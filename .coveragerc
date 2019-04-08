@@ -1,0 +1,8 @@
+[run]
+branch = true
+
+[report]
+omit =
+    python/astra/etc/*
+    python/astra/utils/*
+    python/astra/tests/*
