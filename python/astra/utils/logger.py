@@ -18,7 +18,8 @@ import shutil
 import sys
 import traceback
 import warnings
-from logging import PercentStyle
+#PercentStyle not available in Python 2.7
+#from logging import PercentStyle
 from logging.handlers import TimedRotatingFileHandler
 
 from pygments import highlight
@@ -31,6 +32,21 @@ from .color_print import color_text
 # Adds custom log level for print and twisted messages
 PRINT = 15
 logging.addLevelName(PRINT, 'PRINT')
+
+class PercentStyle(object):
+
+    default_format = '%(message)s'
+    asctime_format = '%(asctime)s'
+    asctime_search = '%(asctime)'
+
+    def __init__(self, fmt):
+        self._fmt = fmt or self.default_format
+
+    def usesTime(self):
+        return self._fmt.find(self.asctime_search) >= 0
+
+    def format(self, record):
+        return self._fmt.format(**record.__dict__)
 
 
 def print_log_level(self, message, *args, **kws):
