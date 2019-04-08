@@ -14,3 +14,4 @@ This README describes the astra Python package. It should include things like a 
 
 .. |Coverage Status| image:: https://coveralls.io/repos/github/sdss/astra/badge.svg?branch=master
    :target: https://coveralls.io/github/sdss/astra?branch=master
+
