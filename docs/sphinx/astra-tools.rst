@@ -25,6 +25,7 @@ to be available in the ``sdss-astra`` tool (e.g., ``sdss-astra data watch``):
 ====================  =============
    Command             Description
 ====================  =============
+``setup``             Run the setup procedure to initialise Astra
 ``data watch``        Watch a folder for new SDSS data products
 ``data unwatch``      Stop watching a folder for new SDSS data products
 ``subset create``     Name a subset of the data that is recognizable by all components
@@ -37,6 +38,14 @@ to be available in the ``sdss-astra`` tool (e.g., ``sdss-astra data watch``):
 ``execute``           Execute a component (or all components) on some given data path
 ``schedule``          Schedule the execution of component(s) on some given data path
 ====================  =============
+
+
+Setup
+=====
+
+Needs to only be run once. 
+
+[TBD: auto-fill arguments from help string]
 
 
 Data

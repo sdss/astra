@@ -50,14 +50,12 @@ Roadmap and priorities
 
 4. Create an initial version of Astra framework that can do the following from
    command line interfaces: 
-    
-  - Setup database structure for components (e.g., pipelines), data paths,
-    schedule analysis jobs, etc.
 
-  - Create, replace, update, delete (CRUD) functionality for components
-    (e.g., pipelines)
+- Setup database structure for components (e.g., pipelines), data paths, schedule analysis jobs, etc.
 
-  - CRUD functionality for triggering analysis jobs
+- Create, replace, update, delete (CRUD) functionality for components (e.g., pipelines)
+
+- CRUD functionality for triggering analysis jobs
 
 5. Wrap up ASPCAP as a component
 
