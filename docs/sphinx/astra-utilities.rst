@@ -23,3 +23,6 @@ Overview
 ``priors``? (Out of Astra scope but would generally be useful)
 
 ``sdss_tree`` and other things that people should be building their code with
+
+``subsets`` -> Access paths to named subsets, etc.
+

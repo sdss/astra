@@ -76,13 +76,16 @@ Eventually you will be able to add components to Astra through a website.
 For now you should use the ``sdss-astra`` command line utility. To add a
 component you will to specify the relevant information in the following format::
 
-  short_name: Continuum normalization
   github_repo_slug: sdss/my-continuum-normalization
+
+  short_name: Continuum normalization
+
   owner: Andy Casey
   owner_email_address: andrew.casey@monash.edu
-  execution_order: 10
+
   component_cli: continuum-normalize 
   schedule_analysis: new
+  execution_order: 10
 
 Most keywords in the above example are self-explanatory. The ``short_name`` is
 an internal reference only. The most important is the ``github_repo_slug`` and
@@ -110,19 +113,49 @@ is to be executed by Astra. Ideally this should be installed as a
 Every command line tool that describes a component in Astra **must** accept and 
 follow the following arguments:
 
--p input_path  the path to the input data model file
--i input_file  read the input paths from a local file
--o output_dir  the directory for output products produced by the component
--v             verbose output
+=================  =============================================
+ Argument           Description
+=================  =============================================
+``input_path``     the path to the input data model file
+``output_dir``     the directory for output products produced by the component
+``-i``             read the input paths from a local file
+``-v``             verbose output
+=================  =============================================
+  
 
-The typical use case for a single observation is that ``continuum-normalize -v -p {input_path} -o {output_dir}``
+The typical use case for a single observation is that ``continuum-normalize -v {input_path} {output_dir}``
 would be executed, and the outputs would be written to the ``output_dir``
-directory.
+directory. Here is an example Python script that can be executed as a shell 
+utility::
+
+  from __future__ import (absolute_import, division, print_function, unicode_literals)  
+
+  import click
+  from numpy.random import choice  
+
+  @click.command()
+  @click.argument("input_path")
+  @click.argument("output_dir")
+  @click.option("-i", "read_from_path", default=False, is_flag=True,
+                help="read input data paths from the given input path")
+  @click.option("-v", "verbose", default=False, is_flag=True,
+                help="verbose mode")
+  def is_executable(input_path, output_dir, read_from_path, verbose):
+      if verbose:
+          click.echo(f"{input_path} > {output_dir} / {read_from_path} / {verbose}")
+      decision = choice([True, False])
+      click.echo(decision)
+      return decision  
+
+  if __name__ == "__main__":
+      is_executable()
+
+
+You are not required to use ``click``; you can use the built-in ``argparse``
+module (or anything similar) if you want. You just need to specify these
+dependencies in your ``setup.py`` file.
 
 [TBD: how to manage ``output_dir`` products when the ``-i`` flag is used]
-
-[TBD: An example python file that takes in the arguments and does something]
-
 
 
 Component execution order
