@@ -28,8 +28,43 @@ streamline the data release process.
 Conceptual overview
 ===================
 
-* :ref:`Components <components>`
+A *component* in Astra describes an analysis tool that can run on some subset
+(or all!) of SDSS data. Once components are added, Astra will monitor select data
+folders for new SDSS data products and schedule all relevant active components
+to be executed. Certain outputs from those components will be stored and tracked
+by Astra so the collaboration can evaluate changes in results with time, and 
+make comparisons to previous sets of results.
+
+The concept of component-driven design implies that no one component can govern
+how another component behaves. All data could, in principle, be processed by all
+active components. Each component must come with an associated utility that
+returns whether or not it *should* be able to process a SDSS data model file.
+In the simpler case of SDSS-IV, this utility might simply return ``True`` if the
+given data file followed the SDSS data model format for APOGEE spectra, and
+``False`` otherwise. In Astra, the decision about whether a component *should*
+process some observation could depend on the specified data model (e.g., APOGEE
+or BOSS), inputs from other components (e.g., a suite of classifiers), some
+targeting information or other external data, or it could depend on the values
+in the data array itself (e.g., Are there any finite data values? is the estimated
+S/N value above some threshold?). For these reasons, each component makes the
+decision about what it *should* be able to process, and Astra's role is to
+maintain version control, streamline data processing and task allocation, and
+to manage book-keeping of all component results.
+
+It is important to note that just because multiple components may analyse the
+same observation does not mean that all results will form part of the data 
+release candidate! As an example, Astra would keep the results from one
+component that has been improved over time (with many tagged versions), and
+each time that component has been run over a subset of the data. Those 
+earlier results will not form part of a data release: they are merely to 
+track and compare results over time. It will be the responsibility of the
+data release coordinators to decide what components (and versions) will 
+contribute the results to a data release candidate.
+
+For more details see:
+
 * :ref:`Data flow <data>`
+* :ref:`Components <components>`
 * :ref:`Database design <database>`
 * :ref:`[TBD: Astra setup (for local/Utah/etc)]`
 * :ref:`Astra command line tools <astra-tools>`
