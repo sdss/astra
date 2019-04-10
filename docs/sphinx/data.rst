@@ -13,5 +13,5 @@
 It is assumed that 1D extracted spectra are available 'upstream' and those data
 are transferred to a location where Astra is run (e.g., Utah). Astra will monitor
 those folders for new data files and schedule jobs to execute relevant components.
-
-
+Astra can be installed and run locally, but you will need access to SDSS data
+in order to do anything useful. 

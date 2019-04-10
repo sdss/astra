@@ -32,7 +32,11 @@ could be considered a pipeline component.
 
 
 Components can be executed sequentially in Astra so that the outputs of one
-component are accessible to other components.
+component are accessible to other components. All Astra components will have 
+access to the ``astra`` Python module, which includes utility functions to 
+access targeting information about a source, retrieve outputs that other
+components have produced about this source, and to access external databases
+(e.g., Gaia photometry and astrometry).
 
 
 What makes a component?
@@ -76,14 +80,56 @@ component you will to specify the relevant information in the following format::
   github_repo_slug: sdss/my-continuum-normalization
   owner: Andy Casey
   owner_email_address: andrew.casey@monash.edu
-  component_cli: continuum-normalize
+  execution_order: 10
+  component_cli: continuum-normalize 
 
-TBD: how to add a component using the ``astra`` command line utility.
+Component execution order
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Most keywords in the above example are self-explanatory. The ``execution_order`` 
+key **only** matters for components that rely on the output of other components. 
+If your component does not rely on the output of any other components (and does 
+not provide outputs that will reasonably be used by other components) then you 
+can set ``execution_order: 0``.
+
+If there are five components that are to run on a given observation, then those
+components will be executed in order of ascending non-negative execution order 
+(``1`` indicates the first execution order). If your component in some part 
+relies on the outputs of other components, then you should set your 
+``execution_order`` to be higher than those other components, otherwise you
+will not be able to access the outputs of those components.
+
 
 Astra periodically checks for new tagged versions to existing components, and
 will update itself automatically [#]_.
 
+TBD: how to add a component using the ``astra`` command line utility.
+
 TBD: how to edit aspects of components using the ``astra`` command line utility
+
+
+TBD: Resources and utiltiies that each component has access to (e.g. ``astra.utils``)
+
+
+Component command line arguments
+--------------------------------
+
+An Astra command line tool must accept the following arguments::
+
+  --path: [single data file to run on]
+
+  --f: [read paths from a file provided]
+
+  --others common to all?
+
+
+TBD: [An example python file that takes in the arguments and does something]
+
+TBD: [How to deal with ``-f`` flag for just deciding whether it can analyse it or not?]
+
+TBD: [Input/output data file paths...]
+
+
 
 
 .. _GitHub: http://www.github.com/
