@@ -69,8 +69,8 @@ also have a Docker container file that describes the environment. If no Docker
 container is provided then the component will be run in the `standard Astra environment <#>`_.
 
 
-Adding a component to Astra
-===========================
+Creating a component 
+====================
 
 Eventually you will be able to add components to Astra through a website.
 For now you should use the ``sdss-astra`` command line utility. To add a
@@ -82,15 +82,56 @@ component you will to specify the relevant information in the following format::
   owner_email_address: andrew.casey@monash.edu
   execution_order: 10
   component_cli: continuum-normalize 
+  schedule_analysis: new
+
+Most keywords in the above example are self-explanatory. The ``short_name`` is
+an internal reference only. The most important is the ``github_repo_slug`` and
+the ``component_cli``. When a component is added Astra will fetch the repository
+and use the most recently tagged point as the current version of the component.
+Astra periodically checks for new tagged versions to existing components, and
+will update itself automatically [#]_. When new versions are tagged, the previous 
+versions of the component are marked as 'inactive' and the freshly tagged version 
+is marked as 'active'. In doing so, this will trigger Astra to setup analysis 
+tasks using the updated component.
+
+[TBD: how to add a component using the ``astra`` command line utility.]
+Something like::
+
+  sdss-astra component create --from-path component.yml
+
+
+Component command line interface
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``component_cli`` describes the command line utility in your component that
+is to be executed by Astra. Ideally this should be installed as a
+``console_scripts`` entry point in your ``setup.py`` file.
+
+Every command line tool that describes a component in Astra **must** accept and 
+follow the following arguments:
+
+-p input_path  the path to the input data model file
+-i input_file  read the input paths from a local file
+-o output_dir  the directory for output products produced by the component
+-v             verbose output
+
+The typical use case for a single observation is that ``continuum-normalize -v -p {input_path} -o {output_dir}``
+would be executed, and the outputs would be written to the ``output_dir``
+directory.
+
+[TBD: how to manage ``output_dir`` products when the ``-i`` flag is used]
+
+[TBD: An example python file that takes in the arguments and does something]
+
+
 
 Component execution order
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Most keywords in the above example are self-explanatory. The ``execution_order`` 
-key **only** matters for components that rely on the output of other components. 
-If your component does not rely on the output of any other components (and does 
-not provide outputs that will reasonably be used by other components) then you 
-can set ``execution_order: 0``.
+The ``execution_order`` key **only** matters for components that rely on the 
+output of other components. If your component does not rely on the output of any
+other components (and does not provide outputs that will reasonably be used by 
+other components) then you can set ``execution_order: 0``.
 
 If there are five components that are to run on a given observation, then those
 components will be executed in order of ascending non-negative execution order 
@@ -100,35 +141,55 @@ relies on the outputs of other components, then you should set your
 will not be able to access the outputs of those components.
 
 
-Astra periodically checks for new tagged versions to existing components, and
-will update itself automatically [#]_.
 
-TBD: how to add a component using the ``astra`` command line utility.
+Updating components
+===================
 
-TBD: how to edit aspects of components using the ``astra`` command line utility
+Everything **except** the ``github_repo_slug`` can be updated. 
+
+[TBD: how to update aspects of components using the ``astra`` command line utility]
+
+Something like::
+
+  sdss-astra component update {github_repo_slug} --active true
+
+[TBD: more examples of things to alter]
+
+Deleting components
+===================
+
+You will rarely need to delete components because you can just mark them as
+inactive and they will no longer be run on any observations. If you do need
+to delete a component you can do so using the ``sdss-astra`` command line tool::
+
+  sdss-astra component delete {github_repo_slug}
+
+[TBD: or something like that..]
+
+It will ask you if you are sure. You can use the ``-y`` flag to indicate yes and
+skip this question.
+
+Registering data models
+=======================
+
+[TBD: this is a hard one. Inputs are easier than outputs. There will be some
+declarative way to describe the data model of your components' outputs, and 
+ths will need to be stored in the component's GitHub repository somewhere]
+
+Select outputs from registered data models will be stored in the Astra database
+for book-keeping, cross-reference, comparisons, and to be accessible to other
+components.
 
 
-TBD: Resources and utiltiies that each component has access to (e.g. ``astra.utils``)
+Common utilities for components
+===============================
 
 
-Component command line arguments
---------------------------------
+[TBD: Resources and utiltiies that each component has access to (e.g. ``astra.utils``)
 
-An Astra command line tool must accept the following arguments::
-
-  --path: [single data file to run on]
-
-  --f: [read paths from a file provided]
-
-  --others common to all?
-
-
-TBD: [An example python file that takes in the arguments and does something]
-
-TBD: [How to deal with ``-f`` flag for just deciding whether it can analyse it or not?]
-
-TBD: [Input/output data file paths...]
-
+Examples include: accessing targetting information for some source, modules like
+``sdss_tree``, retrieving external information about this source, accessing
+outputs from other components for this observation, etc.
 
 
 

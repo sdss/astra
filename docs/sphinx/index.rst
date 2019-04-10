@@ -31,9 +31,9 @@ Conceptual overview
 * :ref:`Components <components>`
 * :ref:`Data flow <data>`
 * :ref:`Database design <database>`
-* :ref:`Astra setup (for local/Utah/etc)`
-* :ref:`Astra command line tools`
-* :ref:`Astra utilities`
+* :ref:`[TBD: Astra setup (for local/Utah/etc)]`
+* :ref:`Astra command line tools <astra-tools>`
+* :ref:`Astra utilities <astra-utilities>`
 
 
 Roadmap and priorities
