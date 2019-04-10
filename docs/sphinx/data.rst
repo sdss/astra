@@ -1,3 +1,6 @@
+
+.. _data:
+
 .. role:: header_no_toc
   :class: class_header_no_toc
 
@@ -9,5 +12,6 @@
 
 It is assumed that 1D extracted spectra are available 'upstream' and those data
 are transferred to a location where Astra is run (e.g., Utah). Astra will monitor
-those folders for new data files and trigger the relevant components to be
-executed.
+those folders for new data files and schedule jobs to execute relevant components.
+
+

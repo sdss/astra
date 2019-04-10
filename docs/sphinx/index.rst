@@ -25,31 +25,11 @@ targets, to encourage improvements to existing analysis approaches, and to
 streamline the data release process. 
 
 
-Roadmap
-=======
-
-* Initial framework to manage and run existing pipeline components
-* Capability for SDSS V members to create experiments and compare results
-* Modularise common functionality from existing pipeline components
-
-
-Introduction
+Overview
 ------------
 
-A description of the package can go here.
-
-* :ref:`What's new in astra? <changelog>`
-* :ref:`Introduction to astra <intro>`
-
-Reference
----------
-
-.. toctree::
-   :maxdepth: 1
-
-   data
-   components
-   api
+* :ref:`Components <components>`
+* :ref:`Data flow <data>`
 
 
 Indices and tables
