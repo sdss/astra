@@ -33,6 +33,5 @@ if not database_exists(engine.url):
 
 metadata = MetaData()
 metadata.bind = engine
-base = declarative_base(bind=engine)
-session = sessionmaker(bind=engine, autocommit=True)
-
+Base = declarative_base(bind=engine)
+Session = sessionmaker(bind=engine, autocommit=True)
