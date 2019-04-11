@@ -10,52 +10,59 @@
 
 .. rubric:: :header_no_toc:`Components`
 
-The purpose of a *component* is to provide a command line utility that takes
-in a path pointing to a SDSS V data product, and to output a data product. The
-output data product might describe the result of some analysis, or it might be
-a data model (e.g., a data model file with continuum normalisation applied).
+A *component* in Astra describes an analysis tool that can run on some subset
+(or all!) of SDSS data. Each component should have at least one shell utility
+that takes in a path pointing to an SDSS V data product and to output a data
+product. The output data product might describe the result of some analysis, 
+or it might be a data model (e.g., a data model file with continuum 
+normalisation applied).
 
-Components overview
-===================
 
-An astronomer might find the term *component* synonymous with 'pipeline'.
-The difference is that a pipeline might be a series of sequential steps to execute
+Definitions
+===========
+
+An astronomer might find the term *component* synonymous with 'pipeline'. The 
+difference is that a pipeline might be a series of sequential steps to execute
 in order to deliver a final answer (e.g., astrophysical parameters), whereas a
-*component* is only expected to perform *at least* one task.
-That task might be continuum normalisation, or it might be providing a 
-classification for a type of object. However, a component *can* do more than one
-task. For the purpose of incorporating existing 'pipelines' into the initial
-version of Astra, we will describe a large pipeline as a *component* and seek
-to modularize common components in the future. In other words, for the purposes
-of Astra, ASPCAP could be described as a *component*, just as an object classifier
-could be considered a pipeline component.
-
-
-Components can be executed sequentially in Astra so that the outputs of one
-component are accessible to other components. All Astra components will have 
-access to the ``astra`` Python module, which includes utility functions to 
-access targeting information about a source, retrieve outputs that other
-components have produced about this source, and to access external databases
-(e.g., Gaia photometry and astrometry).
+*component* is only expected to perform *at least* one task [#]_. That task might be 
+continuum normalisation, or it might be providing a classification for a type 
+of object. However, a component *can* do more than one task. For the purpose 
+of incorporating existing 'pipelines' into the initial version of Astra, we will
+describe a large pipeline as a *component* and seek to modularize common 
+components in the future. In other words, for the purposes of Astra, ASPCAP 
+could be described as a *component*, just as an object classifier could be 
+considered a pipeline component.
 
 
 What makes a component?
 =======================
 
-A valid Astra component must meet the following requirements:
+Components can be executed sequentially in Astra so that the outputs of one
+component are accessible to other components. The execution order of those
+components is managed by Astra. All Astra components will have access to the 
+`Astra Python module <#>`_ (and other SDSS-related modules), which includes 
+utility functions to access targeting information about a source, retrieve 
+outputs that other components have produced about this source, and to access 
+external databases (e.g., Gaia photometry and astrometry). A valid Astra 
+component must meet the following requirements:
 
 1. It must be stored in a public ``git`` repository on GitHub_, preferably in
    the `SDSS organization GitHub <http://github.com/sdss>`_.
 
 2. A component must be `tagged <https://git-scm.com/book/en/v2/Git-Basics-Tagging>`_. 
    All components have full version control through ``git``, but only tagged 
-   versions of components will be considered as a 'component update'.
+   versions of components will be considered a sufficiently substantive change
+   to trigger new analysis tasks.
 
-3. A component must have a command line utility called ``sdss-astra-accepts`` (name TBD)
-   that takes the path to a SDSS data model file as an input, and returns 
-   *whether or not* it can provide an analysis of that source/file. Given the
-   input observation file, this utility will be able to access all relevant
-   information about targetting, etc, through the functions in ``astra.utils``.
+3. A component must have a command line utility called ``saqe``
+   (short for 'SDSS Astra query execute') that takes the path to a SDSS data 
+   model file as an input, and returns *whether or not* it can provide an 
+   analysis of that source/file. Given the input observation file, this utility 
+   will be able to access all relevant information about targetting, etc, 
+   through the functions in ``astra.utils``. In the future this requirement
+   may be deprecated if we move to a conductor-driven execution approach 
+   (see `roadmap <roadmap.htm#road-mapl>`_), but is necessary until components 
+   have iterated into a steady-state mode.
 
 4. A component must have at least one command line utility that takes as an 
    argument the path to a SDSS data model, and produces an output file that
@@ -72,46 +79,46 @@ container is provided then the component will be run in the `standard Astra envi
 Creating a component 
 ====================
 
-Eventually you will be able to add components to Astra through a website.
-For now you should use the ``sdss-astra`` command line utility. To add a
-component you will to specify the relevant information in the following format::
+Eventually you will be able to add components to Astra through a website. For 
+now you will need to supply the relevant information in a `YAML-formatted
+<https://yaml.org/>`_ file, which we will call ``my-component.yml``::
 
   github_repo_slug: sdss/my-continuum-normalization
+
+  component_cli: continuum-normalize 
+  execution_order: 10
 
   short_name: Continuum normalization
 
   owner: Andy Casey
   owner_email_address: andrew.casey@monash.edu
 
-  component_cli: continuum-normalize 
-  schedule_analysis: new
-  execution_order: 10
 
-Most keywords in the above example are self-explanatory. The ``short_name`` is
-an internal reference only. The most important is the ``github_repo_slug`` and
-the ``component_cli``. When a component is added Astra will fetch the repository
-and use the most recently tagged point as the current version of the component.
-Astra periodically checks for new tagged versions to existing components, and
-will update itself automatically [#]_. When new versions are tagged, the previous 
-versions of the component are marked as 'inactive' and the freshly tagged version 
-is marked as 'active'. In doing so, this will trigger Astra to setup analysis 
-tasks using the updated component.
+To add this component to Astra, use the ``sdss-astra`` shell utility::
 
-[TBD: how to add a component using the ``astra`` command line utility.]
-Something like::
+  sdss-astra component create --from-path my-component.yml
 
-  sdss-astra component create --from-path component.yml
+Most keywords in the above example are self-explanatory. The most important
+terms are the ``github_repo_slug`` and the ``component_cli``, which should 
+uniquely define the component. The ``short_name`` is a descriptive term only, 
+and should not be relied on. 
 
+When a component is added Astra will fetch the repository and use the most 
+recently tagged point as the current version of the component. Astra 
+periodically checks for new tagged versions to existing components, and
+will update itself automatically [#]_. When Astra detects a new tagged version
+on GitHub, the previous versions of the component are marked as *inactive* and
+the freshly tagged version is added as an *active* component. In doing so, this 
+can trigger Astra to execute analysis tasks using the updated component.
 
 Component command line interface
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The ``component_cli`` describes the command line utility in your component that
-is to be executed by Astra. Ideally this should be installed as a
-``console_scripts`` entry point in your ``setup.py`` file.
-
-Every command line tool that describes a component in Astra **must** accept and 
-follow the following arguments:
+is to be executed by Astra. Ideally this should be installed as a 
+``console_scripts`` entry point in your ``setup.py`` file. Every command line 
+tool that describes a component in Astra **must** accept and follow the following 
+arguments:
 
 =================  =============================================
  Argument           Description
@@ -123,10 +130,13 @@ follow the following arguments:
 =================  =============================================
   
 
-The typical use case for a single observation is that ``continuum-normalize -v {input_path} {output_dir}``
-would be executed, and the outputs would be written to the ``output_dir``
-directory. Here is an example Python script that can be executed as a shell 
-utility::
+In our example component described in ``my-component.yml`` the typical use case 
+for a single observation would be::
+
+  continuum-normalize -v {input_path} {output_dir}
+
+and the outputs would be written to the ``output_dir`` directory. Here is an 
+example Python script that can be executed as a shell utility::
 
   from __future__ import (absolute_import, division, print_function, unicode_literals)  
 
@@ -178,55 +188,115 @@ will not be able to access the outputs of those components.
 Updating components
 ===================
 
-Everything **except** the ``github_repo_slug`` can be updated. 
-
-[TBD: how to update aspects of components using the ``astra`` command line utility]
-
-Something like::
+All attributes relating to a component can be updated **except** the
+``github_repo_slug``. Attribuets can be updated using the ``sdss-astra`` tool::
 
   sdss-astra component update {github_repo_slug} --active true
 
 [TBD: more examples of things to alter]
+
+[TBD: one repo for training and one for testing data-driven models? or update 
+based on ``component_id``? only require ``component_id`` when there is some
+ambiguity?]
 
 Deleting components
 ===================
 
 You will rarely need to delete components because you can just mark them as
 inactive and they will no longer be run on any observations. If you do need
-to delete a component you can do so using the ``sdss-astra`` command line tool::
+to delete a component you can do so using::
 
   sdss-astra component delete {github_repo_slug}
-
-[TBD: or something like that..]
 
 It will ask you if you are sure. You can use the ``-y`` flag to indicate yes and
 skip this question.
 
+Executing components
+====================
+
+You can directly execute a component using the ``sdss-astra`` utility. For example::
+
+  sdss-astra execute the-cannon -i training-paths.txt -o tmp/ --train --data-release 16
+
+will train a Cannon model using the data files listed in the text file 
+(``training-paths.txt``) and use Data Release 16 labels for those 
+observations. The output model would be written to the ``tmp/`` directory.
+
+In production mode Astra will schedule the execution of relevant components when
+new data products are found in a watched folder. For each reduced data product,
+Astra will query each component (using ``saqe``) to see whether that component
+would analyze the given data file. This will be described as component-driven
+design, in contrast to something like a conductor-driven design where one actor
+decides which components should be executed for a given observation.
+
+The concept of component-driven design implies that no one component can govern
+how another component behaves. All data could, in principle, be processed by all
+active components. In the simpler case of SDSS-IV/APOGEE, the equivalent ``saqe`` 
+utility might simply return ``True`` if the given data file followed the SDSS 
+data model format for APOGEE spectra, and ``False`` otherwise. In Astra, the 
+decision about whether a component *should* process some observation could 
+depend on::
+
+- the specified data model (e.g., APOGEE or BOSS), 
+- inputs from other components (e.g., a suite of classifiers), 
+- some targeting information 
+- or other external data (e.g., Gaia), 
+- or it could depend on the values in the data array itself (e.g., Are there any finite data values? is the estimated
+S/N value above some threshold?). 
+
+For these reasons, each component makes the decision about what it *should* be 
+able to process, and Astra's role is to maintain version control, streamline 
+data processing and task allocation, and to manage book-keeping of all component 
+results.
+
+.. attention::
+    Just because multiple components might analyse the same observation does not
+    mean that all results will form part of the data release candidate! As an 
+    example, Astra would keep the results from one component that has been 
+    improved over time (with many tagged versions), and each time that component 
+    has been run over a subset of the data. Those earlier results will not form 
+    part of a data release: they are merely to track and compare results over 
+    time. It will be the responsibility of the data release coordinators to 
+    decide what components (and versions) will contribute the results to a data 
+    release candidate.
+
+    Keeping all relevant results between component versions in Astra will allow 
+    collaborators to iterate and improve their components, whilst automating
+    much of the requisite scientific verification that comes with making those
+    component changes.
+
+
 Registering data models
 =======================
-
-[TBD: this is a hard one. Inputs are easier than outputs. There will be some
-declarative way to describe the data model of your components' outputs, and 
-ths will need to be stored in the component's GitHub repository somewhere]
 
 Select outputs from registered data models will be stored in the Astra database
 for book-keeping, cross-reference, comparisons, and to be accessible to other
 components.
 
+[TBD: this is a hard one. Inputs are easier than outputs. There will be some
+declarative way to describe the data model of your components' outputs, and 
+ths will need to be stored in the component's GitHub repository somewhere.
+See the `roadmap <roadmap.html#roadmap>`_]
 
-Common utilities for components
-===============================
 
+Examples
+========
 
-[TBD: Resources and utiltiies that each component has access to (e.g. ``astra.utils``)
+Physics-driven model component
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Examples include: accessing targetting information for some source, modules like
-``sdss_tree``, retrieving external information about this source, accessing
-outputs from other components for this observation, etc.
+[TBD: give example repository showing how to package model data files]
 
+Data-driven model component
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+[TBD: give example repository showing how to create a component that trains a model based on 
+existing SDSS data, and then uses that model for inference on new data]
 
 
 .. _GitHub: http://www.github.com/
+
+.. [#] Preferably only one task.
 
 .. [#] What constitutes a 'valid data model' for output is still to be determined,
        but it could look something like either a FITS data model file, or a
