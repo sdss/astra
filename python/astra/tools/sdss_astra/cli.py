@@ -5,6 +5,13 @@ from astra import config, log
 from astra.db.connection import Base, engine
 from sqlalchemy_utils import database_exists, create_database
 
+from astra.tools.sdss_astra.data import data
+from astra.tools.sdss_astra.subset import subset
+from astra.tools.sdss_astra.component import component
+from astra.tools.sdss_astra.execute import execute
+from astra.tools.sdss_astra.query_execute import query_execute
+from astra.tools.sdss_astra.schedule import schedule
+
 
 # Common options.
 @click.group()
@@ -23,12 +30,7 @@ def cli(context, verbose):
 @cli.command()
 @click.pass_context
 def setup(context):
-    r"""
-    Setup Astra databases based on the current configuration.
-
-    :param context:
-        The command line interface context object.
-    """
+    r""" Setup databases using the current configuration. """
 
     log.debug("Running setup")
 
@@ -48,6 +50,16 @@ def setup(context):
 
     log.info("Astra is ready.")
     return None
+
+
+# Add various commands
+cli.add_command(data)
+cli.add_command(subset)
+cli.add_command(component)
+cli.add_command(execute)
+cli.add_command(query_execute)
+cli.add_command(schedule)
+
 
 
 
