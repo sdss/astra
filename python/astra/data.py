@@ -44,7 +44,7 @@ def watch_folder(path, recursive=False, interval=3600, regex_ignore_pattern=None
     session.add(item)
     session.commit()
 
-    raise a
+    return item
 
 
 def unwatch_folder():
