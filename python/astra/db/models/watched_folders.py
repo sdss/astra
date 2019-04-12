@@ -1,23 +1,25 @@
 
 import datetime
 from sqlalchemy import Boolean, Column, DateTime, String, Integer
-from astra.db.connection import Base, Session
+from astra.db.connection import Base, engine
 
-class WatchedFolders(Base):
+class WatchedFolder(Base):
 
-    __tablename__ = "watched_folders"
+    __tablename__ = "watched_folder"
 
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
     is_active = Column(Boolean, default=True)
     path = Column(String, nullable=False)
-    update_interval_seconds = Column(Integer, default=3600)
+    interval = Column(Integer, default=3600)
     recursive = Column(Boolean, default=False)
-    regex_pattern = Column(String, nullable=True)
+    regex_ignore_pattern = Column(String, nullable=True)
+
     last_checked = Column(DateTime)
     created = Column(DateTime, default=datetime.datetime.utcnow)
 
     def __repr__(self):
-        return f"<{self.__class__.__name__}(id={self.id}, path=self.path)>"
+        return f"<{self.__class__.__name__}(id={self.id}, path={self.path})>"
 
 
-# Base.metadata.create_all(engine)
+#if not engine.dialect.has_table(engine, WatchedFolder.__tablename__):
+#    Base.metadata.create_all(engine)

@@ -2,7 +2,7 @@
 import datetime
 from sqlalchemy import (Boolean, Column, DateTime, String, Integer, ForeignKey,
                         UniqueConstraint)
-from astra.db.connection import Base, Session
+from astra.db.connection import Base
 
 class DataProducts(Base):
 
@@ -41,8 +41,9 @@ class DataProductsSubsetsBridge(Base):
 
     __tablename__ = "data_products_subsets"
 
+    id = Column(Integer, primary_key=True)
     data_subsets_id = Column(Integer, ForeignKey("data_subsets.id"))
-    data_products_id = Colunn(Integer, ForeignKey("data_products.id"))
+    data_products_id = Column(Integer, ForeignKey("data_products.id"))
 
     __table_args__ = (
         UniqueConstraint("data_subsets_id", "data_products_id", name="_id_uc"),

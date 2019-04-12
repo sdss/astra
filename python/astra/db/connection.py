@@ -1,6 +1,6 @@
 
 from sqlalchemy import create_engine, MetaData
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy_utils import database_exists, create_database
 # TODO: pgpasslib not on conda-forge. Import only as needed? Remove?
@@ -31,7 +31,13 @@ if not database_exists(engine.url):
     create_database(engine.url)
 
 
-metadata = MetaData()
-metadata.bind = engine
-Base = declarative_base(bind=engine)
-Session = sessionmaker(bind=engine, autocommit=True)
+#metadata = MetaData()
+#metadata.reflect(bind=engine)
+Base = declarative_base()
+Base.metadata.reflect(bind=engine)
+session = scoped_session(sessionmaker(bind=engine, autocommit=True))
+
+
+def burn_it_all():
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)

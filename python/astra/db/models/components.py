@@ -1,7 +1,7 @@
 
 import datetime
 from sqlalchemy import Boolean, Column, DateTime, String, Integer, UniqueConstraint
-from astra.db.connection import Base, Session
+from astra.db.connection import Base
 
 class Components(Base):
 
@@ -33,4 +33,4 @@ class Components(Base):
         return f"<{self.__class__.__name__}(id={self.id}, github_repo_slug={self.github_repo_slug}, tag={self.tag})>"
 
 
-# Base.metadata.create_all(engine)
+#Base.metadata.create_all(engine)

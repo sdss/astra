@@ -2,7 +2,7 @@
 import datetime
 from sqlalchemy import (Boolean, Column, DateTime, String, Integer, ForeignKey,
                         UniqueConstraint)
-from astra.db.connection import Base, Session
+from astra.db.connection import Base
 
 
 class Tasks(Base):
