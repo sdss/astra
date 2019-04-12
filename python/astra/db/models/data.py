@@ -11,7 +11,7 @@ class DataProducts(Base):
     id = Column(Integer, primary_key=True)
     path = Column(String, nullable=False, unique=True)
     created = Column(DateTime, default=datetime.datetime.utcnow)
-    folder_id = Column(Integer, ForeignKey("watched_folders.id"))
+    folder_id = Column(Integer, ForeignKey("watched_folder.id"))
 
     # TODO: datamodel_id ? Infer this from the path?
 

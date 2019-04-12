@@ -10,7 +10,7 @@ class Tasks(Base):
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True)
-    component_id = Column(Integer, ForeignKey("component.id"))
+    component_id = Column(Integer, ForeignKey("components.id"))
 
     # TODO: worker_id ? how to represent the worker information?
 
