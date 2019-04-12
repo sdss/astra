@@ -235,14 +235,13 @@ active components. In the simpler case of SDSS-IV/APOGEE, the equivalent ``saqe`
 utility might simply return ``True`` if the given data file followed the SDSS 
 data model format for APOGEE spectra, and ``False`` otherwise. In Astra, the 
 decision about whether a component *should* process some observation could 
-depend on::
+depend on:
 
 - the specified data model (e.g., APOGEE or BOSS), 
 - inputs from other components (e.g., a suite of classifiers), 
 - some targeting information 
 - or other external data (e.g., Gaia), 
-- or it could depend on the values in the data array itself (e.g., Are there any finite data values? is the estimated
-S/N value above some threshold?). 
+- or it could depend on the values in the data array itself (e.g., Are there any finite data values? is the estimated S/N value above some threshold?). 
 
 For these reasons, each component makes the decision about what it *should* be 
 able to process, and Astra's role is to maintain version control, streamline 
