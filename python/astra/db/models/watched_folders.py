@@ -9,7 +9,7 @@ class WatchedFolder(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
     is_active = Column(Boolean, default=True)
-    path = Column(String, nullable=False)
+    path = Column(String, nullable=False, unique=True)
     interval = Column(Integer, default=3600)
     recursive = Column(Boolean, default=False)
     regex_ignore_pattern = Column(String, nullable=True)

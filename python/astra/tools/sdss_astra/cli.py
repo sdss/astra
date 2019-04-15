@@ -28,8 +28,10 @@ def cli(context, verbose):
 
 
 @cli.command()
+@click.option("-y", "confirm", default=False, is_flag=True,
+              help="drop the database if it already exists")
 @click.pass_context
-def setup(context):
+def setup(context, confirm):
     r""" Setup databases using the current configuration. """
 
     log.debug("Running setup")
@@ -38,8 +40,10 @@ def setup(context):
         log.info(f"Creating database {engine.url}")
         create_database(engine.url)
 
-    elif click.confirm("Database already exists. This will wipe the database "\
-                       "and start again. Are you sure?", abort=True):
+    elif not confirm \
+         and click.confirm("Database already exists. "\
+                           "This will wipe the database and start again. "\
+                           "Are you sure?", abort=True):
         None
 
     log.debug("Dropping all tables")

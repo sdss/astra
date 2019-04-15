@@ -1,9 +1,19 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import os
+import re
+from astra import log
 from astra.db.connection import engine, session
 from astra.db.models.watched_folders import WatchedFolder
+from astra.db.models.data import DataProducts
 
+
+# Right-hand strip any / values to match the input we would expect.
+# For example, if the path /this/is/that *was* in the database, and here the
+# `path` parameter was exactly: "/this/is/that" then if we executed
+# os.path.dirname("/this/is/that") -> "/this/is"
+# which is not what we want, obviously.
+full_path = lambda path: os.path.abspath(os.path.realpath(path.rstrip("/")))
 
 
 def watch_folder(path, recursive=False, interval=3600, regex_ignore_pattern=None):
@@ -26,7 +36,7 @@ def watch_folder(path, recursive=False, interval=3600, regex_ignore_pattern=None
         all files in ``path`` that have ".log" or ".txt" extensions.
     """
 
-    path = os.path.abspath(os.path.realpath(path))
+    path = full_path(path)
     if not os.path.exists(path):
         raise IOError(f"path '{path}' does not exist")
 
@@ -47,16 +57,87 @@ def watch_folder(path, recursive=False, interval=3600, regex_ignore_pattern=None
     return item
 
 
-def unwatch_folder():
+def unwatch_folder(path, quiet=False):
+    r"""
+    Stop monitoring a directory for reduced data products.
 
-    # Check if 
-    pass
+    :param path:
+        The local directory path to stop monitoring.
+
+    :param quiet: [optional]
+        Be quiet if the specified `path` was not found in the database (default:
+        False).
+    """
+
+    path = full_path(path)
+    result = session.query(WatchedFolder).filter_by(path=path).one_or_none()
+
+    if result is None:
+        if quiet: return False
+        raise ValueError(f"no watched folders matching '{path}'")
+
+    session.delete(result)
+    session.commit()
+
+    return True
+
+
+def refresh_folder(path, quiet=False):
+    r"""
+    Check a watched folder for new reduced data products.
+
+    :param path:
+        The local directory path to refresh.
+
+    :param quiet: [optional]
+        Do not raise an exception if the folder is not being watched.
+
+    :returns:
+        A three-length tuple with the number of new paths added, the number of
+        new paths that were ignored, and the number of existing paths that were
+        skipped.
+    """
+
+    path = full_path(path)
+    folder = session.query(WatchedFolder).filter_by(path=path).one_or_none()
+
+    if folder is None:
+        if quiet: return (0, 0, 0)
+        raise ValueError(f"path '{path}' not being watched")
+
+    # TODO: query if there is a faster way to do this.
+    added, ignored, skipped = (0, 0, 0)
+    for top_directory, directories, basenames in os.walk(path, topdown=True):
+        print(top_directory, directories, basenames)
+
+        for basename in basenames:
+            p = os.path.join(top_directory, basename)
+
+            if folder.regex_ignore_pattern is not None \
+            and re.search(folder.regex_ignore_pattern, basename):
+                log.info(f"Ignoring {p} because it matched regular expression "\
+                         f"for ignoring files: '{folder.regex_ignore_pattern}'")
+                ignored += 1
+                continue
+
+            # Add the data product if it doesn't exist already
+            if session.query(DataProducts).filter_by(path=p).one_or_none() is None:
+                session.add(DataProducts(path=p, folder_id=folder.id))
+                log.info(f"Added {p} from watched folder {folder}")
+                added += 1
+
+            else:
+                skipped += 1
+
+        if not folder.recursive: break
+
+    session.commit()
+
+    return (added, ignored, skipped)
 
 
 def refresh_folders():
-    pass
+    r""" Check all watched folders for new reduced data products. """
 
-def refresh_folder():
-    pass
-
+    return dict([(f.path, refresh_folder(f.path)) for f in session.query(WatchedFolder).all()])
 
