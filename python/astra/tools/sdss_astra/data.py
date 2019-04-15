@@ -1,8 +1,7 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import click
-
 from astra import (folders, log)
-from astra.db.models import WatchedFolder
-
 
 @click.group()
 @click.pass_context
@@ -14,17 +13,15 @@ def data(context):
 @data.command()
 @click.argument("path", nargs=1, required=True)
 @click.option("-r", "--recursive", is_flag=True, default=False,
-              help="monitor recursive directories")
+              help="Monitor directory recursively (default: false).")
 @click.option("--interval", default=3600,
-              help="number of seconds to wait between checking for new data")
+              help="Number of seconds to wait between checking for new data (default: 3600).")
 @click.option("--regex-ignore-pattern", default=None,
-              help="regular expression pattern for ignoring files")
+              help="Regular expression pattern for ignoring files.")
 @click.pass_context
 def watch(context, path, recursive, interval, regex_ignore_pattern):
     r"""
     Start monitoring a folder for new data products.
-
-    TODO: Docs on params.
     """
     log.debug(f"data.watch {path} {recursive} {interval} {regex_ignore_pattern}")
     result = folders.watch(path, recursive, interval, regex_ignore_pattern)
@@ -35,13 +32,11 @@ def watch(context, path, recursive, interval, regex_ignore_pattern):
 @data.command()
 @click.argument("path", nargs=1, required=True)
 @click.option("--quiet", is_flag=True, default=False,
-              help="stay quiet if the given path is not being watched")
+              help="Stay quiet if the given path is not being watched.")
 @click.pass_context
 def unwatch(context, path, quiet):
     r"""
     Stop monitoring a folder for new data products.
-
-    TODO: Docs on params/
     """
     log.debug(f"data.unwatch {path} {quiet}")
     result = folders.unwatch(path, quiet)
@@ -52,11 +47,13 @@ def unwatch(context, path, quiet):
 @data.command()
 @click.argument("path", nargs=-1)
 @click.option("--quiet", is_flag=True, default=False,
-              help="stay quiet if the given path is not being watched")
+              help="Stay quiet if the given path is not being watched.")
 @click.pass_context
 def refresh(context, path, quiet):
     r"""
-    Check a watched folder for new data products.
+    Check watched folder(s) for new data products.
+
+    If no PATH is given then all watched folders will be refreshed.
     """
     log.debug(f"data.refresh {path}")
 

@@ -150,6 +150,6 @@ def refresh(path, quiet=False):
 def refresh_all():
     r""" Check all watched folders for new reduced data products. """
 
-    return dict([(f.path, refresh_folder(f.path, True)) \
+    return dict([(f.path, refresh(f.path, True)) \
                  for f in session.query(WatchedFolder).all()])
 
