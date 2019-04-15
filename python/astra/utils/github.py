@@ -17,6 +17,8 @@ def graphql(query_string, token=None):
     """
 
     if token is None:
+        # TODO: Consider using SDSS_GITHUB_KEY because that is used by `sdss_install`
+        #       See https://github.com/sdss/sdss_install/blob/master/python/sdss_install/application/Client.py
         tokens = [
             config.get("github.token", None),
             os.getenv("ASTRA_GITHUB_TOKEN", None)

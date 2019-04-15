@@ -46,7 +46,7 @@ Using ``sdss_install``
 If you already have the ``sdss_install`` tool from the `SDSS organization on GitHub <https://github.com/sdss/sdss_install>`_
 then you can simply enter the following command in a terminal window::
 
-  sdss_install astra
+  sdss_install -G astra
 
 
 Development version
