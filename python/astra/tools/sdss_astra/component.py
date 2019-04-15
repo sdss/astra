@@ -69,11 +69,14 @@ def update(context, github_repo_slug, release, is_active, auto_update,
 
 
 @component.command()
+@click.argument("github_repo_slug", nargs=1, required=True)
+@click.argument("release", nargs=1, required=True)
 @click.pass_context
-def delete(context):
-    r"""Delete an existing component"""
+def delete(context, github_repo_slug, release):
+    r"""Delete an existing component."""
     log.debug("component.delete")
-    pass
+
+    return components.delete(github_repo_slug, release)
 
 
 @component.command()

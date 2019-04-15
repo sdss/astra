@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import os
 import datetime
 from astra import log
 from astra.db.connection import session
@@ -148,8 +147,18 @@ def update(github_repo_slug, release, **kwargs):
     return component
 
 
-def delete(**kwargs):
-    pass
+def delete(github_repo_slug, release):
+    r"""
+    'Delete' a component by marking it as inactive.
+
+    :param github_repo_slug:
+        The GitHub repository in 'slug' form: {OWNER}/{REPOSITORY_NAME}.
+
+    :param release:
+        The version release.
+    """
+
+    return update(github_repo_slug, release, is_active=False)
 
 
 
