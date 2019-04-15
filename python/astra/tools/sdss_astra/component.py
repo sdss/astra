@@ -59,11 +59,11 @@ def refresh(context, github_repo_slug):
     log.debug("component.refresh")
 
     return components.refresh(github_repo_slug)
-    
+
 
 # Update
 @component.command()
-@click.argument("github_repo_slug", nargs=1, required=True)
+@click.argument("github_repo_slug", nargs=1, required=True,)
 @click.argument("release", nargs=1, required=True)
 @click.option("--active/--inactive", "is_active", default=None,
               help="Set a component as active or inactive.")

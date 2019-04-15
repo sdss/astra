@@ -2,15 +2,11 @@
 # encoding: utf-8
 
 import click
-import os
-from shutil import rmtree
 from astra import log
 from logging import DEBUG, INFO
-from astra.db.connection import Base, engine
-from sqlalchemy_utils import database_exists, create_database
 
 from astra.tools.sdss_astra import (data, subset, component, execute, 
-                                    query_execute, schedule)
+                                    query_execute, schedule, setup)
 
 # Common options.
 @click.group()
@@ -26,51 +22,14 @@ def cli(context, verbose):
     log.set_level(DEBUG if verbose else INFO)
 
 
-@cli.command()
-@click.option("-y", "confirm", default=False, is_flag=True,
-              help="drop the database if it already exists")
-@click.pass_context
-def setup(context, confirm):
-    r""" Setup databases using the current configuration. """
-
-    log.debug("Running setup")
-
-    if not database_exists(engine.url):
-        log.info(f"Creating database {engine.url}")
-        create_database(engine.url)
-
-    elif not confirm \
-         and click.confirm("Database already exists. This will wipe the database, including all "\
-                           "downloaded components, and start again. Are you sure?", abort=True):
-        None
-
-    log.debug("Dropping all tables")
-    Base.metadata.drop_all(engine)
-
-    log.debug("Creating all tables")
-    Base.metadata.create_all(engine)
-
-    log.debug("Removing old components")
-    component_dir = os.getenv("ASTRA_COMPONENT_DIR", None)
-    if component_dir is not None:
-        if os.path.exists(component_dir):
-            rmtree(component_dir)
-        os.makedirs(component_dir, exist_ok=True)
-
-
-    log.info("Astra is ready.")
-    return None
-
-
 # Add various commands
+cli.add_command(setup.setup)
 cli.add_command(data.data)
 cli.add_command(subset.subset)
 cli.add_command(component.component)
 cli.add_command(execute.execute)
 cli.add_command(query_execute.query_execute)
 cli.add_command(schedule.schedule)
-
-
 
 
 if __name__ == "__main__":

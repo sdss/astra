@@ -40,6 +40,7 @@ class Task(Base):
             raise IOError(f"path {path} already exists")
 
         contents = []
+        
         # TODO: module load what is needed.
 
         # Write the data_subset to a temporary file in the output_dir.

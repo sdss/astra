@@ -12,14 +12,19 @@ from astra import (data_subsets, tasks)
 @click.argument("input_path")
 @click.argument("output_dir")
 @click.option("--release", nargs=1, default=None,
-              help="Release version of the component to use. If none is given "\
+              help="Release version of the component to use. If `None` is given "\
                    "then it defaults to the most recent release.")
 @click.option("--from-path", "from_path", is_flag=True, default=False,
-              help="Read a list of input files from the `input_path` text file.")
+              help="Read a list of input files from the `INPUT_PATH` text file.")
 @click.pass_context
 def execute(context, github_repo_slug, input_path, output_dir, release, 
             from_path, **kwargs):
-    r"""Execute a component on some reduced data products. """
+    r"""
+    Execute a component on some reduced data products.
+
+    Given the `GITHUB_REPO_SLUG` -- and optionally, the `RELEASE` -- execute the
+    component on the `INPUT_PATH` and write the outputs to `OUTPUT_DIR`.
+    """
     log.debug("execute")
 
     # Check release.
