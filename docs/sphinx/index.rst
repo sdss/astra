@@ -40,11 +40,34 @@ file provenance) is managed by Astra.
 Installation
 ============
 
-Eventually you will be able to run::
+Using ``sdss_install``
+^^^^^^^^^^^^^^^^^^^^^^
 
-  conda install sdss-astra -c conda-forge 
+If you already have the ``sdss_install`` tool from the `SDSS organization on GitHub <https://github.com/sdss/sdss_install>`_
+then you can simply enter the following command in a terminal window::
 
-[TBD: instructions on how to setup database locally etc]
+  sdss_install astra
+
+
+Development version
+^^^^^^^^^^^^^^^^^^^
+
+If you instead want to be on the bleeding edge and install the development
+version then you can using::
+
+  git clone git@github.com:sdss/astra.git
+  cd astra/
+  python setup.py install
+
+
+The configuration for Astra is currently specified in the ``python/astra/etc/astra.yml``
+file. Once those configuration settings are updated, you can set Astra up by
+running the following command from the terminal::
+
+  sdss-astra setup
+
+
+
 
 
 Indices and tables
