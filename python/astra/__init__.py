@@ -36,4 +36,4 @@ if os.path.exists(custom_config_fn):
     with open(custom_config_fn) as fp:
         config = merge(yaml.load(fp, Loader=yaml.FullLoader), config)
 
-__version__ = '0.1.0dev'
+__version__ = '0.1.1dev'
