@@ -104,7 +104,10 @@ def create(github_repo_slug, component_cli, short_name=None, release=None,
     _, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
     log.info(f"Checking out repository {github_repo_slug} release {release} "\
              f"to {tmp_path}")
-    r = requests.get(release_info["target"]["tarballUrl"], stream=True)
+
+    # TODO: Use sdss_install to do the checkout & install
+    tarball_url = f"https://github.com/{owner}/{repository_name}/archive/{release}.tar.gz"
+    r = requests.get(tarball_url, stream=True)
     with open(tmp_path, "wb") as fp:
         copyfileobj(r.raw, fp)
 
@@ -112,9 +115,8 @@ def create(github_repo_slug, component_cli, short_name=None, release=None,
     os.system(f"tar -xzf {tmp_path} --directory {dirname}")
 
     # It will extract things into it's own folder, so move things.
-    sha = release_info["target"]["sha"]
-    os.rename(f"{dirname}/{owner}-{repository_name}-{sha[:7]}/",
-              f"{dirname}/{release}/")
+    os.rename(f"{dirname}/{repository_name}-{release}",
+              f"{dirname}/{release}")
     os.unlink(tmp_path)
 
     dirname = os.path.join(dirname, release)
