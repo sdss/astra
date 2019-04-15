@@ -1,8 +1,6 @@
 import click
 
-from astra import log
-from astra.data import (watch_folder, unwatch_folder, refresh_folder,
-                        refresh_folders)
+from astra import (folders, log)
 from astra.db.models import WatchedFolder
 
 
@@ -29,7 +27,7 @@ def watch(context, path, recursive, interval, regex_ignore_pattern):
     TODO: Docs on params.
     """
     log.debug(f"data.watch {path} {recursive} {interval} {regex_ignore_pattern}")
-    result = watch_folder(path, recursive, interval, regex_ignore_pattern)
+    result = folders.watch(path, recursive, interval, regex_ignore_pattern)
     log.info(result)
     return True
 
@@ -46,7 +44,7 @@ def unwatch(context, path, quiet):
     TODO: Docs on params/
     """
     log.debug(f"data.unwatch {path} {quiet}")
-    result = unwatch_folder(path, quiet)
+    result = folders.unwatch(path, quiet)
     log.info(result)
     return result
 
@@ -64,10 +62,11 @@ def refresh(context, path, quiet):
 
     if not len(path):
         # Refresh all.
-        counts = refresh_folders()
+        counts = folders.refresh_all()
 
     else:
-        counts = dict([(p, refresh_folder(p, quiet)) for p in path])
+        # Refresh given paths.
+        counts = dict([(p, folders.refresh(p, quiet)) for p in path])
 
     log.info(counts)
     return counts

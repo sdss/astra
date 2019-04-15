@@ -2,8 +2,9 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import os
 import re
+import datetime
 from astra import log
-from astra.db.connection import engine, session
+from astra.db.connection import session
 from astra.db.models.watched_folders import WatchedFolder
 from astra.db.models.data import DataProducts
 
@@ -16,7 +17,7 @@ from astra.db.models.data import DataProducts
 full_path = lambda path: os.path.abspath(os.path.realpath(path.rstrip("/")))
 
 
-def watch_folder(path, recursive=False, interval=3600, regex_ignore_pattern=None):
+def watch(path, recursive=False, interval=3600, regex_ignore_pattern=None):
     f"""
     Start monitoring a directory for reduced SDSS data products.
 
@@ -48,16 +49,24 @@ def watch_folder(path, recursive=False, interval=3600, regex_ignore_pattern=None
     if 0 > interval:
         raise ValueError("interval must be a non-negative integer")
 
-    # Check if path is already monitored, or just let SQL work it out?
-    item = WatchedFolder(path=path, recursive=recursive, interval=interval,
-                         regex_ignore_pattern=regex_ignore_pattern)
-    session.add(item)
+    # Check if path is already monitored.
+    item = session.query(WatchedFolder).filter_by(path=path).one_or_none()
+    if item is not None:
+        item.is_active = True
+        log.info(f"Re-activated previously watched folder {item}")
+
+    else:
+        item = WatchedFolder(path=path, recursive=recursive, interval=interval,
+                             regex_ignore_pattern=regex_ignore_pattern)
+        session.add(item)
+        log.info(f"Created new watched folder {item}")
+
     session.commit()
 
     return item
 
 
-def unwatch_folder(path, quiet=False):
+def unwatch(path, quiet=False):
     r"""
     Stop monitoring a directory for reduced data products.
 
@@ -76,13 +85,13 @@ def unwatch_folder(path, quiet=False):
         if quiet: return False
         raise ValueError(f"no watched folders matching '{path}'")
 
-    session.delete(result)
+    result.is_active = False
     session.commit()
 
     return True
 
 
-def refresh_folder(path, quiet=False):
+def refresh(path, quiet=False):
     r"""
     Check a watched folder for new reduced data products.
 
@@ -101,9 +110,9 @@ def refresh_folder(path, quiet=False):
     path = full_path(path)
     folder = session.query(WatchedFolder).filter_by(path=path).one_or_none()
 
-    if folder is None:
+    if folder is None or not folder.is_active:
         if quiet: return (0, 0, 0)
-        raise ValueError(f"path '{path}' not being watched")
+        raise ValueError(f"path '{path}' not being actively watched")
 
     # TODO: query if there is a faster way to do this.
     added, ignored, skipped = (0, 0, 0)
@@ -131,13 +140,16 @@ def refresh_folder(path, quiet=False):
 
         if not folder.recursive: break
 
+    # Update the last checked time for this folder.
+    folder.last_checked = datetime.datetime.utcnow()
     session.commit()
 
     return (added, ignored, skipped)
 
 
-def refresh_folders():
+def refresh_all():
     r""" Check all watched folders for new reduced data products. """
 
-    return dict([(f.path, refresh_folder(f.path)) for f in session.query(WatchedFolder).all()])
+    return dict([(f.path, refresh_folder(f.path, True)) \
+                 for f in session.query(WatchedFolder).all()])
 

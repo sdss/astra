@@ -1,7 +1,7 @@
 
 import datetime
 from sqlalchemy import Boolean, Column, DateTime, String, Integer
-from astra.db.connection import Base, engine
+from astra.db.connection import Base
 
 class WatchedFolder(Base):
 
@@ -19,7 +19,3 @@ class WatchedFolder(Base):
 
     def __repr__(self):
         return f"<{self.__class__.__name__}(id={self.id}, path={self.path})>"
-
-
-#if not engine.dialect.has_table(engine, WatchedFolder.__tablename__):
-#    Base.metadata.create_all(engine)
