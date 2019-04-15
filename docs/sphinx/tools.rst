@@ -11,16 +11,16 @@
 .. rubric:: :header_no_toc:`Tools`
 
 
-``sdss-astra``
+``astra``
 ========
 
-The ``sdss-astra`` command line tool provides most of the functionality needed
+The ``astra`` command line tool provides most of the functionality needed
 to manage data flows, analysis components, scheduling and monitoring of analysis 
 tasks, and bookkeeping the outputs from those analysis tasks.
 
 This documentation page will be automatically generated using the help strings
 of each function, but for now you can see a list of commands that are expected
-to be available in the ``sdss-astra`` tool (e.g., ``sdss-astra data watch``):
+to be available in the ``astra`` tool (e.g., ``astra data watch``):
 
 =====================  =============
    Command              Description

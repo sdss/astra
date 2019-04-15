@@ -48,7 +48,6 @@ then you can simply enter the following command in a terminal window::
 
   sdss_install -G astra
 
-
 Development version
 ^^^^^^^^^^^^^^^^^^^
 
@@ -64,9 +63,16 @@ The configuration for Astra is currently specified in the ``python/astra/etc/ast
 file. Once those configuration settings are updated, you can set Astra up by
 running the following command from the terminal::
 
-  sdss-astra setup
+  astra setup
 
 
+Using modules on the Utah system
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+TBD some docs::
+
+  sdss_install -G astra
+  module load astra
 
 
 

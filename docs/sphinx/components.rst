@@ -94,9 +94,9 @@ now you will need to supply the relevant information in a `YAML-formatted
   owner_email_address: andrew.casey@monash.edu
 
 
-To add this component to Astra, use the ``sdss-astra`` shell utility::
+To add this component to Astra, use the ``astra`` shell utility::
 
-  sdss-astra component create --from-path my-component.yml
+  astra component create --from-path my-component.yml
 
 Most keywords in the above example are self-explanatory. The most important
 terms are the ``github_repo_slug`` and the ``component_cli``, which should 
@@ -189,9 +189,9 @@ Updating components
 ===================
 
 All attributes relating to a component can be updated **except** the
-``github_repo_slug``. Attribuets can be updated using the ``sdss-astra`` tool::
+``github_repo_slug``. Attribuets can be updated using the ``astra`` tool::
 
-  sdss-astra component update {github_repo_slug} --active true
+  astra component update {github_repo_slug} --active true
 
 [TBD: more examples of things to alter]
 
@@ -206,7 +206,7 @@ You will rarely need to delete components because you can just mark them as
 inactive and they will no longer be run on any observations. If you do need
 to delete a component you can do so using::
 
-  sdss-astra component delete {github_repo_slug}
+  astra component delete {github_repo_slug}
 
 It will ask you if you are sure. You can use the ``-y`` flag to indicate yes and
 skip this question.
@@ -214,9 +214,9 @@ skip this question.
 Executing components
 ====================
 
-You can directly execute a component using the ``sdss-astra`` utility. For example::
+You can directly execute a component using the ``astra`` utility. For example::
 
-  sdss-astra execute the-cannon -i training-paths.txt -o tmp/ --train --data-release 16
+  astra execute the-cannon -i training-paths.txt -o tmp/ --train --data-release 16
 
 will train a Cannon model using the data files listed in the text file 
 (``training-paths.txt``) and use Data Release 16 labels for those 

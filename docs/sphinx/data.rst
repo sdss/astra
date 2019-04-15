@@ -23,19 +23,19 @@ a database that records the data files present in each directory in order to
 identify new or updated files. When new or updated data are detected, Astra will
 schedule all *active* components to be executed. Once new observations have been 
 processed by all active components, they will only be re-processed once a new 
-component is added. To watch a folder you can use the ``sdss-astra`` shell 
+component is added. To watch a folder you can use the ``astra`` shell 
 utility::
 
-  sdss-astra data watch -r /path/to/SDSS/data --interval 3600
+  astra data watch -r /path/to/SDSS/data --interval 3600
 
-[TBD: link to full docs for ``sdss-astra`` CLI]
+[TBD: link to full docs for ``astra`` CLI]
 
 Unwatching folders
 ==================
 
-You can use the ``sdss-astra`` shell utility to stop watching a folder::
+You can use the ``astra`` shell utility to stop watching a folder::
 
-  sdss-astra data unwatch /path/to/SDSS/data
+  astra data unwatch /path/to/SDSS/data
 
 
 Force refresh
@@ -44,7 +44,7 @@ Force refresh
 If you want to forcibly refresh all watched folders instead of waiting until
 the next interval, you can do so with::
 
-  sdss-astra data refresh
+  astra data refresh
 
 
 Subsets
@@ -56,9 +56,9 @@ allow for multiple components to run on something like 'calibration sets'
 (or 'science verification set', etc). Named subsets are available to any 
 component through the functions in  ``astra.utils``.
 
-Use the ``sdss-astra`` utility to create a named subset::
+Use the ``astra`` utility to create a named subset::
 
-  sdss-astra subset create dr20.science-verification -i paths.txt
+  astra subset create dr20.science-verification -i paths.txt
 
 Data products can be part of many subsets (data products have a many-to-many 
 relationship with subsets), and subsets can be created to automatically add 
