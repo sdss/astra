@@ -18,9 +18,8 @@ The ``astra`` command line tool provides most of the functionality needed
 to manage data flows, analysis components, scheduling and monitoring of analysis 
 tasks, and bookkeeping the outputs from those analysis tasks.
 
-This documentation page will be automatically generated using the help strings
-of each function, but for now you can see a list of commands that are expected
-to be available in the ``astra`` tool (e.g., ``astra data watch``):
+Here is an overview of the commands available through ``astra``, and more detailed
+documentation is listed below:
 
 =====================  =============
    Command              Description
@@ -69,9 +68,6 @@ Components
 
 .. click:: astra.tools.sdss_astra.component:create
    :prog: astra component create
-
-.. click:: astra.tools.sdss_astra.component:refresh
-   :prog: astra component refresh
 
 .. click:: astra.tools.sdss_astra.component:update
    :prog: astra component update

@@ -20,10 +20,11 @@ from astra import (data_subsets, tasks)
 def execute(context, github_repo_slug, input_path, output_dir, release, 
             from_path, **kwargs):
     r"""
-    Execute a component on some reduced data products.
-
-    Given the `GITHUB_REPO_SLUG` -- and optionally, the `RELEASE` -- execute the
-    component on the `INPUT_PATH` and write the outputs to `OUTPUT_DIR`.
+    Execute a component on a reduced data product (``INPUT_PATH``) and write
+    the outputs to ``OUTPUT_DIR``. The component is uniquely
+    specified by the ``GITHUB_REPO_SLUG`` and the release version. The most
+    recent release will be assumed if no release is specified in the ``--release``
+    option.
     """
     log.debug("execute")
 

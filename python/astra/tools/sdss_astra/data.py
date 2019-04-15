@@ -13,15 +13,16 @@ def data(context):
 @data.command()
 @click.argument("path", nargs=1, required=True)
 @click.option("-r", "--recursive", is_flag=True, default=False,
-              help="Monitor directory recursively (default: false).")
+              help="Monitor recursively (default: `False`).")
 @click.option("--interval", default=3600,
-              help="Number of seconds to wait between checking for new data (default: 3600).")
+              help="Number of seconds to wait between checking for new data (default: `3600`).")
 @click.option("--regex-ignore-pattern", default=None,
-              help="Regular expression pattern for ignoring files.")
+              help="A regular expression pattern that, when matched, "\
+                   "will ignore files in the watched folder.")
 @click.pass_context
 def watch(context, path, recursive, interval, regex_ignore_pattern):
     r"""
-    Start monitoring a folder for new data products.
+    Start monitoring a local folder for new data products.
     """
     log.debug(f"data.watch {path} {recursive} {interval} {regex_ignore_pattern}")
     result = folders.watch(path, recursive, interval, regex_ignore_pattern)
@@ -32,11 +33,11 @@ def watch(context, path, recursive, interval, regex_ignore_pattern):
 @data.command()
 @click.argument("path", nargs=1, required=True)
 @click.option("--quiet", is_flag=True, default=False,
-              help="Stay quiet if the given path is not being watched.")
+              help="Do not raise an exception if the given path is not actively being watched.")
 @click.pass_context
 def unwatch(context, path, quiet):
     r"""
-    Stop monitoring a folder for new data products.
+    Stop monitoring a local folder for new data products.
     """
     log.debug(f"data.unwatch {path} {quiet}")
     result = folders.unwatch(path, quiet)
@@ -47,13 +48,12 @@ def unwatch(context, path, quiet):
 @data.command()
 @click.argument("path", nargs=-1)
 @click.option("--quiet", is_flag=True, default=False,
-              help="Stay quiet if the given path is not being watched.")
+              help="Do not raise an exception if the given path is not actively being watched.")
 @click.pass_context
 def refresh(context, path, quiet):
     r"""
-    Check watched folder(s) for new data products.
-
-    If no PATH is given then all watched folders will be refreshed.
+    Refresh watched folder(s) for new data products. If no `PATH` is given then 
+    all watched folders will be refreshed.
     """
     log.debug(f"data.refresh {path}")
 

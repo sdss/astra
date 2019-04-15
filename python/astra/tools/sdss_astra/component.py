@@ -34,14 +34,24 @@ def create(context, from_path):
 @component.command()
 @click.argument("github_repo_slug", nargs=1, required=True)
 @click.argument("component_cli", nargs=1, required=True)
-@click.option("--release", nargs=1, default=None)
-@click.option("--short-name", "short_name", nargs=1, default=None)
+@click.option("--release", nargs=1, default=None,
+              help="The release version of this repository to use. "\
+                   "If no release is given then this will default to the last "\
+                   "release made available on GitHub.")
+@click.option("--short-name", "short_name", nargs=1, default=None,
+              help="A short description for this component. If no description "\
+                   "is given then this will default to the description that "\
+                   "exists on GitHub.")
 @click.option("--execution-order", "execution_order", default=0,
-              help="Set the execution order for the component.")
+              help="Set the execution order for the component (default: `0`).")
 @click.pass_context
 def create(context, github_repo_slug, component_cli, release, short_name,
            execution_order):
-    r""" Create a new component. """
+    r"""
+    Create a new component in Astra from an existing GitHub repository
+    (`GITHUB_REPO_SLUG`) and a command line tool in that repository
+    (`COMPONENT_CLI`).
+    """
     log.debug("component.create")
 
     return components.create(github_repo_slug=github_repo_slug,
@@ -55,9 +65,10 @@ def create(context, github_repo_slug, component_cli, release, short_name,
 @click.argument("github_repo_slug", nargs=1, required=True)
 @click.pass_context
 def refresh(context, github_repo_slug):
-    r"""Check a component for an updated version"""
+    r"""
+    Check GitHub for a new release in this repository.
+    """
     log.debug("component.refresh")
-
     return components.refresh(github_repo_slug)
 
 
@@ -66,20 +77,22 @@ def refresh(context, github_repo_slug):
 @click.argument("github_repo_slug", nargs=1, required=True,)
 @click.argument("release", nargs=1, required=True)
 @click.option("--active/--inactive", "is_active", default=None,
-              help="Set a component as active or inactive.")
+              help="Set the component as active or inactive.")
 @click.option("--enable-auto-update/--disable-auto-update", "auto_update", default=None,
               help="Enable or disable automatic checks to GitHub for new releases.")
 @click.option("--short-name", "short_name", nargs=1,
-              help="Set the short descriptive name for a component.")
+              help="Set the short descriptive name for this component.")
 @click.option("--execution-order", "execution_order", type=int,
-              help="Set the execution order for a component.")
+              help="Set the execution order for this component.")
 @click.option("--component-cli", "component_cli", nargs=1,
-              help="Set the command line interface tool for a component.")
+              help="Set the command line interface tool for this component.")
 @click.pass_context
 def update(context, github_repo_slug, release, is_active, auto_update,
            short_name, execution_order, component_cli):
-    r"""Update attributes of an existing component."""
-
+    r"""
+    Update attribute(s) of an existing component, where the component is uniquely
+    specified by the ``GITHUB_REPO_SLUG`` and the ``RELEASE`` version.
+    """
     log.debug("component.update")
 
     # Only send non-None inputs.
@@ -107,7 +120,10 @@ def update(context, github_repo_slug, release, is_active, auto_update,
 @click.argument("release", nargs=1, required=True)
 @click.pass_context
 def delete(context, github_repo_slug, release):
-    r"""Delete an existing component."""
+    r"""
+    Delete an existing component, where the component is uniquely specified by
+    the ``GITHUB_REPO_SLUG`` and the ``RELEASE`` version.
+    """
     log.debug("component.delete")
 
     return components.delete(github_repo_slug, release)

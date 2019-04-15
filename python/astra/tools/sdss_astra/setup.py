@@ -9,10 +9,13 @@ from sqlalchemy_utils import database_exists, create_database
 
 @click.command()
 @click.option("-y", "confirm", default=False, is_flag=True,
-              help="drop the database if it already exists")
+              help="Do not prompt the user for confirmation if the database already exists.")
 @click.pass_context
 def setup(context, confirm):
-    r""" Setup databases using the current configuration. """
+    r"""
+    Setup Astra database using the current configuration, and create directories
+    for components to be installed.
+    """
 
     log.debug("Running setup")
 
