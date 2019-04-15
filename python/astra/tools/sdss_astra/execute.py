@@ -1,9 +1,9 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import click
-from astra import (folders, log)
+from astra import log
 from astra.db.connection import session
-from astra.db.models import Component, Task
+from astra.db.models import Component
 from astra import (data_subsets, tasks)
 
 
@@ -45,7 +45,10 @@ def execute(context, github_repo_slug, input_path, output_dir, release,
     subset = data_subsets.create_subset_from_data_paths(data_paths)
     task = tasks.create(component.id, subset.id)
 
-    # Need: environment variables, etc
+    # Need to module_load the right thing.
 
-    # Actually run the damn thing/
+
+    # Actually run the damn thing.
+
+
     raise a

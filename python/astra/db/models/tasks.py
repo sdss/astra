@@ -1,4 +1,5 @@
 
+import os
 import datetime
 from sqlalchemy import (Boolean, Column, DateTime, String, Integer, ForeignKey,
                         UniqueConstraint)
@@ -28,3 +29,19 @@ class Task(Base):
 
     def __repr__(self):
         return f"<{self.__class__.__name__}(id={self.id}, component_id={self.component_id}, data_subset_id={self.data_subset_id})>"
+
+
+    def write(self, path, overwrite=False):
+        r"""
+        Write a task to an executable shell script.
+        """
+
+        if os.path.exists(path) and not overwrite:
+            raise IOError(f"path {path} already exists")
+
+        contents = []
+        # TODO: module load what is needed.
+
+        # Write the data_subset to a temporary file in the output_dir.
+
+        raise NotImplementedError("foo")
