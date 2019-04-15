@@ -75,7 +75,7 @@ def get_repository_summary(owner, repository, **kwargs):
     return content["data"]["repository"]
 
 
-def get_most_recent_release(owner, repository, **kwargs):
+def get_most_recent_release(owner, repository, n=1, **kwargs):
     r"""
     Query the GitHub GraphQL API to access information about the most recent
     release for the given ``owner`` and ``repository``.
@@ -90,7 +90,7 @@ def get_most_recent_release(owner, repository, **kwargs):
     q = """
     query {{
       repository(owner: "{owner}", name: "{repository}") {{
-        releases(last: 1) {{
+        releases(last: {n}) {{
           edges {{
             node {{
               url
@@ -138,12 +138,15 @@ def get_most_recent_release(owner, repository, **kwargs):
         date
       }}
     }}
-    """.format(owner=owner, repository=repository)
+    """.format(owner=owner, n=n, repository=repository)
     
     content = graphql(q, **kwargs)
     edges = content["data"]["repository"]["releases"]["edges"]
     if len(edges):
-        return edges[0]["node"]["tag"]
+        if n == 1:
+            return edges[0]["node"]["tag"]
+        return [edges[i]["node"]["tag"] for i in range(min(n, len(edges)))]
+          
     else:
         # No releases
         return dict()

@@ -1,6 +1,10 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import os
 import datetime
+import requests
+import tempfile
+from shutil import copyfileobj
 from astra import log
 from astra.db.connection import session
 from astra.db.models.components import Components
@@ -56,6 +60,18 @@ def create(github_repo_slug, component_cli, short_name=None, release=None,
             raise ValueError(f"no releases available for {github_repo_slug}")
 
         release = last_release["name"]
+        release_info = last_release
+
+    else:
+        log.info("Making sure this release exists on GitHub")
+        releases = github.get_most_recent_release(owner, repository_name, n=100)
+        for release_info in releases:
+            if release_info["name"] == release: break
+
+        else:
+            raise ValueError(f"could not find release {release} in last 100 "\
+                             "releases on GitHub")
+
 
     # Check for a component that matches this slug.
     item = _get_component_or_none(github_repo_slug, release)
@@ -68,8 +84,6 @@ def create(github_repo_slug, component_cli, short_name=None, release=None,
     if short_name is None:
         short_name = repository["description"]
 
-    # TODO: Checkout the repository at the most recent release?
-    # TODO: Check that the component cli works? That it installs?
 
     # Create the component.
     component = Components(github_repo_slug=github_repo_slug, release=release,
@@ -77,7 +91,48 @@ def create(github_repo_slug, component_cli, short_name=None, release=None,
                            execution_order=execution_order, owner_name=owner,
                            is_active=True, auto_update=False)
 
+    # Now actually check out the repository.
+    # $ASTRA_COMPONENT_DIR/{GITHUB_REPO_SLUG}/{RELEASE}/
+    # But the tarball will extract it to a folder, so we will rename later.
+    ASTRA_COMPONENT_DIR = os.getenv("ASTRA_COMPONENT_DIR")
+    dirname = os.path.abspath(os.path.join(ASTRA_COMPONENT_DIR, github_repo_slug))
+
+    if os.path.exists(dirname):
+        raise IOError("directory name where we should checkout the repository "\
+                      "to already exists")
+
+    # Create directory.
+    os.makedirs(dirname, exist_ok=True)
+
+    # Checkout repository at this tag version.
+    _, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
+    log.info(f"Checking out repository {github_repo_slug} release {release} "\
+             f"to {tmp_path}")
+    r = requests.get(release_info["target"]["tarballUrl"], stream=True)
+    with open(tmp_path, "wb") as fp:
+        copyfileobj(r.raw, fp)
+
+    log.info(f"Download complete. Untarring to {dirname}")
+    os.system(f"tar -xzf {tmp_path} --directory {dirname}")
+
+    # It will extract things into it's own folder, so move things.
+    sha = release_info["target"]["sha"]
+    os.rename(f"{dirname}/{owner}-{repository_name}-{sha[:7]}/",
+              f"{dirname}/{release}/")
+    os.unlink(tmp_path)
+
+    dirname = os.path.join(dirname, release)
+
+    # Strip the $ASTRA_COMPONENT_DIR.
+    component.local_path = "$ASTRA_COMPONENT_DIR" \
+                         + dirname[len(ASTRA_COMPONENT_DIR):]
+
+    # TODO: Check that the component cli works? That it installs?
+
     session.add(component)
+
+    log.info(f"Component {github_repo_slug} release {release} lives at {component.local_path}")
+
     session.commit()
 
     # TODO: What data should it run on?

@@ -26,6 +26,8 @@ class Components(Base):
     created = Column(DateTime, default=datetime.datetime.utcnow)
     modified = Column(DateTime, default=datetime.datetime.utcnow)
 
+    local_path = Column(String)
+
     __table_args__ = (
         UniqueConstraint("github_repo_slug", "release", name="_repo_release"),
     )
