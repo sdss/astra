@@ -6,7 +6,7 @@ import datetime
 from astra import log
 from astra.db.connection import session
 from astra.db.models.watched_folders import WatchedFolder
-from astra.db.models.data import DataProducts
+from astra.db.models.data import DataProduct
 
 
 # Right-hand strip any / values to match the input we would expect.
@@ -130,8 +130,8 @@ def refresh(path, quiet=False):
                 continue
 
             # Add the data product if it doesn't exist already
-            if session.query(DataProducts).filter_by(path=p).one_or_none() is None:
-                session.add(DataProducts(path=p, folder_id=folder.id))
+            if session.query(DataProduct).filter_by(path=p).one_or_none() is None:
+                session.add(DataProduct(path=p, folder_id=folder.id))
                 log.info(f"Added {p} from watched folder {folder}")
                 added += 1
 

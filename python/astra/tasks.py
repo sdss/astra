@@ -4,7 +4,7 @@ import os
 import datetime
 from astra import log
 from astra.db.connection import session
-from astra.db.models import (Components, DataSubsets, Task)
+from astra.db.models import (Component, DataSubset, Task)
 
 
 def create(component_id, data_subset_id, scheduled=None):
@@ -22,12 +22,12 @@ def create(component_id, data_subset_id, scheduled=None):
     """
 
     # Verify that the component exists.
-    component = session.query(Components).filter_by(id=component_id).one_or_none()
+    component = session.query(Component).filter_by(id=component_id).one_or_none()
     if component is None:
         raise ValueError(f"unrecognized component id {component_id}")
 
     # Verify that the data subset exists.
-    subset = session.query(DataSubsets).filter_by(id=data_subset_id).one_or_none()
+    subset = session.query(DataSubset).filter_by(id=data_subset_id).one_or_none()
     if subset is None:
         raise ValueError(f"unrecognized subset id {data_subset_id}")
 
@@ -44,8 +44,8 @@ def create(component_id, data_subset_id, scheduled=None):
     session.commit()
 
     # Generate the output directory.
-    task.output_dir = os.path.join("$ASTRA_TASK_DIR", f"{task.id:10.0f}")
-    task.log_path = os.path.join(task.output_dir, f"{task.id:10.0f}.log")
+    task.output_dir = os.path.join("$ASTRA_TASK_DIR", f"{task.id:0>10.0f}")
+    task.log_path = os.path.join(task.output_dir, f"{task.id:0>10.0f}.log")
 
     output_dir = task.output_dir.replace("$ASTRA_TASK_DIR",
                                          os.getenv("ASTRA_TASK_DIR", ""))
@@ -92,7 +92,8 @@ def update(task_id, **kwargs):
         return task
 
     else:
-        log.warn(f"Nothing to update on task with id {task_id}")
+        # TODO: this should be a warning
+        log.info(f"Nothing to update on task with id {task_id}")
 
         return None
 

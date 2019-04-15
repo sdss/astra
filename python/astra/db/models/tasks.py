@@ -10,8 +10,8 @@ class Task(Base):
     __tablename__ = "task"
 
     id = Column(Integer, primary_key=True)
-    component_id = Column(Integer, ForeignKey("components.id"))
-    data_subset_id = Column(Integer, ForeignKey("data_subsets.id"))
+    component_id = Column(Integer, ForeignKey("component.id"))
+    data_subset_id = Column(Integer, ForeignKey("data_subset.id"))
 
     # TODO: worker_id ? how to represent the worker information?
 
@@ -27,4 +27,4 @@ class Task(Base):
 
 
     def __repr__(self):
-        return f"<{self.__class__.__name__}(id={self.id}, component_id={self.component_id}, subset_id={self.subset_id})>"
+        return f"<{self.__class__.__name__}(id={self.id}, component_id={self.component_id}, data_subset_id={self.data_subset_id})>"

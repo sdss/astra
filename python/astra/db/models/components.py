@@ -3,9 +3,9 @@ import datetime
 from sqlalchemy import Boolean, Column, DateTime, String, Integer, UniqueConstraint
 from astra.db.connection import Base
 
-class Components(Base):
+class Component(Base):
 
-    __tablename__ = "components"
+    __tablename__ = "component"
 
     id = Column(Integer, primary_key=True)
     is_active = Column(Boolean, default=True)

@@ -7,7 +7,7 @@ import tempfile
 from shutil import copyfileobj
 from astra import log
 from astra.db.connection import session
-from astra.db.models.components import Components
+from astra.db.models.components import Component
 from astra.utils import github
 
 _valid_github_repo_slug = lambda _: _.strip().lower()
@@ -86,20 +86,16 @@ def create(github_repo_slug, component_cli, short_name=None, release=None,
 
 
     # Create the component.
-    component = Components(github_repo_slug=github_repo_slug, release=release,
-                           component_cli=component_cli, short_name=short_name,
-                           execution_order=execution_order, owner_name=owner,
-                           is_active=True, auto_update=False)
+    component = Component(github_repo_slug=github_repo_slug, release=release,
+                          component_cli=component_cli, short_name=short_name,
+                          execution_order=execution_order, owner_name=owner,
+                          is_active=True, auto_update=False)
 
     # Now actually check out the repository.
     # $ASTRA_COMPONENT_DIR/{GITHUB_REPO_SLUG}/{RELEASE}/
     # But the tarball will extract it to a folder, so we will rename later.
     ASTRA_COMPONENT_DIR = os.getenv("ASTRA_COMPONENT_DIR")
     dirname = os.path.abspath(os.path.join(ASTRA_COMPONENT_DIR, github_repo_slug))
-
-    if os.path.exists(dirname):
-        raise IOError("directory name where we should checkout the repository "\
-                      "to already exists")
 
     # Create directory.
     os.makedirs(dirname, exist_ok=True)
@@ -154,9 +150,9 @@ def refresh(github_repo_slug):
     github_repo_slug = _valid_github_repo_slug(github_repo_slug)
 
     # TODO: ascending or descending?
-    last_release = session.query(Components) \
+    last_release = session.query(Component) \
                           .filter_by(github_repo_slug=github_repo_slug) \
-                          .order_by(Components.release.desc()) \
+                          .order_by(Component.release.desc()) \
                           .first()
 
     # Check GitHub for new version.
@@ -241,7 +237,7 @@ def delete(github_repo_slug, release):
 
 
 def _get_component_or_none(github_repo_slug, release):
-    return session.query(Components) \
+    return session.query(Component) \
                   .filter_by(github_repo_slug=github_repo_slug,
                              release=release) \
                   .one_or_none()

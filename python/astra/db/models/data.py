@@ -5,9 +5,9 @@ from sqlalchemy import (Boolean, Column, DateTime, String, Integer, ForeignKey,
                         UniqueConstraint)
 from astra.db.connection import Base
 
-class DataProducts(Base):
+class DataProduct(Base):
 
-    __tablename__ = "data_products"
+    __tablename__ = "data_product"
 
     id = Column(Integer, primary_key=True)
     path = Column(String, nullable=False, unique=True)
@@ -20,35 +20,37 @@ class DataProducts(Base):
         return f"<{self.__class__.__name__}(id={self.id}, path={self.path})>"
 
 
-class DataSubsets(Base):
+class DataSubset(Base):
 
-    __tablename__ = "data_subsets"
+    __tablename__ = "data_subset"
 
     id = Column(Integer, primary_key=True)
     is_visible = Column(Boolean, default=True)
 
-    name = Column(String, nullable=False, unique=True)
+    # Name should be unique if it is visible.
+    name = Column(String)
     regex_pattern_match = Column(String)
     auto_update = Column(Boolean, default=False)
 
     created = Column(DateTime, default=datetime.datetime.utcnow)
+    modified = Column(DateTime, default=datetime.datetime.utcnow)
 
     # TODO: owner information
     def __repr__(self):
         return f"<{self.__class__.__name__}(id={self.id}, name={self.name})>"
 
 
-class DataProductsSubsetsBridge(Base):
+class DataProductSubsetBridge(Base):
 
-    __tablename__ = "data_products_subsets"
+    __tablename__ = "data_product_data_subset"
 
     id = Column(Integer, primary_key=True)
-    data_subsets_id = Column(Integer, ForeignKey("data_subsets.id"))
-    data_products_id = Column(Integer, ForeignKey("data_products.id"))
+    data_subset_id = Column(Integer, ForeignKey("data_subset.id"))
+    data_product_id = Column(Integer, ForeignKey("data_product.id"))
 
     __table_args__ = (
-        UniqueConstraint("data_subsets_id", "data_products_id", name="_id_uc"),
+        UniqueConstraint("data_subset_id", "data_product_id", name="_id_uc"),
     )
 
     def __repr__(self):
-        return f"<{self.__class__.__name__}(subset_id={self.data_subsets_id}, product_id={self.data_products_id})>"
+        return f"<{self.__class__.__name__}(subset_id={self.data_subset_id}, product_id={self.data_product_id})>"
