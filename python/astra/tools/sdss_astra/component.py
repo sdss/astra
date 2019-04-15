@@ -1,6 +1,4 @@
 import click
-import os
-import yaml
 from astra import (components, log)
 
 @click.group()
@@ -10,6 +8,9 @@ def component(context):
     log.debug("component")
     pass
 
+# TODO: Click validator for GitHub slug
+
+'''
 @component.command()
 @click.argument("from_path", nargs=1, required=True)
 @click.pass_context
@@ -26,8 +27,41 @@ def create(context, from_path):
     log.info(f"Creating component from keywords: {kwds}")
 
     return components.create(**kwds)
+'''
 
+# TODO: figure out how to do this with EITHER --from-path or as arguments.
+# Create
+@component.command()
+@click.argument("github_repo_slug", nargs=1, required=True)
+@click.argument("component_cli", nargs=1, required=True)
+@click.option("--release", nargs=1, default=None)
+@click.option("--short-name", "short_name", nargs=1, default=None)
+@click.option("--execution-order", "execution_order", default=0,
+              help="Set the execution order for the component.")
+@click.pass_context
+def create(context, github_repo_slug, component_cli, release, short_name,
+           execution_order):
+    r""" Create a new component. """
+    log.debug("component.create")
 
+    return components.create(github_repo_slug=github_repo_slug,
+                             component_cli=component_cli,
+                             short_name=short_name,
+                             release=release,
+                             execution_order=execution_order)
+    
+
+@component.command()
+@click.argument("github_repo_slug", nargs=1, required=True)
+@click.pass_context
+def refresh(context, github_repo_slug):
+    r"""Check a component for an updated version"""
+    log.debug("component.refresh")
+
+    return components.refresh(github_repo_slug)
+    
+
+# Update
 @component.command()
 @click.argument("github_repo_slug", nargs=1, required=True)
 @click.argument("release", nargs=1, required=True)
@@ -79,9 +113,3 @@ def delete(context, github_repo_slug, release):
     return components.delete(github_repo_slug, release)
 
 
-@component.command()
-@click.pass_context
-def refresh(context):
-    r"""Check a component for an updated version"""
-    log.debug("component.refresh")
-    pass

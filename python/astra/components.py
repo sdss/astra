@@ -85,8 +85,31 @@ def create(github_repo_slug, component_cli, short_name=None, release=None,
     return component
 
 
-def refresh(**kwargs):
-    pass
+def refresh(github_repo_slug):
+    r"""
+    Check GitHub for a new release of this repository. If a new release exists,
+    then mark all earlier releases as inactive and create a new component with
+    the latest release. 
+
+    :param github_repo_slug:
+        The GitHub repository in 'slug' form: {OWNER}/{REPOSITORY_NAME}.
+    """
+
+    # Do we have any components with this repo slug?
+    github_repo_slug = _valid_github_repo_slug(github_repo_slug)
+
+    # TODO: ascending or descending?
+    last_release = session.query(Components) \
+                          .filter_by(github_repo_slug=github_repo_slug) \
+                          .order_by(Components.release.desc()) \
+                          .first()
+
+    # Check GitHub for new version.
+    raise NotImplementedYet("""because requires a thinko w.r.t. multiple active 
+                               components with the same github_repo_slug, 
+                               different releases, and both set to auto-update
+                            """)
+
 
 def update(github_repo_slug, release, **kwargs):
     r"""
