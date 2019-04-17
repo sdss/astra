@@ -40,13 +40,13 @@ file provenance) is managed by Astra.
 Installation
 ============
 
-Using ``sdss_install``
+Using ``sdss-install``
 ^^^^^^^^^^^^^^^^^^^^^^
 
-If you already have the ``sdss_install`` tool from the `SDSS organization on GitHub <https://github.com/sdss/sdss_install>`_
+If you already have the ``sdss-install`` tool from the `SDSS organization on GitHub <https://github.com/sdss/sdss_install>`_
 then you can simply enter the following command in a terminal window::
 
-  sdss_install -G astra
+  sdss-install -G astra 
 
 Development version
 ^^^^^^^^^^^^^^^^^^^
