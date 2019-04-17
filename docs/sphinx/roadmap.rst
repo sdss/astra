@@ -18,9 +18,6 @@ Completed
 
 *3. Distribute technical and overview documentation to interested parties (MWM email list, Astra email list, SMAUG list, SDSS V software group, etc) and invite comments
 
-Upcoming
-^^^^^^^^
-
 *4. Create an initial version of Astra framework that can do the following from command line interfaces: 
 
 - Setup database structure for components (e.g., pipelines), data paths, schedule analysis jobs, etc.
@@ -30,6 +27,9 @@ Upcoming
 - CRUD functionality for triggering analysis jobs
 
 *5. Deploy initial version of Astra to Utah.
+
+Upcoming
+^^^^^^^^
 
 *6. Wrap up ASPCAP as a component
 
