@@ -5,31 +5,6 @@ __dsi_path_descriptors = dict([
     ("apStar", r".+\/(?P<apred>[\w\d]+)\/stars\/(?P<telescope>\w{3}\d{1,2}m)\/\w+\/(?P<prefix>[\w\d]+)Star-(?P<_apred>[\w\d]+)-(?P<obj>[\w\d\+\-]+)\.fits"),
 ])
 
-def parse_data_model(path):
-    r"""
-    Return the SDSS data model that describes the given path.
-
-    :param path:
-        A local path to a SDSS data product that has a data model registered with the SDSS Data
-        Specification Index.
-
-    :returns:
-        The name of the matched data model.
-
-    :raises ValueError:
-        If no data model could be found that describes the given path, or multiple data models were
-        matched.
-    """
-
-    matches = [name for name, p in __dsi_path_descriptors.items() if re.compile(p).search(path)]
-    if not matches:
-        raise ValueError("no data model found that describe the given path")
-
-    if len(matches) > 1:
-        raise ValueError(f"multiple data model matches found: {matches}")
-
-    return matches.pop()
-
 
 def parse_descriptors(path):
     r"""
@@ -58,7 +33,7 @@ def parse_descriptors(path):
     for name, pattern in __dsi_path_descriptors.items():
         try:
             matches[name] = re.compile(pattern).search(path).groupdict()
-            
+
         except AttributeError:
             pass
 
@@ -71,6 +46,22 @@ def parse_descriptors(path):
     return matches.popitem()
 
 
+def parse_data_model(path):
+    r"""
+    Return the SDSS data model that describes the given path.
+
+    :param path:
+        A local path to a SDSS data product that has a data model registered with the SDSS Data
+        Specification Index.
+
+    :returns:
+        The name of the matched data model.
+
+    :raises ValueError:
+        If no data model could be found that describes the given path, or multiple data models were
+        matched.
+    """
+    return parse_descriptors(path)[0]
 
 
 
