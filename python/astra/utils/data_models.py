@@ -17,7 +17,8 @@ def parse_data_model(path):
         The name of the matched data model.
 
     :raises ValueError:
-        If no data model could be found that describes the given path.
+        If no data model could be found that describes the given path, or multiple data models were
+        matched.
     """
 
     matches = [name for name, p in __dsi_path_descriptors.items() if re.compile(p).search(path)]
@@ -44,13 +45,13 @@ def parse_descriptors(path):
         A local path to a SDSS data product that has a data model registered with the SDSS Data
         Specification Index.
 
-    :param data_model: [optional]
-        The name of the SDSS data model to use when parsing the descriptors. If `None` is given then
-        the data model will be inferred from the given path.
-
     :returns:
         A two-length tuple containing the name of the matched data model, and a dictionary that
         contains the matched descriptors.
+
+    :raises ValueError:
+        If no data model could be found that describes the given path, or multiple data models were
+        matched.
     """
 
     matches = dict()
