@@ -56,9 +56,11 @@ def parse_descriptors(path):
 
     matches = dict()
     for name, pattern in __dsi_path_descriptors.items():
-        r = re.compile(pattern).search(path)
-        if r is not None:
-            matches[name] = r.groupdict()
+        try:
+            matches[name] = re.compile(pattern).search(path).groupdict()
+            
+        except AttributeError:
+            pass
 
     if not len(matches):
         raise ValueError("no data model found that describe the given path")
