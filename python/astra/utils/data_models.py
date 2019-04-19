@@ -1,12 +1,27 @@
+import os
 import re
 
+
+#https://github.com/sdss/datamodel_parser/blob/c19fb6a225946fb4189d3ff1d4e1a95b98f8b721/docs/flagship_datamodels.py
 __dsi_path_descriptors = dict([
-    # $APOGEE_REDUX/{apred}/stars/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits
-    ("apStar", r".+\/(?P<apred>[\w\d]+)\/stars\/(?P<telescope>\w{3}\d{1,2}m)\/\w+\/(?P<prefix>[\w\d]+)Star-(?P<_apred>[\w\d]+)-(?P<obj>[\w\d\+\-]+)\.fits"),
+    # $APOGEE_REDUX/{APRED_VERS}/stars/{TELESCOPE}/{FIELD}/{PREFIX}Star-{APRED_VERS}-{OBJ}.fits
+    ("apStar", r".+\/(?P<_APRED_VERS>[\w\d]+)\/stars\/(?P<TELESCOPE>\w{3}\d{1,2}m)\/\w+\/(?P<PREFIX>[\w\d]+)Star-(?P<APRED_VERS>[\w\d]+)-(?P<OBJ>[\w\d\+\-]+)\.fits?$"),
+
+    # $APOGEE_REDUX/{APRED_VERS}/{TELESCOPE}/{PLATE}/{MJD}/apVisit-{PLATE}-{MJD}-{FIBER}.fits
+    # https://data.sdss.org/datamodel/files/APOGEE_REDUX/APRED_VERS/TELESCOPE/PLATE_ID/MJD5/apVisit.html
+    ("apVisit", r".+\/(?P<_APRED_VERS>[\w\d]+)\/(?P<TELESCOPE>\w{3}\d{1,2}m)\/(?P<_PLATE>\d+)\/(?P<_MJD>\d+)\/apVisit-(?P<APRED_VERS>[\w\d]+)-(?P<PLATE>[0-9]{4})-(?P<MJD>[0-9]{5})-(?P<FIBER>[0-9]{3})\.fits?$"),
+
+    # $BOSS_SPECTRO_REDUX/{RUN2D}/spectra/{PLATE4}/spec-{PLATE}-{MJD}-{FIBER}.fits
+    ("spec", r".+\/(?P<RUN2D>[\w\d_]+)\/spectra/(?P<PLATE4>\d+)\/spec-(?P<PLATE>\d+)-(?P<MJD>\d+)-(?P<FIBER>\d+)\.fits?$"),
+
+    # https://data.sdss.org/datamodel/files/MANGA_SPECTRO_MASTAR/DRPVER/MPROCVER/mastar-goodspec-DRPVER-MPROCVER.html
+    ("MaStar", r".+\/(?P<_DRPVER>[\w\d_]+)\/(?P<_MPROCVER>[\w\d_]+)/mastar-(?P<SUBSET>\w+)+-(?P<DRPVER>[\w\d_]+)-(?P<MPROCVER>[\w\d_]+).fits?$"),
 ])
 
 
-def parse_descriptors(path):
+
+
+def parse_descriptors(path, strict=True):
     r"""
     Parse the data model descriptors from the given path. For example, the path
 
@@ -20,6 +35,10 @@ def parse_descriptors(path):
         A local path to a SDSS data product that has a data model registered with the SDSS Data
         Specification Index.
 
+    :param strict: [optional]
+        Require that the given path follows the full path description given by the data model,
+        instead of just matching on the path basename (default: True).
+
     :returns:
         A two-length tuple containing the name of the matched data model, and a dictionary that
         contains the matched descriptors.
@@ -29,13 +48,24 @@ def parse_descriptors(path):
         matched.
     """
 
+    descriptors = lambda pattern, path: re.compile(pattern).search(path).groupdict()
+
     matches = dict()
-    for name, pattern in __dsi_path_descriptors.items():
+    for name, strict_pattern in __dsi_path_descriptors.items():
+
         try:
-            matches[name] = re.compile(pattern).search(path).groupdict()
+            matches[name] = descriptors(strict_pattern, path)
 
         except AttributeError:
-            pass
+            if not strict:
+                # Parse the strict pattern into something less strict.
+                _, basename_pattern = strict_pattern.rsplit("\/", maxsplit=1)
+
+                try:
+                    matches[name] = descriptors(f"^{basename_pattern}", os.path.basename(path))
+
+                except AttributeError:
+                    pass
 
     if not len(matches):
         raise ValueError("no data model found that describe the given path")
@@ -46,13 +76,17 @@ def parse_descriptors(path):
     return matches.popitem()
 
 
-def parse_data_model(path):
+def parse_data_model(path, strict=True):
     r"""
     Return the SDSS data model that describes the given path.
 
     :param path:
         A local path to a SDSS data product that has a data model registered with the SDSS Data
         Specification Index.
+
+    :param strict: [optional]
+        Require that the given path follows the full path description given by the data model,
+        instead of just matching on the path basename (default: True).
 
     :returns:
         The name of the matched data model.
@@ -61,17 +95,33 @@ def parse_data_model(path):
         If no data model could be found that describes the given path, or multiple data models were
         matched.
     """
-    return parse_descriptors(path)[0]
 
+    return parse_descriptors(path, strict=strict)[0]
 
 
 if __name__ == "__main__":
 
     paths = [
-        "/uufs/chpc.utah.edu/common/home/sdss/apogeework/apogee/spectro/redux/r12/stars/apo25m/M67/apStar-r12-2M08485930+1117220.fits"
+        "/uufs/chpc.utah.edu/common/home/sdss/apogeework/apogee/spectro/redux/r12/stars/apo25m/M67/apStar-r12-2M08485930+1117220.fits",
+        "/uufs/chpc.utah.edu/common/home/sdss/apogeework/apogee/spectro/redux/r12/stars/apo25m/M67/apStar-r12-2M08485930+1117220.fits",
+        "/APOGEE_REDUX/r8/apo25m/4912/55726/apVisit-r8-4912-55726-269.fits",
+        "/Users/arc/Downloads/spec-6171-56311-0312.fits",
     ]
 
     for path in paths:
-        foo = parse_descriptors(path)
-        print(path, foo)
+        try:
+            print(parse_descriptors(path, strict=False))
+
+        except:
+            raise
+
+    print("STRICT")
+    for path in paths:
+        try:
+            print(parse_descriptors(path, strict=True))
+
+        except:
+            print(f"Couldn't match path {path} on strict mode")
+
+
 
