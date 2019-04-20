@@ -10,8 +10,6 @@ from astra.db.connection import session
 from astra.db.models.components import Component
 from astra.utils import github
 
-_valid_github_repo_slug = lambda _: _.strip().lower()
-
 def create(github_repo_slug, component_cli, short_name=None, release=None,
            execution_order=0, owner=None, **kwargs):
     r"""
@@ -41,7 +39,7 @@ def create(github_repo_slug, component_cli, short_name=None, release=None,
     """
 
     # If necessary, fetch the repository to get the most recent release.
-    github_repo_slug = _valid_github_repo_slug(github_repo_slug)
+    github_repo_slug = github.validate_slug(github_repo_slug)
     owner, repository_name = github_repo_slug.split("/")
 
     # Check that this repository exists.
@@ -149,7 +147,7 @@ def refresh(github_repo_slug):
     """
 
     # Do we have any components with this repo slug?
-    github_repo_slug = _valid_github_repo_slug(github_repo_slug)
+    github_repo_slug = github.validate_slug(github_repo_slug)
 
     # TODO: ascending or descending?
     last_release = session.query(Component) \
@@ -197,7 +195,7 @@ def update(github_repo_slug, release, **kwargs):
     # TODO: long_description, owner_*, ... others ...
     """
 
-    github_repo_slug = _valid_github_repo_slug(github_repo_slug)
+    github_repo_slug = github.validate_slug(github_repo_slug)
     component = _get_component_or_none(github_repo_slug, release)
     if component is None:
         raise ValueError(f"no component found with slug {github_repo_slug} "\

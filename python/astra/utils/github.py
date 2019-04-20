@@ -3,6 +3,24 @@ import os
 from astra import config
 import requests
 
+
+def validate_slug(slug_string):
+    r"""
+    Validate a given GitHub repository slug, given some input.
+
+    :param slug_string:
+        The given slug string, which should be in the form '{OWNER}/{REPO}'.
+        If no '{OWNER}' is given, it will be assumed to be owned by the SDSS organization.
+    """
+
+    slug_string = f"{slug_string}".strip().lower()
+    if "/" not in slug_string:
+        log.info(f"Assuming GitHub repository '{slug_string}' is owned by SDSS (sdss/{slug_string}")
+        slug_string = f"sdss/{slug_string}"
+    return slug_string
+
+
+
 def graphql(query_string, token=None):
     r"""
     Execute a GraphQL query on GitHub.
