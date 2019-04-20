@@ -52,17 +52,17 @@ def load_sdss_apstar(path, **kwargs):
         # log-linear transformations yet.
         spectral_axis = _wcs_log_linear(image[1].header)
 
-        flux = image[1].data * units
-        uncertainty = InverseVariance(image[2].data**-2)
+        flux = np.atleast_2d(image[1].data) * units
+        uncertainty = InverseVariance(image[2].data.reshape(flux.shape)**-2)
 
         meta = OrderedDict([
             ("header", image[0].header),
             ("hdu_headers", [hdu.header for hdu in image]),
-            ("masks", image[3].data),
-            ("sky_flux", image[4].data * units),
-            ("sky_error", image[5].data * units),
-            ("telluric_flux", image[6].data * units),
-            ("telluric_error", image[7].data * units),
+            ("masks", image[3].data.reshape(flux.shape)),
+            ("sky_flux", image[4].data.reshape(flux.shape) * units),
+            ("sky_error", image[5].data.reshape(flux.shape) * units),
+            ("telluric_flux", image[6].data.reshape(flux.shape) * units),
+            ("telluric_error", image[7].data.reshape(flux.shape) * units),
             ("lsf_coefficients", image[8].data),
             ("rv_ccf_structure", image[9].data)
         ])
@@ -89,18 +89,18 @@ def load_sdss_apvisit(path, **kwargs):
     with fits.open(path, **kwargs) as image:
         spectral_axis = _wcs_log_linear(image[1].header)
 
-        flux = image[1].data * units
-        uncertainty = InverseVariance(image[2].data**-2)
+        flux = np.atleast_2d(image[1].data) * units
+        uncertainty = InverseVariance(image[2].data.reshape(flux.shape)**-2)
 
         meta = OrderedDict([
             ("header", image[0].header),
             ("hdu_headers", [hdu.header for hdu in image]),
-            ("masks", image[3].data),
+            ("masks", image[3].data.reshape(flux.shape)),
             ("wavelength", image[4].data * u.Angstrom),
-            ("sky_flux", image[5].data * units),
-            ("sky_error", image[6].data * units),
-            ("telluric_flux", image[7].data * units),
-            ("telluric_error", image[8].data * units),
+            ("sky_flux", image[5].data.reshape(flux.shape) * units),
+            ("sky_error", image[6].data.reshape(flux.shape) * units),
+            ("telluric_flux", image[7].data.reshape(flux.shape) * units),
+            ("telluric_error", image[8].data.reshape(flux.shape) * units),
             ("wavelength_coefficients", image[9].data),
             ("lsf_coefficients", image[10].data)
         ])
@@ -128,16 +128,16 @@ def load_sdss_boss(path, hdu=1, **kwargs):
     
         spectral_axis = 10**image[hdu].data["loglam"] * u.Angstrom
 
-        flux = image[hdu].data["flux"] * units
-        uncertainty = InverseVariance(image[hdu].data["ivar"])
+        flux = np.atleast_2d(image[hdu].data["flux"]) * units
+        uncertainty = InverseVariance(image[hdu].data["ivar"].reshape(flux.shape))
 
         meta = OrderedDict([
             ("header", image[0].header),
             ("hdu_headers", [hdu.header for hdu in image]),
-            ("masks", dict(and_mask=image[hdu].data["and_mask"], 
-                           or_mask=image[hdu].data["or_mask"])),
+            ("masks", dict(and_mask=image[hdu].data["and_mask"].reshape(flux.shape), 
+                           or_mask=image[hdu].data["or_mask"].reshape(flux.shape))),
             ("wavelength", image[hdu].data["wdisp"]),
-            ("model", image[hdu].data["model"]),
+            ("model", image[hdu].data["model"].reshape(flux.shape)),
         ])
 
     return Spectrum1D(spectral_axis=spectral_axis, flux=flux, uncertainty=uncertainty, meta=meta)
@@ -170,8 +170,8 @@ def load_sdss_mastar(path, hdu=1, **kwargs):
             meta = OrderedDict(zip(_hdu.data.dtype.names, _hdu.data[i]))
 
             spectral_axis = meta.pop("WAVE") * u.Angstrom
-            flux = meta.pop("FLUX") * units
-            uncertainty = InverseVariance(meta.pop("IVAR"))
+            flux = np.atleast_2d(meta.pop("FLUX") * units)
+            uncertainty = InverseVariance(meta.pop("IVAR").reshape(flux.shape))
 
             spectra.append(Spectrum1D(spectral_axis=spectral_axis, 
                                       flux=flux, uncertainty=uncertainty, meta=meta))

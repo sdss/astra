@@ -5,7 +5,7 @@ import re
 #https://github.com/sdss/datamodel_parser/blob/c19fb6a225946fb4189d3ff1d4e1a95b98f8b721/docs/flagship_datamodels.py
 __dsi_path_descriptors = dict([
     # $APOGEE_REDUX/{APRED_VERS}/stars/{TELESCOPE}/{FIELD}/{PREFIX}Star-{APRED_VERS}-{OBJ}.fits
-    ("apStar", r".+\/(?P<_APRED_VERS>[\w\d]+)\/stars\/(?P<TELESCOPE>\w{3}\d{1,2}m)\/\w+\/(?P<PREFIX>[\w\d]+)Star-(?P<APRED_VERS>[\w\d]+)-(?P<OBJ>[\w\d\+\-]+)\.fits?$"),
+    ("apStar", r".+\/(?P<_APRED_VERS>[\w\d]+)\/stars\/(?P<TELESCOPE>\w{3}\d{1,2}m)\/(?P<FIELD>[\w\d\+\-]+)\/(?P<PREFIX>[\w\d]+)Star-(?P<APRED_VERS>[\w\d]+)-(?P<APOGEE_ID>[\w\d\+\-]+)\.fits?$"),
 
     # $APOGEE_REDUX/{APRED_VERS}/{TELESCOPE}/{PLATE}/{MJD}/apVisit-{PLATE}-{MJD}-{FIBER}.fits
     # https://data.sdss.org/datamodel/files/APOGEE_REDUX/APRED_VERS/TELESCOPE/PLATE_ID/MJD5/apVisit.html
