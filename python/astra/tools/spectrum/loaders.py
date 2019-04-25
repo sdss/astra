@@ -55,24 +55,31 @@ def load_sdss_apstar(path, **kwargs):
         flux = np.atleast_2d(image[1].data) * units
         uncertainty = InverseVariance(image[2].data.reshape(flux.shape)**-2)
 
+        verbosity = kwargs.get("verbosity", 0)
         meta = OrderedDict([
             ("header", image[0].header),
-            ("hdu_headers", [hdu.header for hdu in image]),
-            ("masks", image[3].data.reshape(flux.shape)),
-            ("sky_flux", image[4].data.reshape(flux.shape) * units),
-            ("sky_error", image[5].data.reshape(flux.shape) * units),
-            ("telluric_flux", image[6].data.reshape(flux.shape) * units),
-            ("telluric_error", image[7].data.reshape(flux.shape) * units),
-            ("lsf_coefficients", image[8].data),
-            ("rv_ccf_structure", image[9].data)
+            ("mask", image[3].data.reshape(flux.shape))
         ])
+
+        if verbosity > 1:
+            meta["hdu_headers"] = [hdu.header for hdu in image]
+
+        if verbosity > 2:
+            meta.update(OrderedDict([
+                ("sky_flux", image[4].data.reshape(flux.shape) * units),
+                ("sky_error", image[5].data.reshape(flux.shape) * units),
+                ("telluric_flux", image[6].data.reshape(flux.shape) * units),
+                ("telluric_error", image[7].data.reshape(flux.shape) * units),
+                ("lsf_coefficients", image[8].data),
+                ("rv_ccf_structure", image[9].data)
+            ]))
 
     return Spectrum1D(spectral_axis=spectral_axis, flux=flux, uncertainty=uncertainty, meta=meta)
 
 
 @data_loader("SDSS APOGEE apVisit", 
              identifier=lambda o, *a, **k: _is_sdss_data_model(a[0], "apVisit"),
-             extensions=["fits"])
+             extensions=["fits"], dtype=SpectrumList)
 def load_sdss_apvisit(path, **kwargs):
     r"""
     Read a spectrum from a path that is described by the SDSS apVisit data model
@@ -87,25 +94,46 @@ def load_sdss_apvisit(path, **kwargs):
     units = u.Unit("1e-17 erg / (Angstrom cm2 s)")
 
     with fits.open(path, **kwargs) as image:
-        spectral_axis = _wcs_log_linear(image[1].header)
+        image = fits.open(path, **kwargs)
 
+        spectral_axis = image[4].data * u.Angstrom
         flux = np.atleast_2d(image[1].data) * units
         uncertainty = InverseVariance(image[2].data.reshape(flux.shape)**-2)
 
-        meta = OrderedDict([
+        S, P = spectral_axis.shape
+
+        # Multiple spectra, so need to generate these and send back a SpectrumList
+        common_meta = OrderedDict([
             ("header", image[0].header),
-            ("hdu_headers", [hdu.header for hdu in image]),
-            ("masks", image[3].data.reshape(flux.shape)),
-            ("wavelength", image[4].data * u.Angstrom),
-            ("sky_flux", image[5].data.reshape(flux.shape) * units),
-            ("sky_error", image[6].data.reshape(flux.shape) * units),
-            ("telluric_flux", image[7].data.reshape(flux.shape) * units),
-            ("telluric_error", image[8].data.reshape(flux.shape) * units),
-            ("wavelength_coefficients", image[9].data),
-            ("lsf_coefficients", image[10].data)
+        ])
+        verbosity = kwargs.get("verbosity", 0)
+        if verbosity > 1:
+            common_meta["hdu_headers"] = [hdu.header for hdu in image]
+
+        structured_meta = OrderedDict([
+            ("mask", image[3].data.reshape(flux.shape)),
         ])
 
-    return Spectrum1D(spectral_axis=spectral_axis, flux=flux, uncertainty=uncertainty, meta=meta)
+        if verbosity > 2:
+            structured_meta.update(OrderedDict([
+                ("sky_flux", image[5].data.reshape(flux.shape) * units),
+                ("sky_error", image[6].data.reshape(flux.shape) * units),
+                ("telluric_flux", image[7].data.reshape(flux.shape) * units),
+                ("telluric_error", image[8].data.reshape(flux.shape) * units),
+                ("wavelength_coefficients", image[9].data),
+                ("lsf_coefficients", image[10].data)
+            ]))
+
+        spectra = []
+        for s in range(S):
+            meta = common_meta.copy()
+            for k in structured_meta.keys():
+                meta[k] = structured_meta[k][s]                
+
+            spectra.append(Spectrum1D(spectral_axis=spectral_axis[s],
+                                      flux=flux[s], uncertainty=uncertainty[s], meta=meta))
+
+    return spectra
 
 
 @data_loader("SDSS BOSS spec",
@@ -134,7 +162,7 @@ def load_sdss_boss(path, hdu=1, **kwargs):
         meta = OrderedDict([
             ("header", image[0].header),
             ("hdu_headers", [hdu.header for hdu in image]),
-            ("masks", dict(and_mask=image[hdu].data["and_mask"].reshape(flux.shape), 
+            ("mask", dict(and_mask=image[hdu].data["and_mask"].reshape(flux.shape), 
                            or_mask=image[hdu].data["or_mask"].reshape(flux.shape))),
             ("wavelength", image[hdu].data["wdisp"]),
             ("model", image[hdu].data["model"].reshape(flux.shape)),
