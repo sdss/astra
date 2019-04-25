@@ -70,14 +70,11 @@ def colored_formatter(record):
 
     colours = {'info': ('blue', 'normal'),
                'debug': ('magenta', 'normal'),
-               'warning': ('yellow', 'normal'),
+               'error': ('yellow', 'normal'),
                'print': ('green', 'normal'),
-               'error': ('red', 'bold')}
+               'critical': ('red', 'bold')}
 
     levelname = record.levelname.lower()
-
-    if levelname == 'error':
-        return
 
     if levelname.lower() in colours:
         levelname_color = colours[levelname][0]
