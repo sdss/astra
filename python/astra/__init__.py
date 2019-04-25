@@ -28,7 +28,9 @@ NAME = 'astra'
 
 
 # Loads config
-config = yaml.load(open(os.path.dirname(__file__) + '/etc/{0}.yml'.format(NAME)))
+config_path = os.path.dirname(__file__) + '/etc/{0}.yml'.format(NAME)
+with open(config_path, "r") as fp:
+    config = yaml.load(fp, Loader=yaml.FullLoader)
 
 # If there is a custom configuration file, updates the defaults using it.
 custom_config_fn = os.path.expanduser('~/.{0}/{0}.yml'.format(NAME))
