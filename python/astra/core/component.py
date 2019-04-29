@@ -4,7 +4,8 @@ import os
 import datetime
 import requests
 import tempfile
-from shutil import copyfileobj
+from glob import glob
+import shutil
 from astra import log
 from astra.db.connection import session
 from astra.db.models.component import Component
@@ -18,55 +19,8 @@ from importlib import import_module
 from pkg_resources import DistributionNotFound, VersionConflict
 
 
-def installer(options):
 
-    installation = Install(options=options)
-
-    log.info("Getting ready")
-    installation.set_ready()
-
-    log.info("Setting product/directory/directory_install/directory_work")
-    installation.set_product()
-    installation.set_directory()
-    installation.set_directory_install()
-    installation.set_directory_work()
-
-    log.info("Cleaning directory_install and setting remote GitHub URL")
-    installation.clean_directory_install()
-    installation.set_github_remote_url()
-
-    log.info("Fetching repository")
-    installation.fetch()
-
-    return installation
-
-    installation.reset_options_from_config()
-    installation.set_build_type()
-
-    if not options.module_only:
-        installation.logger_build_message()
-        installation.make_directory_install()
-
-    if installation.ready:
-        installation.set_modules()
-        installation.modules.set_ready()
-        installation.modules.set_file()
-        installation.modules.load_dependencies()
-        installation.modules.set_keywords()
-        installation.modules.set_directory()
-        installation.modules.build()
-    
-    installation.set_environ()
-    if not options.module_only:
-        installation.build()
-        installation.build_documentation()
-        installation.build_package()
-        if not options.keep: installation.clean()
-
-    return installation
-
-
-def add(product, version=None, execution_order=0, component_cli=None, description=None,
+def add(product, version=None, owner=None, execution_order=0, component_cli=None, description=None,
         module_name=None, test=False, **kwargs):
     r"""
     Add a component for analysing reduced data products.
@@ -77,6 +31,10 @@ def add(product, version=None, execution_order=0, component_cli=None, descriptio
 
     :param version: [optional]
         The version to use. If `None` is given then the most recent release on GitHub will be used.
+
+    :param owner: [optional]
+        The owner of the repository on GitHub. If `None` is given then the owner will be assumed 
+        to be the SDSS organization.
 
     :param execution_order: [optional]
         The execution order priority (ascending non-negative execution order).
@@ -101,7 +59,7 @@ def add(product, version=None, execution_order=0, component_cli=None, descriptio
     """
 
     product = github.validate_repository_name(product)
-    owner = kwargs.get("__github_owner", "sdss")
+    owner = owner or "sdss"
     github_repo_slug = f"{owner}/{product}"
 
     # Check that this repository exists.
@@ -138,10 +96,19 @@ def add(product, version=None, execution_order=0, component_cli=None, descriptio
 
     # Check for a component that matches this slug.
     log.info(f"Checking for existing component ({github_repo_slug}: {version})")
-    item = _get_component_or_none(github_repo_slug, version)
+    item = _get_component_or_none(owner, product, version)
     if item is not None:
-        raise ValueError(f"component already exists ({github_repo_slug} version {version}) as "\
-                         f"component id {item.id}")
+        if item.is_active:
+            raise ValueError(f"component already exists ({github_repo_slug} version {version}) as "\
+                             f"component id {item.id}")
+
+        else:
+            item.is_active = True
+            log.info(f"Setting component {item} as active")
+            session.commit()
+
+            return item
+
 
     # Check if we need to give it a short name.
     if description is None:
@@ -152,16 +119,15 @@ def add(product, version=None, execution_order=0, component_cli=None, descriptio
         module_name = product
         log.info(f"Assuming {module_name} for the module name")
 
-    args = ["--github", "--force", "--keep"]
+    args = ["--github", "--force", "--keep"] + ["-v"]        
     # TODO: Pass on alt-module
-    if test or True:
+    if test:
         args += ["--test"]
 
-    # TODO: Should we be doing this?
-
-    # TODO: Here we are assuming the owner is SDSS and not allowing non-SDSS owned repositories to
-    # be installed
-    args.extend([product, version])
+    if "sdss" != owner:
+        args += ["--public", f"{owner}/{product}", version]
+    else:
+        args += [product, version]
 
     options = Argument("sdss_install", args=args).options
 
@@ -178,6 +144,8 @@ def add(product, version=None, execution_order=0, component_cli=None, descriptio
     installation.set_directory()
     installation.set_directory_install()
     installation.set_directory_work()
+
+    directory_work = "" + installation.directory["work"]
 
     # Update work directory
     # If we *don't* make the temporary working directory here then sdss_install is just going to
@@ -206,66 +174,94 @@ def add(product, version=None, execution_order=0, component_cli=None, descriptio
         except (DistributionNotFound, VersionConflict):
             log.exception(f"Cannot install {owner}/{product} because of version requirements")
 
+            # Clean up the temporary directory.
+            log.info(f"Cleaning up work directory {twd}")
+            shutil.rmtree(twd)
+            raise
+
         else:
             log.info("All requirements OK:\n{0}".format('\n'.join(requirements)))
 
     else:
         log.error(f"No requirements.txt file found at {requirements_path}")
 
+    # Get the component CLI
+    if component_cli is None:
+        # TODO: Should we parse this from setup.py instead?
+        executables = glob(os.path.join(twd, "bin", "*"))
+        if len(executables) < 1:
+            raise ValueError(f"no executable found in bin/ directory ({twd}/bin) of "
+                             f"{owner}/{product} {version}")
+        elif len(executables) > 2:
+            raise ValueError(f"multiple component CLIs found: {executables}")
+
+        else:
+            log.info(f"Setting component cli as {executables[0]}")
+            component_cli = os.path.basename(executables[0])
+
+    # Update directory work.
+    log.info(f"Updating work directory {twd} -> {directory_work}")
+    shutil.move(twd, directory_work)
+    installation.directory["work"] = directory_work
+
+    # Continue the installation.
+    installation.reset_options_from_config()
+    installation.set_build_type()
+
+    if not options.module_only:
+        installation.logger_build_message()
+        installation.make_directory_install()
+
+    if installation.ready:
+        installation.set_modules()
+        if installation.options.moduleshome is None:
+            log.error("No modules home path found!")
+
+        else:
+            installation.modules.set_ready()
+            installation.modules.set_file()
+            installation.modules.load_dependencies()
+            installation.modules.set_keywords()
+            installation.modules.set_directory()
+            installation.modules.build()
+
+    installation.set_environ()
+
+    # THIS IS A WHOLE BAG OF HACKS TO MAKE SDSS_INSTALL INSTALL SOMETHING
+    site_package_dir = os.path.join(installation.directory["install"], "lib/python3.6/site-packages")
+    #os.makedirs(os.path.join(installation.directory["install"], "lib/python3.6/site-packages"), exist_ok=True)
+
+    log.info(f"Site package directory: {site_package_dir}")
+
+    pythonpath = ":".join([
+        site_package_dir,
+        os.environ["PYTHONPATH"]
+    ])
+    os.environ["PYTHONPATH"] = pythonpath
+    ### 
+    if not options.module_only:
+        installation.build()
+        installation.build_documentation()
+        installation.build_package()
+        if not options.keep: installation.clean()
+
+    installation.finalize()
 
 
-
-    raise a
-
+    # Figure out the path where it gets installed to.
+    # TODO
+    if not installation.ready:
+        raise RuntimeError("installation failed")
 
     # Create the component.
-    component = Component(github_repo_slug=github_repo_slug, release=release,
+    component = Component(owner=owner, product=product, version=version,
                           component_cli=component_cli, description=description,
-                          execution_order=execution_order, owner_name=owner,
-                          module_name=module_name,
+                          execution_order=execution_order, module_name=module_name,
                           is_active=True, auto_update=False)
-
-    # Now actually check out the repository.
-    # $ASTRA_COMPONENT_DIR/{GITHUB_REPO_SLUG}/{RELEASE}/
-    # But the tarball will extract it to a folder, so we will rename later.
-    ASTRA_COMPONENT_DIR = os.getenv("ASTRA_COMPONENT_DIR")
-    dirname = os.path.abspath(os.path.join(ASTRA_COMPONENT_DIR, github_repo_slug))
-
-    # Create directory.
-    os.makedirs(dirname, exist_ok=True)
-
-    # Checkout repository at this tag version.
-    _, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
-    log.info(f"Checking out repository {github_repo_slug} release {release} "\
-             f"to {tmp_path}")
-
-    # TODO: Use sdss_install to do the checkout & install
-    tarball_url = f"https://github.com/{owner}/{repository_name}/archive/{release}.tar.gz"
-    r = requests.get(tarball_url, stream=True)
-    with open(tmp_path, "wb") as fp:
-        copyfileobj(r.raw, fp)
-
-    log.info(f"Download complete. Untarring to {dirname}")
-    os.system(f"tar -xzf {tmp_path} --directory {dirname}")
-
-    # It will extract things into it's own folder, so move things.
-    os.rename(f"{dirname}/{repository_name}-{release}",
-              f"{dirname}/{release}")
-    os.unlink(tmp_path)
-
-    dirname = os.path.join(dirname, release)
-
-    # Strip the $ASTRA_COMPONENT_DIR.
-    component.local_path = "$ASTRA_COMPONENT_DIR" \
-                         + dirname[len(ASTRA_COMPONENT_DIR):]
-
-    # TODO: Check that the component cli works? That it installs?
-
     session.add(component)
-
-    log.info(f"Component {github_repo_slug} release {release} lives at {component.local_path}")
-
     session.commit()
+
+    log.info(f"Component {product} version {version} installed: {component}")
 
     # TODO: What data should it run on?
     # TODO: Should we trigger it to run on data immediately?
@@ -301,15 +297,20 @@ def refresh(github_repo_slug):
                             """)
 
 
-def update(github_repo_slug, release, **kwargs):
+def update(product, version, owner=None, **kwargs):
     r"""
     Update attributes of an existing component.
-    
-    :param github_repo_slug:
-        The GitHub repository in 'slug' form: {OWNER}/{REPOSITORY_NAME}.
 
-    :param release:
-        The version release.
+    :param product:
+        The GitHub repository name, or the name of the SDSS product. This should refer to a
+        repository name that is owned by the SDSS organization.
+
+    :param version: 
+        The version to delete.
+
+    :param owner: [optional]
+        The owner of the repository on GitHub. If `None` is given then the owner will be assumed 
+        to be the SDSS organization.
 
 
     Optional keyword arguments include:
@@ -322,23 +323,20 @@ def update(github_repo_slug, release, **kwargs):
         Toggle the component to automatically update with new releases from
         GitHub.
 
-    :param short_name: [optional]
-        Set the short descriptive name for this component.
-
     :param execution_order: [optional]
         Set the execution order for this component.
 
     :param component_cli: [optional]
         Set the command line utility to be executed.
-
-    # TODO: long_description, owner_*, ... others ...
     """
 
-    github_repo_slug = github.validate_slug(github_repo_slug)
-    component = _get_component_or_none(github_repo_slug, release)
+    product = github.validate_repository_name(product)
+    owner = owner or "sdss"
+    github_repo_slug = f"{owner}/{product}"
+
+    component = _get_component_or_none(owner, product, version)
     if component is None:
-        raise ValueError(f"no component found with slug {github_repo_slug} "\
-                         f"and release {release}")
+        raise ValueError(f"no component found with {owner}/{product} and version {version}")
 
     acceptable_keywords = ("is_active", "auto_update", "short_name", 
                            "execution_order", "component_cli")
@@ -360,23 +358,26 @@ def update(github_repo_slug, release, **kwargs):
     return component
 
 
-def delete(github_repo_slug, release):
+def delete(product, version, owner=None):
     r"""
-    'Delete' a component by marking it as inactive.
+    Delete a component by marking it as inactive.
 
-    :param github_repo_slug:
-        The GitHub repository in 'slug' form: {OWNER}/{REPOSITORY_NAME}.
+    :param product:
+        The GitHub repository name, or the name of the SDSS product. This should refer to a
+        repository name that is owned by the SDSS organization.
 
-    :param release:
-        The version release.
+    :param version: 
+        The version to delete.
+
+    :param owner: [optional]
+        The owner of the repository on GitHub. If `None` is given then the owner will be assumed 
+        to be the SDSS organization.
     """
 
-    return update(github_repo_slug, release, is_active=False)
+    return update(product, version, owner=owner, is_active=False)
 
 
-
-def _get_component_or_none(github_repo_slug, release):
+def _get_component_or_none(owner, product, version):
     return session.query(Component) \
-                  .filter_by(github_repo_slug=github_repo_slug,
-                             release=release) \
+                  .filter_by(owner=owner, product=product, version=version) \
                   .one_or_none()

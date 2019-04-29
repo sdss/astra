@@ -10,16 +10,15 @@ class Component(Base):
     id = Column(Integer, primary_key=True)
     is_active = Column(Boolean, default=True)
     auto_update = Column(Boolean, default=True)
+
     # TODO: consider a check interval?
 
-    github_repo_slug = Column(String, nullable=False)
-    release = Column(String, nullable=False)
+    owner = Column(String, nullable=False)
+    product = Column(String, nullable=False)
+    version = Column(String, nullable=False)
+
 
     description = Column(String, nullable=True)
-
-    owner_name = Column(String, nullable=True)
-    owner_email_address = Column(String, nullable=True)
-
     module_name = Column(String, nullable=False)
 
     execution_order = Column(Integer, default=0)
@@ -30,11 +29,9 @@ class Component(Base):
     local_path = Column(String)
 
     __table_args__ = (
-        UniqueConstraint("github_repo_slug", "release", name="_repo_release"),
+        UniqueConstraint("owner", "product", "version", name="_unique_component"),
     )
 
     def __repr__(self):
-        return f"<{self.__class__.__name__}(id={self.id}, github_repo_slug={self.github_repo_slug}, release={self.release})>"
-
-
-#Base.metadata.create_all(engine)
+        return f"<{self.__class__.__name__}(id={self.id}, owner={self.owner}, "\
+               f"product={self.product}, version={self.version})>"

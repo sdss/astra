@@ -1,6 +1,19 @@
 import click
 from astra.utils import log
 from astra.core import component
+from astra.db.connection import session
+from astra.db.models.component import Component
+
+
+
+def _get_assumed_version(product, owner="sdss"):
+    # Get default version.
+    result = session.query(Component).filter_by(product=product, owner="sdss").one_or_none()
+    if result is not None:
+        return result.version
+
+    else:
+        return None
 
 @click.group()
 @click.pass_context
@@ -15,6 +28,8 @@ def parser(context):
 @click.option("--version", nargs=1, default=None,
               help="The version of this product to use. If no version is given then this will "
                    "default to the last release made available on GitHub.")
+@click.option("--owner", nargs=1, default="sdss",
+              help="The owner of the repository on GitHub (default: sdss).")
 @click.option("--execution-order", "execution_order", default=0,
               help="Set the execution order for the component (default: 0).")
 @click.option("--component-cli", nargs=1, default=None,
@@ -29,7 +44,7 @@ def parser(context):
 @click.option("-t", "--test", is_flag=True, default=False,
               help="Test mode. Do not actually install anything.")
 @click.pass_context
-def add(context, product, version, execution_order, component_cli, description,
+def add(context, product, version, owner, execution_order, component_cli, description,
         alt_module, test):
     r"""
     Add a new component in Astra from an existing GitHub repository (`product`) and a 
@@ -39,6 +54,7 @@ def add(context, product, version, execution_order, component_cli, description,
 
     return component.add(product=product,
                          version=version,
+                         owner=owner,
                          execution_order=execution_order,
                          component_cli=component_cli,
                          description=description,
@@ -46,9 +62,9 @@ def add(context, product, version, execution_order, component_cli, description,
                          test=test)
 
 
-
+'''
 @parser.command()
-@click.argument("github_repo_slug", nargs=1, required=True)
+@click.argument("product", nargs=1, required=True)
 @click.pass_context
 def refresh(context, github_repo_slug):
     r"""
@@ -56,12 +72,16 @@ def refresh(context, github_repo_slug):
     """
     log.debug("component.refresh")
     return components.refresh(github_repo_slug)
-
+'''
 
 # Update
 @parser.command()
-@click.argument("github_repo_slug", nargs=1, required=True,)
-@click.argument("release", nargs=1, required=True)
+@click.argument("product", nargs=1, required=True)
+@click.option("--version", nargs=1, default=None,
+              help="The version of the product to update. If `None` is given then it will default "\
+                   "to the most recent version.")
+@click.option("--owner", nargs=1, default="sdss",
+              help="The owner of the repository on GitHub (default: sdss).")
 @click.option("--active/--inactive", "is_active", default=None,
               help="Set the component as active or inactive.")
 @click.option("--enable-auto-update/--disable-auto-update", "auto_update", default=None,
@@ -73,13 +93,19 @@ def refresh(context, github_repo_slug):
 @click.option("--component-cli", "component_cli", nargs=1,
               help="Set the command line interface tool for this component.")
 @click.pass_context
-def update(context, github_repo_slug, release, is_active, auto_update,
+def update(context, product, version, owner, is_active, auto_update,
            short_name, execution_order, component_cli):
     r"""
     Update attribute(s) of an existing component, where the component is uniquely
     specified by the ``GITHUB_REPO_SLUG`` and the ``RELEASE`` version.
     """
     log.debug("component.update")
+
+
+    if version is None:
+        version = _get_assumed_version(product, owner)
+        if version is None:
+            click.UsageError("unknown version")
 
     # Only send non-None inputs.
     kwds = dict(is_active=is_active, auto_update=auto_update,
@@ -98,20 +124,29 @@ def update(context, github_repo_slug, release, is_active, auto_update,
                                "Use 'component update --help' to see the "\
                                "available options.")
 
-    return components.update(github_repo_slug, release, **kwds)
+    return components.update(product=product, version=version, owner=owner, **kwds)
 
 
 @parser.command()
-@click.argument("github_repo_slug", nargs=1, required=True)
-@click.argument("release", nargs=1, required=True)
+@click.argument("product", nargs=1, required=True)
+@click.option("--version", nargs=1, default=None,
+              help="The version of the product to update. If `None` is given then it will default "\
+                   "to the most recent version.")
+@click.option("--owner", nargs=1, default="sdss",
+              help="The owner of the repository on GitHub (default: sdss).")
 @click.pass_context
-def delete(context, github_repo_slug, release):
+def delete(context, product, version, owner):
     r"""
     Delete an existing component, where the component is uniquely specified by
     the ``GITHUB_REPO_SLUG`` and the ``RELEASE`` version.
     """
     log.debug("component.delete")
 
-    return components.delete(github_repo_slug, release)
+    if version is None:
+        version = _get_assumed_version(product, owner)
+        if version is None:
+            click.UsageError("unknown version")
+
+    return component.delete(product=product, version=version, owner=owner)
 
 
