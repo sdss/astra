@@ -58,8 +58,8 @@ def unwatch(context, path, quiet):
 @click.pass_context
 def refresh(context, path, quiet):
     r"""
-    Refresh watched folder(s) for new data products. If no `PATH` is given then 
-    all watched folder will be refreshed.
+    Refresh watched folder(s) for new data products. If no `PATH` is given then all watched folders
+    will be refreshed.
     """
     log.debug(f"folder.refresh {path}")
 

@@ -62,18 +62,6 @@ def add(context, product, version, owner, execution_order, component_cli, descri
                          test=test)
 
 
-'''
-@parser.command()
-@click.argument("product", nargs=1, required=True)
-@click.pass_context
-def refresh(context, github_repo_slug):
-    r"""
-    Check GitHub for a new release in this repository.
-    """
-    log.debug("component.refresh")
-    return components.refresh(github_repo_slug)
-'''
-
 # Update
 @parser.command()
 @click.argument("product", nargs=1, required=True)
@@ -86,7 +74,7 @@ def refresh(context, github_repo_slug):
               help="Set the component as active or inactive.")
 @click.option("--enable-auto-update/--disable-auto-update", "auto_update", default=None,
               help="Enable or disable automatic checks to GitHub for new releases.")
-@click.option("--short-name", "short_name", nargs=1,
+@click.option("--description", nargs=1,
               help="Set the short descriptive name for this component.")
 @click.option("--execution-order", "execution_order", type=int,
               help="Set the execution order for this component.")
