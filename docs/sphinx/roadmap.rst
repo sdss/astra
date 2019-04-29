@@ -28,30 +28,29 @@ Completed
 
 *5. Deploy initial version of Astra to Utah.
 
-Upcoming
-^^^^^^^^
-
 *6. Wrap up ASPCAP as a component
 
 *7. Wrap up The Cannon as a component
 
-*8. Wrap up hot star code as a component
+*8. Wrap up The Payne as a component
 
-*9. Wrap up The Payne as a component
+*9. Wrap up IN-SYNC as a component
 
-*10. Wrap up IN-SYNC as a component
+
+Upcoming
+^^^^^^^^
+
+*10. Wrap up hot star code as a component
 
 *11. Wrap up WD code as a component? (awaiting code)
 
-*12. Wrap up The Chat code as a component? (awaiting code)
+*12. Create a web interface for monitoring data flow, CRUDding components, and watching analysis job status, etc.
 
-*13. Create a web interface for monitoring data flow, CRUDding components, and watching analysis job status, etc.
+*13. CRUD functionality for "experiments" to compare results between versions, etc
 
-*14. CRUD functionality for "experiments" to compare results between versions, etc
+*14. Enable "experiments" functionality through Astra website.
 
-*15. Enable "experiments" functionality through Astra website.
-
-*16. Modularize common components (e.g., continuum normalisation, spectrum generation)
+*15. Modularize common components (e.g., continuum normalisation, spectrum generation)
 
 
 Road map
