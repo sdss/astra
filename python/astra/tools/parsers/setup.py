@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import click
 import os
 from shutil import rmtree
-from astra import log
+from astra.utils import log
 from astra.db.connection import Base, engine
 from sqlalchemy_utils import database_exists, create_database
 
@@ -11,10 +11,9 @@ from sqlalchemy_utils import database_exists, create_database
 @click.option("-y", "confirm", default=False, is_flag=True,
               help="Do not prompt the user for confirmation if the database already exists.")
 @click.pass_context
-def setup(context, confirm):
+def parser(context, confirm):
     r"""
-    Setup Astra database using the current configuration, and create directories
-    for components to be installed.
+    Setup Astra using the current configuration
     """
 
     log.debug("Running setup")

@@ -2,11 +2,17 @@
 # encoding: utf-8
 
 import click
+import argparse
+import os
 from astra import log
 from logging import DEBUG, INFO
 
-from astra.tools.sdss_astra import (data, subset, component, execute, 
-                                    query_execute, schedule, setup)
+#from astra.tools.sdss_astra import (data, subset, component, execute, 
+#                                    query_execute, schedule, setup)
+
+from astra.tools.parsers import component, folder, setup, subset
+
+
 
 # Common options.
 @click.group()
@@ -23,14 +29,25 @@ def cli(context, verbose):
 
 
 # Add various commands
-cli.add_command(setup.setup)
-cli.add_command(data.data)
-cli.add_command(subset.subset)
-cli.add_command(component.component)
-cli.add_command(execute.execute)
-cli.add_command(query_execute.query_execute)
-cli.add_command(schedule.schedule)
-
+cli.add_command(setup.parser, name="setup")
+cli.add_command(folder.parser, name="folder")
+cli.add_command(subset.parser, name="subset")
+cli.add_command(component.parser, name="component")
+# Query execute
+#cli.add_command(task.parser, name="task")
+# Execute
+# Schedule
 
 if __name__ == "__main__":
     cli(obj=dict())
+
+"""
+
+astra setup
+astra folder watch [PATH]
+astra folder unwatch [PATH]
+astra subset create
+astra subset delete
+astra component add
+astra component delete
+"""

@@ -15,11 +15,12 @@ class Component(Base):
     github_repo_slug = Column(String, nullable=False)
     release = Column(String, nullable=False)
 
-    short_name = Column(String, nullable=True)
-    long_description = Column(String, nullable=True)
+    description = Column(String, nullable=True)
 
     owner_name = Column(String, nullable=True)
     owner_email_address = Column(String, nullable=True)
+
+    module_name = Column(String, nullable=False)
 
     execution_order = Column(Integer, default=0)
     component_cli = Column(String, nullable=False)

@@ -19,7 +19,7 @@ else:
     connection_string = "postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
 
 engine = create_engine(connection_string.format(**database_config),
-                       echo=True, pool_size=10, pool_recycle=1800)
+                       echo=False, pool_size=10, pool_recycle=1800)
 
 # Force SQLalchemy logging to be parsed through the Astra logger.
 # TODO: verbosity is not correctly followed here.

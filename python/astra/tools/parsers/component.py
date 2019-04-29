@@ -1,67 +1,53 @@
 import click
-from astra import (components, log)
+from astra.utils import log
+from astra.core import component
 
 @click.group()
 @click.pass_context
-def component(context):
-    r"""Create, update, and delete components"""
+def parser(context):
+    r"""Add, update, and delete components"""
     log.debug("component")
     pass
 
-# TODO: Click validator for GitHub slug
 
-'''
-@component.command()
-@click.argument("from_path", nargs=1, required=True)
-@click.pass_context
-def create(context, from_path):
-    r"""Create a component"""
-    log.debug("component.create")
-
-    if not os.path.exists(from_path):
-        raise IOError(f"given path ({from_path}) does not exist")
-
-    with open(from_path, "r") as fp:
-        kwds = yaml.load(fp)
-
-    log.info(f"Creating component from keywords: {kwds}")
-
-    return components.create(**kwds)
-'''
-
-# TODO: figure out how to do this with EITHER --from-path or as arguments.
-# Create
-@component.command()
-@click.argument("github_repo_slug", nargs=1, required=True)
-@click.argument("component_cli", nargs=1, required=True)
-@click.option("--release", nargs=1, default=None,
-              help="The release version of this repository to use. "\
-                   "If no release is given then this will default to the last "\
-                   "release made available on GitHub.")
-@click.option("--short-name", "short_name", nargs=1, default=None,
-              help="A short description for this component. If no description "\
-                   "is given then this will default to the description that "\
-                   "exists on GitHub.")
+@parser.command()
+@click.argument("product", nargs=1, required=True)
+@click.option("--version", nargs=1, default=None,
+              help="The version of this product to use. If no version is given then this will "
+                   "default to the last release made available on GitHub.")
 @click.option("--execution-order", "execution_order", default=0,
-              help="Set the execution order for the component (default: `0`).")
+              help="Set the execution order for the component (default: 0).")
+@click.option("--component-cli", nargs=1, default=None,
+              help="Specify the name of the command line utility to execute from that component. "
+                   "This is only required if there are more than one executable components in the "
+                   "bin/ directory of that repository.")
+@click.option("--description", "description", nargs=1, default=None,
+              help="A short description for this component. If no description is given then this "
+                   "will default to the description that exists on GitHub.")
+@click.option("-a", "--alt-module",  nargs=1, default=None,
+              help="Specify an alternate module name for this component.")
+@click.option("-t", "--test", is_flag=True, default=False,
+              help="Test mode. Do not actually install anything.")
 @click.pass_context
-def create(context, github_repo_slug, component_cli, release, short_name,
-           execution_order):
+def add(context, product, version, execution_order, component_cli, description,
+        alt_module, test):
     r"""
-    Create a new component in Astra from an existing GitHub repository
-    (`GITHUB_REPO_SLUG`) and a command line tool in that repository
-    (`COMPONENT_CLI`).
+    Add a new component in Astra from an existing GitHub repository (`product`) and a 
+    command line tool in that repository (`COMPONENT_CLI`).
     """
-    log.debug("component.create")
+    log.debug("component.add")
 
-    return components.create(github_repo_slug=github_repo_slug,
-                             component_cli=component_cli,
-                             short_name=short_name,
-                             release=release,
-                             execution_order=execution_order)
-    
+    return component.add(product=product,
+                         version=version,
+                         execution_order=execution_order,
+                         component_cli=component_cli,
+                         description=description,
+                         alt_module=alt_module,
+                         test=test)
 
-@component.command()
+
+
+@parser.command()
 @click.argument("github_repo_slug", nargs=1, required=True)
 @click.pass_context
 def refresh(context, github_repo_slug):
@@ -73,7 +59,7 @@ def refresh(context, github_repo_slug):
 
 
 # Update
-@component.command()
+@parser.command()
 @click.argument("github_repo_slug", nargs=1, required=True,)
 @click.argument("release", nargs=1, required=True)
 @click.option("--active/--inactive", "is_active", default=None,
@@ -115,7 +101,7 @@ def update(context, github_repo_slug, release, is_active, auto_update,
     return components.update(github_repo_slug, release, **kwds)
 
 
-@component.command()
+@parser.command()
 @click.argument("github_repo_slug", nargs=1, required=True)
 @click.argument("release", nargs=1, required=True)
 @click.pass_context

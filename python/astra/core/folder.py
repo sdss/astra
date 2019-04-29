@@ -5,7 +5,7 @@ import re
 import datetime
 from astra import log
 from astra.db.connection import session
-from astra.db.models.watched_folders import WatchedFolder
+from astra.db.models.folder import Folder
 from astra.db.models.data import DataProduct
 
 
@@ -17,8 +17,8 @@ from astra.db.models.data import DataProduct
 full_path = lambda path: os.path.abspath(os.path.realpath(path.rstrip("/")))
 
 
-def watch(path, recursive=False, interval=3600, regex_ignore_pattern=None):
-    f"""
+def watch(path, recursive=False, interval=3600, regex_match_pattern=None, regex_ignore_pattern=None):
+    r"""
     Start monitoring a directory for reduced SDSS data products.
 
     :param path:
@@ -30,11 +30,17 @@ def watch(path, recursive=False, interval=3600, regex_ignore_pattern=None):
     :param interval: [optional]
         The number of seconds between checking for new files (default: 3600).
 
+    :param regex_match_pattern: [optional]
+        A regular expression pattern that, if given, then only paths that match this pattern will
+        be acted upon.
+
     :param regex_ignore_pattern: [optional]
-        A regular expression pattern that when matched against a new path, will
-        cause the path to be ignored by Astra. For example, if "((\.log)|(\.txt))$"
-        is provided to ``regex_ignore_pattern`` then Astra will *ignore*
-        all files in ``path`` that have ".log" or ".txt" extensions.
+        A regular expression pattern that when matched against a new path, will cause the path to be 
+        ignored by Astra. For example, if "((\.log)|(\.txt))$" is provided to `regex_ignore_pattern`
+        then Astra will *ignore* all files in ``path`` that have ".log" or ".txt" extensions.
+
+        If both `regex_match_pattern` and `regex_ignore_pattern` are given, then any path that 
+        matches both will be ignored.
     """
 
     path = full_path(path)
@@ -50,14 +56,15 @@ def watch(path, recursive=False, interval=3600, regex_ignore_pattern=None):
         raise ValueError("interval must be a non-negative integer")
 
     # Check if path is already monitored.
-    item = session.query(WatchedFolder).filter_by(path=path).one_or_none()
+    item = session.query(Folder).filter_by(path=path).one_or_none()
     if item is not None:
         item.is_active = True
         log.info(f"Re-activated previously watched folder {item}")
 
     else:
-        item = WatchedFolder(path=path, recursive=recursive, interval=interval,
-                             regex_ignore_pattern=regex_ignore_pattern)
+        item = Folder(path=path, recursive=recursive, interval=interval,
+                      regex_match_pattern=regex_match_pattern,
+                      regex_ignore_pattern=regex_ignore_pattern)
         session.add(item)
         log.info(f"Created new watched folder {item}")
 
@@ -79,14 +86,17 @@ def unwatch(path, quiet=False):
     """
 
     path = full_path(path)
-    result = session.query(WatchedFolder).filter_by(path=path).one_or_none()
+    result = session.query(Folder).filter_by(path=path).one_or_none()
 
     if result is None:
-        if quiet: return False
+        log.info(f"No watched folder matching {path}")
+        if quiet:
+            return False
         raise ValueError(f"no watched folders matching '{path}'")
 
     result.is_active = False
     session.commit()
+    log.info(f"Stopped watching folder {path} ({result})")
 
     return True
 
@@ -108,7 +118,7 @@ def refresh(path, quiet=False):
     """
 
     path = full_path(path)
-    folder = session.query(WatchedFolder).filter_by(path=path).one_or_none()
+    folder = session.query(Folder).filter_by(path=path).one_or_none()
 
     if folder is None or not folder.is_active:
         if quiet: return (0, 0, 0)
@@ -120,23 +130,27 @@ def refresh(path, quiet=False):
         print(top_directory, directories, basenames)
 
         for basename in basenames:
-            p = os.path.join(top_directory, basename)
+            path = os.path.join(top_directory, basename)
 
             if folder.regex_ignore_pattern is not None \
-            and re.search(folder.regex_ignore_pattern, basename):
-                log.info(f"Ignoring {p} because it matched regular expression "\
-                         f"for ignoring files: '{folder.regex_ignore_pattern}'")
+                and re.search(folder.regex_ignore_pattern, path):
+                log.info(f"Ignoring {path} because it matched regular expression for ignoring "
+                         f"files: '{folder.regex_ignore_pattern}'")
                 ignored += 1
                 continue
 
-            # Add the data product if it doesn't exist already
-            if session.query(DataProduct).filter_by(path=p).one_or_none() is None:
-                session.add(DataProduct(path=p, folder_id=folder.id))
-                log.info(f"Added {p} from watched folder {folder}")
-                added += 1
+            if (folder.regex_match_pattern is not None \
+                and re.search(folder.regex_match_pattern, path)) \
+            or folder.regex_match_pattern is None:
 
-            else:
-                skipped += 1
+                # Add the data product if it doesn't exist already
+                if session.query(DataProduct).filter_by(path=path).one_or_none() is None:
+                    session.add(DataProduct(path=path, folder_id=folder.id))
+                    log.info(f"Added {path} from watched folder {folder}")
+                    added += 1
+
+                else:
+                    skipped += 1
 
         if not folder.recursive: break
 
@@ -151,5 +165,5 @@ def refresh_all():
     r""" Check all watched folders for new reduced data products. """
 
     return dict([(f.path, refresh(f.path, True)) \
-                 for f in session.query(WatchedFolder).all()])
+                 for f in session.query(Folder).all()])
 

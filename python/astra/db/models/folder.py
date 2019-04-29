@@ -3,15 +3,16 @@ import datetime
 from sqlalchemy import Boolean, Column, DateTime, String, Integer
 from astra.db.connection import Base
 
-class WatchedFolder(Base):
+class Folder(Base):
 
-    __tablename__ = "watched_folder"
+    __tablename__ = "folder"
 
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
     is_active = Column(Boolean, default=True)
     path = Column(String, nullable=False, unique=True)
     interval = Column(Integer, default=3600)
     recursive = Column(Boolean, default=False)
+    regex_match_pattern = Column(String, nullable=True)
     regex_ignore_pattern = Column(String, nullable=True)
 
     last_checked = Column(DateTime)

@@ -1,6 +1,7 @@
 
 import os
 from astra import config
+from astra.utils import log
 import requests
 
 
@@ -15,11 +16,15 @@ def validate_slug(slug_string):
 
     slug_string = f"{slug_string}".strip().lower()
     if "/" not in slug_string:
-        log.info(f"Assuming GitHub repository '{slug_string}' is owned by SDSS (sdss/{slug_string}")
+        log.info(f"Assuming GitHub repository '{slug_string}' is owned by SDSS (sdss/{slug_string})")
         slug_string = f"sdss/{slug_string}"
     return slug_string
 
-
+def validate_repository_name(repository_name):
+    if "/" in repository_name:
+      raise ValueError("repository name cannot contain forward slashes ('/')")
+    return repository_name.strip().lower()
+    
 
 def graphql(query_string, token=None):
     r"""

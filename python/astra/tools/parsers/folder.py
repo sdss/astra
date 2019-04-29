@@ -1,36 +1,42 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+
 import click
-from astra import (folders, log)
+from astra.utils import log
+from astra.core import folder
 
 @click.group()
 @click.pass_context
-def data(context):
-    r""" Manage data monitoring """
-    log.debug("data")
+def parser(context):
+    r""" Manage monitoring of data folders """
+    log.debug("folder")
     pass
 
-@data.command()
+@parser.command()
 @click.argument("path", nargs=1, required=True)
 @click.option("-r", "--recursive", is_flag=True, default=False,
               help="Monitor recursively (default: `False`).")
 @click.option("--interval", default=3600,
               help="Number of seconds to wait between checking for new data (default: `3600`).")
+@click.option("--regex-match-pattern", default=None,
+              help="A regular expression pattern that, if given, only files that match this pattern"
+                   " will be acted upon.")
 @click.option("--regex-ignore-pattern", default=None,
-              help="A regular expression pattern that, when matched, "\
-                   "will ignore files in the watched folder.")
+              help="A regular expression pattern that, when matched, will ignore files in the "
+                   "watched folder. If both --regex-ignore-pattern and --regex-match-pattern are "
+                   "given, then any paths that match *both* will be ignored.")
 @click.pass_context
-def watch(context, path, recursive, interval, regex_ignore_pattern):
+def watch(context, path, recursive, interval, regex_match_pattern, regex_ignore_pattern):
     r"""
     Start monitoring a local folder for new data products.
     """
-    log.debug(f"data.watch {path} {recursive} {interval} {regex_ignore_pattern}")
-    result = folders.watch(path, recursive, interval, regex_ignore_pattern)
+    log.debug(f"folder.watch {path} {recursive} {interval} {regex_match_pattern} {regex_ignore_pattern}")
+    result = folder.watch(path, recursive, interval, regex_match_pattern, regex_ignore_pattern)
     log.info(result)
     return True
 
 
-@data.command()
+@parser.command()
 @click.argument("path", nargs=1, required=True)
 @click.option("--quiet", is_flag=True, default=False,
               help="Do not raise an exception if the given path is not actively being watched.")
@@ -39,13 +45,13 @@ def unwatch(context, path, quiet):
     r"""
     Stop monitoring a local folder for new data products.
     """
-    log.debug(f"data.unwatch {path} {quiet}")
-    result = folders.unwatch(path, quiet)
+    log.debug(f"folder.unwatch {path} {quiet}")
+    result = folder.unwatch(path, quiet)
     log.info(result)
     return result
 
 
-@data.command()
+@parser.command()
 @click.argument("path", nargs=-1)
 @click.option("--quiet", is_flag=True, default=False,
               help="Do not raise an exception if the given path is not actively being watched.")
@@ -53,17 +59,18 @@ def unwatch(context, path, quiet):
 def refresh(context, path, quiet):
     r"""
     Refresh watched folder(s) for new data products. If no `PATH` is given then 
-    all watched folders will be refreshed.
+    all watched folder will be refreshed.
     """
-    log.debug(f"data.refresh {path}")
+    log.debug(f"folder.refresh {path}")
 
     if not len(path):
         # Refresh all.
-        counts = folders.refresh_all()
+        counts = folder.refresh_all()
 
     else:
         # Refresh given paths.
-        counts = dict([(p, folders.refresh(p, quiet)) for p in path])
+        counts = dict([(p, folder.refresh(p, quiet)) for p in path])
 
     log.info(counts)
     return counts
+
