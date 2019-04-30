@@ -16,7 +16,7 @@ def parser(context, confirm):
     Setup Astra using the current configuration.
     """
 
-    log.debug("Running setup")
+    log.debug(f"Running setup with {engine}")
 
     # TODO Should we do the imports here so that we can change the config if needed.
     if not database_exists(engine.url):

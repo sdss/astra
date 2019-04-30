@@ -1,5 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
+import datetime
 import os
 import re
 from astra import log
@@ -13,7 +12,7 @@ def _get_likely_subset(identifier):
     the subset `id`, or the name of the `subset`.
     """
 
-    if isinstance(identifer, DataSubset):
+    if isinstance(identifier, DataSubset):
         # This is a subset.
         return identifier
 
@@ -48,7 +47,7 @@ def _get_likely_subset(identifier):
 
 
 
-def create_from_data_paths(data_paths, name=None, is_visible=False):
+def create_from_data_paths(data_paths, name=None, is_visible=False, add_unrecognised=True):
     r"""
     Create a data subset from a list of paths.
     
@@ -60,7 +59,17 @@ def create_from_data_paths(data_paths, name=None, is_visible=False):
 
     :param is_visible: [optional]
         Make this subset visible to all users.
+
+    :param add_unrecognised: [optional]
+        Add unrecognized data paths to the database (default: True). If this is not given then
+        an exception will be raised.
     """
+
+    if isinstance(data_paths, str):
+        data_paths = [data_paths]
+
+    if data_paths is None or len(data_paths) < 1:
+        raise ValueError("data paths is empty")
 
     if name is not None:
         name = str(name).strip()
@@ -70,8 +79,6 @@ def create_from_data_paths(data_paths, name=None, is_visible=False):
             raise ValueError(f"subset name '{name}' already exists: {s}")
 
     # For each data path, find the corresponding id.
-    if isinstance(data_paths, str):
-        data_paths = [data_paths]
 
     data_ids = []
     unrecognised_data_paths = []
@@ -82,14 +89,29 @@ def create_from_data_paths(data_paths, name=None, is_visible=False):
         dp = session.query(DataProduct).filter_by(path=path).one_or_none()
         if dp is None:
             # TODO: this should be a warning
-            log.error(f"Could not find path {path} in database: not including it in subset")
+            if add_unrecognised:
+                log.info(f"Adding unrecognized path {path} to database")
+            else:
+                log.error(f"Could not find path {path} in database: not including it in subset")
             unrecognised_data_paths.append(path)
 
         else:
             data_ids.append(dp.id)
 
     if unrecognised_data_paths:
-        raise ValueError(f"did not recognise {len(unrecognised_data_paths)} paths in database")
+        if not add_unrecognised:
+            raise ValueError(f"did not recognise {len(unrecognised_data_paths)} paths in database")
+
+        else:
+            # Add the unrecognized data paths.
+            for path in unrecognised_data_paths:
+                session.add(DataProduct(path=path))
+
+            session.commit()
+
+            # To understand recursion you must understand recursion.
+            return create_from_data_paths(data_paths, name=name, is_visible=is_visible,
+                                          add_unrecognised=False)
 
     if not len(data_ids):
         raise ValueError(f"no data to add to subset")
@@ -215,16 +237,22 @@ def update(subset_id, **kwargs):
     if unknown:
         log.error(f"Ignoring subset keywords: {unknown}")
 
-    kwds = dict([(k, kwargs[k]) for k in available if kwargs[k] is not None])
+
+    kwds = dict([(k, kwargs[k]) for k in available if kwargs.get(k, None) is not None])
     for k in kwds.keys():
         if k in ("is_visible", "auto_update"):
             kwds[k] = bool(kwds[k])
 
     # Check name.
     if "name" in kwds:
-        existing_subset = session.query(DataSubset).filter_by(name=name).one_or_none()
-        if existing_subset is not None:
-            raise ValueError(f"subset already exists by name '{name}'")
+        if kwds["name"] == subset.name:
+            log.info("Ignoring subset name change because name is same")
+            del kwds["name"]
+
+        else:
+            existing_subset = session.query(DataSubset).filter_by(name=kwds["name"]).one_or_none()
+            if existing_subset is not None:
+                raise ValueError(f"subset already exists by name {kwds['name']}")
 
     if kwds:
         log.info(f"Updating subset {subset} with {kwds}")
@@ -236,6 +264,18 @@ def update(subset_id, **kwargs):
 
     return subset
 
+def list_named_and_visible():
+    r"""
+    Return a list of the named (and visible) subsets availalble.
+    """
+
+    named_subsets = session.query(DataSubset).filter_by(is_visible=True).all()
+    # TODO: filter by not None?
+    named_subsets = [ns.name for ns in named_subsets if ns.name is not None]
+    return named_subsets
+
+
+
 
 def delete(subset_id):
     r"""
@@ -246,7 +286,7 @@ def delete(subset_id):
     """
     subset = _get_likely_subset(subset_id)
 
-    result = subset.delete()
+    session.delete(subset)
     session.commit()
     log.info(f"Deleted subset {subset} with id {subset_id}")
 

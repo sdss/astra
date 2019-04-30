@@ -47,7 +47,7 @@ def parser(context):
               help="Test mode. Do not actually install anything.")
 @click.pass_context
 def add(context, product, version, owner, execution_order, command, description,
-        alt_module, default_arg, test):
+        alt_module, default_args, test):
     r"""
     Add a new component in Astra from an existing GitHub repository (`product`) and a 
     command line tool in that repository (`command`).

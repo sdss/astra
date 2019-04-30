@@ -13,7 +13,7 @@ if database_config is None:
     raise RuntimeError("no database configured in Astra")
 
 # Build a database connection string.
-kwds = dict(echo=False)
+kwds = dict(echo=database_config.get("echo", False))
 connection_string = database_config.get("connection_string", None)
 if connection_string is None:
     if database_config["host"] == "localhost":

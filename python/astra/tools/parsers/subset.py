@@ -14,7 +14,7 @@ def _get_subset_by_identifier(identifier):
         # definitely a name
         result = session.query(DataSubset).filter_by(name=identifier).one_or_none()
         if result is None:
-            click.UsageError(f"no subset found with name '{identifier}'")
+            raise click.UsageError(f"no subset found with name '{identifier}'")
 
     else:
         # Could be a name or an id.
@@ -22,11 +22,11 @@ def _get_subset_by_identifier(identifier):
         subset_by_id = session.query(DataSubset).filter_by(id=int(identifier)).one_or_none()
 
         if subset_by_id is not None and subset_by_name is not None:
-            click.UsageError(f"ambiguous identifier: subset exists with name='{identifier}' and "
-                             f"with id={identifier}")
+            raise click.UsageError(f"ambiguous identifier: subset exists with name='{identifier}' "
+                                   f"and with id={identifier}")
 
         elif subset_by_id is None and subset_by_name is None:
-            click.UsageError(f"no subset found with name '{identifier}' or id {identifier}")
+            raise click.UsageError(f"no subset found with name '{identifier}' or id {identifier}")
 
         elif subset_by_id is None and subset_by_name is not None:
             log.info(f"Identified subset by name '{identifier}': {subset_by_name}")
@@ -99,23 +99,32 @@ class OptionEatAll(click.Option):
               help="Supply a regular expression pattern to match against all data paths.")
 @click.option("--name", nargs=1, default=None,
               help="Provide a name for this subset.")
-@click.option("--visible", is_flag=True, default=False,
+@click.option("--visible", is_flag=True, default=None,
               help="Make this subset visible when users search for subsets.")
 @click.option("--auto-update", is_flag=True, default=False,
               help=("Automatically update this subset when new data are available. This is only "
                     "relevant for subsets that have a regular expression pattern to match against."))
+@click.option("--raise-on-unrecognised", "raise_on_unrecognised", is_flag=True, default=False,
+              help="Raise an exception if a data path is given that is not recognised in the "
+                   "database. If this flag is not given then the unrecognised data paths will be "
+                   "added to the database.")
 @click.pass_context
-def create(context, data_paths, regex_match_pattern, name, visible, auto_update):
+def create(context, data_paths, regex_match_pattern, name, visible, auto_update,
+           raise_on_unrecognised):
     r"""
     Create a subset from the available data products. A subset can be created from data paths, 
     and/or by providing a regular expression pattern to match against data paths.
     """
 
     # If there are data paths then create it from that.
-    if data_paths is None and regex_match_pattern is None:
-        click.UsageError("Either data paths or a regular expression pattern is required.")
+    if (data_paths is None or len(data_paths) < 1) and regex_match_pattern is None:
+        raise click.UsageError("Either data paths or a regular expression pattern is required.")
 
-    result = subset.create_from_data_paths(data_paths, name=name, is_visible=visible)
+    if name is not None and visible is None:
+        visible = True
+
+    result = subset.create_from_data_paths(data_paths, name=name, is_visible=visible,
+                                           add_unrecognised=not raise_on_unrecognised)
 
     if regex_match_pattern is not None:
         result = subset.update(result,
@@ -123,6 +132,16 @@ def create(context, data_paths, regex_match_pattern, name, visible, auto_update)
                                auto_update=auto_update)
 
     return result
+
+@parser.command()
+@click.pass_context
+def list(context):
+    r"""List the named subsets available."""
+    log.debug("subset.list")
+    named_str = "\n\t".join(subset.list_named_and_visible())
+    log.info(f"Named subsets available:\n\t{named_str}")
+    return named_str
+
 
 
 @parser.command()
@@ -154,11 +173,10 @@ def update(context, identifier, is_visible, auto_update, regex_match_pattern, na
     _subset = _get_subset_by_identifier(identifier)
 
     # Only send non-None inputs.
-    kwds = dict(is_active=is_active, auto_update=auto_update,
+    kwds = dict(is_visible=is_visible, auto_update=auto_update,
                 name=name, regex_match_pattern=regex_match_pattern)
-    for k in list(kwds.keys()):
-        if kwds[k] is None:
-            del kwds[k]
+    kwds = {k: v for k, v in kwds.items() if v is not None}
+    log.info(f"Updating with keywords: {kwds}")
 
     # TODO: Consider a custom class to check that at least one option 
     #       is required. See: https://stackoverflow.com/questions/44247099/click-command-line-interfaces-make-options-required-if-other-optional-option-is
@@ -170,8 +188,9 @@ def update(context, identifier, is_visible, auto_update, regex_match_pattern, na
 
 
 @parser.command()
+@click.argument("identifier", nargs=1, required=True, type=str)
 @click.pass_context
-def delete(context):
+def delete(context, identifier):
     r"""Delete a named subset"""
     log.debug("subset.delete")
     return subset.delete(_get_subset_by_identifier(identifier))

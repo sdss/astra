@@ -213,6 +213,7 @@ def add(product, version=None, owner=None, execution_order=0, command=None, desc
         installation.logger_build_message()
         installation.make_directory_install()
 
+    
     if installation.ready:
         installation.set_modules()
         if installation.options.moduleshome is None:
