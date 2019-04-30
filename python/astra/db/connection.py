@@ -8,7 +8,7 @@ from astra import config, log
 
 # TODO: allow for multiple database configurations to be given in the config
 #       and then have the user specify?
-database_config = config.get("database", None)
+database_config = config.get("database_config", None)
 if database_config is None:
     raise RuntimeError("no database configured in Astra")
 

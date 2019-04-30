@@ -1,9 +1,9 @@
 ---
 
-database:
+database_config:
     host: localhost
     database: astra
-
+    
 option1:
     suboption1: 1
     suboption2: "some text"
