@@ -4,8 +4,8 @@ import click
 import os
 from shutil import rmtree
 from astra.utils import log
-from astra.db.connection import Base, engine
 from sqlalchemy_utils import database_exists, create_database
+from astra.db.connection import Base, engine
 
 @click.command()
 @click.option("-y", "confirm", default=False, is_flag=True,
@@ -18,6 +18,7 @@ def parser(context, confirm):
 
     log.debug("Running setup")
 
+    # TODO Should we do the imports here so that we can change the config if needed.
     if not database_exists(engine.url):
         log.info(f"Creating database {engine.url}")
         create_database(engine.url)

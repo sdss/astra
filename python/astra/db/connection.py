@@ -13,13 +13,18 @@ if database_config is None:
     raise RuntimeError("no database configured in Astra")
 
 # Build a database connection string.
-if database_config["host"] == "localhost":
-    connection_string = "postgresql+psycopg2:///{database}"
-else:
-    connection_string = "postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+kwds = dict(echo=False)
+connection_string = database_config.get("connection_string", None)
+if connection_string is None:
+    if database_config["host"] == "localhost":
+        connection_string = "postgresql+psycopg2:///{database}"
+    else:
+        connection_string = "postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
 
-engine = create_engine(connection_string.format(**database_config),
-                       echo=False, pool_size=10, pool_recycle=1800)
+    connection_string.format(**database_config)
+    kwds.update(pool_size=10, pool_recycle=1800)
+
+engine = create_engine(connection_string, **kwds)
 
 # Force SQLalchemy logging to be parsed through the Astra logger.
 # TODO: verbosity is not correctly followed here.
