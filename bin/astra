@@ -7,10 +7,7 @@ import os
 from astra import log
 from logging import DEBUG, INFO
 
-#from astra.tools.sdss_astra import (data, subset, component, execute, 
-#                                    query_execute, schedule, setup)
-
-from astra.tools.parsers import component, folder, setup, subset, task
+from astra.tools.parsers import (component, folder, setup, subset, task, execute)
 
 
 

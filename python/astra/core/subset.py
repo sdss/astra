@@ -42,7 +42,7 @@ def _get_likely_subset(identifier):
         elif result_by_id is None and result_by_name is None:
             raise ValueError(f"no subset found with id = {identifier} or name = {identifier}")
 
-        elif:
+        else:
             raise ValueError(f"ambigious subset identifier: found subset with id = {identifier} "
                              f"and name = {identifier}")
 

@@ -43,7 +43,7 @@ def _get_subset_by_identifier(identifier):
 @click.group()
 @click.pass_context
 def parser(context):
-    r"""Create, update, and delete data subsets"""
+    r"""Create, update, and delete data subsets."""
     log.debug("subset")
     pass
 

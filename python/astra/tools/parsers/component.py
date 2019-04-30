@@ -18,7 +18,7 @@ def _get_assumed_version(product, owner="sdss"):
 @click.group()
 @click.pass_context
 def parser(context):
-    r"""Add, update, and delete components"""
+    r"""Add, update, and delete components."""
     log.debug("component")
     pass
 

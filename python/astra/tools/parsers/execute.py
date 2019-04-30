@@ -13,11 +13,7 @@ from astra.core.component import _get_likely_component
 def execute(context, component, input_path, output_dir, release, 
             from_path, **kwargs):
     r"""
-    Execute a component on a reduced data product (``INPUT_PATH``) and write
-    the outputs to ``OUTPUT_DIR``. The component is uniquely
-    specified by the ``GITHUB_REPO_SLUG`` and the release version. The most
-    recent release will be assumed if no release is specified in the ``--release``
-    option.
+    Execute a component on a data product.
     """
     log.debug("execute")
 

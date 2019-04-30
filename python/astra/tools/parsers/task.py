@@ -11,7 +11,7 @@ from astra.db.models import Task
 @click.group()
 @click.pass_context
 def parser(context):
-    r"""Create, update, and delete tasks"""
+    r"""Create, update, and delete tasks."""
     log.debug("task")
     pass
 
