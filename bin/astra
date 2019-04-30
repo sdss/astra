@@ -50,4 +50,13 @@ astra subset create
 astra subset delete
 astra component add
 astra component delete
+
+astra run:
+
+# Every minute check if we should check for new folders.
+# With any new data, update subsets.
+# With any new data, identify suitable components
+# With any new data, create tasks for those components.
+# Execute the tasks.
+
 """

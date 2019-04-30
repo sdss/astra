@@ -8,10 +8,16 @@ from astra.db.models import (DataSubset, DataProduct, DataProductSubsetBridge)
 
 
 def _get_subset(subset_id):
-    subset = session.query(DataSubset).filter_by(id=subset_id).one_or_none()
-    if subset is None:
-        raise ValueError(f"no subset matching id {subset_id} found")
-    return subset
+    if isinstance(subset_id, int):
+        subset = session.query(DataSubset).filter_by(id=subset_id).one_or_none()
+        if subset is None:
+            raise ValueError(f"no subset matching id {subset_id} found")
+
+    elif isinstance(subset_id, DataSubset):
+        return subset_id
+
+    else:
+        raise TypeError("subset_id type not recognized")
 
 
 def create_from_data_paths(data_paths, name=None, is_visible=False):
@@ -36,6 +42,9 @@ def create_from_data_paths(data_paths, name=None, is_visible=False):
             raise ValueError(f"subset name '{name}' already exists: {s}")
 
     # For each data path, find the corresponding id.
+    if isinstance(data_paths, str):
+        data_paths = [data_paths]
+        
     data_ids = []
     unrecognised_data_paths = []
     for data_path in data_paths:
@@ -45,7 +54,7 @@ def create_from_data_paths(data_paths, name=None, is_visible=False):
         dp = session.query(DataProduct).filter_by(path=path).one_or_none()
         if dp is None:
             # TODO: this should be a warning
-            log.info(f"Could not find path {path} in database")
+            log.error(f"Could not find path {path} in database: not including it in subset")
             unrecognised_data_paths.append(path)
 
         else:
@@ -150,7 +159,7 @@ def refresh(subset_id):
 
 
 
-def update_subset(subset_id, **kwargs):
+def update(subset_id, **kwargs):
     r"""
     Update attributes of an existing data subset.
 

@@ -49,14 +49,37 @@ def parser(context):
 
 
 @parser.command()
+@click.option("--data-paths", nargs="?", default=None,
+              help="Supply data paths that will form this subset.")
+@click.option("--regex-match-pattern", nargs=1, default=None,
+              help="Supply a regular expression pattern to match against all data paths.")
+@click.option("--name", nargs=1, default=None,
+              help="Provide a name for this subset.")
+@click.option("--visible", is_flag=True, default=False,
+              help="Make this subset visible when users search for subsets.")
+@click.option("--auto-update", is_flag=True, default=False,
+              help="Automatically update this subset when new data are available. This is only "
+                   "relevant for subsets that have a regular expression pattern to match against.")
 @click.pass_context
-def create(context):
-    r"""Create a subset of the data"""
-    # (1) From list of paths.
-    # (2) From regular expression..
-    log.debug("subset.create")
-    raise NotImplementedError()
+def create(context, data_paths, regex_match_pattern, name, visible, auto_update):
+    r"""
+    Create a subset from the available data products. A subset can be created from data paths, 
+    and/or by providing a regular expression pattern to match against data paths.
+    """
 
+    # If there are data paths then create it from that.
+    if data_paths is None and regex_match_pattern is None:
+        click.UsageError("Either data paths or a regular expression pattern is required.")
+
+    result = subset.create_from_data_paths(data_paths, name=name, is_visible=visible)
+
+    if regex_match_pattern is not None:
+        result = subset.update(result,
+                               regex_match_pattern=regex_match_pattern, 
+                               auto_update=auto_update)
+
+    return result
+    
 
 @parser.command()
 @click.argument("identifier", nargs=1, required=True, dtype=str)
@@ -69,11 +92,37 @@ def refresh(context, identifier):
 
 
 @parser.command()
+@click.argument("identifier", nargs=1, required=True, dtype=str)
+@click.option("--visible/--invisible", "is_visible", default=None,
+              help="Set the subset as visible or invisible.")
+@click.option("--auto-update/--no-auto-update", "auto_update", default=None,
+              help="Automatically update the subset as new data become available. This is only "
+                   "relevant for subsets that have a regular expression pattern to match data paths")
+@click.option("--regex-match-pattern", nargs=1, default=None,
+              help="Supply a regular expression pattern to match against all data paths.")
+@click.option("--name", nargs=1, default=None,
+              help="Provide a name for the specified subset.")
 @click.pass_context
-def update(context):
-    r"""Update an existing named subset"""
-    log.debug("subset.update")
-    raise NotImplementedError()
+def update(context, identifier, is_visible, auto_update, regex_match_pattern, name):
+    r"""
+    Update attributes of an existing named subset.
+    """
+    _subset = _get_subset_by_identifier(identifier)
+
+    # Only send non-None inputs.
+    kwds = dict(is_active=is_active, auto_update=auto_update,
+                name=name, regex_match_pattern=regex_match_pattern)
+    for k in list(kwds.keys()):
+        if kwds[k] is None:
+            del kwds[k]
+
+    # TODO: Consider a custom class to check that at least one option 
+    #       is required. See: https://stackoverflow.com/questions/44247099/click-command-line-interfaces-make-options-required-if-other-optional-option-is
+    if not kwds:
+        raise click.UsageError("At least one option is required")
+
+    return subset.update(_subset, **kwds)
+
 
 
 @parser.command()
