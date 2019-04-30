@@ -11,27 +11,30 @@
 .. rubric:: :header_no_toc:`Components`
 
 A *component* in Astra describes an analysis tool that can run on some subset
-(or all!) of SDSS data. Each component should have at least one shell utility
-that takes in a path pointing to an SDSS V data product and to output a data
-product. The output data product might describe the result of some analysis, 
-or it might be a data model (e.g., a data model file with continuum 
+(or all!) of SDSS data. Each component should have one command line tool
+that takes in input paths pointing to SDSS V data products, and to output some
+data products. The output data proucts might describe the result of some analysis, 
+or they might be an "intermediate" data product (e.g., a data model file with continuum 
 normalisation applied).
 
 
 Definitions
 ===========
 
-An astronomer might find the term *component* synonymous with 'pipeline'. The 
-difference is that a pipeline might be a series of sequential steps to execute
-in order to deliver a final answer (e.g., astrophysical parameters), whereas a
-*component* is only expected to perform *at least* one task [#]_. That task might be 
-continuum normalisation, or it might be providing a classification for a type 
-of object. However, a component *can* do more than one task. For the purpose 
-of incorporating existing 'pipelines' into the initial version of Astra, we will
-describe a large pipeline as a *component* and seek to modularize common 
-components in the future. In other words, for the purposes of Astra, ASPCAP 
-could be described as a *component*, just as an object classifier could be 
-considered a pipeline component.
+An astronomer might find the term *component* synonymous with 'pipeline'. 
+
+The difference here is that a pipeline might be a series of sequential steps to 
+execute in order to deliver a final answer (e.g., astrophysical parameters),
+whereas a *component* is only expected to perform *at least* one task [#]_. 
+That task might be continuum normalisation, or it might be providing a 
+classification for a type of object. However, a component *can* do more than 
+one task. 
+
+For the purpose of incorporating existing 'pipelines' into the initial version 
+of Astra, we will describe a large pipeline as a *component* and seek to 
+modularize common components in the future. In other words, for the purposes of 
+Astra, *ASPCAP* could be described as a *component*, just as an object classifier 
+could be considered a pipeline component.
 
 
 What makes a component?
