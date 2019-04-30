@@ -10,8 +10,6 @@ from __future__ import unicode_literals
 
 from pytest import mark
 
-from astra.main import math
-
 
 class TestMath(object):
     """Tests for the ``math`` function in main.py."""
