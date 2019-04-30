@@ -11,11 +11,7 @@ from __future__ import unicode_literals
 from pytest import mark
 
 
-class TestMath(object):
-    """Tests for the ``math`` function in main.py."""
+class Tester(object):
 
-    @mark.parametrize(('arg1', 'arg2', 'operator', 'result'),
-                      [(1, 2, '+', 3), (2, 2, '-', 0), (3, 5, '*', 15), (10, 2, '/', 5)])
-    def test_math(self, arg1, arg2, operator, result):
-
-        assert math(arg1, arg2, arith_operator=operator) == result
+    def test_truth(self):
+        assert 1 + 1 == 2
