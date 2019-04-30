@@ -117,8 +117,12 @@ def refresh(path, quiet=False):
         skipped.
     """
 
-    path = full_path(path)
-    folder = session.query(Folder).filter_by(path=path).one_or_none()
+    if isinstance(path, Folder):
+        folder = path
+
+    else:
+        path = full_path(path)
+        folder = session.query(Folder).filter_by(path=path).one_or_none()
 
     if folder is None or not folder.is_active:
         if quiet: return (0, 0, 0)

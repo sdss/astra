@@ -101,3 +101,11 @@ ENV/
 # mypy
 .mypy_cache/
 
+# for local testing
+dev-env.sh
+dev-component.yml
+dev-list
+dev-tmp/
+tmp/
+
+.gitignore

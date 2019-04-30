@@ -33,6 +33,9 @@ def watch(context, path, recursive, interval, regex_match_pattern, regex_ignore_
     log.debug(f"folder.watch {path} {recursive} {interval} {regex_match_pattern} {regex_ignore_pattern}")
     result = folder.watch(path, recursive, interval, regex_match_pattern, regex_ignore_pattern)
     log.info(result)
+
+    # Now refresh it.
+    folder.refresh(result.path)
     return True
 
 
