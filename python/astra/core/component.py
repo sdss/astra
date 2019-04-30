@@ -20,8 +20,9 @@ from pkg_resources import DistributionNotFound, VersionConflict
 
 
 
-def add(product, version=None, owner=None, execution_order=0, component_cli=None, description=None,
-        module_name=None, test=False, **kwargs):
+
+def add(product, version=None, owner=None, execution_order=0, command=None, description=None,
+        module_name=None, default_args=None, test=False, **kwargs):
     r"""
     Add a component for analysing reduced data products.
 
@@ -40,10 +41,10 @@ def add(product, version=None, owner=None, execution_order=0, component_cli=None
         The execution order priority (ascending non-negative execution order).
         See the documentation online for more details about the execution order.
 
-    :param component_cli: [optional]
+    :param command: [optional]
         The command line utility that will be executed by this component. If `None` is given then
         this will default to the first executable in the `bin/` directory of the repository. If
-        there is more than one executable in the `bin/` directory and no `component_cli` is given
+        there is more than one executable in the `bin/` directory and no `command` is given
         then an exception will be raised.
 
     :param description: [None]
@@ -186,7 +187,7 @@ def add(product, version=None, owner=None, execution_order=0, component_cli=None
         log.error(f"No requirements.txt file found at {requirements_path}")
 
     # Get the component CLI
-    if component_cli is None:
+    if command is None:
         # TODO: Should we parse this from setup.py instead?
         executables = glob(os.path.join(twd, "bin", "*"))
         if len(executables) < 1:
@@ -197,7 +198,7 @@ def add(product, version=None, owner=None, execution_order=0, component_cli=None
 
         else:
             log.info(f"Setting component cli as {executables[0]}")
-            component_cli = os.path.basename(executables[0])
+            command = os.path.basename(executables[0])
 
     # Update directory work.
     log.info(f"Updating work directory {twd} -> {directory_work}")
@@ -255,8 +256,9 @@ def add(product, version=None, owner=None, execution_order=0, component_cli=None
 
     # Create the component.
     component = Component(owner=owner, product=product, version=version,
-                          component_cli=component_cli, description=description,
+                          command=command, description=description,
                           execution_order=execution_order, module_name=module_name,
+                          default_args=default_args,
                           is_active=True, auto_update=False)
     session.add(component)
     session.commit()
@@ -326,7 +328,7 @@ def update(product, version, owner=None, **kwargs):
     :param execution_order: [optional]
         Set the execution order for this component.
 
-    :param component_cli: [optional]
+    :param command: [optional]
         Set the command line utility to be executed.
     """
 
@@ -339,7 +341,7 @@ def update(product, version, owner=None, **kwargs):
         raise ValueError(f"no component found with {owner}/{product} and version {version}")
 
     acceptable_keywords = ("is_active", "auto_update", "short_name", 
-                           "execution_order", "component_cli")
+                           "execution_order", "command")
     relevant_keywords = set(acceptable_keywords).intersection(kwargs)
     kwds = dict([(k, kwargs[k]) for k in relevant_keywords])
 
@@ -381,3 +383,77 @@ def _get_component_or_none(owner, product, version):
     return session.query(Component) \
                   .filter_by(owner=owner, product=product, version=version) \
                   .one_or_none()
+
+
+def _get_likely_component(identifier):
+    """
+    Return the most likely coponent, given some identifier about that coponent. The identifier could
+    be the coponent `id`, or the name of the `component` (if only one version exists), or it could
+    be a string of the form "{product}/{version}".
+    """
+
+    if isinstance(identifer, Component):
+        # This is a component.
+        return identifier
+
+    possible_filters = []
+
+    try:
+        identifier = int(identifier)
+
+    except:
+        if "/" in identifier:
+
+            num_fs = identifier.count("/")
+            if num_fs == 2:
+                # It's a "{owner}/{product}/{version}" string.
+                owner, product, version = identifier.split("/")
+                possible_filters.append(dict(owner=owner, product=product, version=version))
+
+            elif num_fs == 1:
+                # It's either a {owner}/{product} string (where version is assumed)
+                # or it's a {product}/{version} string.
+                a, b = identifier.split("/")
+                possible_filters.extend([
+                    dict(owner=a, product=b),
+                    dict(product=a, version=b)
+                ])
+
+            else:
+                raise ValueError(f"unrecognised component identifier format '{identifier}'")
+
+        else:
+            # The identifier is a product name. Let's hope it's unique.
+            possible_filters.append(dict(product=identifier))
+
+    else:
+        possible_filters.append(dict(id=identifier))
+
+    results = []
+    for filters in possible_filters:
+
+        try:
+            result = session.query(Component).filter_by(**filters).one_or_none()
+
+        except:
+            # Multiple matches. 
+            continue
+
+        else:
+            if result is None:
+                continue
+            else:
+                results.append(result)
+
+
+    if len(results) == 0:
+        raise ValueError(f"No component found with identifier '{identifier}'. "
+                         f"Filters: {possible_filters}")
+
+    elif len(results) > 1:
+        raise ValueError(f"Multiple components found with identifier '{identifier}': {results} "
+                         f"Filters: {possible_filters}")
+
+    else:
+        return results[0]
+

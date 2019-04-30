@@ -37,9 +37,10 @@ def parser(context, confirm):
     component_dir = os.getenv("ASTRA_COMPONENT_DIR", None)
     if component_dir is not None:
         if os.path.exists(component_dir):
+            log.debug(f"Removing existing component directory {component_dir}")
             rmtree(component_dir)
+        log.debug(f"Creating component directory {component_dir}")
         os.makedirs(component_dir, exist_ok=True)
 
-
-    log.info("Astra is ready.")
+    log.info("Per aspera ad astra; Astra is ready")
     return None

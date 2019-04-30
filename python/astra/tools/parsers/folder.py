@@ -8,7 +8,7 @@ from astra.core import folder
 @click.group()
 @click.pass_context
 def parser(context):
-    r""" Manage monitoring of data folders """
+    r""" Manage monitoring of data folders. """
     log.debug("folder")
     pass
 
@@ -28,7 +28,7 @@ def parser(context):
 @click.pass_context
 def watch(context, path, recursive, interval, regex_match_pattern, regex_ignore_pattern):
     r"""
-    Start monitoring a local folder for new data products.
+    Start monitoring a  folder for new data.
     """
     log.debug(f"folder.watch {path} {recursive} {interval} {regex_match_pattern} {regex_ignore_pattern}")
     result = folder.watch(path, recursive, interval, regex_match_pattern, regex_ignore_pattern)
@@ -43,7 +43,7 @@ def watch(context, path, recursive, interval, regex_match_pattern, regex_ignore_
 @click.pass_context
 def unwatch(context, path, quiet):
     r"""
-    Stop monitoring a local folder for new data products.
+    Stop monitoring a folder for new data.
     """
     log.debug(f"folder.unwatch {path} {quiet}")
     result = folder.unwatch(path, quiet)
@@ -58,8 +58,7 @@ def unwatch(context, path, quiet):
 @click.pass_context
 def refresh(context, path, quiet):
     r"""
-    Refresh watched folder(s) for new data products. If no `PATH` is given then all watched folders
-    will be refreshed.
+    Refresh watched folder(s) for new data.
     """
     log.debug(f"folder.refresh {path}")
 

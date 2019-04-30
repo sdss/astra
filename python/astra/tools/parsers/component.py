@@ -32,7 +32,7 @@ def parser(context):
               help="The owner of the repository on GitHub (default: sdss).")
 @click.option("--execution-order", "execution_order", default=0,
               help="Set the execution order for the component (default: 0).")
-@click.option("--component-cli", nargs=1, default=None,
+@click.option("--command", nargs=1, default=None,
               help="Specify the name of the command line utility to execute from that component. "
                    "This is only required if there are more than one executable components in the "
                    "bin/ directory of that repository.")
@@ -41,14 +41,16 @@ def parser(context):
                    "will default to the description that exists on GitHub.")
 @click.option("-a", "--alt-module",  nargs=1, default=None,
               help="Specify an alternate module name for this component.")
+@click.option("--default-args", nargs=1, default=None,
+              help="Default arguments to supply to the command.")
 @click.option("-t", "--test", is_flag=True, default=False,
               help="Test mode. Do not actually install anything.")
 @click.pass_context
-def add(context, product, version, owner, execution_order, component_cli, description,
-        alt_module, test):
+def add(context, product, version, owner, execution_order, command, description,
+        alt_module, default_arg, test):
     r"""
     Add a new component in Astra from an existing GitHub repository (`product`) and a 
-    command line tool in that repository (`COMPONENT_CLI`).
+    command line tool in that repository (`command`).
     """
     log.debug("component.add")
 
@@ -56,9 +58,10 @@ def add(context, product, version, owner, execution_order, component_cli, descri
                          version=version,
                          owner=owner,
                          execution_order=execution_order,
-                         component_cli=component_cli,
+                         command=command,
                          description=description,
                          alt_module=alt_module,
+                         default_args=default_args,
                          test=test)
 
 
@@ -70,6 +73,8 @@ def add(context, product, version, owner, execution_order, component_cli, descri
                    "to the most recent version.")
 @click.option("--owner", nargs=1, default="sdss",
               help="The owner of the repository on GitHub (default: sdss).")
+@click.option("--default-args", nargs=1, default=None,
+              help="Default arguments to supply to the command line utility.")
 @click.option("--active/--inactive", "is_active", default=None,
               help="Set the component as active or inactive.")
 @click.option("--enable-auto-update/--disable-auto-update", "auto_update", default=None,
@@ -78,11 +83,11 @@ def add(context, product, version, owner, execution_order, component_cli, descri
               help="Set the short descriptive name for this component.")
 @click.option("--execution-order", "execution_order", type=int,
               help="Set the execution order for this component.")
-@click.option("--component-cli", "component_cli", nargs=1,
+@click.option("--command", nargs=1,
               help="Set the command line interface tool for this component.")
 @click.pass_context
-def update(context, product, version, owner, is_active, auto_update,
-           short_name, execution_order, component_cli):
+def update(context, product, version, owner, default_args, is_active, auto_update,
+           description, execution_order, command):
     r"""
     Update attribute(s) of an existing component, where the component is uniquely
     specified by the ``GITHUB_REPO_SLUG`` and the ``RELEASE`` version.
@@ -97,8 +102,8 @@ def update(context, product, version, owner, is_active, auto_update,
 
     # Only send non-None inputs.
     kwds = dict(is_active=is_active, auto_update=auto_update,
-                short_name=short_name, execution_order=execution_order,
-                component_cli=component_cli)
+                description=description, execution_order=execution_order,
+                command=command)
     for k in list(kwds.keys()):
         if kwds[k] is None:
             del kwds[k]

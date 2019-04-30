@@ -7,17 +7,45 @@ from astra.db.connection import session
 from astra.db.models import (DataSubset, DataProduct, DataProductSubsetBridge)
 
 
-def _get_subset(subset_id):
-    if isinstance(subset_id, int):
-        subset = session.query(DataSubset).filter_by(id=subset_id).one_or_none()
-        if subset is None:
-            raise ValueError(f"no subset matching id {subset_id} found")
+def _get_likely_subset(identifier):
+    """
+    Return the most likely subset, given some identifier about that subset. The identifier could be
+    the subset `id`, or the name of the `subset`.
+    """
 
-    elif isinstance(subset_id, DataSubset):
-        return subset_id
+    if isinstance(identifer, DataSubset):
+        # This is a subset.
+        return identifier
+
+    try:
+        identifier = int(identifier)
+
+    except:
+        # The identifier is a name.
+        result = session.query(DataSubset).filter_by(name=identifier).one_or_none()
+        if result is None:
+            raise ValueError(f"no subset matching name '{identifier}' found")
+
+        return result
 
     else:
-        raise TypeError("subset_id type not recognized")
+        # The identifier is an integer. It could be the id, or a dataset with the same name.
+        result_by_name = session.query(DataSubset).filter_by(name=f"{identifier}").one_or_none()
+        result_by_id = session.query(DataSubset).filter_by(id=identifier).one_or_none()
+
+        if result_by_id is not None and result_by_name is None:
+            return result_by_id
+
+        elif result_by_id is None and result_by_name is not None:
+            return result_by_name
+
+        elif result_by_id is None and result_by_name is None:
+            raise ValueError(f"no subset found with id = {identifier} or name = {identifier}")
+
+        elif:
+            raise ValueError(f"ambigious subset identifier: found subset with id = {identifier} "
+                             f"and name = {identifier}")
+
 
 
 def create_from_data_paths(data_paths, name=None, is_visible=False):
@@ -44,7 +72,7 @@ def create_from_data_paths(data_paths, name=None, is_visible=False):
     # For each data path, find the corresponding id.
     if isinstance(data_paths, str):
         data_paths = [data_paths]
-        
+
     data_ids = []
     unrecognised_data_paths = []
     for data_path in data_paths:
@@ -130,7 +158,7 @@ def refresh(subset_id):
         A two-length tuple containing the number of paths added, and the number of paths skipped 
         (e.g., paths that were already part of this subset.)
     """
-    subset = _get_subset(subset_id)
+    subset = _get_likely_subset(subset_id)
 
     if subset.regex_match_pattern is None:
         log.warn(f"Nothing to refresh on data subset with id {subset_id}: no regex match pattern.")    
@@ -180,7 +208,7 @@ def update(subset_id, **kwargs):
         subsets that are defined by a regular expression pattern.
     """
 
-    subset = _get_subset(subset_id)
+    subset = _get_likely_subset(subset_id)
 
     available = ("name", "regex_match_pattern", "is_visible", "auto_update")
     unknown = set(available).difference(kwargs.keys())
@@ -216,7 +244,7 @@ def delete(subset_id):
     :param subset_id:
         The unique identifier of the subset to delete.
     """
-    subset = _get_subset(subset_id)
+    subset = _get_likely_subset(subset_id)
 
     result = subset.delete()
     session.commit()

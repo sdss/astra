@@ -7,54 +7,54 @@ from astra.db.connection import session
 from astra.db.models import (Component, DataSubset, Task)
 
 
-def create(component_id, data_subset_id, scheduled=None):
+def create(component, subset, args=None, schedule=None, output_dir=None):
     r"""
     Create a task for a component to execute on some data subset.
 
-    :param component_id:
+    :param component:
         The id of the component to execute.
 
-    :param data_subset_id:
+    :param subset:
         The id of the data subset to execute.
 
-    :param scheduled: [optional]
-        Specify a scheduled time for this task to be executed.
+    :param schedule: [optional]
+        Specify a schedule datetime for this task to be executed.
     """
 
-    # Verify that the component exists.
-    component = session.query(Component).filter_by(id=component_id).one_or_none()
-    if component is None:
-        raise ValueError(f"unrecognized component id {component_id}")
+    if not isinstance(component, Component):
+        # Verify that the component exists.
+        result = session.query(Component).filter_by(id=component).one_or_none()
+        if result is None:
+            raise ValueError(f"unrecognized component id {component}")
+        component = result
 
-    # Verify that the data subset exists.
-    subset = session.query(DataSubset).filter_by(id=data_subset_id).one_or_none()
-    if subset is None:
-        raise ValueError(f"unrecognized subset id {data_subset_id}")
+    if not isinstance(subset, DataSubset):
+        # Verify that the data subset exists.
+        result = session.query(DataSubset).filter_by(id=subset).one_or_none()
+        if result is None:
+            raise ValueError(f"unrecognized subset id {subset}")
+        subset = result
 
-    if scheduled is None:
-        scheduled = datetime.datetime.now()
+    if schedule is None:
+        schedule = datetime.datetime.now()
 
-    elif not isinstance(scheduled, datetime.datetime):
-        raise TypeError("if a scheduled time is given then it must be a datetime.datetime object")
+    elif not isinstance(schedule, datetime.datetime):
+        raise TypeError("if a schedule time is given then it must be a datetime.datetime object")
+
+    if output_dir is None:
+        # TODO: Assumee CWD? Something from environment variables?
+        output_dir = os.getcwd()
+        log.info(f"Assuming output directory as {output_dir}")
 
     # Create the task.
-    task = Task(component_id=component_id, data_subset_id=data_subset_id,
-                scheduled=scheduled)
+    task = Task(component_id=component.id, data_subset_id=subset.id,
+                schedule=schedule, output_dir=output_dir, args=args)
     session.add(task)
     session.commit()
 
-    # Generate the output directory.
-    task.output_dir = os.path.join("$ASTRA_TASK_DIR", f"{task.id:0>10.0f}")
-    task.log_path = os.path.join(task.output_dir, f"{task.id:0>10.0f}.log")
-
-    output_dir = task.output_dir.replace("$ASTRA_TASK_DIR",
-                                         os.getenv("ASTRA_TASK_DIR", ""))
-
-    log.debug(f"Creating output directory {output_dir}")
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Commit the output_dir and log_path changes
-    session.commit()
+    if not os.path.exists(task.output_dir):
+        log.info(f"Creating output directory {output_dir}")
+        os.makedirs(task.output_dir, exist_ok=True)
 
     return task
 
@@ -114,7 +114,7 @@ def delete(task_id):
     log.info(f"Deleting task {task}")
 
     # TODO: handle status' better
-    task.status = "CANCELLED"
+    task.status = "DELETED"
     session.commit()
 
     return task

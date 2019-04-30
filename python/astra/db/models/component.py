@@ -22,7 +22,9 @@ class Component(Base):
     module_name = Column(String, nullable=False)
 
     execution_order = Column(Integer, default=0)
-    component_cli = Column(String, nullable=False)
+    command = Column(String, nullable=False)
+    default_args = Column(String, nullable=True)
+
     created = Column(DateTime, default=datetime.datetime.utcnow)
     modified = Column(DateTime, default=datetime.datetime.utcnow)
 
