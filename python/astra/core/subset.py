@@ -286,8 +286,19 @@ def delete(subset_id):
     """
     subset = _get_likely_subset(subset_id)
 
-    session.delete(subset)
-    session.commit()
-    log.info(f"Deleted subset {subset} with id {subset_id}")
+    # Delete any references in the bridge.
+    references = session.query(DataProductSubsetBridge).filter_by(data_subset_id=subset.id).all()
+    N = len(references)
+    for reference in references:
+        session.delete(reference)
 
-    return result
+    # Commit so we don't violate foreign key constraints.
+    session.commit()
+
+    # Delete the subset.
+    session.delete(subset)
+
+    session.commit()
+    log.info(f"Deleted subset {subset} with id {subset_id} ({N} entries)")
+
+    return True
