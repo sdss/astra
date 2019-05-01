@@ -5,26 +5,34 @@ from astra.utils import log
 import requests
 
 
-def validate_slug(slug_string):
+def validate_slug(slug):
     r"""
     Validate a given GitHub repository slug, given some input.
 
-    :param slug_string:
+    :param slug:
         The given slug string, which should be in the form '{OWNER}/{REPO}'.
         If no '{OWNER}' is given, it will be assumed to be owned by the SDSS organization.
     """
 
-    slug_string = f"{slug_string}".strip().lower()
-    if "/" not in slug_string:
-        log.info(f"Assuming GitHub repository '{slug_string}' is owned by SDSS (sdss/{slug_string})")
-        slug_string = f"sdss/{slug_string}"
-    return slug_string
+    slug = f"{slug}".strip().lower()
+    if "/" not in slug:
+        log.info(f"Assuming GitHub repository '{slug}' is owned by SDSS (sdss/{slug})")
+        slug = f"sdss/{slug}"
+    return slug
+
 
 def validate_repository_name(repository_name):
+    r"""
+    Validate a given GitHub repository name.
+
+    :param repository_name:
+        The given repository name.
+
+    """
     if "/" in repository_name:
       raise ValueError("repository name cannot contain forward slashes ('/')")
     return repository_name.strip().lower()
-    
+
 
 def graphql(query_string, token=None):
     r"""
@@ -40,18 +48,16 @@ def graphql(query_string, token=None):
     """
 
     if token is None:
-        # TODO: Consider using SDSS_GITHUB_KEY because that is used by `sdss_install`
-        #       See https://github.com/sdss/sdss_install/blob/master/python/sdss_install/application/Client.py
         tokens = [
             config.get("github.token", None),
-            os.getenv("ASTRA_GITHUB_TOKEN", None)
+            os.getenv("SDSS_GITHUB_KEY", None)
         ]
         for token in tokens:
             if token is not None: break
 
         else:
-            raise ValueError("no github.token key found in Astra configuration"\
-                             " or ASTRA_GITHUB_TOKEN environment variable")
+            raise ValueError("no github.token key found in Astra configuration or SDSS_GITHUB_KEY "
+                             "environment variable")
 
     headers = dict([("Authorization", f"token {token}")])
     r = requests.post("https://api.github.com/graphql",
@@ -73,6 +79,9 @@ def get_repository_summary(owner, repository, **kwargs):
 
     :param repository:
         The name of the repository.
+
+    :returns:
+        The metadata dictionary for the requested repository, as given by GitHub.
     """
 
     q = """
