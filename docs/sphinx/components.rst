@@ -52,72 +52,125 @@ component must meet the following requirements:
 1. It must be stored in a public ``git`` repository on GitHub_, preferably in
    the `SDSS organization GitHub <http://github.com/sdss>`_.
 
-2. A component must be `tagged <https://git-scm.com/book/en/v2/Git-Basics-Tagging>`_. 
-   All components have full version control through ``git``, but only tagged 
-   versions of components will be considered a sufficiently substantive change
-   to trigger new analysis tasks.
+2. A component must have at lease one `release <https://help.github.com/en/articles/creating-releases>`.
+   All components have full version control through ``git``, but only new
+   releases of components will be considered a sufficiently substantive change
+   to trigger (and differentiate between) analysis tasks.
 
-3. A component must have a command line utility called ``saqe``
-   (short for 'SDSS Astra query execute') that takes the path to a SDSS data 
-   model file as an input, and returns *whether or not* it can provide an 
-   analysis of that source/file. Given the input observation file, this utility 
-   will be able to access all relevant information about targetting, etc, 
-   through the functions in ``astra.utils``. In the future this requirement
-   may be deprecated if we move to a conductor-driven execution approach 
-   (see `roadmap <roadmap.htm#road-mapl>`_), but is necessary until components 
-   have iterated into a steady-state mode.
+3. A component must have a function called ``saqe`` (short for 'SDSS Astra query 
+   execute') that takes the path to a SDSS data product and returns *whether or
+   not** it can provide an analysis of that source. Given the data product path,
+   this utility will be able to access all relevant information in order to make
+   a decision. This could include targeting information, photometry and
+   astrometry from external catalogues (e.g., Gaia), and results from other
+   Astra components that have run on that data product. For example, the results
+   of a classifier.
 
 4. A component must have at least one command line utility that takes as an 
    argument the path to a SDSS data model, and produces an output file that
    is a valid data model [#]_.
 
+
+.. note::
+    In the future the ``saqe`` requirement may no longer exist if we move to a 
+    conductor-driven execution approach (see `roadmap <roadmap.htm#road-mapl>`_), 
+    but the ``saqe`` function will be necessary until components have iterated 
+    into a steady-state mode.
+
+
 Components must be self-contained Python packages that fully describe all of the
-required dependencies, and can be installed using ``python setup.py``. If there 
-are deep dependency requirements on operating system, or software that
-can not -- or should not -- be installed from ``setup.py``, then components can
-also have a Docker container file that describes the environment. If no Docker
-container is provided then the component will be run in the `standard Astra environment <#>`_.
+required dependencies, and can be installed using ``python setup.py``. If your
+component has dependencies that are not available on the SDSS systems at Utah, 
+then Astra will identify those discrepancies [TODO: get link to CPHC systems to
+request a python component]. Any module dependencies that are required on Utah
+can be specified in your component.
 
 
-Creating a component 
-====================
+Adding a component to Astra
+===========================
 
-Eventually you will be able to add components to Astra through a website. For 
-now you will need to supply the relevant information in a `YAML-formatted
-<https://yaml.org/>`_ file, which we will call ``my-component.yml``::
+Once you have run ``astra setup`` you will be able to add components to Astra.
+If you are running Astra locally then you must add components using the ``astra``
+command line tool. If you want to add components to Astra on the SDSS systems at
+Utah then you can do so through a SSH terminal, or eventually through an
+internal collaboration website that will be available in early 2020.
 
-  github_repo_slug: sdss/my-continuum-normalization
+To add a component to Astra you will need the name of a GitHub repository. If
+you type ``astra component add --help`` in a terminal then this is the output
+you can expect::
 
-  component_cli: continuum-normalize 
-  execution_order: 10
+    Usage: astra component add [OPTIONS] PRODUCT
 
-  short_name: Continuum normalization
+      Add a new component in Astra from an existing GitHub repository
+      (`product`) and a  command line tool in that repository (`command`).
 
-  owner: Andy Casey
-  owner_email_address: andrew.casey@monash.edu
+    Options:
+      --version TEXT             The version of this product to use. If no version
+                                 is given then this will default to the last
+                                 release made available on GitHub.
+      --owner TEXT               The owner of the repository on GitHub (default:
+                                 sdss).
+      --execution-order INTEGER  Set the execution order for the component
+                                 (default: 0).
+      --command TEXT             Specify the name of the command line utility to
+                                 execute from that component. This is only
+                                 required if there are more than one executable
+                                 components in the bin/ directory of that
+                                 repository.
+      --description TEXT         A short description for this component. If no
+                                 description is given then this will default to
+                                 the description that exists on GitHub.
+      -a, --alt-module TEXT      Specify an alternate module name for this
+                                 component.
+      --default-args TEXT        Default arguments to supply to the command.
+      -t, --test                 Test mode. Do not actually install anything.
+      --help                     Show this message and exit.
 
 
-To add this component to Astra, use the ``astra`` shell utility::
+If your component's GitHub repository does not fall under the SDSS organization,
+then you will need to specify the ``--owner`` flag. The ``--version`` flag
+indicates the release tag on GitHub. If no ``--version`` is given then Astra
+will find the most recent version on GitHub.
 
-  astra component create --from-path my-component.yml
+Here are some components that you might be interested in adding to Astra:
 
-Most keywords in the above example are self-explanatory. The most important
-terms are the ``github_repo_slug`` and the ``component_cli``, which should 
-uniquely define the component. The ``short_name`` is a descriptive term only, 
-and should not be relied on. 
+  - FERRE ()
+  - The Cannon ()
+  - INSYNC ()
+  - The Payne ()
+  - GSSP ()
 
-When a component is added Astra will fetch the repository and use the most 
-recently tagged point as the current version of the component. Astra 
-periodically checks for new tagged versions to existing components, and
-will update itself automatically [#]_. When Astra detects a new tagged version
-on GitHub, the previous versions of the component are marked as *inactive* and
-the freshly tagged version is added as an *active* component. In doing so, this 
-can trigger Astra to execute analysis tasks using the updated component.
+If you want all of these components then you can use the commands::
+
+  astra component add astra_ferre
+  astra component add astra_thecannon
+  astra component add astra_insync
+  astra component add astra_thepayne
+  astra component add astra_gssp
+
+
+
+Component execution order
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``execution_order`` key **only** matters for components that rely on the 
+output of other components. If your component does not rely on the output of any
+other components (and does not provide outputs that will reasonably be used by 
+other components) then you can set ``execution_order: 0``.
+
+If there are five components that are to run on a given observation, then those
+components will be executed in order of ascending non-negative execution order 
+(``1`` indicates the first execution order). If your component in some part 
+relies on the outputs of other components, then you should set your 
+``execution_order`` to be higher than those other components, otherwise you
+will not be able to access the outputs of those components.
+
+
 
 Component command line interface
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The ``component_cli`` describes the command line utility in your component that
+The ``command`` describes the command line utility in your component that
 is to be executed by Astra. Ideally this should be installed as a 
 ``console_scripts`` entry point in your ``setup.py`` file. Every command line 
 tool that describes a component in Astra **must** accept and follow the following 
@@ -169,23 +222,6 @@ module (or anything similar) if you want. You just need to specify these
 dependencies in your ``setup.py`` file.
 
 [TBD: how to manage ``output_dir`` products when the ``-i`` flag is used]
-
-
-Component execution order
-^^^^^^^^^^^^^^^^^^^^^^^^^
-
-The ``execution_order`` key **only** matters for components that rely on the 
-output of other components. If your component does not rely on the output of any
-other components (and does not provide outputs that will reasonably be used by 
-other components) then you can set ``execution_order: 0``.
-
-If there are five components that are to run on a given observation, then those
-components will be executed in order of ascending non-negative execution order 
-(``1`` indicates the first execution order). If your component in some part 
-relies on the outputs of other components, then you should set your 
-``execution_order`` to be higher than those other components, otherwise you
-will not be able to access the outputs of those components.
-
 
 
 Updating components

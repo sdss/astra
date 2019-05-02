@@ -39,32 +39,22 @@ file provenance) is managed by Astra.
 Installation
 ============
 
-Using ``sdss_install``
-^^^^^^^^^^^^^^^^^^^^^^
-
-Astra can be run locally, but in production mode it is intended to be run on SDSS clusters at the
-University of Utah. Astra is already available to all users on Utah. If you want to install a new
-version of Astra at Utah, you can do so using `sdss_install`::
-
-  sdss_install -G astra
-
-.. note::
-    Once installed, you can make Astra available by simply running the ``module load astra``
-    command next time you log in.
-
-If you are running locally and you have the ``sdss_install`` tool from the `SDSS organization on GitHub <https://github.com/sdss/sdss_install>`_
-then you can use that to install Astra.
-
-
-Development version
-^^^^^^^^^^^^^^^^^^^
-
-Alternatively, if you want to be on the bleeding edge and install the development version then you
-can do so using::
+Astra can be installed using the following terminal commands::
 
   git clone git@github.com:sdss/astra.git
   cd astra/
   python setup.py install
+
+Alternatively, if you have the ``sdss_install`` package then you can use the one-liner::
+
+  sdss_install -G astra
+
+  If you are running Astra on Utah then you only have to install Astra once, and you can make it
+  available by using the ``module load astra`` command next time you log in.
+
+.. attention::
+    If you have problems running ``sdss_install`` then you may want to ensure that you have the
+    ``SDSS_GITHUB_KEY`` environment variable set. This should be a GitHub personal access token.
 
 
 Configuration
@@ -87,54 +77,13 @@ local testing. The configuration for a local SQLite database might look somethin
     connection_string: sqlite:///astra.db
 
 
-Setup
-=====
-
-Once you have installed and configured Astra, you should be able to immediately start using the
-``astra`` command line tool. However, the first time you use this tool should be to run::
+You can immediately start using the ``astra`` command line tool once you have installed and
+configured Astra. The first time you run this tool should be to set up the database and folder
+structure. You can do this using::
 
   astra setup
 
-Which sets up the database and folder structure. You only need to do this once. 
-
-
-Usage
-=====
-
-When testing Astra locally, the typical use case for adding a component might be something like::
-
-  astra component add [MY_COMPONENT_NAME]
-
-and if you want to run that component on some data, you can do so by running::
-
-  astra execute [MY_COMPONENT_NAME] [INPUT_DATA]
-
-which, by default, will execute the component in the current working directory. In the background
-there is a little more going on. Specifically, in the first command Astra has done the following:
-
-  - Fetched your component from a remote GitHub repository
-  - Checked that there are no requirement conflicts with that component repository
-  - Built your component and made the executables available on your `$PATH`
-  - Installed your component using Modules
-
-And in the second line:
-
-  - Added the `[INPUT_PATHS]` to a database so that results between components can be tracked and
-    compared.
-  - Created a Data Subset using those `[INPUT_PATHS]` so that the same subset can be executed using
-    other components in the future.
-  - Made your component available using Modules
-  - Executed the specified component
-  - [In future]: Parsed the outputs from the component and recoreded them in a database, where all
-    results are defined by having declrarative data models
-  - Un-loaded your component
-
-This abstraction has the following advantages:
-
-  - Track results from the same component between different versions
-  - Compare results from different components analysing the same data
-  - Re-use subsets of data for calibration or scientific verification purposes
-  - etc
+Now you're good to go! Next you may want to check out the getting started guide.
 
 
 
