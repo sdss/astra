@@ -47,7 +47,7 @@ the `writing your own component <#>`_ guide.
 
 A valid Astra component must meet the following requirements:
 
-1. It must be stored in a public ``git`` repository on GitHub_, preferably in
+1. It must be stored in a public ``git`` repository on GitHub, preferably in
    the `SDSS organization GitHub <http://github.com/sdss>`_.
 
 2. A component must have at lease one `release <https://help.github.com/en/articles/creating-releases>`_.
@@ -61,7 +61,7 @@ A valid Astra component must meet the following requirements:
 
 4. A component must have at least one command line utility that takes as an 
    argument the path to a SDSS data model, and produces an output file that
-   is a valid data model [#]_.
+   has a valid SDSS data model.
 
 
 Requirement #3 above implies that no one component can govern how another
