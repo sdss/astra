@@ -49,12 +49,11 @@ Alternatively, if you have the ``sdss_install`` package then you can use the one
 
   sdss_install -G astra
 
-  If you are running Astra on Utah then you only have to install Astra once, and you can make it
-  available by using the ``module load astra`` command next time you log in.
+If you are running Astra on Utah then you only have to install Astra once, and you can make it
+available by using the ``module load astra`` command next time you log in. If you have problems
+running ``sdss_install`` then you may want to visit the `frequently encountered problems <#>`_
+page to check that you have all the requisite environment variables set.
 
-.. attention::
-    If you have problems running ``sdss_install`` then you may want to ensure that you have the
-    ``SDSS_GITHUB_KEY`` environment variable set. This should be a GitHub personal access token.
 
 
 Configuration
@@ -83,15 +82,5 @@ structure. You can do this using::
 
   astra setup
 
-Now you're good to go! Next you may want to check out the getting started guide.
-
-
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-
-.. [#] Astra can be run locally, but you would need a local mirror of SDSS
-       reduced data products to do anything useful.
+Now you're good to go! Next you may want to read about `components <components>`_ or check out the
+`getting started guides <guides>`_.

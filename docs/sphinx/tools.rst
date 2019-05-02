@@ -47,64 +47,83 @@ The ``setup`` command will set up Astra according to the settings given in the
 current configuration file. If an Astra database already exists and components
 have been installed already, these will be removed.
 
-.. click:: astra.tools.sdss_astra.setup:setup
+.. click:: astra.tools.parsers.setup:setup
    :prog: astra setup
+
+
+Components
+----------
+
+.. click:: astra.tools.parsers.component:add
+   :prog: astra component add
+
+.. click:: astra.tools.parsers.component:update
+   :prog: astra component update
+
+.. click:: astra.tools.parsers.component:list
+   :prog: astra component list
+
+.. click:: astra.tools.parsers.component:delete
+   :prog: astra component delete
+
+
+Execute
+-------
+
+.. click:: astra.tools.parsers.execute:execute
+   :prog: astra execute
 
 
 Data
 ----
 
-.. click:: astra.tools.sdss_astra.data:watch
-   :prog: astra data watch
+.. click:: astra.tools.parsers.folder:watch
+   :prog: astra folder watch
 
-.. click:: astra.tools.sdss_astra.data:unwatch
-   :prog: astra data unwatch
+.. click:: astra.tools.parsers.folder:unwatch
+   :prog: astra folder unwatch
 
-.. click:: astra.tools.sdss_astra.data:refresh
-   :prog: astra data refresh
-
-Components
-----------
-
-.. click:: astra.tools.sdss_astra.component:create
-   :prog: astra component create
-
-.. click:: astra.tools.sdss_astra.component:update
-   :prog: astra component update
-
-.. click:: astra.tools.sdss_astra.component:delete
-   :prog: astra component delete
+.. click:: astra.tools.parsers.folder:refresh
+   :prog: astra folder refresh
 
 
 Subsets
 -------
 
-[TBD: auto-fill arguments from help string]
+.. click:: astra.tools.parsers.subset:create
+   :prog: astra subset create
 
-[TBD: subsets can follow regular expression patterns]
+.. click:: astra.tools.parsers.subset:list
+   :prog: astra subset list
 
-[TBD: auto-fill arguments from help string]
+.. click:: astra.tools.parsers.subset:refresh
+   :prog: astra subset refresh
 
-Query execution
----------------
-
-[TBD: auto-fill arguments from help string]
-[TBD: better name for ``query-execute``?]
-
-Execute
--------
-
-.. click:: astra.tools.sdss_astra.execute:execute
-   :prog: astra execute
+.. click:: astra.tools.parsers.subset:update
+   :prog: astra subset update
 
 
-Schedule execution
-------------------
+Tasks
+-----
 
-[TBD: auto-fill arguments from help string]
+.. click:: astra.tools.parsers.task:create
+   :prog: astra task create
+
+.. click:: astra.tools.parsers.task:update
+   :prog: astra task update
+
+.. click:: astra.tools.parsers.task:delete
+   :prog: astra task delete
+
+
 
 Experiments
 -----------
+
+In the `roadmap <roadmap>`_ it is envisaged that you will be able to set up 
+"experiments" in Astra such that multiple components (or versions of components)
+can be executed on the same data set, and have custom quality control figures
+produced in real time while that experiment is taking place.
 
 [TBD: ``experiment create/update/delete``]
 
