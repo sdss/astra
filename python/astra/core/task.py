@@ -7,7 +7,7 @@ from astra.db.connection import session
 from astra.db.models import (Component, DataSubset, Task)
 
 
-def create(component, subset, args=None, schedule=None, output_dir=None):
+def create(component, subset, args=None, scheduled=None, output_dir=None):
     r"""
     Create a task for a component to execute on some data subset.
 
@@ -17,8 +17,8 @@ def create(component, subset, args=None, schedule=None, output_dir=None):
     :param subset:
         The id of the data subset to execute.
 
-    :param schedule: [optional]
-        Specify a schedule datetime for this task to be executed.
+    :param scheduled: [optional]
+        Specify a scheduled datetime for this task to be executed.
     """
 
     if not isinstance(component, Component):
@@ -35,22 +35,30 @@ def create(component, subset, args=None, schedule=None, output_dir=None):
             raise ValueError(f"unrecognized subset id {subset}")
         subset = result
 
-    if schedule is None:
-        schedule = datetime.datetime.now()
+    if scheduled is None:
+        scheduled = datetime.datetime.now()
 
-    elif not isinstance(schedule, datetime.datetime):
-        raise TypeError("if a schedule time is given then it must be a datetime.datetime object")
+    elif not isinstance(scheduled, datetime.datetime):
+        raise TypeError("if a scheduled time is given then it must be a datetime.datetime object")
 
     if output_dir is None:
         # TODO: Assumee CWD? Something from environment variables?
         output_dir = os.getcwd()
         log.info(f"Assuming output directory as {output_dir}")
 
+    if args is not None and not args:
+        args = ""
+    elif isinstance(args, (tuple, list)):
+        args = " ".join(args)
+
     # Create the task.
-    task = Task(component_id=component.id, data_subset_id=subset.id,
-                schedule=schedule, output_dir=output_dir, args=args)
+    log.info(f"Creating task for {component} to execute on {subset} at {scheduled} with args {args}")
+    task = Task(component_id=component.id, subset_id=subset.id, scheduled=scheduled, 
+                output_dir=output_dir, args=args)
     session.add(task)
     session.commit()
+
+    log.info(f"Task created: {task}")
 
     if not os.path.exists(task.output_dir):
         log.info(f"Creating output directory {output_dir}")
@@ -83,11 +91,14 @@ def update(task_id, **kwargs):
         if task is None:
             raise ValueError(f"no task found with id {task.id}")
 
+        log.info(f"Identified task to update: {task}")
+
         for k, v in kwds.items():
             setattr(task, k, v)
 
         task.modified = datetime.datetime.utcnow()
         session.commit()
+        log.info(f"Updated task: {task}")
 
         return task
 
@@ -111,11 +122,13 @@ def delete(task_id):
     if task is None:
         raise ValueError(f"no task found with id {task.id}")
 
-    log.info(f"Deleting task {task}")
+    log.info(f"Identified task for deletion: {task}")
 
     # TODO: handle status' better
     task.status = "DELETED"
     session.commit()
+
+    log.info(f"Marked task {task} as {task.status}")
 
     return task
 

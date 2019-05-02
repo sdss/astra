@@ -5,7 +5,7 @@ from astra.core import task
 from astra.core.subset import _get_likely_subset
 from astra.core.component import _get_likely_component
 from astra.db.connection import session
-from astra.db.models import Task
+from astra.db.models import (Component, Task, DataProductSubsetBridge)
 
 
 @click.group()
@@ -22,7 +22,7 @@ def parser(context):
 @click.option("--output-dir", nargs=1, default=None,
               help="Specify an output directory for this task.")
 @click.option("--schedule", nargs=1, default=None,
-              help="Scheduled this task for a time in the future.")
+              help="Schedule this task for a time in the future.")
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def create(context, component, subset, schedule, output_dir, args):
@@ -55,6 +55,24 @@ def delete(context, task_id):
     return task.delete(task_id)
 
 
+@parser.command()
+@click.pass_context
+def list(context):
+    r""" List all the current tasks. """
+
+    # TODO: List recent 100 or something
+    log.info("Tasks:")
+    tasks = session.query(Task).all()
+    for task in tasks:
+        component = session.query(Component).filter_by(id=task.component_id)
+        N = session.query(DataProductSubsetBridge).filter_by(data_subset_id=task.subset_id).count()
+
+        log.info(f"\t{task.id}: run {component.owner}/{component.product} ({component.version}) on "
+                 f"subset {task.subset_id} ({N} entries)")
+
+    return None
+
+
 
 @parser.command()
 @click.argument("task_id", nargs=1, required=True)
@@ -67,12 +85,12 @@ def update(context, task_id, status):
     log.debug("task.update")
 
     kwds = dict(status=status)
-    for k in kwds.items():
+    for k in kwds.keys():
         if kwds[k] is None: 
-            del k
+            del kwds[k]
 
     if not kwds:
-        click.UsageError("Nothing to update.")
+        raise click.UsageError("Nothing to update.")
 
     return task.update(task_id, **kwds)
 

@@ -120,6 +120,21 @@ def update(context, product, version, owner, default_args, is_active, auto_updat
     return components.update(product=product, version=version, owner=owner, **kwds)
 
 
+# List them.
+@parser.command()
+@click.pass_context
+def list(context):
+    r"""List the components available. """
+
+    components = []
+    for result in session.query(Component).all():
+        components.append(f"{result.owner}/{result.product} {result.version}")
+
+    components = "\n\t".join(components)
+    log.info(f"Available components:\n\t{components}")
+    return None
+
+
 @parser.command()
 @click.argument("product", nargs=1, required=True)
 @click.option("--version", nargs=1, default=None,

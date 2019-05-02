@@ -393,7 +393,7 @@ def _get_likely_component(identifier):
     be a string of the form "{product}/{version}".
     """
 
-    if isinstance(identifer, Component):
+    if isinstance(identifier, Component):
         # This is a component.
         return identifier
 

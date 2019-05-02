@@ -10,7 +10,3 @@ passlib
 sqlalchemy
 sqlalchemy-utils
 click>=7.0
-
-# sdss_tree
-# sdss_access
-# sdss_install
