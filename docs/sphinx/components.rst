@@ -136,10 +136,10 @@ will find the most recent version on GitHub.
 Here are some components that you might be interested in adding to Astra:
 
 - `FERRE <https://github.com/sdss/astra_ferre>`_ (`Allende-Prieto et al. <https://ui.adsabs.harvard.edu/abs/2015AAS...22542207A/abstract>`_; `website <http://www.as.utexas.edu/~hebe/ferre/>`_/`user guide <http://www.as.utexas.edu/~hebe/ferre/ferre.pdf>`_) interpolates between a grid of synthetic spectra and compares the interpolated spectra with observations.
-- `The Cannon <https://github.com/sdss/astra_thecannon>`_ () for building a data-driven model of stellar spectra.
-- `INSYNC <https://github.com/sdss/astra_insync>`_ () estimates stellar parameters and veiling for young star spectra.
-- `The Payne <https://github.com/sdss/astra_thepayne>`_ () trains a single layer fully connected neural network on synthetic spectra.
- - `GSSP <https://github.com/sdss/astra_gssp>`_ () performs a grid search in stellar parameters and is typically used to analyse hot star spectra.
+- `The Cannon <https://github.com/sdss/astra_thecannon>`_ (`Ness et al. <https://ui.adsabs.harvard.edu/abs/2015ApJ...808...16N/abstract>`_) for building a data-driven model of stellar spectra.
+- `INSYNC <https://github.com/sdss/astra_insync>`_ (Cottaar; `original repository <https://bitbucket.org/mcottaar/apogee/src/master>`_) estimates stellar parameters and veiling for young star spectra.
+- `The Payne <https://github.com/sdss/astra_thepayne>`_ (`Ting et al. <https://ui.adsabs.harvard.edu/abs/2018arXiv180401530T/abstract>`_) trains a single layer fully connected neural network on synthetic spectra.
+ - `GSSP <https://github.com/sdss/astra_gssp>`_ (`Tkachenko <https://ui.adsabs.harvard.edu/abs/2015A%26A...581A.129T/abstract>`_ ; `website <https://fys.kuleuven.be/ster/meetings/binary-2015/gssp-software-package>`) performs a grid search in stellar parameters and is typically used to analyse hot star spectra.
 
 If you want all of these components then you can use the commands::
 
