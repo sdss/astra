@@ -432,20 +432,9 @@ def _get_likely_component(identifier):
 
     results = []
     for filters in possible_filters:
+        results.extend(session.query(Component).filter_by(**filters).all())
 
-        try:
-            result = session.query(Component).filter_by(**filters).one_or_none()
-
-        except:
-            # Multiple matches. 
-            continue
-
-        else:
-            if result is None:
-                continue
-            else:
-                results.append(result)
-
+    results = list(set(results))
 
     if len(results) == 0:
         raise ValueError(f"No component found with identifier '{identifier}'. "

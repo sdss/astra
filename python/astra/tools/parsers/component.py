@@ -54,6 +54,10 @@ def add(context, product, version, owner, execution_order, command, description,
     """
     log.debug("component.add")
 
+    if "/" in product:
+        owner, product = product.split("/")
+        log.info(f"Inferring owner as {owner} from given product name")
+
     return component.add(product=product,
                          version=version,
                          owner=owner,
@@ -107,6 +111,8 @@ def update(context, product, version, owner, default_args, is_active, auto_updat
     for k in list(kwds.keys()):
         if kwds[k] is None:
             del kwds[k]
+
+    log.info(f"Keywords: {kwds}")
 
     # TODO: Consider a custom class to check that at least one option 
     #       is required. See: https://stackoverflow.com/questions/44247099/click-command-line-interfaces-make-options-required-if-other-optional-option-is

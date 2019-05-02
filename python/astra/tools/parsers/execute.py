@@ -1,7 +1,10 @@
 
 import click
 import os
+import multiprocessing as mp
 import subprocess
+import threading
+from tempfile import mktemp
 from astra import log
 from astra.db.connection import session
 from astra.db.models import Component
@@ -9,65 +12,32 @@ from astra.core.component import _get_likely_component
 from astra.core import subset, task
 
 
-# Thanks https://stackoverflow.com/questions/48391777/nargs-equivalent-for-options-in-click
-class OptionEatAll(click.Option):
-
-    def __init__(self, *args, **kwargs):
-        self.save_other_options = kwargs.pop('save_other_options', True)
-        nargs = kwargs.pop('nargs', -1)
-        assert nargs == -1, 'nargs, if set, must be -1 not {}'.format(nargs)
-        super(OptionEatAll, self).__init__(*args, **kwargs)
-        self._previous_parser_process = None
-        self._eat_all_parser = None
-
-    def add_to_parser(self, parser, ctx):
-
-        def parser_process(value, state):
-            # method to hook to the parser.process
-            done = False
-            value = [value]
-            if self.save_other_options:
-                # grab everything up to the next option
-                while state.rargs and not done:
-                    for prefix in self._eat_all_parser.prefixes:
-                        if state.rargs[0].startswith(prefix):
-                            done = True
-                    if not done:
-                        value.append(state.rargs.pop(0))
-            else:
-                # grab everything remaining
-                value += state.rargs
-                state.rargs[:] = []
-            value = tuple(value)
-
-            # call the actual process
-            self._previous_parser_process(value, state)
-
-        retval = super(OptionEatAll, self).add_to_parser(parser, ctx)
-        for name in self.opts:
-            our_parser = parser._long_opt.get(name) or parser._short_opt.get(name)
-            if our_parser:
-                self._eat_all_parser = our_parser
-                self._previous_parser_process = our_parser.process
-                our_parser.process = parser_process
-                break
-        return retval
 
 
-@click.command()
+
+def _non_blocking_pipe_read(pipe, queue):
+    f""" A non-blocking and non-destructive pipe reader for long-running interactive jobs. """
+    thread = threading.currentThread()
+    while getattr(thread, "needed", True):
+        queue.put(pipe.readline())
+
+
+@click.command(context_settings=dict(ignore_unknown_options=True))
 @click.argument("component", nargs=1, required=True)
 @click.option("-i", "--from-file", is_flag=True,
               help="specifies that the INPUT_PATH is a text file that contains a list of input "
                    "paths that are separated by new lines")
 @click.argument("input_path", nargs=1, required=True)
 @click.argument("output_dir", nargs=1, required=True)
-@click.option("--args", default=None, cls=OptionEatAll,
-              help="Supply additional arguments to this component.")
+@click.option("--timeout", nargs=1, default=3600,
+              help="Time out in seconds before killing the task.")
+@click.argument("args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
-def execute(context, component, input_path, output_dir, from_file, args, **kwargs):
+def execute(context, component, input_path, output_dir, from_file, timeout, args, **kwargs):
     r"""
     Execute a component on a data product.
     """
+    #context["ignore_unknown_options"] = True
 
     # TODO: THIS SHOULD BE MOVED TO task.execute!
 
@@ -85,9 +55,14 @@ def execute(context, component, input_path, output_dir, from_file, args, **kwarg
         process = subprocess.Popen(command.split(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, encoding="utf-8")
 
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         log.exception(f"Exception when loading {this_component} as module. Continuing anyways!")
         None
+
+    else:
+        stdout, stderr = process.communicate()
+        log.info(f"Stdout:\n{stdout}\n\nStderr:\n{stderr}")
+
 
     # Parse the input paths.
     if from_file:
@@ -115,17 +90,27 @@ def execute(context, component, input_path, output_dir, from_file, args, **kwarg
 
     log.info(f"Created task: {this_task}")
 
-
     # Create a temporary file that has all the data paths in it, which we will pass to the command
     # line function.
+    temp_data_paths = mktemp()
+    with open(temp_data_paths, "w") as fp:
+        fp.write("\n".join(input_paths))
+    log.info(f"Created temporary file {temp_data_paths} for input data paths")
 
-    # Execute the task.
-    args = " ".join(args)
-    command = [this_component.product, "-i", tempfile, output_dir, args]
-    log.info(f"Executin command:\n{command}")
+    # Execute the task
+    command = [this_component.command, "-i", temp_data_paths, output_dir]
+    if this_task.args is not None:
+        if isinstance(this_task.args, str):
+            command.append(this_task.args)
+        else:
+            command.extend(this_task.args)
+
+    log.info(f"Executing command:\n{command}")
+
+
     try:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, 
-                                   stderr=subprocess.PIPE, encoding="utf-8")
+                                   stderr=subprocess.PIPE, encoding="utf-8", bufsize=1)
 
     except subprocess.CalledProcessError:
         log.exception(f"Exception raised when executing task")
@@ -133,10 +118,22 @@ def execute(context, component, input_path, output_dir, from_file, args, **kwarg
         # Update task status.
         task.update(this_task, status="FAILED")
 
-
     else:
-        log.info("Task completed")
-        task.update(this_task, status="COMPLETE")
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+
+        except subprocess.TimeoutExpired:
+            log.exception(f"Time out occurred ({timeout}) when executing task")
+
+            # Update task status.
+            task.update(this_task, status="TIMEOUT")
+
+        else:
+            log.info(f"Standard output:\n{stdout}")
+            log.error(f"Standard error:\n{stderr}")
+
+            log.info("Task completed")
+            task.update(this_task, status="COMPLETE")
+
 
     return None
-    

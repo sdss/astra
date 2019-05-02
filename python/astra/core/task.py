@@ -7,6 +7,16 @@ from astra.db.connection import session
 from astra.db.models import (Component, DataSubset, Task)
 
 
+def _get_probable_task(identifier):
+    if isinstance(identifier, Task):
+        return identifier
+
+    task = session.query(Task).filter_by(id=int(identifier)).one_or_none()
+    if task is None:
+        raise ValueError(f"no task found with id {identifier}")
+    return task
+
+
 def create(component, subset, args=None, scheduled=None, output_dir=None):
     r"""
     Create a task for a component to execute on some data subset.
@@ -85,13 +95,9 @@ def update(task_id, **kwargs):
     kwds = dict([(k, kwargs[k]) for k in relevant_keywords])
 
     if kwds:
-        log.info(f"Updating task {task_id} with {kwds}")
+        task = _get_probable_task(task_id)
 
-        task = session.query(Task).filter_by(id=task_id).one_or_none()
-        if task is None:
-            raise ValueError(f"no task found with id {task.id}")
-
-        log.info(f"Identified task to update: {task}")
+        log.info(f"Identified task to update: {task}, with kwds {kwds}")
 
         for k, v in kwds.items():
             setattr(task, k, v)
@@ -117,10 +123,7 @@ def delete(task_id):
     :param task_id:
         The id of the task to delete.
     """
-   
-    task = session.query(Task).filter_by(id=task_id).one_or_none()
-    if task is None:
-        raise ValueError(f"no task found with id {task.id}")
+    task = _get_probable_task(task_id)
 
     log.info(f"Identified task for deletion: {task}")
 
