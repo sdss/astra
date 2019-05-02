@@ -99,6 +99,7 @@ To add a component to Astra you will need the name of a GitHub repository. If
 you type ``astra component add --help`` in a terminal then this is the output
 you can expect::
 
+    ~$ astra component add --help
     Usage: astra component add [OPTIONS] PRODUCT
 
       Add a new component in Astra from an existing GitHub repository
@@ -134,11 +135,11 @@ will find the most recent version on GitHub.
 
 Here are some components that you might be interested in adding to Astra:
 
-  - FERRE ()
-  - The Cannon ()
-  - INSYNC ()
-  - The Payne ()
-  - GSSP ()
+- `FERRE <https://github.com/sdss/astra_ferre>`_ (`Allende-Prieto et al. <https://ui.adsabs.harvard.edu/abs/2015AAS...22542207A/abstract>`_; `website <http://www.as.utexas.edu/~hebe/ferre/>`_/`user guide <http://www.as.utexas.edu/~hebe/ferre/ferre.pdf>`_) interpolates between a grid of synthetic spectra and compares the interpolated spectra with observations.
+- `The Cannon <https://github.com/sdss/astra_thecannon>`_ () for building a data-driven model of stellar spectra.
+- `INSYNC <https://github.com/sdss/astra_insync>`_ () estimates stellar parameters and veiling for young star spectra.
+- `The Payne <https://github.com/sdss/astra_thepayne>`_ () trains a single layer fully connected neural network on synthetic spectra.
+ - `GSSP <https://github.com/sdss/astra_gssp>`_ () performs a grid search in stellar parameters and is typically used to analyse hot star spectra.
 
 If you want all of these components then you can use the commands::
 
@@ -149,21 +150,25 @@ If you want all of these components then you can use the commands::
   astra component add astra_gssp
 
 
+Astra will fetch and install all of these components and make them accessible
+through `modules <https://github.com/cea-hpc/modules>`_.
+
 
 Component execution order
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The ``execution_order`` key **only** matters for components that rely on the 
+The ``--execution-order`` option **only** matters for components that rely on the 
 output of other components. If your component does not rely on the output of any
-other components (and does not provide outputs that will reasonably be used by 
-other components) then you can set ``execution_order: 0``.
+other components -- and does not provide outputs that will reasonably be used by 
+other components -- then you can leave the default value of zero.
 
 If there are five components that are to run on a given observation, then those
 components will be executed in order of ascending non-negative execution order 
 (``1`` indicates the first execution order). If your component in some part 
 relies on the outputs of other components, then you should set your 
-``execution_order`` to be higher than those other components, otherwise you
+``--execution-order`` to be higher than those other components, otherwise you
 will not be able to access the outputs of those components.
+
 
 
 
@@ -171,7 +176,15 @@ Component command line interface
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The ``command`` describes the command line utility in your component that
-is to be executed by Astra. Ideally this should be installed as a 
+is to be executed by Astra. Ideally this should be specified as a ``script``
+keyword to ``setup()`` in your ``setup.py`` file. 
+
+.. note::
+    If you are are writing a component to add to Astra, then you should look at
+    the [guide to writing your own component].
+
+
+
 ``console_scripts`` entry point in your ``setup.py`` file. Every command line 
 tool that describes a component in Astra **must** accept and follow the following 
 arguments:
