@@ -7,13 +7,17 @@
 
 .. rubric:: :header_no_toc:`Installation`
 
+This document will show you how to install and configure Astra in a self-contained environment.
 
-Preparing a Conda environment for testing
-=========================================
 
-If you already use Conda then we recommend creating a temporary environment for testing
-Astra. You can create a file called `astra-test-environment.yml` that contains the following
-(or download it from [here](LINK))::
+Preparing an environment
+------------------------
+
+If you already use `Conda <http://docs.conda.io/>`_ then we recommend creating a temporary environment
+for testing Astra.
+
+You can create a file called `astra-test-environment.yml` that contains the following
+(or `download it from here <https://github.com/sdss/astra/raw/master/etc/astra-test-environment.yml>`_)::
 
   name: astra-test
   channels:
@@ -23,22 +27,26 @@ Astra. You can create a file called `astra-test-environment.yml` that contains t
     - pip:
       - "--editable=git+https://github.com/sdss/sdss_install.git@master#egg=sdss_install"
 
-Then you can create a Conda environment using the following terminal command::
+Now create a Conda environment using the following terminal command::
 
   conda create -f astra-test-environment.yml
 
-Now activate it using the command::
+And activate it using the command::
 
   source activate astra-test
 
-Once you're done and you want to go back to your normal Conda environment, you can de-activate 
+Now you're ready to install Astra using the ``sdss_install`` tool (see below), and start using
+Astra. Once you're done and you want to go back to your normal Conda environment, you can de-activate 
 this environment using::
 
   source deactivate
 
 
-Installing Astra using ``sdss_install``
-=======================================
+Install
+=======
+
+Install Astra using ``sdss_install``
+------------------------------------
 
 If you created the Conda environment as described above, or you already have ``sdss_install``,
 then you can install Astra using the following terminal command::
@@ -46,16 +54,14 @@ then you can install Astra using the following terminal command::
   sdss_install -G astra
 
 
-Installing Astra from source
-============================
+Install Astra from source
+----------------------------
 
-You can install Astra from source using the following terminal commands::
+Alternatively, you can install Astra from source using the following terminal commands::
 
   git clone git@github.com:sdss/astra.git
   cd astra/
   python setup.py install
-
-
 
 
 If you are running Astra on Utah then you only have to install Astra once, and you can make it
@@ -64,6 +70,15 @@ running ``sdss_install`` then you may want to visit the `frequently encountered 
 page to check that you have all the requisite environment variables set.
 
 
+Setup
+=====
+
+You will need to run the setup function once Astra is installed. You can do this using the following
+terminal command::
+
+  astra setup
+
+And you should see a message telling you Astra is ready. If not, please `raise an issue on GitHub <https://github.com/sdss/astra/issues/new>`_.
 
 
 Configuration
