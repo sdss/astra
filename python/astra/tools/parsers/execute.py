@@ -99,14 +99,14 @@ def execute(context, component, input_path, output_dir, from_file, timeout, args
 
     # Execute the task
     command = [this_component.command, "-i", temp_data_paths, output_dir]
+
     if this_task.args is not None:
         if isinstance(this_task.args, str):
-            command.append(this_task.args)
+            command.extend(this_task.args.split())
         else:
             command.extend(this_task.args)
 
     log.info(f"Executing command:\n{command}")
-
 
     try:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, 

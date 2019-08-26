@@ -153,6 +153,8 @@ html_theme_options = {
     # an arbitrary url.
     'navbar_links': [
         ("Overview", "index"),
+        ("Install", "installation"),
+        ("Tutorials", "tutorials"),
         ("Data", "data"),
         ("Components", "components"),
         ("Tools", "tools"),

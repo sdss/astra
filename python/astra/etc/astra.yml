@@ -1,9 +1,9 @@
 ---
 
 database_config:
-    host: localhost
-    database: astra
-    
+  connection_string: sqlite:///astra.db
+
+
 option1:
     suboption1: 1
     suboption2: "some text"
