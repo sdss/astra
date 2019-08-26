@@ -43,19 +43,36 @@ this environment using::
 
 
 Install
-=======
+-------
 
 Install Astra using ``sdss_install``
-------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If you created the Conda environment as described above, or you already have ``sdss_install``,
 then you can install Astra using the following terminal command::
 
   sdss_install -G astra
 
+If Astra has installed correctly then you should be able to run the following command::
+
+  (astra-test) arc:~/$ astra --help
+  Usage: astra [OPTIONS] COMMAND [ARGS]...
+
+  Options:
+    -v      verbose mode
+    --help  Show this message and exit.
+
+  Commands:
+    component  Add, update, and delete components.
+    execute    Execute a component on a data product.
+    folder     Manage monitoring of data folders.
+    setup      Setup Astra using the current configuration.
+    subset     Create, update, and delete data subsets.
+    task       Create, update, and delete tasks.
+
 
 Install Astra from source
-----------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Alternatively, you can install Astra from source using the following terminal commands::
 
@@ -63,15 +80,37 @@ Alternatively, you can install Astra from source using the following terminal co
   cd astra/
   python setup.py install
 
+If Astra has installed correctly then you should be able to run the following command::
 
-If you are running Astra on Utah then you only have to install Astra once, and you can make it
-available by using the ``module load astra`` command next time you log in. If you have problems
-running ``sdss_install`` then you may want to visit the `frequently encountered problems <#>`_
-page to check that you have all the requisite environment variables set.
+  (astra-test) arc:~/$ astra --help
+  Usage: astra [OPTIONS] COMMAND [ARGS]...
+
+  Options:
+    -v      verbose mode
+    --help  Show this message and exit.
+
+  Commands:
+    component  Add, update, and delete components.
+    execute    Execute a component on a data product.
+    folder     Manage monitoring of data folders.
+    setup      Setup Astra using the current configuration.
+    subset     Create, update, and delete data subsets.
+    task       Create, update, and delete tasks.
+
+
+Installing Astra at Utah
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can install Astra on Utah using the ``sdss_install`` tool. Astra only needs to be installed
+once, and then you can make it available in future sessions by using the command::
+
+  module load astra
+
+next time you log in.
 
 
 Setup
-=====
+-----
 
 You will need to run the setup function once Astra is installed. You can do this using the following
 terminal command::
@@ -82,7 +121,7 @@ And you should see a message telling you Astra is ready. If not, please `raise a
 
 
 Configuration
-=============
+-------------
 
 The configuration for Astra is specified by the ``python/astra/etc/astra.yml`` file. The most
 relevant terms in this file are those that relate to the database. If you need to find where your
