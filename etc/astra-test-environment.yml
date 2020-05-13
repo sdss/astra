@@ -1,8 +1,0 @@
-name: astra-test
-channels:
-dependencies:
-  - python=3.6.5
-  - requests
-  - pip:
-    - "--editable=git+https://github.com/sdss/sdss_install.git@master#egg=sdss_install"
-

@@ -7,7 +7,30 @@
 
 .. rubric:: :header_no_toc:`Installation`
 
-This document will show you how to install and configure Astra in a self-contained environment.
+Astra needs to be installable in two different ways:
+  - Locally (on your computer or cluster) for testing and development
+  - On the SDSS infrastructure, largely hosted at Utah
+
+For most users, Astra will run the same in either installation style. The differences are subtle and will depend on whether modules are installed or not. **TODO**: Andy write more about this.
+
+Local Installation
+------------------
+
+With a local installation we use `Conda <http://docs.conda.io/>`_ to manage a _single_ environment for Astra and all of its components to run from. Run the following commands to create an environment and install Astra:
+  
+  wget -O environment.yml https://github.com/sdss/astra/raw/master/etc/environment.yml
+  conda env create -f environment.yml
+
+Use this command to activate that environment:
+
+  conda activate astra
+
+And to de-activate that environment:
+
+  conda deactivate
+
+
+
 
 
 Preparing an environment
@@ -16,30 +39,32 @@ Preparing an environment
 If you already use `Conda <http://docs.conda.io/>`_ then we recommend creating a temporary environment
 for testing Astra.
 
-You can create a file called `astra-test-environment.yml` that contains the following
-(or `download it from here <https://github.com/sdss/astra/raw/master/etc/astra-test-environment.yml>`_)::
+You can create a file called `sdss_astra_environment.yml` that contains the following
+(or `download it from here <https://github.com/sdss/astra/raw/master/etc/environment.yml>`_)::
 
-  name: astra-test
+  name: sdss_astra
   channels:
   dependencies:
-    - python=3.6.5
+    - python=3.7
     - requests
+    - pip
     - pip:
       - "--editable=git+https://github.com/sdss/sdss_install.git@master#egg=sdss_install"
 
+
 Now create a Conda environment using the following terminal command::
 
-  conda create -f astra-test-environment.yml
+  conda create -f sdss_astra_environment.yml
 
 And activate it using the command::
 
-  source activate astra-test
+  conda activate sdss_astra
 
 Now you're ready to install Astra using the ``sdss_install`` tool (see below), and start using
 Astra. Once you're done and you want to go back to your normal Conda environment, you can de-activate 
 this environment using::
 
-  source deactivate
+  conda deactivate
 
 
 Install
@@ -51,7 +76,7 @@ Install Astra using ``sdss_install``
 If you created the Conda environment as described above, or you already have ``sdss_install``,
 then you can install Astra using the following terminal command::
 
-  sdss_install -G astra
+  sdss_install --github astra master
 
 If Astra has installed correctly then you should be able to run the following command::
 
