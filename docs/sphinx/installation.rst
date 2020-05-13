@@ -7,24 +7,17 @@
 
 .. rubric:: :header_no_toc:`Installation`
 
-Astra needs to be installable in two different ways:
-  - Locally (on your computer or cluster) for testing and development
-  - On the SDSS infrastructure, largely hosted at Utah
+Astra needs to be installable in two different ways. The first way is so it can be run on SDSS infrastructure and work nicely with other SDSS tools, and the second way is so that any SDSS member can run Astra locally on their computer to analyse subsets of data, or to develop analysis components. For most users, Astra will run exactly the same in either installation style. The differences are subtle and will depend on whether modules are installed or not. **TODO**: Andy write more about this.
 
-For most users, Astra will run the same in either installation style. The differences are subtle and will depend on whether modules are installed or not. **TODO**: Andy write more about this.
+Local Installation
+------------------
 
-Install
--------
-
-Local installation
-~~~~~~~~~~~~~~~~~~
-
-With a local installation we use `Conda <http://docs.conda.io/>`_ to manage a _single_ environment for Astra and all of its components to run from. Run the following commands to create an environment and install Astra:
+With a local installation we use `Conda <http://docs.conda.io/>`_ to manage a _single_ environment for Astra and all of its components to run from. Run the following commands to create an environment and install Astra::
   
   wget -O environment.yml https://raw.githubusercontent.com/sdss/astra/master/etc/environment.yml
   conda env create -f environment.yml
 
-Activate the environment to confirm that everything installed correctly, and then run the `astra` command line tool:
+Activate the environment to confirm that everything installed correctly, and then run the `astra` command line tool::
 
   io: conda activate astra
   (astra) io: astra --help
@@ -42,11 +35,11 @@ Activate the environment to confirm that everything installed correctly, and the
     subset     Create, update, and delete data subsets.
     task       Create, update, and delete tasks.
 
-That looks good. Now run the setup routine for Astra to initialise databases, etc.
+That looks good. Now run the setup routine for Astra to initialise the database::
 
   (astra) io: astra setup
 
-Now you're ready to start adding components and processing data. If you ever need to de-activate the Astra environment you can do so with:
+Now you're ready to start adding components and processing data. If you ever need to de-activate the Astra environment you can do so with::
 
   conda deactivate
 
@@ -56,13 +49,13 @@ Now you're ready to start adding components and processing data. If you ever nee
 Local installation to your existing environment 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If you already have a Conda environment that you'd like to install Astra to (instead of having Astra in it's own environment) then you can install it from source:
+If you already have a Conda environment that you'd like to install Astra to (instead of having Astra in it's own environment) then you can install it from source::
 
   git clone git@github.com:sdss/astra.git
   cd astra/
   python setup.py install
 
-Once installed, remember to run the setup routine
+Once installed, remember to run the setup routine::
 
   astra setup
 
