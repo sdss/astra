@@ -2,11 +2,8 @@
 # numpy
 # astropy
 pyyaml>=5.1
-pygments
 sdss-tree>=2.15.2
 sdss-access>=0.2.3
-#sqlite3
-#psycopg2
 passlib
 sqlalchemy
 sqlalchemy-utils
