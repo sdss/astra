@@ -18,7 +18,7 @@ import sys
 # The NAME variable should be of the format "sdss-astra".
 # Please check your NAME adheres to that format.
 NAME = 'astra'
-VERSION = '0.1.3'
+VERSION = '0.1.4'
 RELEASE = 'dev' in VERSION
 
 
