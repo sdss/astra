@@ -38,6 +38,9 @@ def run(packages, install_requires):
           install_requires=install_requires,
           package_dir={'': 'python'},
           scripts=['bin/astra'],
+          entry_points = {
+              'console_scripts': ['astra-test=astra.utils:get_authentication_token'],
+          },
           classifiers=[
               'Development Status :: 4 - Beta',
               'Intended Audience :: Science/Research',

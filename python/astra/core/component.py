@@ -6,12 +6,13 @@ import requests
 import tempfile
 from glob import glob
 import shutil
-from astra import log
+from astra import log, __file__ as astra___file__
 from astra.db.connection import session
 from astra.db.models.component import Component
 from astra.utils import github
 
-from sdss_install.install import Install
+#from sdss_install.install import Install
+from astra.utils.sdss_install_monkey_patch import Install
 from sdss_install.application import Argument#, sdss_install as sdss_install_parser
 
 import pkg_resources
@@ -131,6 +132,10 @@ def add(product, version=None, owner=None, execution_order=0, command=None, desc
         args += [product, version]
 
     options = Argument("sdss_install", args=args).options
+    # TODO: the no_python_package may depend on whether we are using modules or not..
+    options.no_python_package = False 
+    options.evilmake = False
+    
 
     # Specify installation options.
     log.info(f"Installation options: {options}")
@@ -157,7 +162,7 @@ def add(product, version=None, owner=None, execution_order=0, command=None, desc
 
     log.info("Cleaning directory_install and setting remote GitHub URL")
     installation.clean_directory_install()
-    installation.set_github_remote_url()
+    installation.set_sdss_github_remote_url()
 
     log.info("Fetching repository")
     installation.fetch()
@@ -206,7 +211,6 @@ def add(product, version=None, owner=None, execution_order=0, command=None, desc
     installation.directory["work"] = directory_work
 
     # Continue the installation.
-    installation.reset_options_from_config()
     installation.set_build_type()
 
     if not options.module_only:
@@ -216,8 +220,36 @@ def add(product, version=None, owner=None, execution_order=0, command=None, desc
     
     if installation.ready:
         installation.set_modules()
-        if installation.options.moduleshome is None:
-            log.error("No modules home path found!")
+
+        # If we are using modules then we want `sdss_install` to manage the location of SDSS products.
+        # But if we aren't using modules then we want this to be installed to the same location as
+        # other python packages in this environment.
+
+        if installation.options.modules_home is None:
+            log.warning("No modules home path found!")
+            
+            site_package_dir = os.path.abspath(
+                os.path.dirname(
+                    os.path.join(
+                        astra___file__, 
+                        "../../../",
+                    )
+                )
+            )
+            log.info("Since you're not using modules, this component will be installed to the same "
+                     "location as other site packages for this Python environment.")
+            
+            log.info(f"Previous installation directories: {installation.directory}")
+
+            install_dir = os.path.join(site_package_dir, product)
+
+            # TODO: Can we specify the root directory for sdss_install instead of having to do this?
+            installation.directory["install"] = install_dir
+
+            if os.path.exists(install_dir):
+                # TODO: when running locally without modules we may have to state that you can only
+                #       have one version of a component.
+                shutil.rmtree(install_dir)
 
         else:
             installation.modules.set_ready()
@@ -227,20 +259,12 @@ def add(product, version=None, owner=None, execution_order=0, command=None, desc
             installation.modules.set_directory()
             installation.modules.build()
 
-    installation.set_environ()
-
-    # THIS IS A WHOLE BAG OF HACKS TO MAKE SDSS_INSTALL INSTALL SOMETHING
-    site_package_dir = os.path.join(installation.directory["install"], "lib/python3.6/site-packages")
-    #os.makedirs(os.path.join(installation.directory["install"], "lib/python3.6/site-packages"), exist_ok=True)
+            site_package_dir = installation.directory["install"]
 
     log.info(f"Site package directory: {site_package_dir}")
 
-    pythonpath = ":".join([
-        site_package_dir,
-        os.environ["PYTHONPATH"]
-    ])
-    os.environ["PYTHONPATH"] = pythonpath
-    ### 
+    installation.set_environ()
+
     if not options.module_only:
         installation.build()
         installation.build_documentation()
@@ -249,9 +273,6 @@ def add(product, version=None, owner=None, execution_order=0, command=None, desc
 
     installation.finalize()
 
-
-    # Figure out the path where it gets installed to.
-    # TODO
     if not installation.ready:
         raise RuntimeError("installation failed")
 
@@ -266,11 +287,7 @@ def add(product, version=None, owner=None, execution_order=0, command=None, desc
 
     log.info(f"Component {product} version {version} installed: {component}")
 
-    # TODO: What data should it run on?
-    # TODO: Should we trigger it to run on data immediately?
     return component
-
-
 
 
 
