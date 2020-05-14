@@ -39,9 +39,18 @@ That looks good. Now run the setup routine for Astra to initialise the database:
 
   (astra) io: astra setup
 
-Now you're ready to start adding components and processing data. If you ever need to de-activate the Astra environment you can do so with::
+Now in order to add components (that are all hosted on GitHub) you will need an environment variable so that Astra can programatically access certain parts of GitHub. Follow `this guide <https://help.github.com/en/github/authenticating-to-github/creating-a-personal-access-token-for-the-command-line>`_ to create a Personal Access Token. It's best to store your Personal Access Token as an environment variable. Adding something like this to your `~/.bash_profile` will do it::
 
-  conda deactivate
+  export SDSS_GITHUB_KEY=YOUR_GITHUB_PERSONAL_ACCESS_TOKEN
+
+And to enable that environment variable you may need to reload your `~/.bash_profile`::
+
+  source ~/.bash_profile
+
+Now you're ready to start adding components and processing data!
+
+.. note:: If you ever need to de-activate the Astra environment then you can do so with `conda deactivate`.
+
 
 
 

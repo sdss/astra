@@ -59,11 +59,25 @@ def graphql(query_string, token=None):
             raise ValueError("no github.token key found in Astra configuration or SDSS_GITHUB_KEY "
                              "environment variable")
 
-    headers = dict([("Authorization", f"token {token}")])
-    r = requests.post("https://api.github.com/graphql",
-                      json=dict(query=query_string), headers=headers)
+    headers = dict([("Authorization", f"Bearer {token}")])
+    r = requests.post(
+        "https://api.github.com/graphql",
+        json=dict(query=query_string), 
+        headers=headers
+    )
 
     if not r.ok:
+        try:
+            message = r.json().get("message", None)
+        except:
+            None
+
+        if r.status_code == 401 and message == "Bad credentials":
+            raise requests.HTTPError(
+                f"401 Client Error: {message}. Please check that the GitHub Personal Access Token "\
+                f"(set as the SDSS_GITHUB_KEY environment variable or through the 'github.token' "\
+                f"configuration in Astra) is valid.")
+
         r.raise_for_status()
 
     return r.json()
