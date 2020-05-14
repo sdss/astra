@@ -9,8 +9,11 @@
 
 Astra needs to be installable in two different ways. The first way is so it can be run on SDSS infrastructure and work nicely with other SDSS tools, and the second way is so that any SDSS member can run Astra locally on their computer to analyse subsets of data, or to develop analysis components. For most users, Astra will run exactly the same in either installation style. The differences are subtle and will depend on whether modules are installed or not. **TODO**: Andy write more about this.
 
-Local Installation
+Local installation
 ------------------
+
+Into a new environment
+~~~~~~~~~~~~~~~~~~~~~~
 
 With a local installation we use `Conda <http://docs.conda.io/>`_ to manage a _single_ environment for Astra and all of its components to run from. Run the following commands to create an environment and install Astra::
   
@@ -39,11 +42,11 @@ That looks good. Now run the setup routine for Astra to initialise the database:
 
   (astra) io: astra setup
 
-Now in order to add components (that are all hosted on GitHub) you will need an environment variable so that Astra can programatically access certain parts of GitHub. Follow `this guide <https://help.github.com/en/github/authenticating-to-github/creating-a-personal-access-token-for-the-command-line>`_ to create a Personal Access Token. It's best to store your Personal Access Token as an environment variable. Adding something like this to your `~/.bash_profile` will do it::
+Now in order to add components (that are all hosted on GitHub) you will need an environment variable so that Astra can programatically access certain parts of GitHub. Follow `this guide <https://help.github.com/en/github/authenticating-to-github/creating-a-personal-access-token-for-the-command-line>`_ to create a Personal Access Token. It's best to store your Personal Access Token as an environment variable. Adding something like this to your ``~/.bash_profile`` will do it::
 
   export SDSS_GITHUB_KEY=YOUR_GITHUB_PERSONAL_ACCESS_TOKEN
 
-And to enable that environment variable you may need to reload your `~/.bash_profile`::
+And to enable that environment variable you may need to reload your ``~/.bash_profile``::
 
   source ~/.bash_profile
 
@@ -55,8 +58,8 @@ Now you're ready to start adding components and processing data!
 
 
 
-Local installation to your existing environment 
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+To an existing environment 
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If you already have a Conda environment that you'd like to install Astra to (instead of having Astra in it's own environment) then you can install it from source::
 
@@ -75,7 +78,7 @@ which will intialise the database and other things.
 
 
 Installing Astra at Utah
-~~~~~~~~~~~~~~~~~~~~~~~~
+------------------------
 
 You can install Astra on Utah using the ``sdss_install`` tool. Astra only needs to be installed
 once, and then you can make it available in future sessions by using the command::
