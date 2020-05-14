@@ -6,6 +6,7 @@ from shutil import rmtree
 from astra.utils import log
 from sqlalchemy_utils import database_exists, create_database
 from astra.db.connection import Base, engine
+from astra.utils.github import get_authentication_token
 
 @click.command()
 @click.option("-y", "confirm", default=False, is_flag=True,
@@ -47,5 +48,15 @@ def parser(context, confirm):
 
     log.debug("Removing old components")
 
+    # Check for environment variables / configurations.
+    try:
+        get_authentication_token()
+
+    except ValueError:
+        log.warning("No GitHub personal access token found in SDSS_GITHUB_KEY environment variable "
+                    "or through Astra configuration setting 'github.token'. Without a GitHub "
+                    "personal access token you will be unable to add remote components. "
+                    "See https://sdss-astra.readthedocs.io/en/latest/installation.html for details.")
+    
     log.info("Per aspera ad astra; Astra is ready")
     return None

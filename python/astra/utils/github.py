@@ -34,17 +34,19 @@ def validate_repository_name(repository_name):
     return repository_name.strip().lower()
 
 
-def graphql(query_string, token=None):
+def get_authentication_token(token=None):
     r"""
-    Execute a GraphQL query on GitHub.
+    Check the Astra configuration and the SDSS_GITHUB_KEY environment variables (in that order) for 
+    a GitHub personal access token.
 
-    :param query_string:
-        The query string to execute.
-    
     :param token: [optional]
-        The GitHub personal access token to use for this query. If `None` is
-        given then this will default to the access token called "github.token"
-        in ``astra.config``.
+        If given, then this token will be used instead of whatever is stored elsewhere.
+      
+    :returns:
+        The first authentication token that was found.
+
+    :raises ValueError:
+        If no token is given, and no token is found.
     """
 
     if token is None:
@@ -59,6 +61,24 @@ def graphql(query_string, token=None):
             raise ValueError("no github.token key found in Astra configuration or SDSS_GITHUB_KEY "
                              "environment variable")
 
+    return token      
+
+
+def graphql(query_string, token=None):
+    r"""
+    Execute a GraphQL query on GitHub.
+
+    :param query_string:
+        The query string to execute.
+    
+    :param token: [optional]
+        The GitHub personal access token to use for this query. If `None` is
+        given then this will default to the access token called "github.token"
+        in ``astra.config``.
+    """
+
+    token = get_authentication_token(token)
+  
     headers = dict([("Authorization", f"Bearer {token}")])
     r = requests.post(
         "https://api.github.com/graphql",
