@@ -14,11 +14,11 @@ import os
 import argparse
 import sys
 
+from python.astra import __version__ as VERSION
 
 # The NAME variable should be of the format "sdss-astra".
 # Please check your NAME adheres to that format.
 NAME = 'astra'
-VERSION = '0.1.4'
 RELEASE = 'dev' in VERSION
 
 
