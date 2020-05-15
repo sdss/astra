@@ -1,5 +1,7 @@
 name: astra
 channels:
+  - conda-forge
+  - defaults
 dependencies:
   - python=3.7
   - requests
@@ -11,7 +13,8 @@ dependencies:
   - matplotlib
   - ipython
   - click>=7.0
-  - pyyaml>=5.1  
+  - pyyaml>=5.1 
+  - specutils
   - pip: # Even though this won't be used for local installations that don't have modules.
     - "--editable=git+https://github.com/sdss/sdss_install.git@master#egg=sdss_install"
     - "--editable=git+https://github.com/sdss/astra.git@master#egg=astra"
