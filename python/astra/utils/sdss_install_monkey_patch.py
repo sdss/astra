@@ -8,14 +8,21 @@ from sdss_install.install import Install as InstallBase
 
 class Install(InstallBase):
 
-    def build(self):
+    def build(self, install_args=None):
         chdir(self.directory["work"])
         print("In Monkey patch!!")
+
+        if install_args is not None:
+            install_args = install_args.split(" ")
+        else:
+            install_args = []
+
         if 'python' in self.build_type:
             command = [executable,
                         'setup.py',
                         'install',
                     ]
+            command.extend(install_args)
             #            "--prefix=%(install)s" % self.directory]
             self.logger.debug(' '.join(command))
             if not self.options.test:

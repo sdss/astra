@@ -41,13 +41,15 @@ def parser(context):
                    "will default to the description that exists on GitHub.")
 @click.option("-a", "--alt-module",  nargs=1, default=None,
               help="Specify an alternate module name for this component.")
+@click.option("--install-args", nargs=1, default=None,
+              help="Additional arguments to supply when installing this component.")
 @click.option("--default-args", nargs=1, default=None,
               help="Default arguments to supply to the command.")
 @click.option("-t", "--test", is_flag=True, default=False,
               help="Test mode. Do not actually install anything.")
 @click.pass_context
 def add(context, product, version, owner, execution_order, command, description,
-        alt_module, default_args, test):
+        alt_module, install_args, default_args, test):
     r"""
     Add a new component in Astra from an existing GitHub repository (`product`) and a 
     command line tool in that repository (`command`).
@@ -65,6 +67,7 @@ def add(context, product, version, owner, execution_order, command, description,
                          command=command,
                          description=description,
                          alt_module=alt_module,
+                         install_args=install_args,
                          default_args=default_args,
                          test=test)
 

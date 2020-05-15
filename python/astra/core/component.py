@@ -23,7 +23,7 @@ from pkg_resources import DistributionNotFound, VersionConflict
 
 
 def add(product, version=None, owner=None, execution_order=0, command=None, description=None,
-        module_name=None, default_args=None, test=False, **kwargs):
+        module_name=None, install_args=None, default_args=None, test=False, **kwargs):
     r"""
     Add a component for analysing reduced data products.
 
@@ -268,7 +268,7 @@ def add(product, version=None, owner=None, execution_order=0, command=None, desc
     installation.set_environ()
 
     if not options.module_only:
-        installation.build()
+        installation.build(install_args=install_args)
         installation.build_documentation()
         installation.build_package()
         if not options.keep: installation.clean()
