@@ -109,3 +109,6 @@ dev-tmp/
 tmp/
 
 .gitignore
+environment.yml
+reinstall_astra # sandbox tool
+*.db

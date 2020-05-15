@@ -167,6 +167,7 @@ def add(product, version=None, owner=None, execution_order=0, command=None, desc
     log.info("Fetching repository")
     installation.fetch()
 
+    '''
     # Check for requirements.txt to see what is missing.
     requirements_path = os.path.join(twd, "requirements.txt")
     if os.path.exists(requirements_path):
@@ -190,6 +191,7 @@ def add(product, version=None, owner=None, execution_order=0, command=None, desc
 
     else:
         log.error(f"No requirements.txt file found at {requirements_path}")
+    '''
 
     # Get the component CLI
     if command is None:
