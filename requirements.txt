@@ -1,9 +1,9 @@
 
-# numpy
-# astropy
+numpy
+astropy
 pyyaml>=5.1
-sdss-tree>=2.15.2
-sdss-access>=0.2.3
+sdsstools
+sdss-access
 passlib
 sqlalchemy
 sqlalchemy-utils
