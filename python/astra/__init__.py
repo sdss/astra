@@ -6,10 +6,6 @@ import os
 import yaml
 from pkg_resources import parse_version
 
-# Inits the logging system. Only shell logging, and exception and warning catching.
-# File logging can be started by calling log.start_file_logger(name).
-from .utils import log
-
 
 def merge(user, default):
     """Merges a user configuration with the default one."""
