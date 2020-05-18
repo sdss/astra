@@ -109,6 +109,16 @@ class StellarParametersWithFerreFromApStar(BaseApStarTask):
     initial_n_m = luigi.FloatParameter()
     initial_c_m = luigi.FloatParameter()
 
+    """
+    frozen_teff = luigi.FloatParameter(default=None)
+    frozen_logg = luigi.FloatParameter(default=None)
+    frozen_m_h = luigi.FloatParameter(default=None)
+    frozen_alpha_m = luigi.FloatParameter(default=None)
+    frozen_n_m = luigi.FloatParameter(default=None)
+    frozen_c_m = luigi.FloatParameter(default=None)
+    """
+
+
     def requires(self):
         """ Requires a continuum-normalized apStar file. """
         return ContinuumNormalizeApStarBySinesAndCosines(
@@ -140,7 +150,9 @@ class StellarParametersWithFerreFromApStar(BaseApStarTask):
             self.initial_n_m,
             self.initial_c_m
         ]
+        
         frozen_parameters = None
+        
 
         # alpha_m, n_m, c_m,
 
@@ -179,8 +191,10 @@ class StellarParametersWithFerreFromApStar(BaseApStarTask):
         print(f"FERRE stderr:\n{meta['stdout']}")
         for k, v in params.items():
             print(f"Estimated {k}: {v}")
-            
+ 
 
+        raise NotImplementedError
+    
 
 
 if __name__ == "__main__":
@@ -188,7 +202,6 @@ if __name__ == "__main__":
     from glob import glob
     starnames = [p.split("-r8-")[-1][:-5] for p in glob(os.path.join(data_path, "*.fits"))]
 
-    #ContinuumNormalizeApStarBySinesAndCosines(apstar_version=8, starname=starnames[0]).run()
 
     """
     StellarParametersWithFerreFromApStar(
@@ -207,8 +220,8 @@ if __name__ == "__main__":
         synthfile_paths="/Users/arc/research/projects/astra_components/data/ferre/asGK_131216_lsfcombo5v6/p6_apsasGK_131216_lsfcombo5v6_w123.hdr"
     )
 
-    #StellarParametersWithFerreFromApStar(apstar_version=8, starname=starnames[0], **other).run()
-    #raise a
+    StellarParametersWithFerreFromApStar(apstar_version=8, starname=starnames[0], **other).run()
+    raise a
     luigi.build([
         StellarParametersWithFerreFromApStar(apstar_version=8, starname=starname, **other) for starname in starnames
     ])
