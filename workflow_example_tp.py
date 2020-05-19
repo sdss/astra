@@ -1,34 +1,32 @@
-
-
+import luigi
+from astra.tasks.base import BaseTask
 from astra.tasks.io import ApStarFile
 from astra.tasks.continuum import Sinusoidal
-from astra_ferre.tasks import Ferre
+#from astra_ferre.tasks import Ferre
+from astra_thepayne.tasks import Train, Test
 
 
 class ContinuumNormalize(Sinusoidal, ApStarFile):
-
-    # We extend the ContinuumNormalize class with ApStarFile because this
-    # continuum normalization task could be run with many kinds of inputs.
 
     def requires(self):
         return ApStarFile(**self.get_common_param_kwargs(ApStarFile))
 
 
-class StellarParameters(Ferre, ApStarFile):
-    
-    # We extend the FerreStellarParameters class with the ApStarFile class because
-    # FERRE could be run with an ApStar file, an ApVisit file, or something else!
+
+
+class StellarParameters(Test, ApStarFile):
 
     def requires(self):
-        return ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
+        return {
+            "model": Train(**self.get_common_param_kwargs(Train)),
+            "observations": [
+                ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
+            ]
+        }
+
+    def output(self):
+        return luigi.LocalTarget("foo.pkl")
     
-
-
-
-
-
-
-
     
 
 if __name__ == "__main__":
@@ -44,19 +42,24 @@ if __name__ == "__main__":
     )
 
     additional_params = dict(
-        initial_teff=5000,
-        initial_logg=2.0,
-        initial_m_h=0.0,
-        initial_alpha_m=0.0,
-        initial_n_m=0.0,
-        initial_c_m=0.0,
-        synthfile_paths="/Users/arc/research/projects/astra_components/data/ferre/asGK_131216_lsfcombo5v6/p6_apsasGK_131216_lsfcombo5v6_w123.hdr"
+        n_steps=10,
+        training_set_path="/Users/arc/research/projects/astra_components/data/the-payne/kurucz_training_spectra.npz"
     )
 
     params = {**file_params, **additional_params}
 
     workflow = StellarParameters(**params).run()
 
+    raise a
+    luigi.build(
+        [
+            StellarParameters(**params)
+        ],
+        local_scheduler=True,
+        detailed_summary=True
+    )
+
+    raise a
 
     # Do all stars.
     import os
