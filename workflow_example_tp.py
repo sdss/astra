@@ -8,6 +8,8 @@ from astra_thepayne.tasks import Train, Test
 
 class ContinuumNormalize(Sinusoidal, ApStarFile):
 
+    sum_axis = 0 # Stack multiple visits.
+
     def requires(self):
         return ApStarFile(**self.get_common_param_kwargs(ApStarFile))
 
@@ -19,13 +21,9 @@ class StellarParameters(Test, ApStarFile):
     def requires(self):
         return {
             "model": Train(**self.get_common_param_kwargs(Train)),
-            "observations": [
-                ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
-            ]
+            "observation": ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
         }
 
-    def output(self):
-        return luigi.LocalTarget("foo.pkl")
     
     
 
@@ -42,15 +40,17 @@ if __name__ == "__main__":
     )
 
     additional_params = dict(
-        n_steps=10,
-        training_set_path="/Users/arc/research/projects/astra_components/data/the-payne/kurucz_training_spectra.npz"
+        n_steps=1000,
+        training_set_path="/Users/arc/research/projects/astra_components/data/the-payne/kurucz_data.pkl"
     )
 
     params = {**file_params, **additional_params}
+    ContinuumNormalize(**file_params).run()
+    #raise a
+    
+    #workflow = StellarParameters(**params).run()
 
-    workflow = StellarParameters(**params).run()
-
-    raise a
+    #raise a
     luigi.build(
         [
             StellarParameters(**params)
@@ -58,6 +58,8 @@ if __name__ == "__main__":
         local_scheduler=True,
         detailed_summary=True
     )
+
+    workflow = StellarParameters(**params).run()
 
     raise a
 

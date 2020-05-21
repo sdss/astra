@@ -11,8 +11,11 @@ from astra.utils.continuum.sines_and_cosines import normalize
 
 from astra.tasks.base import BaseTask
 
+
+
 class Sinusoidal(BaseTask):
 
+    sum_axis = luigi.IntParameter(default=None)
     L = luigi.FloatParameter(default=1400)
     order = luigi.IntParameter(default=3)
     continuum_regions_path = luigi.Parameter()
@@ -22,7 +25,6 @@ class Sinusoidal(BaseTask):
         
         spectrum = Spectrum1D.read(self.input().path)
 
-        # TODO: Return a Spectrum1D object and write that instead.
         normalized_flux, normalized_ivar, continuum, metadata = normalize(
             spectrum.wavelength.value,
             spectrum.flux.value,
@@ -30,24 +32,39 @@ class Sinusoidal(BaseTask):
             continuum_regions=continuum_regions,
             L=self.L,
             order=self.order,
+            full_output=True
         )
 
+        # Stack if asked.
+        if self.sum_axis is not None:
+            
+            sum_ivar = np.sum(normalized_ivar, axis=self.sum_axis)
+            sum_flux = np.sum(normalized_flux * normalized_ivar, axis=self.sum_axis) / sum_ivar
 
-        output_path = self.output().path
-        with open(output_path, "wb") as fp:
-            pickle.dump(
-                (
-                    spectrum.wavelength.value,
-                    normalized_flux[0], # TODO: Don't just dom first spcetrum
-                    normalized_ivar[0], # TODO: Don't just dom first spcetrum
-                ), 
-                fp, 
-                -1
+            spectrum_kwds = dict(
+                flux=sum_flux * spectrum.flux.unit,
+                uncertainty=InverseVariance(sum_ivar * spectrum.uncertainty.unit)
             )
-    
+
+        else:
+            spectrum_kwds = dict(
+                flux=normalized_flux * spectrum.flux.unit, 
+                uncertainty=InverseVariance(normalized_ivar * spectrum.uncertainty.unit)
+            )
+        
+        normalized_spectrum = Spectrum1D(
+            wcs=spectrum.wcs,
+            meta=spectrum.meta,
+            **spectrum_kwds
+        )
+
+        self.writer(normalized_spectrum, self.output().path)
+
+
 
     def output(self):
         # Put it relative to the input path.
         output_path_prefix, ext = os.path.splitext(self.input().path)
-        return luigi.LocalTarget(f"{output_path_prefix}-norm-sinusoidal-{self.L}-{self.order}.pkl")
+        stacked_str = f'stacked-{self.sum_axis}' if self.sum_axis is not None else 'original'
+        return luigi.LocalTarget(f"{output_path_prefix}-norm-sinusoidal-{self.L}-{self.order}-{stacked_str}.fits")
     

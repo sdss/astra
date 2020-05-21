@@ -6,6 +6,10 @@ import numpy as np
 import os
 from warnings import warn
 
+from astropy.units import Quantity
+from astropy.nddata.nduncertainty import InverseVariance 
+
+
 def normalize(
         dispersion,
         flux, 

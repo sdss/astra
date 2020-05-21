@@ -30,6 +30,11 @@ class ApStarFile(BaseDataModelTask):
     sdss_datamodel = "apStar"
     
 
+    def writer(self, spectrum, path, **kwargs):
+        from astra.tools.spectrum.loaders import write_sdss_apstar
+        return write_sdss_apstar(spectrum, path, **kwargs)
+
+
 
 for klass in (ApVisitFile, ApStarFile):
     for lookup_key in path.lookup_keys(klass.sdss_datamodel):
