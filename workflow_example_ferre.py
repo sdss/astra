@@ -9,6 +9,7 @@ class ContinuumNormalize(Sinusoidal, ApStarFile):
 
     # We extend the ContinuumNormalize class with ApStarFile because this
     # continuum normalization task could be run with many kinds of inputs.
+    sum_axis = 0
 
     def requires(self):
         return ApStarFile(**self.get_common_param_kwargs(ApStarFile))
@@ -57,6 +58,7 @@ if __name__ == "__main__":
 
     workflow = StellarParameters(**params).run()
 
+    raise a
 
     # Do all stars.
     import os
