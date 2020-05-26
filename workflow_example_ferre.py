@@ -27,51 +27,64 @@ class StellarParameters(Ferre, ApStarFile):
 
 
 
-
-
-
     
 
 if __name__ == "__main__":
         
-    # Do single star.
-    file_params = dict(
-        apred="r12",
-        apstar="stars",
-        telescope="apo25m",
-        field="000+14",
-        prefix="ap",
-        obj="2M16505794-2118004",
-    )
+    SINGLE_STAR = True
 
-    additional_params = dict(
-        initial_teff=5000,
-        initial_logg=2.0,
-        initial_m_h=0.0,
-        initial_alpha_m=0.0,
-        initial_n_m=0.0,
-        initial_c_m=0.0,
-        synthfile_paths="/Users/arc/research/projects/astra_components/data/ferre/asGK_131216_lsfcombo5v6/p6_apsasGK_131216_lsfcombo5v6_w123.hdr"
-    )
+    if SINGLE_STAR:
+        
+        import matplotlib.pyplot as plt
 
-    params = {**file_params, **additional_params}
+        # Do single star.
+        file_params = dict(
+            apred="r12",
+            apstar="stars",
+            telescope="apo25m",
+            field="000+14",
+            prefix="ap",
+            obj="2M16505794-2118004",
+        )
 
-    workflow = StellarParameters(**params).run()
+        additional_params = dict(
+            initial_teff=5000,
+            initial_logg=4.0,
+            initial_m_h=-1,
+            initial_alpha_m=0.0,
+            initial_n_m=0.0,
+            initial_c_m=0.0,
+            synthfile_paths="/Users/arc/research/projects/astra_components/data/ferre/asGK_131216_lsfcombo5v6/p6_apsasGK_131216_lsfcombo5v6_w123.hdr"
+        )
 
-    raise a
+        params = {**file_params, **additional_params}
 
-    # Do all stars.
-    import os
-    import luigi
-    from sdss_access import SDSSPath
-    from glob import glob
+        spectrum, result = StellarParameters(**params).run()
 
-    path = SDSSPath()
-    dirname = os.path.dirname(path.full("apStar", **file_params))
+        params, params_err, model_flux, meta = result
 
-    paths = glob(os.path.join(dirname, "*.fits"))
+        fig, ax = plt.subplots()
+        ax.plot(spectrum.wavelength, spectrum.flux[0], c='k')
+        ax.plot(meta["dispersion"][0], model_flux[0], c='r')
 
-    luigi.build([
-        StellarParameters(**{**path.extract("apStar", p), **additional_params}) for p in paths
-    ])
-    
+        plt.show()
+
+
+    else:
+        # Do all stars.
+        # (This will only run tasks if those tasks have not been run before, 
+        #  because we are using luigi.build() instead of task.run())
+        import os
+        import luigi
+        from sdss_access import SDSSPath
+        from glob import glob
+
+        path = SDSSPath()
+        dirname = os.path.dirname(path.full("apStar", **file_params))
+
+        paths = glob(os.path.join(dirname, "*.fits"))
+
+        luigi.build([
+            StellarParameters(**{**path.extract("apStar", p), **additional_params}) for p in paths
+        ])
+        
