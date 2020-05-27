@@ -1,5 +1,3 @@
-
-
 from astra.tasks.io import ApStarFile
 from astra.tasks.continuum import Sinusoidal
 from astra_ferre.tasks import Ferre
@@ -7,8 +5,6 @@ from astra_ferre.tasks import Ferre
 
 class ContinuumNormalize(Sinusoidal, ApStarFile):
 
-    # We extend the ContinuumNormalize class with ApStarFile because this
-    # continuum normalization task could be run with many kinds of inputs.
     sum_axis = 0
 
     def requires(self):
@@ -17,20 +13,16 @@ class ContinuumNormalize(Sinusoidal, ApStarFile):
 
 class StellarParameters(Ferre, ApStarFile):
     
-    # We extend the FerreStellarParameters class with the ApStarFile class because
-    # FERRE could be run with an ApStar file, an ApVisit file, or something else!
-
     def requires(self):
         return ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
     
-
-
-
-
     
 
 if __name__ == "__main__":
         
+    import luigi
+
+    BUILD = False
     SINGLE_STAR = True
 
     if SINGLE_STAR:
@@ -39,6 +31,7 @@ if __name__ == "__main__":
 
         # Do single star.
         file_params = dict(
+            use_remote=True, # Download remote paths if they don't exist.
             apred="r12",
             apstar="stars",
             telescope="apo25m",
@@ -46,6 +39,8 @@ if __name__ == "__main__":
             prefix="ap",
             obj="2M16505794-2118004",
         )
+
+        #https://data.sdss.org/sas/dr16/apogee/spectro/redux/r12/stars/apo25m/000+14/apStar-r12-2M16544175-2148453.fits
 
         additional_params = dict(
             initial_teff=5000,
@@ -59,16 +54,29 @@ if __name__ == "__main__":
 
         params = {**file_params, **additional_params}
 
-        spectrum, result = StellarParameters(**params).run()
+        task = StellarParameters(**params)
 
-        params, params_err, model_flux, meta = result
 
-        fig, ax = plt.subplots()
-        ax.plot(spectrum.wavelength, spectrum.flux[0], c='k')
-        ax.plot(meta["dispersion"][0], model_flux[0], c='r')
+        if not BUILD:
+            # This will execute the task even if it has alredy been completed.
+            # (But it requires that the tasks it depends on have been executed! Use luigi.build to control the workflow)
+            spectrum, result = task.run()
 
-        plt.show()
+            params, params_err, model_flux, meta = result
 
+            fig, ax = plt.subplots()
+            ax.plot(spectrum.wavelength, spectrum.flux[0], c='k')
+            ax.plot(meta["dispersion"][0], model_flux[0], c='r')
+
+            plt.show()
+
+        else:
+            # Use Luigi' Build functionality to run the pipeline (do this the first time you use this script).
+            result = luigi.build(
+                [task],
+                local_scheduler=True,
+                detailed_summary=True
+            )
 
     else:
         # Do all stars.
