@@ -154,11 +154,12 @@ html_theme_options = {
     'navbar_links': [
         ("Install", "install"),
         ("Tutorials", "tutorials"),
-        ("Data", "data"),
+ #       ("Data", "data"),
         ("Components", "components"),
-        ("Tools", "tools"),
-        ("API", "api"),
-        ("Road map", "roadmap"),
+#        ("Tools", "tools"),
+        ("Tasks", "tasks"),
+#        ("API", "api"),
+ #       ("Road map", "roadmap"),
     ],
 
     # Render the next and previous page links in navbar. (Default: true)
