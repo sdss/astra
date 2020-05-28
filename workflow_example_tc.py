@@ -40,9 +40,8 @@ if __name__ == "__main__":
 
     additional_params = dict(
         order=2,
-        label_names=("teff", "logg", "fe_h"),
-        regularization=1e-6,
-        training_set_path="/Users/arc/research/projects/astra_components/data/the-payne/kurucz_data.pkl",
+        label_names=("TEFF", "LOGG", "FE_H"),
+        training_set_path="/Users/arc/research/projects/astra_components/data/the-cannon/dr14-apogee-giant-training-set.pkl",
     )
 
     params = {**file_params, **additional_params}
