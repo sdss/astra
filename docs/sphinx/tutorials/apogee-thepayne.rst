@@ -63,6 +63,21 @@ The `Sinusoidal` class has four parameters that we need to define:
 The `Sinusoidal` class already has an `output()` function defined that will save the continuum-normalized spectrum to the same directory as the input path, but you can overwrite this if you want by defining your own `output()` function.
 
 
+Creating a training set
+~~~~~~~~~~~~~~~~~~~~~~~
+
+You can `download the training set file used in this workflow (55 MB) <https://drive.google.com/file/d/1RfhkyZBKY3he6sTSM67KPQfVfMnIg_cs/view?usp=sharing>`_, or create one yourself. This will be easier to do in future (e.g., by specifying groups of apStar data models and results), but for now you will have to follow a particular file format if you want to create your own training set file.
+
+The training set file should be a binary `pickle <https://docs.python.org/3/library/pickle.html>`_ file that contains a dictionary with the following keys:
+
+- `wavelength`: an array of shape `(P, )` where `P` is the number of pixels
+- `spectra`: an array of shape `(N, P)` where `N` is the number of spectra and `P` is the number of pixels
+- `labels`: an array of shape `(L, P)` where `L` is the number of labels and `P` is the number of pixels
+- `label_names`: a tuple of length `L` that describes the names of the labels
+
+
+
+
 Training *The Payne*
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -74,7 +89,6 @@ We already have a task defined to train *The Payne*, called `astra_thepayne.task
 - `weight_decay`: the decay to apply to the weights (default: 0)
 - `learning_rate`: the learning rate to apply during training (default: 0.001)
 
-You can `download the training set file used in this workflow (55 MB) <https://drive.google.com/file/d/1RfhkyZBKY3he6sTSM67KPQfVfMnIg_cs/view?usp=sharing>`_, or create one yourself.
 
 Since we don't need to make any changes to the existing `astra_thepayne.tasks.Train` task defined in Astra, let's move straight on to estimating stellar parameters.
 
