@@ -154,10 +154,11 @@ html_theme_options = {
     'navbar_links': [
         ("Install", "install"),
         ("Tutorials", "tutorials"),
- #       ("Data", "data"),
-        ("Components", "components"),
-#        ("Tools", "tools"),
         ("Tasks", "tasks"),
+        ("Components", "components"),
+ #       ("Data", "data"),
+
+#        ("Tools", "tools"),
 #        ("API", "api"),
  #       ("Road map", "roadmap"),
     ],
