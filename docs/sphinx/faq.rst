@@ -17,6 +17,5 @@
 
 2. I am getting a an "AttributeError: 'Auth' object has no attribute 'netrc'" exception.
 
-    See https://sdss-access.readthedocs.io/en/latest/api.html?highlight=netrc#sdss_access.sync.auth.Auth.set_netrc
-
+    See https://github.com/sdss/sdss_access/issues/16
   

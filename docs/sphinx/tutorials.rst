@@ -14,7 +14,7 @@
 APOGEE spectra
 --------------
 - `Workflow for running *FERRE* on *APOGEE apStar* spectra <tutorials/apogee-ferre.html>`_
-- Workflow for training and running *The Cannon* on *APOGEE apStar* spectra
+- `Workflow for training and running *The Cannon* on *APOGEE apStar* spectra <tutorials/apogee-thecannon.html>`_
 - `Workflow for training and running *The Payne* on *APOGEE apStar* spectra <tutorials/apogee-thepayne.html>`_
 - Workflow for running *IN-SYNC* on *APOGEE apStar* spectra
 

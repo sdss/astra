@@ -61,10 +61,8 @@ class Sinusoidal(BaseTask):
         self.writer(normalized_spectrum, self.output().path)
 
 
-
     def output(self):
         # Put it relative to the input path.
         output_path_prefix, ext = os.path.splitext(self.input().path)
-        stacked_str = f'stacked-{self.sum_axis}' if self.sum_axis is not None else 'original'
-        return luigi.LocalTarget(f"{output_path_prefix}-norm-sinusoidal-{self.L}-{self.order}-{stacked_str}.fits")
+        return luigi.LocalTarget(f"{output_path_prefix}-{self.task_id}.fits")
     
