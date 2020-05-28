@@ -2,7 +2,6 @@ import luigi
 from astra.tasks.base import BaseTask
 from astra.tasks.io import ApStarFile
 from astra.tasks.continuum import Sinusoidal
-#from astra_ferre.tasks import Ferre
 from astra_thepayne.tasks import Train, Test
 
 
@@ -12,8 +11,6 @@ class ContinuumNormalize(Sinusoidal, ApStarFile):
 
     def requires(self):
         return ApStarFile(**self.get_common_param_kwargs(ApStarFile))
-
-
 
 
 class StellarParameters(Test, ApStarFile):
@@ -45,36 +42,11 @@ if __name__ == "__main__":
     )
 
     params = {**file_params, **additional_params}
-    ContinuumNormalize(**file_params).run()
-    #raise a
     
-    #workflow = StellarParameters(**params).run()
+    task = StellarParameters(**params)
 
-    #raise a
     luigi.build(
-        [
-            StellarParameters(**params)
-        ],
+        [task],
         local_scheduler=True,
         detailed_summary=True
     )
-
-    workflow = StellarParameters(**params).run()
-
-    raise a
-
-    # Do all stars.
-    import os
-    import luigi
-    from sdss_access import SDSSPath
-    from glob import glob
-
-    path = SDSSPath()
-    dirname = os.path.dirname(path.full("apStar", **file_params))
-
-    paths = glob(os.path.join(dirname, "*.fits"))
-
-    luigi.build([
-        StellarParameters(**{**path.extract("apStar", p), **additional_params}) for p in paths
-    ])
-    
