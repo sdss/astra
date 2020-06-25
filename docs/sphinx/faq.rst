@@ -14,3 +14,8 @@
    Check to make sure you have the ``SDSS_GITHUB_KEY``, ``SDSS_INSTALL_GRAPHQL_DIR``, and
    ``SDSS_INSTALL_PRODUCT_ROOT`` environment variables set.
    
+
+2. I am getting a an "AttributeError: 'Auth' object has no attribute 'netrc'" exception.
+
+    See https://github.com/sdss/sdss_access/issues/16
+  

@@ -10,6 +10,8 @@
 
 .. rubric:: :header_no_toc:`Tools`
 
+**(This documentation will become out-of-date as Astra moves to using Luigi Tasks instead of command-line tools).**
+
 
 ``astra``
 ========

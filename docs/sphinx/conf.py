@@ -152,14 +152,15 @@ html_theme_options = {
     # Note the "1" or "True" value above as the third argument to indicate
     # an arbitrary url.
     'navbar_links': [
-        ("Overview", "index"),
-        ("Install", "installation"),
+        ("Install", "install"),
         ("Tutorials", "tutorials"),
-        ("Data", "data"),
+        ("Tasks", "tasks"),
         ("Components", "components"),
-        ("Tools", "tools"),
-        ("API", "api"),
-        ("Road map", "roadmap"),
+ #       ("Data", "data"),
+
+#        ("Tools", "tools"),
+#        ("API", "api"),
+ #       ("Road map", "roadmap"),
     ],
 
     # Render the next and previous page links in navbar. (Default: true)

@@ -55,27 +55,56 @@ def load_sdss_apstar(path, **kwargs):
         flux = np.atleast_2d(image[1].data) * units
         uncertainty = InverseVariance(image[2].data.reshape(flux.shape)**-2)
 
-        verbosity = kwargs.get("verbosity", 0)
+        verbosity = kwargs.get("verbosity", 1)
         meta = OrderedDict([
             ("header", image[0].header),
-            ("mask", image[3].data.reshape(flux.shape))
+            ("mask", image[3].data)
         ])
 
-        if verbosity > 1:
+        if verbosity >= 1:
             meta["hdu_headers"] = [hdu.header for hdu in image]
 
-        if verbosity > 2:
+        if verbosity >= 2:
             meta.update(OrderedDict([
-                ("sky_flux", image[4].data.reshape(flux.shape) * units),
-                ("sky_error", image[5].data.reshape(flux.shape) * units),
-                ("telluric_flux", image[6].data.reshape(flux.shape) * units),
-                ("telluric_error", image[7].data.reshape(flux.shape) * units),
+                ("sky_flux", image[4].data * units),
+                ("sky_error", image[5].data * units),
+                ("telluric_flux", image[6].data * units),
+                ("telluric_error", image[7].data * units),
                 ("lsf_coefficients", image[8].data),
                 ("rv_ccf_structure", image[9].data)
             ]))
 
     return Spectrum1D(spectral_axis=spectral_axis, flux=flux, uncertainty=uncertainty, meta=meta)
 
+
+# TODO: Incorporate this into data_loaders somehow....
+def write_sdss_apstar(spectrum, path, **kwargs):
+    r"""
+    Write a Spectrum1D object to a path that is consistent with the SDSS apStar data model.
+
+    :param spectrum:
+        The spectrum to write.
+
+    :param path:
+        The local path to write to.
+    """
+
+    units = u.Unit("1e-17 erg / (Angstrom cm2 s)")
+    hdu_list = fits.HDUList([
+        fits.PrimaryHDU(),
+        fits.ImageHDU(spectrum.flux.to(units).value), # flux
+        fits.ImageHDU(spectrum.uncertainty.quantity.value**-2), # sigma
+        fits.ImageHDU(spectrum.meta["mask"]), # mask
+    ])
+
+    for hdu, header in zip(hdu_list, spectrum.meta.get("hdu_headers")):
+        hdu.header = header
+    
+    hdu_list.writeto(path, **kwargs)
+
+    return True
+
+    
 
 @data_loader("SDSS APOGEE apVisit", 
              identifier=lambda o, *a, **k: _is_sdss_data_model(a[0], "apVisit"),
@@ -106,15 +135,15 @@ def load_sdss_apvisit(path, **kwargs):
         common_meta = OrderedDict([
             ("header", image[0].header),
         ])
-        verbosity = kwargs.get("verbosity", 0)
-        if verbosity > 1:
+        verbosity = kwargs.get("verbosity", 1)
+        if verbosity >= 1:
             common_meta["hdu_headers"] = [hdu.header for hdu in image]
 
         structured_meta = OrderedDict([
             ("mask", image[3].data.reshape(flux.shape)),
         ])
 
-        if verbosity > 2:
+        if verbosity >= 2:
             structured_meta.update(OrderedDict([
                 ("sky_flux", image[5].data.reshape(flux.shape) * units),
                 ("sky_error", image[6].data.reshape(flux.shape) * units),
