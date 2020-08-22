@@ -4,7 +4,7 @@
 import click
 import argparse
 import os
-from astra import log
+from astra.utils import log
 from logging import DEBUG, INFO
 
 from astra.tools.parsers import (component, folder, setup, subset, task, execute)
