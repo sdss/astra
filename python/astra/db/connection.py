@@ -4,7 +4,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.ext.declarative import declarative_base
 
-from astra import config, log
+from astra import config
+from astra.utils import log
 
 # TODO: allow for multiple database configurations to be given in the config
 #       and then have the user specify?
