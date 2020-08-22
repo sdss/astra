@@ -6,7 +6,8 @@ import requests
 import tempfile
 from glob import glob
 import shutil
-from astra import log, __file__ as astra___file__
+from astra __file__ as astra___file__
+from astra.utils import log
 from astra.db.connection import session
 from astra.db.models.component import Component
 from astra.utils import github

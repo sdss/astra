@@ -1,6 +1,6 @@
 import click
 
-from astra import log
+from astra.utils import log
 from astra.core import subset
 from astra.db.connection import session
 from astra.db.models import DataSubset

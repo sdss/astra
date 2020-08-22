@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import os
 import re
 import datetime
-from astra import log
+from astra.utils import log
 from astra.db.connection import session
 from astra.db.models.folder import Folder
 from astra.db.models.data import DataProduct

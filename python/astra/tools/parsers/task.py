@@ -1,6 +1,6 @@
 import click
 
-from astra import log
+from astra.utils import log
 from astra.core import task
 from astra.core.subset import _get_likely_subset
 from astra.core.component import _get_likely_component

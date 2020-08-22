@@ -5,7 +5,7 @@ import multiprocessing as mp
 import subprocess
 import threading
 from tempfile import mktemp
-from astra import log
+from astra.utils import log
 from astra.db.connection import session
 from astra.db.models import Component
 from astra.core.component import _get_likely_component

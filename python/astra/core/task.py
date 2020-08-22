@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import os
 import datetime
-from astra import log
+from astra.utils import log
 from astra.db.connection import session
 from astra.db.models import (Component, DataSubset, Task)
 

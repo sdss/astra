@@ -1,7 +1,7 @@
 import datetime
 import os
 import re
-from astra import log
+from astra.utils import log
 from astra.db.connection import session
 from astra.db.models import (DataSubset, DataProduct, DataProductSubsetBridge)
 
