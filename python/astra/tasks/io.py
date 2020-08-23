@@ -7,6 +7,13 @@ from sdss_access import SDSSPath, RsyncAccess, HttpAccess
 from astra.tasks.base import BaseTask
 
 
+class LocalTargetTask(BaseTask):
+    path = luigi.Parameter()
+    def output(self):
+        return luigi.LocalTarget(self.path)
+    
+
+
 # $APOGEE_REDUX/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/{prefix}Visit-{apred}-{plate}-{mjd}-{fiber:0>3}.fits
 # mastargoodspec: $MANGA_SPECTRO_MASTAR/{drpver}/{mastarver}/mastar-goodspec-{drpver}.fits.gz
 
