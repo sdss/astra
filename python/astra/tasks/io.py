@@ -141,8 +141,12 @@ class ApStarFile(SDSSDataModelTask):
         return write_sdss_apstar(spectrum, path, **kwargs)
 
 
+class AllStarFile(SDSSDataModelTask):
 
-for klass in (ApVisitFile, ApStarFile):
+    sdss_data_model_name = "allStar"
+
+    
+for klass in (ApVisitFile, ApStarFile, AllStarFile):
     for lookup_key in klass()._sdss_path.lookup_keys(klass.sdss_data_model_name):
         setattr(klass, lookup_key, luigi.Parameter())
 
