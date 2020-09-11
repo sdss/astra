@@ -39,4 +39,4 @@ if os.path.exists(custom_config_path):
         custom_config = yaml.load(custom_config_path, **yaml_kwds)
     config = merge(custom_config, config)
 
-__version__ = '0.1.9-dev'
+__version__ = '0.1.10-dev'

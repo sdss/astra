@@ -126,6 +126,8 @@ class SDSSDataModelTask(BaseTask):
             return f()
         
 
+class ApPlanFile(SDSSDataModelTask):
+    sdss_data_model_name = "apPlan"
 
 
 class ApVisitFile(SDSSDataModelTask):
@@ -135,7 +137,6 @@ class ApVisitFile(SDSSDataModelTask):
 class ApStarFile(SDSSDataModelTask):
     sdss_data_model_name = "apStar"
     
-
     def writer(self, spectrum, path, **kwargs):
         from astra.tools.spectrum.loaders import write_sdss_apstar
         return write_sdss_apstar(spectrum, path, **kwargs)
@@ -146,7 +147,7 @@ class AllStarFile(SDSSDataModelTask):
     sdss_data_model_name = "allStar"
 
     
-for klass in (ApVisitFile, ApStarFile, AllStarFile):
+for klass in (ApPlanFile, ApVisitFile, ApStarFile, AllStarFile):
     for lookup_key in klass()._sdss_path.lookup_keys(klass.sdss_data_model_name):
         setattr(klass, lookup_key, luigi.Parameter())
 
