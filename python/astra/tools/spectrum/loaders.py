@@ -47,18 +47,25 @@ def load_sdss_apstar(path, **kwargs):
     """
     units = u.Unit("1e-17 erg / (Angstrom cm2 s)")
 
+
     with fits.open(path, **kwargs) as image:
         # Build spectral axis ourselves because specutils does not handle
         # log-linear transformations yet.
         spectral_axis = _wcs_log_linear(image[1].header)
 
-        flux = np.atleast_2d(image[1].data) * units
-        uncertainty = InverseVariance(image[2].data.reshape(flux.shape)**-2)
+        data_slice = kwargs.get("data_slice", None)
+        if data_slice is None:
+            slicer = np.atleast_2d
+        else:
+            slicer = lambda _: np.atleast_2d(_)[data_slice]
+        
+        flux = slicer(image[1].data) * units
+        uncertainty = InverseVariance(slicer(image[2].data)**-2)
 
         verbosity = kwargs.get("verbosity", 1)
         meta = OrderedDict([
             ("header", image[0].header),
-            ("mask", image[3].data)
+            ("mask", slicer(image[3].data))
         ])
 
         if verbosity >= 1:
@@ -66,12 +73,12 @@ def load_sdss_apstar(path, **kwargs):
 
         if verbosity >= 2:
             meta.update(OrderedDict([
-                ("sky_flux", image[4].data * units),
-                ("sky_error", image[5].data * units),
-                ("telluric_flux", image[6].data * units),
-                ("telluric_error", image[7].data * units),
-                ("lsf_coefficients", image[8].data),
-                ("rv_ccf_structure", image[9].data)
+                ("sky_flux", slicer(image[4].data) * units),
+                ("sky_error", slicer(image[5].data) * units),
+                ("telluric_flux", slicer(image[6].data) * units),
+                ("telluric_error", slicer(image[7].data) * units),
+                ("lsf_coefficients", slicer(image[8].data)),
+                ("rv_ccf_structure", slicer(image[9].data))
             ]))
 
     return Spectrum1D(spectral_axis=spectral_axis, flux=flux, uncertainty=uncertainty, meta=meta)
