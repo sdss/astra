@@ -1,6 +1,7 @@
 import os
 import luigi
 import types
+from pathlib import Path
 
 from sdss_access import SDSSPath, RsyncAccess, HttpAccess
 
@@ -49,25 +50,57 @@ class SDSSDataModelTask(BaseTask):
 
     def __init__(self, *args, **kwargs):
         super(SDSSDataModelTask, self).__init__(*args, **kwargs)
-
-        self._sdss_path = SDSSPath(
-            release=self.release,
-            public=self.public,
-            mirror=self.mirror,
-            verbose=self.verbose
-        )
         return None
 
+
+
+    @property
+    def tree(self):
+        try:
+            return self._tree
+
+        except AttributeError:
+            self._tree = SDSSPath(
+                release=self.release,
+                public=self.public,
+                mirror=self.mirror,
+                verbose=self.verbose
+            )
+
+        return self._tree
+        
 
     @property
     def local_path(self):
         """ The local path of the file. """
-        return self._sdss_path.full(self.sdss_data_model_name, **self.param_kwargs)
+        try:
+            return self._local_path
+            
+        except AttributeError:
+            self._local_path = self.tree.full(self.sdss_data_model_name, **self.param_kwargs)
+            
+        return self._local_path
         
+    @classmethod
+    def get_local_path(cls, release, public=True, mirror=False, verbose=True, **kwargs):
+        tree = SDSSPath(
+            release=release,
+            public=public,
+            mirror=mirror,
+            verbose=verbose
+        )
+        return tree.full(cls.sdss_data_model_name, **kwargs)
     
+
+
     def output(self):
-        if not os.path.exists(self.local_path) and self.use_remote:
-            self.get_remote()
+        if self.use_remote:
+            if (os.path.exists(self.local_path) and Path(self.local_path).stat().st_size < 1):
+                # Corrupted. Zero file.
+                os.unlink(self.local_path)
+
+            if not os.path.exists(self.local_path):
+                self.get_remote()
     
         return luigi.LocalTarget(self.local_path)
 
@@ -82,7 +115,7 @@ class SDSSDataModelTask(BaseTask):
         )
         http.remote()
         return http.get(self.sdss_data_model_name, **{
-                k: getattr(self, k) for k in self._sdss_path.lookup_keys(self.sdss_data_model_name)
+                k: getattr(self, k) for k in self.tree.lookup_keys(self.sdss_data_model_name)
             }
         )
 
@@ -99,7 +132,7 @@ class SDSSDataModelTask(BaseTask):
         rsync.remote()
         rsync.add(
             self.sdss_data_model_name, **{
-                k: getattr(self, k) for k in self._sdss_path.lookup_keys(self.sdss_data_model_name)
+                k: getattr(self, k) for k in self.tree.lookup_keys(self.sdss_data_model_name)
             }
         )
         rsync.set_stream()
@@ -148,8 +181,8 @@ class AllStarFile(SDSSDataModelTask):
 
     
 for klass in (ApPlanFile, ApVisitFile, ApStarFile, AllStarFile):
-    for lookup_key in klass()._sdss_path.lookup_keys(klass.sdss_data_model_name):
-        setattr(klass, lookup_key, luigi.Parameter())
+    for lookup_key in klass().tree.lookup_keys(klass.sdss_data_model_name):
+        setattr(klass, lookup_key, luigi.Parameter(batch_method=tuple))
 
 
 
