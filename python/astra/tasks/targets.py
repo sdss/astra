@@ -76,8 +76,15 @@ class BaseDatabaseTarget(luigi.Target):
                 metadata.create_all(self.engine)
             
             else:
-                metadata.reflect(only=[self.parameters_table], bind=self.engine)
-                self._parameters_table_bound = metadata.tables[self.parameters_table]
+                #metadata.reflect(only=[self.parameters_table], bind=self.engine)
+                #self._parameters_table_bound = metadata.tables[self.parameters_table]
+                self._parameters_table_bound = sqlalchemy.Table(
+                    self.parameters_table,
+                    metadata,
+                    autoload=True,
+                    autoload_with=self.engine
+                )
+
         return self._parameters_table_bound
 
 
@@ -106,10 +113,17 @@ class BaseDatabaseTarget(luigi.Target):
                     self.results_table, metadata, *self.results_schema
                 )
                 metadata.create_all(self.engine)
-
             else:
-                metadata.reflect(only=[self.results_table], bind=self.engine)
-                self._results_table_bound = metadata.tables[self.results_table]
+                #metadata.reflect(only=[self.results_table], bind=self.engine)
+                #self._results_table_bound = metadata.tables[self.results_table]
+                self._results_table_bound = sqlalchemy.Table(
+                    self.results_table,
+                    metadata,
+                    autoload=True,
+                    autoload_with=self.engine
+                )
+
+
         return self._results_table_bound
 
     @property
