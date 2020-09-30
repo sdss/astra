@@ -1,6 +1,7 @@
 
 import os
-import collections 
+import collections
+import datetime
 import json
 import luigi
 import sqlalchemy
@@ -127,28 +128,28 @@ class BaseDatabaseTarget(luigi.Target):
         return self.read_results() is not None
 
 
-    def read_results(self):
-        table = self.results_table_bound
+    def read_results(self, as_dict=False):
+        return self._read(self.results_table_bound, as_dict)
+
+
+    def read_parameters(self, as_dict=False):
+        return self._read(self.parameters_table_bound, as_dict)
+        
+
+    def _read(self, table, as_dict):
         with self.engine.begin() as connection:
             s = sqlalchemy.select([table]).where(
                 table.c.task_id == self.task_id
             ).limit(1)
             row = connection.execute(s).fetchone()
+        if as_dict:
+            column_names = (column.name for column in table.columns)
+            return collections.OrderedDict(zip(column_names, row))
         return row
 
 
-    def read_parameters(self):
-        table = self.parameters_table_bound
-        with self.engine.begin() as connection:
-            s = sqlalchemy.select([table]).where(
-                table.c.task_id == self.task_id
-            ).limit(1)
-            row = connection.execute(s).fetchone()
-        return row
-
-
-    def read(self):
-        return self.read_results()
+    def read(self, as_dict=False):
+        return self.read_results(as_dict=as_dict)
 
 
     def write_results(self, data):
@@ -174,18 +175,29 @@ class BaseDatabaseTarget(luigi.Target):
     def write_parameters(self, data):
         exists = self.read_parameters() is not None
         table = self.parameters_table_bound
+        sanitised_data = {}
+        for key, value in data.items():
+            if not isinstance(value, (datetime.datetime, datetime.date)):
+                try:
+                    value = str(value)
+                except:
+                    value = json.dumps(value)
+                
+            sanitised_data[key] = value
+        
+
         with self.engine.begin() as connection:
             if not exists:
                 insert = table.insert().values(
                     task_id=self.task_id,
-                    **data
+                    **sanitised_data
                 )
             else:
                 insert = table.update().where(
                     table.c.task_id == self.task_id
                 ).values(
                     task_id=self.task_id,
-                    **data
+                    **sanitised_data
                 )
             connection.execute(insert)
         
@@ -199,7 +211,36 @@ class BaseDatabaseTarget(luigi.Target):
 
 class DatabaseTarget(BaseDatabaseTarget):
 
+    """ 
+    A database target for outputs of task results. 
+    
+    This class should be sub-classed, where the sub-class has the attribute `results_schema` that is a list containing the
+    table columns for the results table. For example:
+
+    ```
+    results_schema = [
+        sqlalchemy.Column("effective_temperature", sqlalchemy.Float()),
+        sqlalchemy.Column("surface_gravity", sqlalchemy.Float())
+    ]
+    ```
+
+    The `task_id` of the task supplied will be added as a column by default.
+    """
+
     def __init__(self, task, echo=False, only_significant=True):
+        """
+        A database target for outputs of task results.
+
+        :param task:
+            The task that this output will be the target for. This is necessary to reference the task ID, and to generate the table
+            schema for the task parameters.
+
+        :param echo: [optional]
+            Echo the SQL queries that are supplied (default: False).
+        
+        :param only_significant: [optional]
+            When storing the parameter values of the task in a database, only store the significant parameters (default: True).
+        """
         
         self.task = task
         self.only_significant = only_significant
