@@ -21,6 +21,9 @@ class BaseTask(luigi.Task, metaclass=Register):
     )
 
     def __init__(self, *args, **kwargs):
+
+        strict = kwargs.pop("strict", False)
+
         super(BaseTask, self).__init__(*args, **kwargs)
 
         params = self.get_params()
@@ -33,7 +36,8 @@ class BaseTask(luigi.Task, metaclass=Register):
         # Register kwargs as an attribute on the class. Might be useful
         self.param_kwargs = dict(param_values)
 
-        self._warn_on_wrong_param_types()
+        self._warn_on_wrong_param_types(strict)
+
         str_params = self.to_str_params(only_significant=True, only_public=True)
         self.task_id = task_id_str(
             self.get_task_family(), 
@@ -46,6 +50,16 @@ class BaseTask(luigi.Task, metaclass=Register):
         self.set_progress_percentage = None
         self._max_params_in_repr = 10
 
+
+    def _warn_on_wrong_param_types(self, strict=False):
+        params = dict(self.get_params())
+        batch_param_names = self.batch_param_names()
+        for param_name, param_value in self.param_kwargs.items():
+            if param_name in batch_param_names and self.is_batch_mode and not strict:
+                # Don't warn.
+                continue
+            params[param_name]._warn_on_wrong_param_type(param_name, param_value)
+        
 
     def __repr__(self):
         """
@@ -111,23 +125,6 @@ class BaseTask(luigi.Task, metaclass=Register):
             for batch_params in zip(*map(self.__getattribute__, batch_param_names)):
                 yield { **kwds, **dict(zip(batch_param_names, batch_params)) }
                 
-
-    @property
-    def database(self):
-        try:
-            return self._database
-
-        except AttributeError:
-
-            self._database = DatabaseTarget(
-                self.connection_string,
-                self.task_namespace,
-                self.task_family,
-                self.task_id
-            )
-
-        return self._database
-
 
     def output(self):
         """
