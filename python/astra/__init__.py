@@ -6,6 +6,11 @@ import os
 import yaml
 from pkg_resources import parse_version
 
+try:
+    from luigi import build
+except ImportError:
+    print("Warning! Cannot import luigi, our favourite plumber.")
+
 
 def merge(user, default):
     """Merges a user configuration with the default one."""
@@ -38,5 +43,6 @@ if os.path.exists(custom_config_path):
     with open(custom_config_path, "r") as fp:
         custom_config = yaml.load(custom_config_path, **yaml_kwds)
     config = merge(custom_config, config)
+
 
 __version__ = '0.1.10-dev'
