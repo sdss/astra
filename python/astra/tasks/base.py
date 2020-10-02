@@ -73,7 +73,13 @@ class BaseTask(luigi.Task, metaclass=Register):
         param_objs = dict(params)
         for i, (param_name, param_value) in enumerate(param_values):
             if param_objs[param_name].significant and param_objs[param_name].visibility == ParameterVisibility.PUBLIC:
-                repr_parts.append('%s=%s' % (param_name, param_objs[param_name].serialize(param_value)))
+                if param_name in self.batch_param_names() and self.is_batch_mode:
+                    # Show only first two.
+                    v = tuple(list(param_value[:2]) + ["..."])
+                    v = param_objs[param_name].serialize(v)
+                    repr_parts.append(f"{param_name}={v}")
+                else:
+                    repr_parts.append('%s=%s' % (param_name, param_objs[param_name].serialize(param_value)))
             
             if len(repr_parts) >= self._max_params_in_repr:
                 repr_parts.append(f"... et al.")
@@ -112,17 +118,39 @@ class BaseTask(luigi.Task, metaclass=Register):
 
     @property
     def is_batch_mode(self):
-        return any(isinstance(getattr(self, param_name), tuple) for param_name in self.batch_param_names())
+        try:
+            return self._is_batch_mode
+        except AttributeError:
+            self._is_batch_mode = all(
+                isinstance(getattr(self, param_name), tuple) or getattr(self, param_name) is None \
+                for param_name in self.batch_param_names()
+            )
+        return self._is_batch_mode
 
 
-    def get_batch_task_kwds(self):
-        kwds = self.param_kwargs.copy()
+    def get_batch_task_kwds(self, include_non_batch_keywords=True):
+        kwds = self.param_kwargs.copy() if include_non_batch_keywords else {}
         if not self.batchable:
             yield kwds
 
         else:
             batch_param_names = self.batch_param_names()
-            for batch_params in zip(*map(self.__getattribute__, batch_param_names)):
+            fill_values = {}
+
+            Ns = []
+            for param_name in batch_param_names:
+                entry = getattr(self, param_name)
+                if isinstance(entry, tuple):
+                    Ns.append(len(entry))
+            N = max(Ns)
+
+            for param_name in batch_param_names:
+                entry = getattr(self, param_name)
+                if entry is None or len(entry) < 2:
+                    fill_values[param_name] = tuple([entry] * N)
+
+            for batch_params in zip(*(fill_values.get(pn, v) for v in map(self.__getattribute__, batch_param_names))):
+                raise a
                 yield { **kwds, **dict(zip(batch_param_names, batch_params)) }
                 
 

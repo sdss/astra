@@ -191,7 +191,8 @@ class BaseDatabaseTarget(luigi.Target):
         table = self.parameters_table_bound
         sanitised_data = {}
         for key, value in data.items():
-            if not isinstance(value, (datetime.datetime, datetime.date)):
+            # Don't sanitise booleans or date/datetime objects.
+            if not isinstance(value, (datetime.datetime, datetime.date, bool)):
                 try:
                     value = str(value)
                 except:
