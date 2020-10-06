@@ -148,11 +148,25 @@ class BaseTask(luigi.Task, metaclass=Register):
                 entry = getattr(self, param_name)
                 if entry is None or len(entry) < 2:
                     fill_values[param_name] = tuple([entry] * N)
+                    raise NotImplementedError
 
-            for batch_params in zip(*(fill_values.get(pn, v) for v in map(self.__getattribute__, batch_param_names))):
-                raise a
+            #for batch_params in zip(*(fill_values.get(pn, v) for v in map(self.__getattribute__, batch_param_names))):
+            for batch_params in zip(*map(self.__getattribute__, batch_param_names)):
                 yield { **kwds, **dict(zip(batch_param_names, batch_params)) }
-                
+        
+        
+    def get_batch_tasks(self):
+        # This task can be run in single mode or batch mode.
+        if self.is_batch_mode:
+            for kwds in self.get_batch_task_kwds():
+                task = self.__class__(**kwds)
+
+                # Trigger the 'task started' event.
+                task.trigger_event(luigi.Event.START, task)
+                yield task
+        else:
+            yield self
+        
 
     def output(self):
         """

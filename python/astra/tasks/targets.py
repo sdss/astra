@@ -6,6 +6,7 @@ import json
 import luigi
 import sqlalchemy
 from luigi.contrib import sqla
+from luigi import LocalTarget
 
 
 

@@ -94,6 +94,9 @@ class SDSSDataModelTask(BaseTask):
 
 
     def output(self):
+        if self.is_batch_mode:
+            return [task.output() for task in self.get_batch_tasks()]
+
         if self.use_remote:
             if (os.path.exists(self.local_path) and Path(self.local_path).stat().st_size < 1):
                 # Corrupted. Zero file.
