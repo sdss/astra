@@ -243,13 +243,16 @@ class DatabaseTarget(BaseDatabaseTarget):
     The `task_id` of the task supplied will be added as a column by default.
     """
 
-    def __init__(self, task, echo=False, only_significant=True):
+    def __init__(self, task, results_schema=None, echo=False, only_significant=True):
         """
         A database target for outputs of task results.
 
         :param task:
             The task that this output will be the target for. This is necessary to reference the task ID, and to generate the table
             schema for the task parameters.
+
+        :param results_schema: [optional]
+            Optionally provide the results schema here, instead of setting it through self.
 
         :param echo: [optional]
             Echo the SQL queries that are supplied (default: False).
@@ -265,6 +268,9 @@ class DatabaseTarget(BaseDatabaseTarget):
             task,
             only_significant=only_significant
         )
+
+        if results_schema is not None:
+            self.results_schema = results_schema
 
         super(DatabaseTarget, self).__init__(
             task.connection_string,

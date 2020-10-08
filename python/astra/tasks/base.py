@@ -1,4 +1,5 @@
 import hashlib
+import itertools # dat feel
 import json
 import luigi
 import traceback
@@ -135,25 +136,22 @@ class BaseTask(luigi.Task, metaclass=Register):
 
         else:
             batch_param_names = self.batch_param_names()
-            fill_values = {}
 
-            Ns = []
+            all_batch_kwds = {}
+            
             for param_name in batch_param_names:
                 entry = getattr(self, param_name)
                 if isinstance(entry, tuple):
-                    Ns.append(len(entry))
-            N = max(Ns)
+                    all_batch_kwds[param_name] = entry
+                else:
+                    # Some batch parameters may not be given as a tuple.
+                    # Cycle indefinitely over this value. This is equivalent to repeating it N times,
+                    # where N would be the number of batch parameters given elsewhere.
+                    all_batch_kwds[param_name] = itertools.cycle((entry, ))
 
-            for param_name in batch_param_names:
-                entry = getattr(self, param_name)
-                if entry is None or len(entry) < 2:
-                    fill_values[param_name] = tuple([entry] * N)
-                    raise NotImplementedError
+            for batch_values in zip(*map(all_batch_kwds.get, batch_param_names)):
+                yield { **kwds, **dict(zip(batch_param_names, batch_values)) }
 
-            #for batch_params in zip(*(fill_values.get(pn, v) for v in map(self.__getattribute__, batch_param_names))):
-            for batch_params in zip(*map(self.__getattribute__, batch_param_names)):
-                yield { **kwds, **dict(zip(batch_param_names, batch_params)) }
-        
         
     def get_batch_tasks(self):
         # This task can be run in single mode or batch mode.
