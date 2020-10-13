@@ -100,7 +100,7 @@ def write_sdss_apstar(spectrum, path, **kwargs):
     hdu_list = fits.HDUList([
         fits.PrimaryHDU(),
         fits.ImageHDU(spectrum.flux.to(units).value), # flux
-        fits.ImageHDU(spectrum.uncertainty.quantity.value**-2), # sigma
+        fits.ImageHDU(spectrum.uncertainty.quantity.value**-0.5), # sigma
         fits.ImageHDU(spectrum.meta["mask"]), # mask
     ])
 
