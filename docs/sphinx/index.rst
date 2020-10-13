@@ -22,13 +22,7 @@ to encourage improvements to existing analysis approaches, and to streamline
 the data release process. 
 
 
-Overview
---------
-
-Astra monitors specific folders for new reduced data products, schedules 
-analysis tasks to be executed using those data products, and stores outputs from
-those tasks in a database. This allows the collaboration to easily evaluate results 
-in the context of previous sets of results, and ultimately to streamline the
-data release process. All book-keeping (e.g., version control, data and input 
-file provenance) is managed by Astra. 
-
+Astra initiates analysis tasks for different kinds of source targets. Since these
+analysis routines will likely improve with time, Astra stores all version information
+and data provenance. This allows results to be reproducible, tracked, and compared
+to previous sets of results.

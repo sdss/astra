@@ -15,7 +15,14 @@ dependencies:
   - click>=7.0
   - pyyaml>=5.1 
   - specutils
+  - passlib
+  - sqlalchemy
+  - sqlalchemy-utils
+  - luigi
+  - tqdm
   - pip: # Even though this won't be used for local installations that don't have modules.
     - "--editable=git+https://github.com/sdss/sdss_install.git@master#egg=sdss_install"
     - "--editable=git+https://github.com/sdss/astra.git@master#egg=astra"
-
+    - sdsstools
+    - sdss-access
+    
