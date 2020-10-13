@@ -8,3 +8,8 @@ passlib
 sqlalchemy
 sqlalchemy-utils
 click>=7.0
+luigi
+
+matplotlib
+tqdm
+

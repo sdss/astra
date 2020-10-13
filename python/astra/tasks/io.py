@@ -5,7 +5,9 @@ from pathlib import Path
 
 from sdss_access import SDSSPath, RsyncAccess, HttpAccess
 
-from astra.tasks.base import BaseTask
+from astra.tasks.base import BaseTask, SDSSDataProduct
+
+
 
 
 class LocalTargetTask(BaseTask):
@@ -96,16 +98,17 @@ class SDSSDataModelTask(BaseTask):
     def output(self):
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
+        else: 
+            if self.use_remote:
+                if (os.path.exists(self.local_path) and Path(self.local_path).stat().st_size < 1):
+                    # Corrupted. Zero file.
+                    os.unlink(self.local_path)
 
-        if self.use_remote:
-            if (os.path.exists(self.local_path) and Path(self.local_path).stat().st_size < 1):
-                # Corrupted. Zero file.
-                os.unlink(self.local_path)
+                if not os.path.exists(self.local_path):
+                    self.get_remote()
+        
+            return SDSSDataProduct(self.local_path)
 
-            if not os.path.exists(self.local_path):
-                self.get_remote()
-    
-        return luigi.LocalTarget(self.local_path)
 
 
     def get_remote_http(self):
@@ -179,11 +182,14 @@ class ApStarFile(SDSSDataModelTask):
 
 
 class AllStarFile(SDSSDataModelTask):
-
     sdss_data_model_name = "allStar"
 
+
+class SpecFile(SDSSDataModelTask):
+    sdss_data_model_name = "spec"
+
     
-for klass in (ApPlanFile, ApVisitFile, ApStarFile, AllStarFile):
+for klass in (ApPlanFile, ApVisitFile, ApStarFile, AllStarFile, SpecFile):
     for lookup_key in klass().tree.lookup_keys(klass.sdss_data_model_name):
         setattr(klass, lookup_key, luigi.Parameter(batch_method=tuple))
 

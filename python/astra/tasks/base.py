@@ -2,6 +2,7 @@ import hashlib
 import itertools # dat feel
 import json
 import luigi
+import os
 import traceback
 from time import time
 
@@ -10,6 +11,8 @@ from luigi.task_register import Register
 from luigi.parameter import ParameterVisibility
 
 from astra.tasks.targets import DatabaseTarget
+from astra.utils import log
+
 
 
 class BaseTask(luigi.Task, metaclass=Register):
@@ -21,11 +24,33 @@ class BaseTask(luigi.Task, metaclass=Register):
         significant=False
     )
 
+    force = luigi.BoolParameter(significant=False, default=False)
+    force_upstream = luigi.BoolParameter(significant=False, default=False)
+
     def __init__(self, *args, **kwargs):
-
-        strict = kwargs.pop("strict", False)
-
         super(BaseTask, self).__init__(*args, **kwargs)
+
+        if self.force_upstream is True:
+            self.force = True
+
+        if self.force is True:
+            done = False
+            tasks = [self]
+            while not done:
+                outputs = luigi.task.flatten(tasks[0].output())
+                for out in outputs:
+                    log.info(f"Checking {out}")
+                    if out.exists():
+                        log.warn(f"Removing path {out.path}")
+                        print(f"Removing path {out.path}")
+                        #os.remove(out.path)
+                if self.force_upstream is True:
+                    tasks += luigi.task.flatten(tasks[0].requires())
+                tasks.pop(0)
+                if len(tasks) == 0:
+                    done = True
+        
+        strict = kwargs.pop("strict", False)
 
         params = self.get_params()
         param_values = self.get_param_values(params, args, kwargs)
@@ -122,10 +147,11 @@ class BaseTask(luigi.Task, metaclass=Register):
         try:
             return self._is_batch_mode
         except AttributeError:
-            self._is_batch_mode = all(
-                isinstance(getattr(self, param_name), tuple) or getattr(self, param_name) is None \
-                for param_name in self.batch_param_names()
-            )
+            self._is_batch_mode = len(self.batch_param_names()) > 0 \
+                and all(
+                    isinstance(getattr(self, param_name), tuple) or getattr(self, param_name) is None \
+                    for param_name in self.batch_param_names()
+                )
         return self._is_batch_mode
 
 
@@ -198,6 +224,10 @@ class BaseTask(luigi.Task, metaclass=Register):
 
         raise NotImplementedError
         
+
+class SDSSDataProduct(luigi.LocalTarget):
+    pass
+
 
 '''
 # Event handling.

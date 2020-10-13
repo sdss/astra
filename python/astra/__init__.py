@@ -6,11 +6,11 @@ import os
 import yaml
 from pkg_resources import parse_version
 
-try:
-    from luigi import build
-except ImportError:
-    print("Warning! Cannot import luigi, our favourite plumber.")
-
+from luigi import build
+from luigi.util import inherits, requires
+from luigi.parameter import (Parameter, OptionalParameter, DateParameter,
+    IntParameter, FloatParameter, BoolParameter, TaskParameter, DictParameter,
+    EnumParameter, EnumListParameter, ListParameter, NumericalParameter, ChoiceParameter)
 
 def merge(user, default):
     """Merges a user configuration with the default one."""

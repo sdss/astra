@@ -3,6 +3,7 @@ import luigi
 import numpy as np
 import os
 import pickle
+from tqdm import tqdm
 
 from astropy.nddata import InverseVariance
 
@@ -14,9 +15,9 @@ from astra.tasks.base import BaseTask
 
 class Sinusoidal(BaseTask):
 
-    sum_axis = luigi.IntParameter(default=None)
-    L = luigi.FloatParameter(default=1400)
-    order = luigi.IntParameter(default=3)
+    sum_axis = luigi.IntParameter(default=-1)
+    L = luigi.IntParameter(default=1400)
+    continuum_order = luigi.IntParameter(default=3)
     continuum_regions_path = luigi.Parameter()
     spectrum_kwds = luigi.DictParameter(default={})
 
@@ -24,12 +25,10 @@ class Sinusoidal(BaseTask):
         continuum_regions = np.loadtxt(self.continuum_regions_path)
 
         # This can be run in single star mode or batch mode.
-        for task in self.get_batch_tasks():
+        for task in tqdm(self.get_batch_tasks()):
+            if task.complete(): continue
                 
-            spectrum = Spectrum1D.read(
-                task.input().path,
-                **self.spectrum_kwds
-            )
+            spectrum = Spectrum1D.read(task.input().path, **self.spectrum_kwds)
 
             normalized_flux, normalized_ivar, continuum, metadata = normalize(
                 spectrum.wavelength.value,
@@ -37,12 +36,12 @@ class Sinusoidal(BaseTask):
                 spectrum.uncertainty.quantity.value,
                 continuum_regions=continuum_regions,
                 L=task.L,
-                order=task.order,
+                order=task.continuum_order,
                 full_output=True
             )
 
             # Stack if asked.
-            if task.sum_axis is not None:
+            if task.sum_axis > -1:
                 sum_ivar = np.sum(normalized_ivar, axis=task.sum_axis)
                 sum_flux = np.sum(normalized_flux * normalized_ivar, axis=task.sum_axis) / sum_ivar
 
@@ -63,9 +62,11 @@ class Sinusoidal(BaseTask):
                 **spectrum_kwds
             )
 
-            task.writer(normalized_spectrum, task.output().path)
-
-            task.trigger_event(luigi.Event.SUCCESS, task)
+            task.writer(
+                normalized_spectrum, 
+                task.output().path,
+                overwrite=True
+            )
 
 
     def output(self):

@@ -7,7 +7,8 @@ import luigi
 import sqlalchemy
 from luigi.contrib import sqla
 from luigi import LocalTarget
-
+from luigi.event import Event
+from luigi.mock import MockTarget
 
 
 class BaseDatabaseTarget(luigi.Target):
@@ -130,10 +131,15 @@ class BaseDatabaseTarget(luigi.Target):
     @property
     def results_table_bound(self):
         try:
-            return self._results_table_bound
+            response = self._results_table_bound
         except AttributeError:
             return self.create_results_table()
-
+            
+        else:
+            if response is None:
+                return self.create_results_table()
+            return self._results_table_bound
+        
 
     def exists(self):
         return self.results_exist()
@@ -291,7 +297,13 @@ class DatabaseTarget(BaseDatabaseTarget):
         }
         return super(DatabaseTarget, self).write_parameters(data)
 
-
+    def write(self, data, mark_complete=True, write_parameters=True):
+        super(DatabaseTarget, self).write(data)
+        if write_parameters:
+            self.write_parameters()
+        if mark_complete:
+            self.task.trigger_event(Event.SUCCESS, self.task)
+            
 
 def generate_parameter_schema(task, only_significant=True):
 
