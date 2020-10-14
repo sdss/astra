@@ -8,7 +8,7 @@ from astra.utils import log
 from astra.contrib.thecannon.tasks.base import TheCannonMixin, read_training_set
 
 import astra.contrib.thecannon as tc
-
+from astra.contrib.thecannon import plot
 
 
 class TrainTheCannonBase(TheCannonMixin):
@@ -52,7 +52,7 @@ class TrainTheCannonBase(TheCannonMixin):
 
         if self.plot:
             # Plot zeroth and first order coefficients.
-            fig = tc.plot.theta(
+            fig = plot.theta(
                 model,
                 indices=np.arange(1 + len(model.vectorizer.label_names)),
                 normalize=False
@@ -60,7 +60,7 @@ class TrainTheCannonBase(TheCannonMixin):
             fig.savefig(f"{self.task_id}-theta.png")
 
             # Plot scatter.
-            fig = tc.plot.scatter(model)
+            fig = plot.scatter(model)
             fig.savefig(f"{self.task_id}-scatter.png")
 
             # Plot one-to-one.
@@ -69,7 +69,7 @@ class TrainTheCannonBase(TheCannonMixin):
                 training_set_ivar,
                 initial_labels=model.training_set_labels
             )
-            fig = tc.plot.one_to_one(model, test_labels, cov=test_cov)
+            fig = plot.one_to_one(model, test_labels, cov=test_cov)
             fig.savefig(f"{self.task_id}-one-to-one.png")
 
     def output(self):
