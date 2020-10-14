@@ -2,14 +2,12 @@
 import numpy as np
 import pickle
 import astropy.table 
-from sqlalchemy import Column, Float
 from tqdm import tqdm
 
 import astra
-from astra.tasks.base import BaseTask
-from astra.tasks.targets import (LocalTarget, DatabaseTarget, MockTarget)
-from astra.tasks.io import (ApStarFile, ApVisitFile)
+from astra.tasks.io import ApStarFile
 from astra.tasks.continuum import Sinusoidal
+from astra.tasks.targets import LocalTarget
 from astra.tools.spectrum import Spectrum1D
 
 from astra.contrib.thecannon.tasks import (TrainTheCannon, TestTheCannon)
