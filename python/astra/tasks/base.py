@@ -13,6 +13,10 @@ from luigi.parameter import ParameterVisibility
 from astra.tasks.targets import DatabaseTarget
 from astra.utils import log
 
+from packaging.version import parse as parse_version
+from astra import __version__
+
+astra_version = parse_version(__version__)
 
 
 class BaseTask(luigi.Task, metaclass=Register):
@@ -24,31 +28,17 @@ class BaseTask(luigi.Task, metaclass=Register):
         significant=False
     )
 
-    force = luigi.BoolParameter(significant=False, default=False)
-    force_upstream = luigi.BoolParameter(significant=False, default=False)
+    # Astra versioning. These parameters should never be changed directly by the user.
+    # We assume that major and minor version changes should cause all tasks to re-run
+    # (e.g., a major version for a data release, minor version change for serious bug fixes,
+    # and micro or dev version changes for bug fixes that do not affect all tasks.)
+    astra_version_major = luigi.IntParameter(default=astra_version.major, significant=True)
+    astra_version_minor = luigi.IntParameter(default=astra_version.minor, significant=True)
+    astra_version_micro = luigi.IntParameter(default=astra_version.micro, significant=False)
+    astra_version_dev = luigi.BoolParameter(default=astra_version.dev is not None, significant=False)
 
     def __init__(self, *args, **kwargs):
         super(BaseTask, self).__init__(*args, **kwargs)
-
-        if self.force_upstream is True:
-            self.force = True
-
-        if self.force is True:
-            done = False
-            tasks = [self]
-            while not done:
-                outputs = luigi.task.flatten(tasks[0].output())
-                for out in outputs:
-                    log.info(f"Checking {out}")
-                    if out.exists():
-                        log.warn(f"Removing path {out.path}")
-                        print(f"Removing path {out.path}")
-                        #os.remove(out.path)
-                if self.force_upstream is True:
-                    tasks += luigi.task.flatten(tasks[0].requires())
-                tasks.pop(0)
-                if len(tasks) == 0:
-                    done = True
         
         strict = kwargs.pop("strict", False)
 
