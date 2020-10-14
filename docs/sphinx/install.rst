@@ -7,13 +7,13 @@
 
 .. rubric:: :header_no_toc:`Installation`
 
-Astra can be installed in two different ways. If you don't know 
+Astra can be installed in two different ways:
 
-1. Using a `Conda <http://docs.conda.io/>`_ environment.
-2. Using modules to manage component versions and their dependencies; or
+1. Using a `Conda <http://docs.conda.io/>`_ environment, or
+2. Using modules to manage component versions and their dependencies.
 
 If you don't know what you want, you probably want to use a `Conda <http://docs.conda.io>`_ environment. This will be suitable for testing and/or developing some part of Astra locally.
-The second method is how Astra is installed on SDSS inrastructure. 
+The second method is how Astra is installed on SDSS inrastructure. You can expect the same results regardless of how you installed `astra`. 
 
 
 
