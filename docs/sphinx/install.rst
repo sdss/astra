@@ -36,7 +36,7 @@ With a local installation we use `Conda <http://docs.conda.io/>`_ to manage a *s
   wget -O environment.yml https://raw.githubusercontent.com/sdss/astra/master/etc/environment.yml
   conda env create -f environment.yml
 
-Now, activate the Conda environment:
+Now, activate the Conda environment::
 
   conda activate astra
 
