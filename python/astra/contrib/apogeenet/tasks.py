@@ -60,14 +60,8 @@ class EstimateStellarParameters(APOGEENetMixin):
 
     def output(self):
         """ The output produced by this task. """
-        # Place relative to the observation path.
-        return luigi.LocalTarget(
-             os.path.join(
-                 os.path.dirname(self.input()["observation"].path), 
-                f"{self.task_id}.yaml"
-             )
-        )
-
+        return luigi.LocalTarget(f"{self.task_id}.yaml")
+        
 
     def read_model(self):
         """ Read in the trained APOGEENet model. """
@@ -146,13 +140,12 @@ class EstimateStellarParameters(APOGEENetMixin):
         model = self.read_model()
 
         # This task can be run in batch mode.
-        for task in tqdm(self.get_batch_tasks()):
-
-            spectrum = task.read_observation()
+        failed_tasks = []
+        for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
+            spectrum = task.read_observation()    
             result = task.estimate_stellar_parameters(model, spectrum)
-
             task.write_output(result)
-        
+
         return None
 
 
@@ -174,10 +167,12 @@ class EstimateStellarParametersGivenApStarFile(EstimateStellarParameters, ApStar
     """
 
     def requires(self):
-        return {
-            "model": TrainedAPOGEENetModel(**self.get_common_param_kwargs(TrainedAPOGEENetModel)),
-            "observation": ApStarFile(**self.get_common_param_kwargs(ApStarFile))
+        requirements = {
+            "model": TrainedAPOGEENetModel(**self.get_common_param_kwargs(TrainedAPOGEENetModel))
         }
+        if not self.is_batch_mode:
+            requirements.update(observation=ApStarFile(**self.get_common_param_kwargs(ApStarFile)))
+        return requirements
 
 
 class EstimateStellarParametersForAllStarSpectra(APOGEENetMixin, AllStarFile):
