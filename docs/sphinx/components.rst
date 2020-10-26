@@ -1,265 +1,233 @@
 
-.. _components:
+.. title:: Components
 
 .. role:: header_no_toc
   :class: class_header_no_toc
 
 .. title:: Components
 
-:tocdepth: 2
+:tocdepth: 1
 
 .. rubric:: :header_no_toc:`Components`
 
-A *component* in Astra describes an analysis tool that can run on some subset
-(or all!) of SDSS data. Each component should have one command line tool
-that takes in input paths pointing to SDSS V data products, and to output some
-data products. The output data proucts might describe the result of some analysis, 
-or they might be an "intermediate" data product (e.g., a data model file with continuum 
-normalisation applied).
+Astra includes many external analysis methods as contributed components.
+Many of these components include bespoke analysis methods for specialised types of stars.
+Below you can find a summary of what components are currently available to run on 
+APOGEE or BOSS spectra. In all cases a component *could* be executed on both APOGEE or
+BOSS spectra, but we do not have the current models (e.g., spectral grids) to do so.
 
+.. list-table::
+    :widths: 50 25 25
+    :header-rows: 1
 
-Definitions
-===========
+    * - Component
+      - APOGEE
+      - BOSS
+    * - `APOGEENet`_
+      - YES
+      - NO
+    * - `Classifier`_
+      - YES
+      - YES
+    * - `FERRE`_
+      - YES
+      - NO
+    * - `Hot star code`_
+      - YES
+      - NO
+    * - `The Cannon`_
+      - YES
+      - YES
+    * - `The Payne`_
+      - YES
+      - NO
+    * - `WD code`_
+      - NO
+      - YES
 
-An astronomer might find the term *component* synonymous with 'pipeline'. 
+If you are interested in the current functionality of these components, or components
+that are planned for integration into Astra, see the `roadmap <roadmap.html>`_.
 
-The difference here is that a pipeline might be a series of sequential steps to 
-execute in order to deliver a final answer (e.g., astrophysical parameters),
-whereas a *component* is only expected to perform *at least* one task [#]_. 
-That task might be continuum normalisation, or it might be providing a 
-classification for a type of object. However, a component *can* do more than 
-one task. 
 
-For the purpose of incorporating existing 'pipelines' into the initial version 
-of Astra, we will describe a large pipeline as a *component* and seek to 
-modularize common components in the future. In other words, for the purposes of 
-Astra, *ASPCAP* could be described as a *component*, just as an object classifier 
-could be considered a pipeline component.
-
-
-What makes a component?
-=======================
-
-
-Components must be self-contained Python packages that fully describe all of the
-required dependencies. If you intend to write your own component, please see
-the `writing your own component <#>`_ guide. 
-
-A valid Astra component must meet the following requirements:
-
-1. It must be stored in a public ``git`` repository on GitHub, preferably in
-   the `SDSS organization GitHub <http://github.com/sdss>`_.
-
-2. A component must have at lease one `release <https://help.github.com/en/articles/creating-releases>`_.
-   All components have full version control through ``git``, but only new
-   releases of components will be considered a sufficiently substantive change
-   to trigger (and differentiate between) analysis tasks.
-
-3. A component must have a function called ``saqe`` (short for 'SDSS Astra query 
-   execute') that takes the path to a SDSS data product and returns **whether or
-   not** it can provide an analysis of that source. 
-
-4. A component must have at least one command line utility that takes as an 
-   argument the path to a SDSS data model, and produces an output file that
-   has a valid SDSS data model.
-
-
-Requirement #3 above implies that no one component can govern how another
-component behaves. All data could, in principle, be processed by all components. 
-In the simpler case of SDSS-IV/APOGEE, the equivalent ``saqe`` utility might 
-simply return ``True`` if the given data file is an APOGEE spectrum, and ``False``
-otherwise. In Astra the decision about whether a component *can* process some 
-observation could depend on:
-
-- the specified data model (e.g., APOGEE or BOSS), 
-- targeting information,
-- photometry and astrometry from external catalogues,
-- inputs from other components (e.g., a suite of classifiers), or
-- the flux array values themselves (e.g., Are there any finite data values? Is the S/N sufficient?)
-
-For these reasons, each component makes the decision about what it *should* be 
-able to process, and Astra's role is to maintain version control, streamline 
-data processing and task allocation, and to manage book-keeping of all component 
-results.
-
-In the future this ``saqe`` requirement may no longer exist if we move to a 
-conductor-driven execution approach (see `roadmap <roadmap.htm#road-mapl>`_), 
-but the ``saqe`` function will be necessary until components have iterated 
-into a steady-state mode.
-
-
-.. attention::
-    Just because multiple components might analyse the same observation does not
-    mean that all results will form part of the data release candidate! As an 
-    example, Astra would keep the results from one component that has been 
-    improved over time (with many tagged versions), and each time that component 
-    has been run over a subset of the data. Those earlier results will not form 
-    part of a data release: they are merely to track and compare results over 
-    time. It will be the responsibility of the data release coordinators to 
-    decide what components (and versions) will contribute the results to a data 
-    release candidate.
-
-    Keeping all relevant results between component versions in Astra will allow 
-    collaborators to iterate and improve their components, whilst automating
-    much of the requisite scientific verification that comes with making those
-    component changes.
-
-
-
-Adding a component to Astra
-===========================
-
-Once you have run ``astra setup`` you will be able to add components to Astra.
-If you are running Astra locally then you must add components using the ``astra``
-command line tool. If you want to add components to Astra on the SDSS systems at
-Utah then you can do so through a SSH terminal, or eventually through an
-internal collaboration website that will be available in early 2020.
-
-To add a component to Astra you will need the name of a GitHub repository. If
-you type ``astra component add --help`` in a terminal then this is the output
-you can expect::
-
-    ~$ astra component add --help
-    Usage: astra component add [OPTIONS] PRODUCT
-
-      Add a new component in Astra from an existing GitHub repository
-      (`product`) and a  command line tool in that repository (`command`).
-
-    Options:
-      --version TEXT             The version of this product to use. If no version
-                                 is given then this will default to the last
-                                 release made available on GitHub.
-      --owner TEXT               The owner of the repository on GitHub (default:
-                                 sdss).
-      --execution-order INTEGER  Set the execution order for the component
-                                 (default: 0).
-      --command TEXT             Specify the name of the command line utility to
-                                 execute from that component. This is only
-                                 required if there are more than one executable
-                                 components in the bin/ directory of that
-                                 repository.
-      --description TEXT         A short description for this component. If no
-                                 description is given then this will default to
-                                 the description that exists on GitHub.
-      -a, --alt-module TEXT      Specify an alternate module name for this
-                                 component.
-      --default-args TEXT        Default arguments to supply to the command.
-      -t, --test                 Test mode. Do not actually install anything.
-      --help                     Show this message and exit.
-
-
-If your component's GitHub repository does not fall under the `SDSS organization GitHub <http://github.com/sdss>`_
-then you will need to specify the ``--owner`` flag. The ``--version`` flag
-indicates the release tag on GitHub. If no ``--version`` is given then Astra
-will find the most recent version on GitHub.
-
-Here are some components that you might be interested in adding to Astra:
-
-- `FERRE <https://github.com/sdss/astra_ferre>`_ (`Allende-Prieto et al. <https://ui.adsabs.harvard.edu/abs/2015AAS...22542207A/abstract>`_; `website <http://www.as.utexas.edu/~hebe/ferre/>`_/`user guide <http://www.as.utexas.edu/~hebe/ferre/ferre.pdf>`_) interpolates between a grid of synthetic spectra and compares the interpolated spectra with observations.
-- `The Cannon <https://github.com/sdss/astra_thecannon>`_ (`Ness et al. <https://ui.adsabs.harvard.edu/abs/2015ApJ...808...16N/abstract>`_) for building a data-driven model of stellar spectra.
-- `INSYNC <https://github.com/sdss/astra_insync>`_ (Cottaar; `original repository <https://bitbucket.org/mcottaar/apogee/src/master>`_) estimates stellar parameters and veiling for young star spectra.
-- `The Payne <https://github.com/sdss/astra_thepayne>`_ (`Ting et al. <https://ui.adsabs.harvard.edu/abs/2018arXiv180401530T/abstract>`_) trains a single layer fully connected neural network on synthetic spectra.
-- `GSSP <https://github.com/sdss/astra_gssp>`_ (`Tkachenko <https://ui.adsabs.harvard.edu/abs/2015A%26A...581A.129T/abstract>`_ ; `website <https://fys.kuleuven.be/ster/meetings/binary-2015/gssp-software-package>`) performs a grid search in stellar parameters and is typically used to analyse hot star spectra.
+APOGEENet
+=========
 
-If you want all of these components then you can use the commands::
+**Contributor:** Marina Kounkel (University of Michigan) and collaborators.
 
-  astra component add astra_ferre
-  astra component add astra_thecannon
-  astra component add astra_insync
-  astra component add astra_thepayne
-  astra component add astra_gssp
+APOGEENet uses a neural network to estimate stellar properties of young stellar objects
+observed with the APOGEE instrument.
+At the time of writing, only the pre-trained neural network for APOGEENet is available.
+That means that there are no Astra tasks to train a new neural network.
 
 
-Astra will fetch and install all of these components and make them accessible
-through `modules <https://github.com/cea-hpc/modules>`_. 
+The most relevant tasks for APOGEENet in Astra are:
 
-.. note:: 
-    If you are adding a new component to the SDSS systems at Utah and your
-    component has dependencies that do not exist at Utah, then you will need
-    to `submit a request <#>`_ to have your dependencies installed.
+- :py:mod:`astra.contrib.apogeenet.tasks.EstimateStellarParametersGivenApStarFile`
+- :py:mod:`astra.contrib.apogeenet.tasks.EstimateStellarParameters`
 
+`EstimateStellarParametersGivenApStarFile` will estimate stellar parameters given some
+APOGEENet model and an `ApStarFile` object. 
+The `EstimateStellarParametersGivenApStarFile` class is a sub-class of the 
+`EstimateStellarParameters` class (see below), which is a base task that does not specify what kind
+of APOGEE product to expect.
 
-Component execution order
-^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The ``--execution-order`` option **only** matters for components that rely on the 
-output of other components, and if you are running in `continuous data analysis mode <#>`_. 
-If your component does not rely on the output of any other components -- and 
-does not provide outputs that will reasonably be used by other components -- 
-then you can leave the default value of zero.
+.. inheritance-diagram:: astra.contrib.apogeenet.tasks.EstimateStellarParametersGivenApStarFile
+    :top-classes: astra.tasks.base.BaseTask
+    :caption: Inheritance diagram for `EstimateStellarParametersGivenApStarFile`.
 
-If there are five components that are to run on a given observation, then those
-components will be executed in order of ascending non-negative execution order 
-(``1`` indicates the first execution order). If your component in some part 
-relies on the outputs of other components, then you should set your 
-``--execution-order`` to be higher than those other components, otherwise you
-will not be able to access the outputs of those components.
 
+The only required parameter for `EstimateStellarParameters` is `model_path`: the location
+of a file that has the neural network coefficients stored.
+The `EstimateStellarParametersGivenApStarFile` task requires the `model_path` parameter,
+and any parameters required by `ApStarFile`.
 
-Component command line interface
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+The `EstimateStellarParametersGivenApStarFile` task is `batchable <batch.html>`_: you can analyse many APOGEE observations at once,
+minimising the computational overhead in loading the model. 
 
-The ``command`` describes the command line utility in your component that
-is to be executed by Astra. Ideally this should be specified as a ``script``
-keyword to ``setup()`` in your ``setup.py`` file. Every command line tool that
-describes a component in Astra **must** accept and follow the following
-arguments (specified by the :func:`astra.tools.parsers.common.component`
-function).
+**Insert APOGEENet workflow example here**
 
-======================  =============================================
- Argument               Description
-======================  =============================================
-``input_path``          the path to the input data model file
-``output_dir``          the directory for output products produced by the component
-``-i``/``--from-file``  read the input paths from a local file
-``-v``                  verbose output
-======================  =============================================
-  
 
-.. note::
-    If you are are writing a component to add to Astra, then you should look at
-    the [guide to writing your own component].
+Classifier
+==========
 
+**Contributor:** Gabriella Contardo (Flatiron Institute)
 
-Executing components
-====================
+This component uses a deep convolutional neural network with drop-out to classify sources
+by their spectral type. 
+Training sets are available for APOGEE/apVisit and BOSS/spec spectra.
 
-Components can be executed directly using the ``astra`` command line tool. If
-you are running in `continuous data analysis mode <#>`_ then Astra will manage
-the scheduling and execution of components for new data products as they
-appear.
 
 
-You can execute components manually using the ``astra`` command line tool::
+FERRE
+=====
 
-    ~$ astra execute --help
-    Usage: astra execute [OPTIONS] COMPONENT INPUT_PATH OUTPUT_DIR [ARGS]...
+**Contributors:** Carlos Allende-Prieto (Instituto de Astrofisica de Canarias), Jon Holtzman (New Mexico State University), and others
 
-      Execute a component on a data product.
+FERRE is a code to interpolate pre-computed grids of model spectra and compare with
+observations.
+The best-fitting model spectrum by chi-squared minimisation, with a few optimisation
+algorithms available.
+FERRE was used (as part of ASPCAP) for the APOGEE analysis of SDSS-IV data. 
+Astra has tasks that reproduce the functionality of ASPCAP.
 
-    Options:
-      -i, --from-file    specifies that the INPUT_PATH is a text file that
-                         contains a list of input paths that are separated by new
-                         lines
-      --timeout INTEGER  Time out in seconds before killing the task.
-      --help             Show this message and exit.
+API
+---
 
+.. toctree: api/astra/contrib/ferre/index
+    :maxdepth: 2
 
 
-Examples
-========
+Hot star code
+=============
+**Contributors:** Ilya Straumit (KU Leuven)
 
-The FERRE component in Astra has a debug mode that you can use to test that
-things are being executed. To access this mode, use the following commands::
+The Cannon
+==========
 
-  astra component add astra_ferre
-  astra execute astra_ferre . . --debug
+**Contributors:** Melissa Ness (Columbia University; Flatiron Institute), Andy Casey (Monash), and others
 
+The Cannon :cite:`2015ApJ16N` is a data-driven method to estimate stellar labels 
+(e.g., effective temperature, surface gravity, and chemical abundances).
+A training set of stars with high-fidelity labels is required to train a model
+to predict stellar spectra. 
 
-There are Getting Started guides available for all existing Astra components:
+If you want to use The Cannon as a task in Astra then the most relevant classes are:
 
-- `Getting started with Astra and FERRE <#>`_
-- `Getting started with Astra and INSYNC <#>`_
-- `Getting started with Astra and The Payne <#>`_
-- `Getting started with Astra and The Cannon <#>`_
+- :py:mod:`astra.contrib.thecannon.tasks.train.TrainTheCannon`
+- :py:mod:`astra.contrib.thecannon.tasks.test.TestTheCannon`
 
+If you want to use The Cannon without Astra then the most relevant class is:
+
+- :py:mod:`astra.contrib.thecannon.CannonModel`
+
+
+Train The Cannon using a pre-prepared training set
+--------------------------------------------------
+
+You can train The Cannon in Astra using a `pickle` file that contains the training set.
+The training set file should contain a dictionary with the following entries:    
+    - `wavelength`: an array of shape `(P, )` where `P` is the number of pixels
+    - `flux`: an array of flux values with shape `(N, P)` where `N` is the number of observed spectra and `P` is the number of pixels
+    - `ivar`: an array of inverse variance values with shape `(N, P)` where `N` is the number of observed spectra and `P` is the number of pixels
+    - `labels`: an array of shape `(L, N)` where `L` is the number of labels and `N` is the number observed spectra
+    - `label_names`: a tuple of length `L` that describes the names of the labels
+
+Once you have created this file you can supply the path of the training set to the
+:py:mod:`astra.contrib.thecannon.tasks.train.TrainTheCannon` task.
+
+
+Train The Cannon using SDSS spectra and labels
+----------------------------------------------
+
+See the workflow file.
+
+
+.. inheritance-diagram::  astra.contrib.thecannon.tasks.train.TrainTheCannon
+    :top-classes: astra.tasks.base.BaseTask
+    :parts: 2
+
+
+Testing The Cannon
+------------------
+
+You can estimate stellar labels given some spectra and a trained model using the
+:py:mod:`astra.contrib.thecannon.tasks.test.TestTheCannon` task. However, this task
+has no hard-coded information about what kind of observation to expect (e.g., APOGEE
+or BOSS). That means you need to sub-class this task and inherit the behaviour from
+the kind of spectra you would like to use The Cannon on.
+
+For example, if you wanted to train The Cannon on APOGEE apVisit specra, you would
+sub-class the `TestTheCannon` task like this::
+
+    import astra
+    from astra.tasks.io import ApStarFile
+    from astra.contrib.thecannon.tasks.train import TrainTheCannon
+    from astra.contrib.thecannon.tasks.test import TestTheCannon
+
+    @astra.inherits(TrainTheCannon, ApStarFile)
+    class StellarParameters(TestTheCannon):
+
+        """
+        A task to estimate stellar parameters, given an ApStar file and The Cannon.
+        """
+
+        def requires(self):
+            return {
+                "model": TrainTheCannon(**self.get_common_param_kwargs(TrainTheCannon)),
+                "observation": ApStarFile(**self.get_common_param_kwargs(ApStarFile))
+            }
+
+Now our `StellarParameters` task will know how to load ApStar spectra.
+
+
+
+API
+---
+
+.. toctree:: api/astra/contrib/thecannon/index
+   :maxdepth: 2
+   :titlesonly:
+
+.. toctree:: api/astra/contrib/thecannon/tasks/index
+   :maxdepth: 2
+   :titlesonly:
+
+
+The Payne
+=========
+
+**Contributors:** Yuan-Sen Ting (Australian National University)
+
+The Payne uses a single-layer neural network trained on model spectra to estimate
+stellar properties.
+
+
+WD code
+=======
+
+**Contributors:** Nicola Gentile Fusillo (European Southern Observatory)
+
+
+.. bibliography:: refs.bib
+   :style: unsrt

@@ -1,12 +1,14 @@
 
+.. title:: Tasks
 
 .. role:: header_no_toc
   :class: class_header_no_toc
 
-.. title:: Astra
+.. title:: Tasks
 
 :tocdepth: 3
 
+.. rubric:: :header_no_toc:`Tasks`
 
 Tasks
 =====

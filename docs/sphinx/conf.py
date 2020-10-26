@@ -36,11 +36,36 @@ from pkg_resources import parse_version
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = ['sphinx.ext.autodoc', 'sphinx.ext.napoleon', 'sphinx.ext.autosummary',
-              'sphinx.ext.todo', 'sphinx.ext.viewcode', 'sphinx.ext.mathjax',
-              'sphinx.ext.intersphinx', 'sphinx_click.ext']
+              'sphinx.ext.todo', 
+              #'sphinx.ext.viewcode', 
+              'sphinx.ext.mathjax',
+              'sphinx.ext.intersphinx', 'sphinx_click.ext',
+              'autoapi.extension',
+              'sphinxcontrib.bibtex',
+              'sphinx.ext.inheritance_diagram']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
+
+autoapi_dirs = ["../../python/"]
+autoapi_template_dir = "_templates/api"
+autoapi_generate_api_docs = True
+autoapi_root = "api"
+autoapi_options = [
+    "members",
+    "inherited-members",
+    "undoc-members",
+    "private-members",
+    "special-members",
+    #"show-inheritance",
+    #"show-inheritance-diagram",
+    "show-module-summary",
+    "imported-members"
+]
+
+inheritance_graph_attrs = dict(rankdir="BT", size='""')
+
+
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
@@ -153,9 +178,11 @@ html_theme_options = {
     # an arbitrary url.
     'navbar_links': [
         ("Install", "install"),
-        ("Tutorials", "tutorials"),
-        ("Tasks", "tasks"),
         ("Components", "components"),
+        ("Tutorials", "tutorials"),
+        ("API", "api/index"),
+        ("Road map", "roadmap")
+        #("Tasks", "tasks"),
  #       ("Data", "data"),
 
 #        ("Tools", "tools"),
@@ -219,7 +246,10 @@ html_favicon = './_static/favicon.ico'
 html_static_path = ['_static']
 
 
-html_sidebars = {'**': ['localtoc.html']}
+html_sidebars = {
+    '**': ['localtoc.html']
+    
+    }
 
 # -- Options for HTMLHelp output ------------------------------------------
 

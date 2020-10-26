@@ -3,7 +3,7 @@
 
 .. title:: Astra
 
-:tocdepth: 2
+:tocdepth: 0
 
 .. rubric:: :header_no_toc:`Astra`
 
@@ -22,7 +22,12 @@ to encourage improvements to existing analysis approaches, and to streamline
 the data release process. 
 
 
-Astra initiates analysis tasks for different kinds of source targets. Since these
-analysis routines will likely improve with time, Astra stores all version information
+How it works
+------------
+
+Astra uses a directed acyclic graph to figure out which analysis tasks need to be run
+on what observations. Astra may initiate many different analysis tasks, depending on
+the kind of source (e.g., white dwarf, FGK-type star). 
+Since these analysis routines will likely improve with time, Astra stores all version information
 and data provenance. This allows results to be reproducible, tracked, and compared
 to previous sets of results.
