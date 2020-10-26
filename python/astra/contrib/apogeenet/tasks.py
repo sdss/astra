@@ -3,17 +3,13 @@ import luigi
 import numpy as np
 import os
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import yaml
 from tqdm import tqdm
-from sdss_access import SDSSPath
-from astropy.table import Table
 from luigi.parameter import ParameterVisibility
 
 import astra
 from astra.tasks.base import BaseTask
-from astra.tasks.io import (ApStarFile, AllStarFile)
+from astra.tasks.io import ApStarFile
 from astra.tools.spectrum import Spectrum1D
 
 from astra.contrib.apogeenet.model import Net, predict
@@ -21,6 +17,7 @@ from astra.contrib.apogeenet.model import Net, predict
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class APOGEENetMixin(BaseTask):
+
     """ A mixin class for APOGEENet tasks. """
 
     task_namespace = "APOGEENet"
@@ -40,6 +37,7 @@ class TrainedAPOGEENetModel(APOGEENetMixin):
 
 
 class EstimateStellarParameters(APOGEENetMixin):
+
     """
     Estimate stellar parameters of a young stellar object, given a trained APOGEENet model.
 
@@ -60,14 +58,10 @@ class EstimateStellarParameters(APOGEENetMixin):
 
     def output(self):
         """ The output produced by this task. """
-        # Place relative to the observation path.
-        return luigi.LocalTarget(
-             os.path.join(
-                 os.path.dirname(self.input()["observation"].path), 
-                f"{self.task_id}.yaml"
-             )
-        )
-
+        if self.is_batch_mode:
+            return [task.output() for task in self.get_batch_tasks()]
+        return luigi.LocalTarget(f"{self.task_id}.yaml")
+        
 
     def read_model(self):
         """ Read in the trained APOGEENet model. """
@@ -128,6 +122,9 @@ class EstimateStellarParameters(APOGEENetMixin):
     def write_output(self, result):        
         """
         Write stellar parameter estimates to the output location of this task.
+
+        :param result:
+            A dictionary containing the parameter names as keys, and quantities as values.
         """
 
         sanitised_result = { k: float(v) for k, v in result.items() }
@@ -146,13 +143,12 @@ class EstimateStellarParameters(APOGEENetMixin):
         model = self.read_model()
 
         # This task can be run in batch mode.
-        for task in tqdm(self.get_batch_tasks()):
-
-            spectrum = task.read_observation()
+        failed_tasks = []
+        for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
+            spectrum = task.read_observation()    
             result = task.estimate_stellar_parameters(model, spectrum)
-
             task.write_output(result)
-        
+
         return None
 
 
@@ -162,7 +158,7 @@ class EstimateStellarParametersGivenApStarFile(EstimateStellarParameters, ApStar
     Estimate stellar parameters of a young stellar object, given a trained APOGEENet model and an ApStar file.
 
     This task also requires all parameters that `astra.tasks.io.ApStarFile` requires.
-    **TODO**: Update this docstring once the parameters for `ApStarFile` in sdss5 are stable.
+
 
     :param model_path:
         The path of the trained APOGEENet model.
@@ -174,99 +170,10 @@ class EstimateStellarParametersGivenApStarFile(EstimateStellarParameters, ApStar
     """
 
     def requires(self):
-        return {
-            "model": TrainedAPOGEENetModel(**self.get_common_param_kwargs(TrainedAPOGEENetModel)),
-            "observation": ApStarFile(**self.get_common_param_kwargs(ApStarFile))
+        requirements = {
+            "model": TrainedAPOGEENetModel(**self.get_common_param_kwargs(TrainedAPOGEENetModel))
         }
-
-
-class EstimateStellarParametersForAllStarSpectra(APOGEENetMixin, AllStarFile):
-
-    release = luigi.Parameter()
-    apred = luigi.Parameter()
-    aspcap = luigi.Parameter()
-
-    use_remote = luigi.BoolParameter(
-        default=False, 
-        significant=False,
-        visibility=ParameterVisibility.HIDDEN
-    )
-    
-    def requires(self):
-        return AllStarFile(**self.get_common_param_kwargs(AllStarFile))
-    
-    def run(self):
-        
-        # Load in all the apStar files.
-        table = Table.read(self.input().path)
-        
-        def get_task(row):
-            return EstimateStellarParametersGivenApStarFile(
-                model_path=self.model_path,
-                release=self.release,
-                apred=self.apred,
-                telescope=row["TELESCOPE"],
-                field=row["FIELD"],
-                prefix=row["FILE"][:2],
-                obj=row["APOGEE_ID"],
-                apstar="stars",
-                use_remote=self.use_remote,
-            )
-            
-        # Load model
-        model = get_task(table[0]).read_model()
-
-        N = len(table)
-        for i, row in enumerate(table):
-
-            task = get_task(row)
-            if task.complete():
-                continue
-
-            spectrum = task.read_observation()
-            result = task.estimate_stellar_parameters(model, spectrum)
-
-            task.write_output(result)
-
-            try:
-                self.set_progress_percentage(100 * i / N)
-            except TypeError:
-                None
-
-            # Generate the task just so Luigi central scheduler can see that it gets done.
-            #yield task            
-
-        return None
-
-
-
-if __name__ == "__main__":
-
-    #/home/andy/data/sdss/dr16/apogee/spectro/redux/r12/stars/apo25m/218-04/apStar-r12-2M06440890-0610126.fits
-
-    '''
-    task = EstimateStellarParameters(
-        model_path="../../../APOGEE_NET.pt",
-        release="dr16",
-        apred="r12",
-        telescope="apo25m", 
-        field="218-04",
-        prefix="ap",
-        obj="2M06440890-0610126",
-        apstar="stars"
-    )
-    '''
-    task = EstimateStellarParametersForAllStarSpectra(
-        model_path="../../../APOGEE_NET.pt",
-        release="dr16",
-        apred="r12",
-        aspcap="l33",
-        use_remote=True
-    )
-
-    luigi.build(
-        [task],
-        detailed_summary=True
-    )
-    #task.run()
+        if not self.is_batch_mode:
+            requirements.update(observation=ApStarFile(**self.get_common_param_kwargs(ApStarFile)))
+        return requirements
 

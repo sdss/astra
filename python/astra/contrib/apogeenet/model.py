@@ -7,6 +7,10 @@ import numpy as np
 
 class Net(nn.Module):
 
+    """
+    A convolutional neural network for estimating properties of young stellar objects.
+    """
+
     def __init__(self, num_layers=1, num_targets=3, drop_p=0.0):
         super(Net, self).__init__()
         # 3 input channels, 6 output channels, convolution
@@ -55,6 +59,15 @@ class Net(nn.Module):
 
 
 def predict(model, eval_inputs):
+    """
+    Predict stellar parameters (teff, logg, [Fe/H]) of young stellar objects, given a spectrum.
+
+    :param model:
+        The neural network to use.
+    
+    :param eval_inputs:
+        The spectrum flux.
+    """
     
     with torch.no_grad():
         eval_outputs = model.forward(eval_inputs)

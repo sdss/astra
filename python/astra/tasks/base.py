@@ -196,7 +196,12 @@ class BaseTask(luigi.Task, metaclass=Register):
                 yield task
         else:
             yield self
-        
+    
+
+    def get_batch_size(self):
+        """ Get the number of batched tasks. """
+        return len(getattr(self, self.batch_param_names()[0])) if self.is_batch_mode else 1
+
 
     def output(self):
         """
