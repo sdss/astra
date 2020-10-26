@@ -19,8 +19,8 @@ from astra.tasks.io import BaseTask
 from astra.tasks.targets import DatabaseTarget
 from astra.contrib.classifier import networks, utils
 
-from astra.contrib.classifier.mixin import ClassifierMixin
-from astra.contrib.classifier.train import TrainNIRSpectrumClassifier
+from astra.contrib.classifier.tasks.mixin import ClassifierMixin
+from astra.contrib.classifier.tasks.train import TrainNIRSpectrumClassifier
 
 class ClassifySource(ClassifierMixin):
 

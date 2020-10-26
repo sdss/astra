@@ -1,6 +1,7 @@
-import luigi
+import astra
+from astra.tasks.base import BaseTask
 
-class ClassifierMixin(luigi.Config):
+class ClassifierMixin(BaseTask):
 
     """ 
     A mix-in class for classifier parameters. 
@@ -41,33 +42,33 @@ class ClassifierMixin(luigi.Config):
 
     task_namespace = "Classifier"
 
-    training_spectra_path = luigi.Parameter(
+    training_spectra_path = astra.Parameter(
         config_path=dict(section="ClassifierTask", name="training_spectra_path")
     )
-    training_labels_path = luigi.Parameter(
+    training_labels_path = astra.Parameter(
         config_path=dict(section="ClassifierTask", name="training_labels_path")
     )
 
-    validation_spectra_path = luigi.Parameter(
+    validation_spectra_path = astra.Parameter(
         config_path=dict(section="ClassifierTask", name="validation_spectra_path")
     )
-    validation_labels_path = luigi.Parameter(
+    validation_labels_path = astra.Parameter(
         config_path=dict(section="ClassifierTask", name="validation_labels_path")
     )
     
-    test_spectra_path = luigi.Parameter(
+    test_spectra_path = astra.Parameter(
         config_path=dict(section="ClassifierTask", name="test_spectra_path")
     )
-    test_labels_path = luigi.Parameter(
+    test_labels_path = astra.Parameter(
         config_path=dict(section="ClassifierTask", name="test_labels_path")
     )
 
-    class_names = luigi.ListParameter(
+    class_names = astra.ListParameter(
         config_path=dict(section="ClassifierTask", name="class_names"),
         significant=False
     )
 
-    n_epochs = luigi.IntParameter(default=200)
-    batch_size = luigi.IntParameter(default=100)
-    weight_decay = luigi.FloatParameter(default=1e-5)
-    learning_rate = luigi.FloatParameter(default=1e-4)
+    n_epochs = astra.IntParameter(default=200)
+    batch_size = astra.IntParameter(default=100)
+    weight_decay = astra.FloatParameter(default=1e-5)
+    learning_rate = astra.FloatParameter(default=1e-4)

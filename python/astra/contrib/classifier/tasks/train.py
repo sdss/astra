@@ -2,9 +2,8 @@ import luigi
 import os
 
 from astra.tasks.io import BaseTask, LocalTargetTask
-from astra.contrib.classifer import networks, model, utils
-
-from astra.contrib.classifer.tasks.mixin import ClassifierMixin
+from astra.contrib.classifier import networks, model, utils
+from astra.contrib.classifier.tasks.mixin import ClassifierMixin
 
 class TrainSpectrumClassifier(ClassifierMixin, BaseTask):
 
@@ -68,7 +67,7 @@ class TrainSpectrumClassifier(ClassifierMixin, BaseTask):
         """
         Run the task.
         """
-        
+
         try:
             network = self.network_factory
 

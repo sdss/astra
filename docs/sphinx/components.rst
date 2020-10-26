@@ -229,6 +229,74 @@ This component uses a deep convolutional neural network with drop-out to classif
 by their spectral type. 
 Training sets for APOGEE/apVisit and BOSS/spec spectra were coordinated by David Nidever.
 
+The most relevant tasks for this classifier are:
+
+- :py:mod:`astra.contrib.classifier.tasks.train.TrainNIRSpectrumClassifier`
+- :py:mod:`astra.contrib.classifier.tasks.train.TrainOpticalSpectrumClassifier`
+- :py:mod:`astra.contrib.classifier.tasks.test.ClassifySource`
+- :py:mod:`astra.contrib.classifier.tasks.test.ClassifySourceGivenApVisitFile`
+- :py:mod:`astra.contrib.classifier.tasks.test.ClassifySourceGivenSpecFile`
+
+
+All classifier tasks inherit from :py:mod:`astra.contrib.classifier.mixin.ClassifierMixin` and require
+the following parameters:
+
+- `training_spectra_path`: A path that contains the spectra for the training set.
+    
+- `training_set_labels`: A path that contains the labels for the training set.
+
+- `validation_spectra_path`: A path that contains the spectra for the validation set.
+
+- `validation_labels_path`: A path that contains the labels for the validation set.
+
+- `test_spectra_path`: A path that contains the spectra for the test set.
+    
+- `test_labels_path`: A path that contains ths labels for the test set.
+
+- `class_names`: A tuple of names for the object classes.
+    
+- `n_epochs`: The number of epochs to use for training (default: 200).
+    
+- `batch_size`: The number of objects to use per batch in training (default: 100).
+    
+- `weight_decay`: The weight decay to use during training (default: 1e-5).
+    
+- `learning_rate`: The learning rate to use during training (default: 1e-4).
+
+
+The `ClassifySourceGivenApVisitFile` task will also require all the parameters needed by `ApVisitFile`
+to identify the location of the observation.
+
+
+.. inheritance-diagram:: astra.contrib.classifier.tasks.test.ClassifySourceGivenApVisitFile
+    :top-classes: astra.tasks.base.BaseTask
+    :caption: Inheritance diagram for `ClassifySourceGivenApVisitFile`.
+
+
+The training, validation, and test set for these networks are available for download here:
+
+TODO
+
+
+
+Note that all classifier tasks (e.g., `ClassifySourceGivenApVisitFile`) are `batchable <batch.html>`_: 
+you can analyse many observations at once, minimising the computational overhead in loading the neural network. 
+
+Workflow
+--------
+
+TODO
+
+
+
+API
+---
+
+.. toctree:: api/astra/contrib/classifier/index
+   :maxdepth: 4
+   :titlesonly:
+
+
 
 
 
