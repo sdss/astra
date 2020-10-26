@@ -85,6 +85,7 @@ Below is an example where the task can be executed in single-mode or batch-mode,
 any extra information being supplied by the user::
 
     from astra.tasks.base import BaseTask
+    from astra.tasks.io import LocalTargetTask
 
     class MyTask(BaseTask):
 
@@ -107,8 +108,21 @@ any extra information being supplied by the user::
             return None
         
 
-You will have to write functions that do the expensive work (e.g., `read_model`), but you can
-see that it is easy to write tasks that can be easily executed in batch mode.
+        def requires(self):
+            requirements = dict(model=LocalTargetTask(self.model_path))
+            if not self.is_batch_mode:
+                requirements.update(
+                    observation=ObservedSpectrum(**self.get_common_param_kwargs(ObservedSpectrum))
+                )
+            return requirements
+
+
+You can see that you will have to write functions to do some of the expensive work (e.g., `read_model`),
+but it is easy to write tasks that can be easily executed in batch mode.
+The only potential _gotcha_ is what you need to do in `requires()`.
+Here you have to send back different dependencies based on whether the task is running in batch mode or not.
+The reasons for this are deep and complex.
+
 
 Scheduling batch tasks
 ----------------------
