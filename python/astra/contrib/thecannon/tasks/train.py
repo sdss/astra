@@ -15,7 +15,6 @@ class TrainTheCannonBase(TheCannonMixin):
 
     regularization = luigi.FloatParameter(default=0.0)
     threads = luigi.IntParameter(default=1, significant=False)
-    default_inverse_variance = luigi.FloatParameter(default=1.0e6, significant=False)
     plot = luigi.BoolParameter(default=True, significant=False)
 
     def run(self):
@@ -23,7 +22,6 @@ class TrainTheCannonBase(TheCannonMixin):
         # Load training set labels and spectra.
         labels, dispersion, training_set_flux, training_set_ivar = read_training_set(
             self.input().path, 
-            self.default_inverse_variance
         )
 
         # Set the vectorizer.
@@ -88,6 +86,32 @@ class TrainingSetTarget(BaseTask):
 
 
 class TrainTheCannon(TrainTheCannonBase):
+
+    """
+    A task to train The Cannon, given some file that contains high-quality labels,
+    and pseudo-continuum-normalised fluxes and inverse variances.    
+
+    :param training_set_path: The path to a `pickle` file that contains a dictionary
+        with the following keys:
+            
+        - `wavelength`: an array of shape `(P, )` where `P` is the number of pixels
+        - `flux`: an array of flux values with shape `(N, P)` where `N` is the number of observed spectra and `P` is the number of pixels
+        - `ivar`: an array of inverse variance values with shape `(N, P)` where `N` is the number of observed spectra and `P` is the number of pixels
+        - `labels`: an array of shape `(L, N)` where `L` is the number of labels and `N` is the number observed spectra
+        - `label_names`: a tuple of length `L` that describes the names of the labels
+
+    :param regularization: (optional)
+        The L1 regularization strength to use during training (default: 0.0).
+    
+    :param threads: (optional)
+        The number of threads to use during training (default: 1).
+    
+    :param plot: (optional)
+        Produce quality assurance figures after training (default: True).
+    """
+
+
+
     training_set_path = luigi.Parameter()
 
     def requires(self):
