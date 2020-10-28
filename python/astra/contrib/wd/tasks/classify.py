@@ -1,29 +1,30 @@
-
 import astra
-import luigi
 import numpy as np
 import pickle
 import sqlalchemy
 import warnings
 
 from itertools import cycle
-from time import time
 from tqdm import tqdm
 from astra.tasks import BaseTask
 from astra.tasks.targets import DatabaseTarget, LocalTarget
 from astra.tasks.io import LocalTargetTask, SpecFile
 from astra.tools.spectrum import Spectrum1D
-from astra.utils import log
 
-from astra_whitedwarf.utils import line_features
+from astra.contrib.wd.utils import line_features
 
 warnings.filterwarnings("ignore", category=np.RankWarning) 
 
 
 class ClassifyWhiteDwarfMixin(BaseTask):
-    model_path = luigi.Parameter()
 
-    wavelength_regions = luigi.ListParameter(
+    """
+    Mix-in class for classifying white dwarfs.
+    """
+
+    model_path = astra.Parameter()
+
+    wavelength_regions = astra.ListParameter(
         default=[
             [3860, 3900], # Balmer line
             [3950, 4000], # Balmer line
@@ -51,8 +52,8 @@ class ClassifyWhiteDwarfMixin(BaseTask):
         ]
     )
 
-    polyfit_order = luigi.IntParameter(default=5)
-    polyfit_regions = luigi.ListParameter(
+    polyfit_order = astra.IntParameter(default=5)
+    polyfit_regions = astra.ListParameter(
         default=[
             [3850, 3870],
             [4220, 4245],
@@ -62,20 +63,37 @@ class ClassifyWhiteDwarfMixin(BaseTask):
         ]
     )
 
-
+"""
 class WDClassification(DatabaseTarget):
     results_schema = [
         sqlalchemy.Column("wd_class", sqlalchemy.String(2)),
         sqlalchemy.Column("flag", sqlalchemy.Boolean())
     ]
+"""
 
 
+class ClassifyWhiteDwarfGivenSpecFile(ClassifyWhiteDwarfMixin, SpecFile):
 
-class ClassifyWhiteDwarf(ClassifyWhiteDwarfMixin, SpecFile):
+    """
+    Classify a white dwarf given a BOSS SpecFile.
+
+    :param model_path:
+        The path to a file where the model is stored.
+    
+    :param wavelength_regions: (optional)
+        A list of two-length tuples that contains the start and end wavelength around line features to use for classification. Note that if you change these then you should probably re-train a classifier to use the same features.
+    
+    :param polyfit_order: (optional)
+        The order of the polynomial to use for continuum fitting around absorption lines (default: 5).
+    
+    :param polyfit_regions: (optional)
+        A list of two-length tuples that contain the start end end wavelengths of regions to use when fitting the continuum.
+    """
 
     max_batch_size = 10000
 
     def requires(self):
+        """ The requirements for this task. """
         requirements = dict(model=LocalTargetTask(path=self.model_path))
         if not self.is_batch_mode:
             requirements.update(observation=SpecFile(**self.get_common_param_kwargs(SpecFile)))
@@ -83,6 +101,7 @@ class ClassifyWhiteDwarf(ClassifyWhiteDwarfMixin, SpecFile):
 
 
     def run(self):
+        """ Execute this task. """
 
         # Load the model.
         with open(self.input()["model"].path, "rb") as fp:
@@ -116,51 +135,14 @@ class ClassifyWhiteDwarf(ClassifyWhiteDwarfMixin, SpecFile):
             flags = cycle([False])
 
         for task, wd_class, flag in zip(tasks, classifier.predict(features), flags):
-            task.output().write(dict(wd_class=wd_class, flag=flag))
+            #task.output().write(dict(wd_class=wd_class, flag=flag))
+            with open(task.output().path, "wb") as fp:
+                fp.write(pickle.dump(dict(wd_class=wd_class, flag=flag)))
 
 
     def output(self):
-        return WDClassification(self)
+        """ The output of this task. """
+        return LocalTarget(f"{self.task_id}.yml")
 
-
-
-if __name__ == "__main__":
-
-    import yaml
-    with open("examples.yml", "r") as fp:
-        examples = yaml.load(fp)
-
-    expected = [example.pop("expected_class") for example in examples]
-    tasks = [ClassifyWhiteDwarf(model_path="../../../data/training_file", **kwds) for kwds in examples]
-    
-    # Just do a random subset.
-    N_subset = len(tasks)
-    np.random.seed(7)
-    indices = np.random.choice(len(tasks), N_subset, replace=False)
-
-    tasks = [task for i, task in enumerate(tasks) if i in indices]
-    expected = [each for i, each in enumerate(expected) if i in indices]
-    astra.build(
-        tasks,
-        local_scheduler=True
-    )
-    
-    class_names = expected + [task.output().read(as_dict=True)["wd_class"] for task in tasks]
-
-    # Restrict to two first chars.
-    max_chars = 2
-    class_names = list(set([ea.upper()[:max_chars] for ea in class_names]))
-    
-    M = len(class_names)
-
-    confusion_matrix = np.zeros((M, M))
-
-    for i, (task, expected_class) in enumerate(zip(tasks, expected)):
-
-        actual_class = task.output().read(as_dict=True)["wd_class"]
-
-        j = class_names.index(expected_class.upper())
-        k = class_names.index(actual_class.upper()[:max_chars])
-
-        confusion_matrix[j, k] += 1
-    
+    #def output(self):
+    #    return WDClassification(self)

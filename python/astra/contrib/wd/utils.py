@@ -105,4 +105,3 @@ def classify_white_dwarf(model_path, spectrum, **kwargs):
     features = line_features(spectrum, **kwargs)
 
     return random_forest_classifier.predict(features.reshape((1, -1)))[0]
-
