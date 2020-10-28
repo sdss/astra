@@ -535,6 +535,78 @@ minimising the computational overhead in loading the model.
 Workflow
 --------
 
+By default, no continuum normalisation is performed by the `EstimateStellarParametersGivenApStarFile` task.
+Here we will change that and define our own continuum normalisation behaviour.
+
+The files you will need for this workflow are:
+
+- `kurucz_data.pkl <https://drive.google.com/file/d/1RfhkyZBKY3he6sTSM67KPQfVfMnIg_cs/view?usp=sharing>`_: a pre-computed grid of synthetic spectra to train the network
+- `continuum-regions.list <https://drive.google.com/file/d/1RqHxy6t9mCHkPYFH2HEMjHxFCachv-2h/view?usp=sharing>`_: a list of continuum regions for APOGEE spectra, provided by Melissa Ness (Columbia University)
+
+
+Now let's look at the code::
+
+  import astra
+  from astra.tasks.continuum import Sinusoidal
+  from astra.tasks.io import ApStarFile
+  from astra.contrib.thepayne.tasks import (
+      EstimateStellarParametersGivenApStarFile, 
+      TrainThePayne
+  )
+
+  # Let's define a continuum normalization task for ApStarFiles using a sum of sines
+  # and cosines.
+  class ContinuumNormalize(Sinusoidal, ApStarFile):
+      
+      # Just take the first spectrum, which is stacked by individual pixel weighting.
+      # (We will ignore individual visits).
+      spectrum_kwds = dict(data_slice=(slice(0, 1), slice(None)))
+
+      def requires(self):
+          return ApStarFile(**self.get_common_param_kwargs(ApStarFile))
+      
+
+  # The EstimateStellarParametersGivenApStarFile task performs no continuum normalisation.
+  # Here we will create a new class that requires that the observations are continuum normalised.
+  class EstimateStellarParameters(EstimateStellarParametersGivenApStarFile, ContinuumNormalize):
+
+      def requires(self):
+          requirements = dict(model=TrainThePayne(**self.get_common_param_kwargs(TrainThePayne)))
+          if not self.is_batch_mode:
+              requirements.update(
+                  observation=ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
+              )
+          return requirements
+
+
+  # Let's run on one star first.
+  kwds = dict(
+      training_set_path="kurucz_data.pkl",
+      continuum_regions_path="continuum-regions.list",
+
+      # ApStar keywords:
+      release="dr16",
+      apred="r12",
+      apstar="stars",
+      telescope="apo25m",
+      field="000+14",
+      prefix="ap",
+      obj="2M16505794-2118004",
+      use_remote=True # Download the apStar file if we don't have it.
+
+  )
+
+  # Create the task.
+  task = EstimateStellarParameters(**kwds)
+
+  # Build the acyclic graph and execute tasks as necessary.
+  astra.build(
+      [task],
+      local_scheduler=True
+  )
+
+The first time you run this workflow it will train a neural network, download the `ApStarFile` (if it does not exist already), perform continuum normalisation, and then estimate stellar parameters given the trained neural network and the psuedo-continuum-normalised spectrum.
+
 
 API
 ---
