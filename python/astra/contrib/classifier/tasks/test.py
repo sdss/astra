@@ -105,12 +105,17 @@ class ClassifySourceGivenApVisitFile(ClassifySource):
             probs = np.exp(log_probs)
             class_probs = dict(zip(class_names, map(float, probs)))
 
-            task.output().write(class_probs)
+            #task.output().write(class_probs)
+            with open(task.output().path, "w") as fp:
+                fp.write(yaml.dump(class_probs))
 
             most_probable_class = class_names[np.argmax(probs)]
             result = [most_probable_class, class_probs]
             print(f"Result: {result}")
 
+
+    def output(self):
+        return luigi.LocalTarget(f"{self.task_id}.yml")
 
     #def output(self):
     #    return ClassifierResult(self)

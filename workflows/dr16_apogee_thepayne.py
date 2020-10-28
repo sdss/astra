@@ -2,7 +2,7 @@
 import astra
 from astra.tasks.continuum import Sinusoidal
 from astra.tasks.io import ApStarFile
-from astra.contrib.thepayne import (
+from astra.contrib.thepayne.tasks import (
     EstimateStellarParametersGivenApStarFile, 
     TrainThePayne
 )
@@ -22,7 +22,7 @@ class ContinuumNormalize(Sinusoidal, ApStarFile):
 
 # The EstimateStellarParametersGivenApStarFile task performs no continuum normalisation.
 # Here we will create a new class that requires that the observations are continuum normalised.
-class EstimateStellarParameters(EstimateStellarParametersGivenApStarFile):
+class EstimateStellarParameters(EstimateStellarParametersGivenApStarFile, ContinuumNormalize):
 
     def requires(self):
         requirements = dict(model=TrainThePayne(**self.get_common_param_kwargs(TrainThePayne)))
@@ -37,6 +37,7 @@ class EstimateStellarParameters(EstimateStellarParametersGivenApStarFile):
 # Let's run on one star first.
 kwds = dict(
     training_set_path="kurucz_data.pkl",
+    continuum_regions_path="continuum-regions.list",
 
     # ApStar keywords:
     release="dr16",

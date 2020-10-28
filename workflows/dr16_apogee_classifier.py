@@ -62,3 +62,4 @@ astra.build(
     [task],
     local_scheduler=True
 )
+

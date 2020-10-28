@@ -4,7 +4,7 @@ from astra.tasks.base import BaseTask
 from astra.tasks.io import (ApStarFile, LocalTargetTask)
 from astra.tools.spectrum import Spectrum1D
 from astra.contrib.thepayne import training, test as testing
-
+from luigi import LocalTarget
 
 class ThePayneMixin(BaseTask):
 
@@ -79,7 +79,7 @@ class TrainThePayne(ThePayneMixin):
 
     def output(self):
         """ The output of this task. """
-        return luigi.LocalTarget(f"{self.task_id}.pkl")
+        return LocalTarget(f"{self.task_id}.pkl")
         
 
 
@@ -130,7 +130,7 @@ class EstimateStellarParameters(ThePayneMixin):
 
     def output(self):
         """ The output of this task. """
-        return luigi.LocalTarget(f"{self.task_id}.pkl")
+        return LocalTarget(f"{self.task_id}.pkl")
 
 
 

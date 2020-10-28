@@ -1,8 +1,10 @@
 import luigi
 import os
+import torch
+from torch.autograd import Variable
 
 from astra.tasks.io import BaseTask, LocalTargetTask
-from astra.contrib.classifier import networks, model, utils
+from astra.contrib.classifier import networks, model, plot_utils, utils
 from astra.contrib.classifier.tasks.mixin import ClassifierMixin
 
 class TrainSpectrumClassifier(ClassifierMixin, BaseTask):
@@ -111,6 +113,24 @@ class TrainSpectrumClassifier(ClassifierMixin, BaseTask):
             network,
             self.output().path
         )
+
+        # Disable dropout for inference.
+        with torch.no_grad():                
+            pred = network.forward(Variable(torch.Tensor(test_spectra)))
+            outputs = pred.data.numpy()
+
+        pred_test_labels = np.argmax(outputs, axis=1)
+        
+        # Make a confusion matrix plot.
+        fig = plot_utils.plot_confusion_matrix(
+            test_labels, 
+            pred_test_labels, 
+            self.class_names,
+            normalize=False,
+            title=None,
+            cmap=plt.cm.Blues
+        )
+        fig.savefig(f"{self.task_id}.png", dpi=300)
 
 
 class TrainNIRSpectrumClassifier(TrainSpectrumClassifier):
