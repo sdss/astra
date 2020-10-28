@@ -284,7 +284,23 @@ class AllStarFile(SDSS4DataModelTask):
     sdss_data_model_name = "allStar"
 
 
+class AllVisitSum(SDSS4DataModelTask):
+
+    """
+    A task to represent an AllVisitSum SDSS/APOGEE data product.
+
+    :param apred:
+        The version of the APOGEE reduction pipeline used.
+    
+    :param release:
+        The name of the SDSS data release (e.g., DR16).
+    """
+
+    sdss_data_model_name = "allVisitSum"
+
+
+
 # Add requisite parameters and make them batchable.
-for klass in (ApVisitFile, ApStarFile, AllStarFile, SpecFile):#, ApPlanFile)
+for klass in (ApVisitFile, ApStarFile, AllStarFile, AllVisitSum, SpecFile):#, ApPlanFile)
     for lookup_key in klass().tree.lookup_keys(klass.sdss_data_model_name):
         setattr(klass, lookup_key, luigi.Parameter(batch_method=tuple))
