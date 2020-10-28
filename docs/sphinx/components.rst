@@ -204,7 +204,10 @@ Now let's see how the results compare to what we expect for these stars::
 
 If all goes to plan then you should see something like this:
 
-[TODO FIGURE]
+.. figure:: _static/images/workflow_apogeenet_results.png
+  :align: center
+  :alt: The expected stellar parameters (x-axis) for young stellar objects compared to the results obtained by APOGEENet in Astra (y-axis). The mean and standard deviation of label residuals is shown.
+
 
 API
 ---
@@ -277,15 +280,13 @@ The training, validation, and test set for these networks are available for down
 
 TODO
 
-
-
 Note that all classifier tasks (e.g., `ClassifySourceGivenApVisitFile`) are `batchable <batch.html>`_: 
 you can analyse many observations at once, minimising the computational overhead in loading the neural network. 
 
 Workflow
 --------
 
-TODO
+
 
 
 
