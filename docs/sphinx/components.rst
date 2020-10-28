@@ -536,7 +536,15 @@ Workflow
 --------
 
 By default, no continuum normalisation is performed by the `EstimateStellarParametersGivenApStarFile` task.
-Here we will change that and define our own continuum normalisation behaviour::
+Here we will change that and define our own continuum normalisation behaviour.
+
+The files you will need for this workflow are:
+
+- `kurucz_data.pkl <https://drive.google.com/file/d/1RfhkyZBKY3he6sTSM67KPQfVfMnIg_cs/view?usp=sharing>`_: a pre-computed grid of synthetic spectra to train the network
+- `continuum-regions.list <https://drive.google.com/file/d/1RqHxy6t9mCHkPYFH2HEMjHxFCachv-2h/view?usp=sharing>`_: a list of continuum regions for APOGEE spectra, provided by Melissa Ness (Columbia University)
+
+
+Now let's look at the code::
 
   import astra
   from astra.tasks.continuum import Sinusoidal
