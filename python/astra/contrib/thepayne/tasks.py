@@ -1,10 +1,12 @@
 
 import astra
+import pickle
 from astra.tasks.base import BaseTask
 from astra.tasks.io import (ApStarFile, LocalTargetTask)
 from astra.tools.spectrum import Spectrum1D
 from astra.contrib.thepayne import training, test as testing
 from luigi import LocalTarget
+
 
 class ThePayneMixin(BaseTask):
 
