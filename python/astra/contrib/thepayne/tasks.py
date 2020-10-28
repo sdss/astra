@@ -1,6 +1,7 @@
 
+import astra
 from astra.tasks.base import BaseTask
-from astra.tasks.io import LocalTargetTask
+from astra.tasks.io import (ApStarFile, LocalTargetTask)
 from astra.tools.spectrum import Spectrum1D
 from astra.contrib.thepayne import training, test as testing
 
@@ -133,7 +134,7 @@ class EstimateStellarParameters(ThePayneMixin):
 
 
 
-class EstimateGivenStellarParametersGivenApStarFile(EstimateStellarParameters, ApStaFile):
+class EstimateStellarParametersGivenApStarFile(EstimateStellarParameters, ApStarFile):
     """
     Estimate stellar parameters given a single-layer neural network and an ApStar file.
 

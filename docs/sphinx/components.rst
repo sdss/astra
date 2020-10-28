@@ -498,9 +498,42 @@ The Payne
 
 **Contributors:** Yuan-Sen Ting (Australian National University)
 
-The Payne uses a single-layer neural network trained on model spectra to estimate
-stellar properties.
+The Payne is a name given for a single-layer neural network trained on model spectra to estimate stellar properties.
 
+If you want to use The Payne then the most relevant tasks in Astra are:
+
+- :py:mod:`astra.contrib.thepayne.tasks.TrainThePayne`
+- :py:mod:`astra.contrib.thepayne.tasks.EstimateStellarParameters`
+- :py:mod:`astra.contrib.thepayne.tasks.EstimateStellarParametersGivenApStarFile`
+
+
+The only required parameter for `TrainThePayne` is `training_set_path`: the location
+of a file that has the neural network coefficients stored.
+This should be a pickle file that stores a dictionary with the following keys:
+
+- wavelength: an array of shape (P, ) where P is the number of pixels
+- spectra: an array of shape (N, P) where N is the number of spectra and P is the number of pixels
+- labels: an array of shape (L, P) where L is the number of labels and P is the number of pixels
+- label_names: a tuple of length L that contains the names of the labels
+
+
+`EstimateStellarParametersGivenApStarFile` will estimate stellar parameters given some
+pre-trained neural network (trained by `TrainThePayne`) and an `ApStarFile` object. 
+The `EstimateStellarParametersGivenApStarFile` class is a sub-class of the 
+`EstimateStellarParameters` class (see below), which is a base task that does not specify what kind
+of observation.
+
+.. inheritance-diagram:: astra.contrib.thepayne.tasks.EstimateStellarParametersGivenApStarFile
+    :top-classes: astra.tasks.base.BaseTask
+    :caption: Inheritance diagram for `EstimateStellarParametersGivenApStarFile`.
+
+
+The `EstimateStellarParametersGivenApStarFile` task is `batchable <batch.html>`_: you can analyse many APOGEE observations at once,
+minimising the computational overhead in loading the model. 
+
+
+Workflow
+--------
 
 
 API
