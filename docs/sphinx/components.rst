@@ -276,9 +276,7 @@ to identify the location of the observation.
     :caption: Inheritance diagram for `ClassifySourceGivenApVisitFile`.
 
 
-The training, validation, and test set for these networks are available for download here:
-
-TODO
+The training, validation, and test set for these networks are `available for download <https://drive.google.com/drive/folders/1b4HNfOrPxJsJFvaqyX3lZ5-HZH9HD2Xc?usp=sharing>`_.
 
 Note that all classifier tasks (e.g., `ClassifySourceGivenApVisitFile`) are `batchable <batch.html>`_: 
 you can analyse many observations at once, minimising the computational overhead in loading the neural network. 
@@ -286,8 +284,87 @@ you can analyse many observations at once, minimising the computational overhead
 Workflow
 --------
 
+In this workflow example we will train a near-infrared classifer and use it to classify sources from data release 16::
+
+  import astra
+  from astra.tasks.io import AllVisitSum
+  from astra.contrib.classifier.tasks.test import ClassifySourceGivenApVisitFile
+
+  from astropy.table import Table
+  from collections import defaultdict
+  from tqdm import tqdm
+
+  # Load the DR16 AllVisit file to get the parameters we need to locate ApVisit files.
+  # Notes: In future we will do this from a SQL query.
+  #        If you don't have the AllVisitSum file then you can use this to get it:
+  #           
+  #          AllVisitSum(release=release, apred=apred, use_remote=True).run()
+
+  release, apred = ("dr16", "r12")
+  all_visits = Table.read(AllVisitSum(release=release, apred=apred).local_path)
+
+  def get_kwds(row):
+      """
+      Return the ApVisit keys we need from a row in the AllVisitSum file.
+      """
+      return dict(
+          telescope=row["TELESCOPE"],
+          field=row["FIELD"].lstrip(),
+          plate=row["PLATE"].lstrip(),
+          mjd=str(row["MJD"]),
+          prefix=row["FILE"][:2],
+          fiber=str(row["FIBERID"]),
+          apred=apred
+      )
+
+  # We will run this in batch mode.
+  # (We could hard-code keys but it's good coding practice to have a single place of truth)
+  apvisit_kwds = { key: [] for key in get_kwds(defaultdict(lambda: "")).keys() }
+
+  # Add all visits to the keywords.
+  N_max = None # Use this to set a maximum number of ApVisits to analyse.
+  for i, row in tqdm(enumerate(all_visits, start=1)):
+      if N_max is not None and i >= N_max: break
+      for k, v in get_kwds(row).items():
+          apvisit_kwds[k].append(v)
+
+  # Keywords that are needed to train the NIR classifier.
+  directory = "../astra-components/astra_classifier/data"
+  common_kwds = dict(
+      release=release,
+      training_spectra_path=f"{directory}/nir/nir_clean_spectra_shfl.npy",
+      training_labels_path=f"{directory}/nir/nir_clean_labels_shfl.npy",
+      validation_spectra_path=f"{directory}/nir/nir_clean_spectra_valid_shfl.npy",
+      validation_labels_path=f"{directory}/nir/nir_clean_labels_valid_shfl.npy",
+      test_spectra_path=f"{directory}/nir/nir_clean_spectra_test_shfl.npy",
+      test_labels_path=f"{directory}/nir/nir_clean_labels_test_shfl.npy",
+      class_names=["FGKM", "HotStar", "SB2", "YSO"]
+  )
+
+  # Merge keywords and create task.
+  task = ClassifySourceGivenApVisitFile(**{ **common_kwds, **apvisit_kwds })
+
+  # Get Astra to build the acyclic graph and schedule tasks.
+  astra.build(
+      [task],
+      local_scheduler=True
+  )
+
+Astra will build the acyclic graph, and if you haven't previously trained a classifier using these parameters, then it will train one before classifying sources.
+
+For every `ApVisitFile` the classifier will estimate the probability that the source belongs to each of the classes. This is not really a probability, but is usually taken as one. 
+You can take the class with the highest probability as being the 'predicted class', or trigger tasks to occur if the probability of belonging to a particular class is higher than some value.
 
 
+One of the outputs produced from training the network is a confusion matrix showing how frequently the classifier accurately classified sources in the test set.
+
+.. figure:: _static/images/classifier_confusion_matrix_test_set.png
+  :align: center
+
+    Unnormalized confusion matrix for the near-infrared test set.
+  
+This confusion matrix is based on the _test set_, not the training set used to train the model.
+You can see that in general the classifier is doing very well and predicting the correct class almost every time.
 
 
 API
