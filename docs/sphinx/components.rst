@@ -502,6 +502,15 @@ The Payne uses a single-layer neural network trained on model spectra to estimat
 stellar properties.
 
 
+
+API
+---
+
+.. toctree:: api/astra/contrib/thepayne/index
+   :maxdepth: 2
+   :titlesonly:
+
+
 WD code
 =======
 
