@@ -39,7 +39,7 @@ extensions = ['sphinx.ext.autodoc', 'sphinx.ext.napoleon', 'sphinx.ext.autosumma
               'sphinx.ext.todo', 
               #'sphinx.ext.viewcode', 
               'sphinx.ext.mathjax',
-              'sphinx.ext.intersphinx', 'sphinx_click.ext',
+              'sphinx.ext.intersphinx', #'sphinx_click.ext',
               'autoapi.extension',
               'sphinxcontrib.bibtex',
               'sphinx.ext.inheritance_diagram']
