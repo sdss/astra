@@ -528,9 +528,6 @@ of observation.
     :caption: Inheritance diagram for `EstimateStellarParametersGivenApStarFile`.
 
 
-The `EstimateStellarParametersGivenApStarFile` task is `batchable <batch.html>`_: you can analyse many APOGEE observations at once,
-minimising the computational overhead in loading the model. 
-
 
 Workflow
 --------
@@ -607,6 +604,9 @@ Now let's look at the code::
 
 The first time you run this workflow it will train a neural network, download the `ApStarFile` (if it does not exist already), perform continuum normalisation, and then estimate stellar parameters given the trained neural network and the psuedo-continuum-normalised spectrum.
 
+The `EstimateStellarParametersGivenApStarFile` task is `batchable <batch.html>`_: you can analyse many observations at once,
+minimising the computational overhead in loading the network. 
+
 
 API
 ---
@@ -620,6 +620,100 @@ WD code
 =======
 
 **Contributors:** Nicola Gentile Fusillo (European Southern Observatory)
+
+This code classifies white dwarfs given line depths of strong absorption lines, and fits model spectra directly to observations for DA-type white dwarfs.
+
+If you want to use this white dwarf analysis code in Astra then the most relevant tasks are:
+
+- :py:mod:`astra.contrib.wd.tasks.classify.ClassifyWhiteDwarfGivenSpecFile`
+
+The only required parameters for `ClassifyWhiteDwarfGivenSpecFile` is the `model_path`,
+which is the location of a pre-trained random forest classifier, 
+and the parameters required to locate the `SpecFile`.
+
+.. inheritance-diagram:: astra.contrib.wd.tasks.classify.ClassifyWhiteDwarfGivenSpecFile
+    :top-classes: astra.tasks.base.BaseTask
+    :caption: Inheritance diagram for `ClassifyWhiteDwarfGivenSpecFile`.
+
+
+Workflow
+--------
+
+To run this workflow you will need the following files:
+- `training_file <>`_: a random forest classifier trained using the default line region settings
+- `wd-class-examples.yml <>`_: a file containing SpecFile keywords and known classes of white dwarfs
+
+Here we will use the sample of known WDs observed in SDSS-IV, and the pre-trained random forest classifier, to classify known WDs and compare the predicted class to the expected class::
+
+    import astra
+    import numpy as np
+    import os
+    import yaml
+    from astra.contrib.wd.tasks.classify import ClassifyWhiteDwarfGivenSpecFile
+
+    directory = "../astra-components/data/wd/"
+
+    # Get the expected classes for 
+    with open(os.path.join(directory, "sdss-wd-examples.yml"), "r") as fp:
+        examples = yaml.load(fp, Loader=yaml.FullLoader)
+
+    # Let's separate the expected classes and join the keywords together.
+    N = 100 # Optionally only do a subset of the data.
+    kwds = { key: [] for key in examples[0].keys() }
+    for i, each in enumerate(examples, start=1):
+        if N is not None and i >= N: break
+        for k, v in each.items():
+            kwds[k].append(v)
+
+    expected_classes = kwds.pop("expected_class")
+    kwds.update(
+        release="dr16",
+        model_path=os.path.join(directory, "training_file")
+    )
+
+    # Create the task where we will run everything in batch mode.
+    task = ClassifyWhiteDwarfGivenSpecFile(**kwds)
+
+    # Build the acyclic graph and execute tasks.
+    astra.build(
+        [task],
+        local_scheduler=True
+    )
+
+  Now let's make a confusion matrix plot to see how well the classifier performed::
+
+    import pickle
+
+    predicted_classes = []
+    for output in task.output():
+        with open(output.path, "rb") as fp:
+            result = pickle.load(fp)
+        predicted_classes.append(result["wd_class"])
+
+    # Let's plot a confusion matrix.
+
+    # Restrict to major classes only.
+    max_chars = 2
+    unique_class_names = sorted(set([pc[:max_chars] for pc in predicted_classes]))
+
+    M = len(unique_class_names)
+    confusion_matrix = np.zeros((M, M))
+    for i, (predicted_class, expected_class) in enumerate(zip(predicted_classes, expected_classes)):
+        j = unique_class_names.index(expected_class.upper())
+        k = unique_class_names.index(predicted_class.upper()[:max_chars])
+        confusion_matrix[j, k] += 1
+
+
+
+
+
+
+API
+---
+
+.. toctree:: api/astra/contrib/wd/index
+    :maxdepth: 2
+    :titlesonly:
 
 
 .. bibliography:: refs.bib
