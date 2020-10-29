@@ -137,12 +137,14 @@ class ClassifyWhiteDwarfGivenSpecFile(ClassifyWhiteDwarfMixin, SpecFile):
         for task, wd_class, flag in zip(tasks, classifier.predict(features), flags):
             #task.output().write(dict(wd_class=wd_class, flag=flag))
             with open(task.output().path, "wb") as fp:
-                fp.write(pickle.dump(dict(wd_class=wd_class, flag=flag)))
+                pickle.dump(dict(wd_class=wd_class, flag=flag), fp)
 
 
     def output(self):
         """ The output of this task. """
-        return LocalTarget(f"{self.task_id}.yml")
+        if self.is_batch_mode:
+            return [task.output() for task in self.get_batch_tasks()]
+        return LocalTarget(f"{self.task_id}.pkl")
 
     #def output(self):
     #    return WDClassification(self)
