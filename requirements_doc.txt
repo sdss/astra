@@ -1,8 +1,6 @@
 -r requirements.txt
 
-Sphinx>=1.6.5
+Sphinx==1.8.5
 sphinx_bootstrap_theme>=0.4.12
-click>=7.0
-sphinx-click>=2.0.1
 sphinx-autoapi
 sphinxcontrib-bibtex
