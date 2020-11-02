@@ -203,6 +203,19 @@ class BaseTask(luigi.Task, metaclass=Register):
         return len(getattr(self, self.batch_param_names()[0])) if self.is_batch_mode else 1
 
 
+    @property
+    def output_base_dir(self):
+        """ Base directory for storing task outputs. """
+        # TODO: When you have settled on a data model, put it into the Tree and replace this!
+        return os.path.join(
+            os.environ.get("SAS_BASE_DIR"),
+            "sdsswork",
+            "astra",
+            f"{self.astra_version_major}.{self.astra_version_minor}.{self.astra_version_micro}",
+            self.task_namespace
+        )
+    
+
     def output(self):
         """
         The outputs that the task generates. If all outputs exist then the task is considered done,

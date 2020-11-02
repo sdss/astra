@@ -1,6 +1,6 @@
 import os
 import luigi
-import types
+
 from pathlib import Path
 
 from sdss_access import SDSSPath, RsyncAccess, HttpAccess
@@ -8,18 +8,12 @@ from sdss_access import SDSSPath, RsyncAccess, HttpAccess
 from astra.tasks.base import BaseTask, SDSSDataProduct
 
 
-
-
 class LocalTargetTask(BaseTask):
     path = luigi.Parameter()
     def output(self):
         return luigi.LocalTarget(self.path)
+
     
-
-
-# $APOGEE_REDUX/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/{prefix}Visit-{apred}-{plate}-{mjd}-{fiber:0>3}.fits
-# mastargoodspec: $MANGA_SPECTRO_MASTAR/{drpver}/{mastarver}/mastar-goodspec-{drpver}.fits.gz
-
 class SDSSDataModelTask(BaseTask):
 
     """ A task to represent a SDSS data product. """
@@ -164,143 +158,3 @@ class SDSSDataModelTask(BaseTask):
         else:
             return f()
         
-
-class SDSS5DataModelTask(SDSSDataModelTask):
-
-    """ A task to represent a SDSS-V data product. """
-
-    release = luigi.Parameter(default="sdss5")
-
-
-class SDSS4DataModelTask(SDSSDataModelTask):
-
-    """ A task to represent a SDSS-IV data product. """
-
-    release = luigi.Parameter(default="DR16")
-
-
-#class DSS4DataModelTask):#, ApPlanFile)
-#    sdss_data_model_name = "apPlan"
-
-
-class ApVisitFile(SDSS4DataModelTask):
-    """
-    A task to represent an ApVisit SDSS/APOGEE data product.
-
-    :param fiber:
-        The fiber number that the object was observed with.
-
-    :param plate:
-        The plate identifier.
-
-    :param field:
-        The field the object was observed in.
-
-    :param mjd:
-        The modified Julian date of the observation.
-
-    :param apred:
-        The ASPCAP reduction version number (e.g., r12).
-        
-    :param prefix:
-        The prefix of the filename (e.g., ap or as).    
-
-    :param release:
-        The name of the SDSS data release (e.g., DR16).
-    """    
-    sdss_data_model_name = "apVisit"
-
-    
-class ApStarFile(SDSS4DataModelTask):
-
-    """
-    A task to represent an ApStar SDSS/APOGEE data product.
-
-    :param obj:
-        The name of the object.
-
-    :param field:
-        The field the object was observed in.
-
-    :param telescope:
-        The name of the telescope used to observe the  object (e.g., apo25m).
-
-    :param apred:
-        The ASPCAP reduction version number (e.g., r12).
-
-    :param apstar:
-        A string indicating the kind of object (usually 'star').
-
-    :param release:
-        The name of the SDSS data release (e.g., DR16).
-    """
-    sdss_data_model_name = "apStar"
-    
-    def writer(self, spectrum, path, **kwargs):
-        from astra.tools.spectrum.loaders import write_sdss_apstar
-        return write_sdss_apstar(spectrum, path, **kwargs)
-
-
-class SpecFile(SDSS4DataModelTask):
-
-    """
-    A task to represent a Spec SDSS/BOSS data product.
-
-    :param fiberid:
-        The fiber number that the object was observed with.
-
-    :param plateid:
-        The plate identifier.
-    
-    :param mjd:
-        The modified Julian date of the observation.
-
-    :param run2d:
-        The version of the BOSS reduction pipeline used.
-
-    :param release:
-        The name of the SDSS data release (e.g., DR16).
-    """
-    
-    sdss_data_model_name = "spec"
-
-
-
-class AllStarFile(SDSS4DataModelTask):
-    
-    """
-    A task to represent an AllStar SDSS/APOGEE data product.
-
-    :param aspcap:
-        The version of the ASPCAP analysis pipeline used.
-
-    :param apred:
-        The version of the APOGEE reduction pipeline used.
-
-    :param release:
-        The name of the SDSS data release (e.g., DR16).
-    """
-
-    sdss_data_model_name = "allStar"
-
-
-class AllVisitSum(SDSS4DataModelTask):
-
-    """
-    A task to represent an AllVisitSum SDSS/APOGEE data product.
-
-    :param apred:
-        The version of the APOGEE reduction pipeline used.
-    
-    :param release:
-        The name of the SDSS data release (e.g., DR16).
-    """
-
-    sdss_data_model_name = "allVisitSum"
-
-
-
-# Add requisite parameters and make them batchable.
-for klass in (ApVisitFile, ApStarFile, AllStarFile, AllVisitSum, SpecFile):#, ApPlanFile)
-    for lookup_key in klass().tree.lookup_keys(klass.sdss_data_model_name):
-        setattr(klass, lookup_key, luigi.Parameter(batch_method=tuple))

@@ -17,16 +17,15 @@ class BaseDatabaseTarget(luigi.Target):
     _engine_dict = {}
     Connection = collections.namedtuple("Connection", "engine pid")
 
-    def __init__(self, connection_string, task_namespace, task_family, task_id, parameters_schema, results_schema, echo=True):
+    def __init__(self, connection_string, task_namespace, task_family, task_id, schema, echo=True):
         self.task_namespace = task_namespace
         self.task_family = task_family
         self.task_id = task_id
 
-        pk_column = sqlalchemy.Column("task_id", sqlalchemy.String(128), primary_key=True)
-        self.results_schema = [pk_column]
-        self.results_schema.extend(results_schema)
-        self.parameters_schema = [pk_column]
-        self.parameters_schema.extend(parameters_schema)
+        self.schema = [
+            sqlalchemy.Column("task_id", sqlalchemy.String(128), primary_key=True),
+        ]
+        self.schema.extend(schema)
         self.echo = echo
         self.connect_args = {}
         self.connection_string = connection_string
@@ -55,111 +54,56 @@ class BaseDatabaseTarget(luigi.Target):
 
 
     @property
-    def table_prefix(self):
+    def __tablename__(self):
         return f"{self.task_namespace}_{self.task_family}"
     
 
     @property
-    def parameters_table(self):
-        return f"{self.table_prefix}_parameters"
-
-
-    def create_parameters_table(self):
-        """
-        Create the parameters table if it doesn't exist.
-        Use a separate connection since the transaction might have to be reset.
-        """
-        with self.engine.begin() as con:
-            metadata = sqlalchemy.MetaData()
-            if not con.dialect.has_table(con, self.parameters_table):
-                self._parameters_table_bound = sqlalchemy.Table(
-                    self.parameters_table, metadata, *self.parameters_schema,
-                )
-                metadata.create_all(self.engine)
-            
-            else:
-                #metadata.reflect(only=[self.parameters_table], bind=self.engine)
-                #self._parameters_table_bound = metadata.tables[self.parameters_table]
-                self._parameters_table_bound = sqlalchemy.Table(
-                    self.parameters_table,
-                    metadata,
-                    autoload=True,
-                    autoload_with=self.engine
-                )
-
-        return self._parameters_table_bound
-
-
-    @property
-    def parameters_table_bound(self):
+    def table_bound(self):
         try:
-            return self._parameters_table_bound
+            return self._table_bound
         except AttributeError:
-            return self.create_parameters_table()
+            return self.create_table()
 
 
-    @property
-    def results_table(self):
-        return f"{self.table_prefix}_results"
-
-
-    def create_results_table(self):
+    def create_table(self):
         """
-        Create a results table if it doesn't exist.
+        Create a table if it doesn't exist.
         Use a separate connection since the transaction might have to be reset.
         """
         with self.engine.begin() as con:
             metadata = sqlalchemy.MetaData()
-            if not con.dialect.has_table(con, self.results_table):
-                self._results_table_bound = sqlalchemy.Table(
-                    self.results_table, metadata, *self.results_schema
+            if not con.dialect.has_table(con, self.__tablename__):
+                self._table_bound = sqlalchemy.Table(
+                    self.__tablename__, metadata, *self.schema
                 )
                 metadata.create_all(self.engine)
             else:
                 #metadata.reflect(only=[self.results_table], bind=self.engine)
-                #self._results_table_bound = metadata.tables[self.results_table]
-                self._results_table_bound = sqlalchemy.Table(
-                    self.results_table,
+                #self._table_bound = metadata.tables[self.results_table]
+                self._table_bound = sqlalchemy.Table(
+                    self.__tablename__,
                     metadata,
                     autoload=True,
                     autoload_with=self.engine
                 )
 
-
-        return self._results_table_bound
-
-    @property
-    def results_table_bound(self):
-        try:
-            response = self._results_table_bound
-        except AttributeError:
-            return self.create_results_table()
-            
-        else:
-            if response is None:
-                return self.create_results_table()
-            return self._results_table_bound
+        return self._table_bound
         
 
     def exists(self):
-        return self.results_exist()
+        r = self._read(self.table_bound, columns=[self.table_bound.c.task_id]) 
+        return r is not None
 
 
-    def results_exist(self):
-        return self.read_results() is not None
-
-
-    def read_results(self, as_dict=False):
-        return self._read(self.results_table_bound, as_dict)
-
-
-    def read_parameters(self, as_dict=False):
-        return self._read(self.parameters_table_bound, as_dict)
+    def read(self, as_dict=False):
+        return self._read(self.table_bound, as_dict=as_dict)
         
 
-    def _read(self, table, as_dict):
+    def _read(self, table, columns=None, as_dict=False):
+        columns = columns or [table]
         with self.engine.begin() as connection:
-            s = sqlalchemy.select([table]).where(
+            s = sqlalchemy.select(columns).where(
                 table.c.task_id == self.task_id
             ).limit(1)
             row = connection.execute(s).fetchone()
@@ -169,33 +113,9 @@ class BaseDatabaseTarget(luigi.Target):
         return row
 
 
-    def read(self, as_dict=False):
-        return self.read_results(as_dict=as_dict)
-
-
-    def write_results(self, data):
+    def write(self, data):
         exists = self.exists()
-        table = self.results_table_bound
-        with self.engine.begin() as connection:
-            if not exists:
-                insert = table.insert().values(
-                    task_id=self.task_id,
-                    **data
-                )
-            else:
-                insert = table.update().where(
-                    table.c.task_id == self.task_id
-                ).values(
-                    task_id=self.task_id,
-                    **data
-                )
-            connection.execute(insert)
-        return None
-
-
-    def write_parameters(self, data):
-        exists = self.read_parameters() is not None
-        table = self.parameters_table_bound
+        table = self.table_bound
         sanitised_data = {}
         for key, value in data.items():
             # Don't sanitise booleans or date/datetime objects.
@@ -206,8 +126,7 @@ class BaseDatabaseTarget(luigi.Target):
                     value = json.dumps(value)
                 
             sanitised_data[key] = value
-        
-
+    
         with self.engine.begin() as connection:
             if not exists:
                 insert = table.insert().values(
@@ -222,12 +141,7 @@ class BaseDatabaseTarget(luigi.Target):
                     **sanitised_data
                 )
             connection.execute(insert)
-        
         return None
-        
-
-    def write(self, data):
-        return self.write_results(data)
 
 
 
@@ -249,7 +163,7 @@ class DatabaseTarget(BaseDatabaseTarget):
     The `task_id` of the task supplied will be added as a column by default.
     """
 
-    def __init__(self, task, results_schema=None, echo=False, only_significant=True):
+    def __init__(self, task, echo=False, only_significant=True):
         """
         A database target for outputs of task results.
 
@@ -270,37 +184,29 @@ class DatabaseTarget(BaseDatabaseTarget):
         self.task = task
         self.only_significant = only_significant
 
-        self.parameters_schema = generate_parameter_schema(
-            task,
-            only_significant=only_significant
-        )
+        schema = generate_parameter_schema(task, only_significant)
 
-        if results_schema is not None:
-            self.results_schema = results_schema
+        for key, value in self.__class__.__dict__.items():
+            if isinstance(value, sqlalchemy.Column):
+                schema.append(value)
 
         super(DatabaseTarget, self).__init__(
             task.connection_string,
             task.task_namespace,
             task.task_family,
             task.task_id,
-            self.parameters_schema,
-            self.results_schema,
+            schema,
             echo=echo
         )
         return None
 
-
-    def write_parameters(self):
-        data = { 
-            k: getattr(self.task, k) for k, pt in self.task.get_params() \
-                if (self.only_significant and pt.significant) or not self.only_significant
-        }
-        return super(DatabaseTarget, self).write_parameters(data)
-
-    def write(self, data, mark_complete=True, write_parameters=True):
+    def write(self, data, mark_complete=True):
+        # Update with parameter keyword arguments.
+        data = data.copy()
+        for parameter_name in self.task.get_param_names():
+            data[parameter_name] = getattr(self.task, parameter_name)
+        
         super(DatabaseTarget, self).write(data)
-        if write_parameters:
-            self.write_parameters()
         if mark_complete:
             self.task.trigger_event(Event.SUCCESS, self.task)
             
@@ -345,15 +251,16 @@ def generate_parameter_schema(task, only_significant=True):
 
 if __name__ == "__main__":
 
+    from astra.tasks.base import BaseTask
+    from sqlalchemy import Column, Integer
 
     class MyTaskResultTarget(DatabaseTarget):
-        results_schema = [
-            sqlalchemy.Column("a", sqlalchemy.Integer),
-            sqlalchemy.Column("b", sqlalchemy.Integer),
-            sqlalchemy.Column("c", sqlalchemy.Integer),
-        ]
+        
+        a = Column("a", Integer)
+        b = Column("b", Integer)
+        c = Column("c", Integer)
+        
 
-    from astra.tasks.base import BaseTask
 
     class MyTask(BaseTask):
 
@@ -374,5 +281,4 @@ if __name__ == "__main__":
 
     A.run()
     print(A.output().read())
-    print(A.output().write_parameters())
-    print(A.output().read_parameters())
+    print(A.output().read(as_dict=True))
