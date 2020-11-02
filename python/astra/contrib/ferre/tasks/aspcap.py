@@ -3,6 +3,7 @@
 
 import numpy as np
 import os
+import pickle
 from astropy.io.fits import getheader
 from glob import glob
 from tqdm import tqdm
@@ -19,6 +20,7 @@ from astra.contrib.ferre.tasks.mixin import (
     ApStarMixin, BaseFerreMixin, DispatcherMixin, FerreMixin, SPECLIB_DIR
 )
 from astra.contrib.ferre.tasks.ferre import EstimateStellarParametersGivenApStarFile
+from astra.contrib.ferre.continuum import median_filtered_correction
 from astra.tasks.io import SDSS4ApStarFile as ApStarFile
 
 
@@ -188,7 +190,7 @@ class EstimateStellarParametersGivenMedianFilteredApStarFile(EstimateStellarPara
         spectra = []
 
         # TODO: dont do this.
-        with open("../wavelength_mask.pkl", "rb") as fp:
+        with open("/home/ubuntu/data/sdss/astra-components/wavelength_mask.pkl", "rb") as fp:
             mask = pickle.load(fp)
 
         for task in self.get_batch_tasks():
@@ -253,10 +255,9 @@ class IterativeEstimateOfStellarParametersGivenApStarFile(BaseFerreMixin, ApStar
 
     def requires(self):
         """ The requirements of this task. """
-        kwds = self.get_common_param_kwargs(EstimateStellarParametersGivenApStarFile).copy()
         return ASPCAPDispatchFerreTasksGivenApStarFile(
             task_factory=EstimateStellarParametersGivenApStarFile,
-            **kwds
+            **self.get_common_param_kwargs(EstimateStellarParametersGivenApStarFile)
         ).requires()
 
 
@@ -284,22 +285,28 @@ class IterativeEstimateOfStellarParametersGivenApStarFile(BaseFerreMixin, ApStar
 
         # Supply new tasks (with the best grid from chi-sq value) where initial value is final value
         # from previous iteration.
-        iterated_tasks = []
+        self.iterated_tasks = []
         for _, (log_chisq_fit, task) in best_tasks.items():
 
             kwds = task.param_kwargs.copy()
             # Set C, N to be frozen if this is a dwarf grid.
             frozen_parameters = None if kwds["gd"] == "g" else dict(C=0.0, N=0.0)
             # Update with initial estimate from previous task.
+            previous_result = task.output()["database"].read(as_dict=True)
             kwds.update(
                 frozen_parameters=frozen_parameters,
-                initial_parameters=task.output()["database"].read(as_dict=True)
+                # TODO: This is bad practice...
+                initial_parameters={ k: v for k, v in previous_result.items() if k.upper() == k }
             )
-            iterated_tasks.append(EstimateStellarParametersGivenMedianFilteredApStarSpectrum(**kwds))
+            self.iterated_tasks.append(EstimateStellarParametersGivenMedianFilteredApStarFile(**kwds))
         
-        yield iterated_tasks
+        yield self.iterated_tasks
         
 
     def output(self):
-        from luigi.mock import MockTarget
-        return MockTarget(f"{self.task_id}")
+        try:
+            return [task.output() for task in self.iterated_tasks]
+            
+        except:
+            from luigi.mock import MockTarget
+            return MockTarget(f"{self.task_id}")

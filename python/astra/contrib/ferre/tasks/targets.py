@@ -58,16 +58,16 @@ class FerreResult(DatabaseTarget):
     """ A database row representing an output target from FERRE. """
 
     # TODO: We should consider generating this results schema from the grid header file.    
-    teff = Column("TEFF", Float),
-    logg = Column("LOGG", Float),
-    metals = Column("METALS", Float),
-    alpha_m = Column("O Mg Si S Ca Ti", Float),
-    n_m = Column("N", Float),
-    c_m = Column("C", Float),
-    log10vdop = Column("LOG10VDOP", Float),
+    teff = Column("TEFF", Float)
+    logg = Column("LOGG", Float)
+    metals = Column("METALS", Float)
+    alpha_m = Column("O Mg Si S Ca Ti", Float)
+    n_m = Column("N", Float)
+    c_m = Column("C", Float)
+    log10vdop = Column("LOG10VDOP", Float)
     # Not all grids have LGVSINI.
-    lgvsini = Column("LGVSINI", Float, nullable=True),
-    log_snr_sq = Column("log_snr_sq", Float),
+    lgvsini = Column("LGVSINI", Float, nullable=True)
+    log_snr_sq = Column("log_snr_sq", Float)
     log_chisq_fit = Column("log_chisq_fit", Float)
     
 
