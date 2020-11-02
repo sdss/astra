@@ -11,6 +11,18 @@ from astra.tasks.base import BaseTask
 from astra.tasks.io import (ApStarFile, ApVisitFile)
 
 
+# todo: move elsewhere and refactor.
+connection_string = "postgresql://sdss_remote@operations.sdss.org/sdss5db"
+
+engine = create_engine(connection_string)
+
+connection = engine.connect()#begin()
+md = sqlalchemy.MetaData(schema="apogee_drp")
+visit_table = sqlalchemy.Table("visit", md, autoload=True, autoload_with=connection)
+
+star_table = sqlalchemy.Table("star", md, autoload=True, autoload_with=connection)
+
+
 def get_visits(mjd, full_output=False):
     """
     Yield visits that were most recently observed on the given MJD.
@@ -23,21 +35,12 @@ def get_visits(mjd, full_output=False):
         If set to `False`, only the relevant ApVisit keys will be returned.
     """
 
-    # todo: move elsewhere and refactor.
-    connection_string = "postgresql://sdss_remote@operations.sdss.org/sdss5db"
 
-    engine = create_engine(connection_string)
+    #with :
+    s = sqlalchemy.select([visit_table]).where(visit_table.c.mjd == mjd)
+    rows = engine.execute(s).fetchall()
 
-    with engine.begin() as connection:
-
-        md = sqlalchemy.MetaData(schema="apogee_drp")
-
-        table = sqlalchemy.Table("visit", md, autoload=True, autoload_with=connection)
-
-        s = sqlalchemy.select([table]).where(table.c.mjd == mjd)
-        rows = engine.execute(s).fetchall()
-
-        keys = [column.name for column in table.columns]
+    keys = [column.name for column in visit_table.columns]
 
     if full_output:
         # TODO: Consider translating so output behaviour is consistent.
@@ -65,21 +68,16 @@ def get_stars(mjd, full_output=False):
         If set to `False`, only the relevant ApStar keys will be returned.
     """
 
-    connection_string = "postgresql://sdss_remote@operations.sdss.org/sdss5db"
+    #with engine.begin() as connection:
 
-    engine = create_engine(connection_string)
+    s = sqlalchemy.select([star_table]).where(
+            (star_table.c.mjdend == mjd) \
+        &   (star_table.c.ngoodrvs > 0)
+    )
+    rows = engine.execute(s).fetchall()
 
-    with engine.begin() as connection:
+    keys = [column.name for column in star_table.columns]
 
-        md = sqlalchemy.MetaData(schema="apogee_drp")
-
-        table = sqlalchemy.Table("star", md, autoload=True, autoload_with=connection)
-
-        s = sqlalchemy.select([table]).where(table.c.mjdend == mjd)
-        rows = engine.execute(s).fetchall()
-
-        keys = [column.name for column in table.columns]
-    
     if full_output:
         for row in rows:
             yield dict(zip(keys, row))
@@ -196,33 +194,26 @@ def get_visits_given_star(obj, apred):
         The name of the object (e.g., 2M00000+000000).
     
     :param apred:
-        The version of the APOGEE reduction pipeline used.
+        The version of the APOGEE reduction pipeline used (e.g., daily).
     """
     
-    connection_string = "postgresql://sdss_remote@operations.sdss.org/sdss5db"
 
-    engine = create_engine(connection_string)
 
-    with engine.begin() as connection:
+    columns = [
+        visit_table.c.fiberid.label("fiber"),
+        visit_table.c.plate,
+        visit_table.c.mjd,
+        visit_table.c.telescope,
+        visit_table.c.field,
+        visit_table.c.apred_vers.label("apred"),
+    ]
 
-        md = sqlalchemy.MetaData(schema="apogee_drp")
-        visit = sqlalchemy.Table("visit", md, autoload=True, autoload_with=connection)
+    s = sqlalchemy.select(columns).where(
+            (visit_table.c.apogee_id == obj) & (visit_table.c.apred_vers == apred)
+        )
 
-        columns = [
-            visit.c.fiberid.label("fiber"),
-            visit.c.plate,
-            visit.c.mjd,
-            visit.c.telescope,
-            visit.c.field,
-            visit.c.apred_vers.label("apred"),
-        ]
-
-        s = sqlalchemy.select(columns).where(
-                (visit.c.apogee_id == obj) & (visit.c.apred_vers == apred)
-            )
-
-        rows = engine.execute(s).fetchall()
-        keys = [column.name for column in columns]
+    rows = engine.execute(s).fetchall()
+    keys = [column.name for column in columns]
 
     for row in rows:
         yield dict(zip(keys, row))

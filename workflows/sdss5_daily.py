@@ -9,8 +9,10 @@ from astra.contrib.classifier.tasks.test import (
     ClassifySourceGivenApVisitFile,
     ClassifySourceGivenApStarFile
 )
-from astra.contrib.apogeenet.tasks import EstimateStellarParametersGivenApStarFile
-from astra.contrib.thepayne.tasks import EstimateStellarParametersGivenNormalisedApStarFile
+import astra.contrib.apogeenet.tasks as apogeenet
+#import astra.contrib.thecannon.tasks as thecannon
+import astra.contrib.thepayne.tasks as thepayne
+
 
 # Note that many parameters are set in sdss5.cfg
 mjd = 59146
@@ -22,12 +24,6 @@ apvisit_kwds = batcher(get_visits(mjd))
 # Classify task.
 classify = ClassifySourceGivenApVisitFile(**apvisit_kwds)
 
-
-star_kwds = batcher(list(get_stars(mjd=mjd))[2:3])
-
-foo = EstimateStellarParametersGivenNormalisedApStarFile(**star_kwds)
-
-raise a
 
 
 class DistributeAnalysisGivenApStarFile(ApStarFile):
@@ -41,7 +37,7 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
             
             print(f"Working on {task}")
 
-            # Get the classification
+            # Get the joint classification from all individual visits.
             classification = ClassifySourceGivenApStarFile(
                     **task.get_common_param_kwargs(ClassifySourceGivenApStarFile)
                 ).output().read(as_dict=True)
@@ -50,13 +46,17 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
 
             task_factories = []
             if classification["lp_yso"] > 0.7:
-                task_factories.append(EstimateStellarParametersGivenApStarFile)
+                task_factories.append(apogeenet.EstimateStellarParametersGivenApStarFile)
                
             if classification["lp_hotstar"] > 0.7:
                 None
             
             if classification["lp_fgkm"] > 0.7:
-                task_factories.append(EstimateStellarParametersGivenNormalisedApStarFile)
+                task_factories.extend([
+                    #thecannon.EstimateStellarParametersGivenNormalisedApStarFile,
+                    thepayne.EstimateStellarParametersGivenNormalisedApStarFile,
+                    #ferre.EstimateStellarParametersGivenApStarFile
+                ])
 
             
             for task_factory in task_factories:
@@ -72,26 +72,20 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
 # [ ] Execute TC... outputs to database, and saved pkl file.
 # [X] Execute TP... outputs to database, and saved pkl file.
 
+#
+
 # [ ] Put everything into a fits table: apVisit outputs per MJD?
 # [ ] Put everything into a fits table: apStar outputs per MJD?
+star_kwds = batcher(list(get_stars(mjd=mjd)))
 
-t = DistributeAnalysisGivenApStarFile(**star_kwds)
+task = DistributeAnalysisGivenApStarFile(**star_kwds)
 
 astra.build(
-    [t],
+    [task],
     local_scheduler=True
 )
 
 
 raise a
-
-
-for star_kwds in get_stars(mjd=mjd):
-
-    visit_kwds = list(get_visits_given_star(star_kwds["obj"], star_kwds["apred"]))
-
-    raise a
-
-
 
 
