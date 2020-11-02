@@ -12,7 +12,8 @@ from luigi.mock import MockTarget
 
 
 class BaseDatabaseTarget(luigi.Target):
-    # BaseMixin gives us the connection_string parameter.
+    
+    """ A mixin class for DatabaseTargets. """
 
     _engine_dict = {}
     Connection = collections.namedtuple("Connection", "engine pid")
@@ -55,11 +56,13 @@ class BaseDatabaseTarget(luigi.Target):
 
     @property
     def __tablename__(self):
+        """ The name of the table in the database. """
         return f"{self.task_namespace}_{self.task_family}"
     
 
     @property
     def table_bound(self):
+        """ A bound reflection of the database table. """
         try:
             return self._table_bound
         except AttributeError:
@@ -92,15 +95,34 @@ class BaseDatabaseTarget(luigi.Target):
         
 
     def exists(self):
+        """ Returns True or False whether the database target exists. """
         r = self._read(self.table_bound, columns=[self.table_bound.c.task_id]) 
         return r is not None
 
 
     def read(self, as_dict=False):
+        """ 
+        Read the target from the database. 
+
+        :param as_dict: (optional)
+            Optionally return the result as a dictionary (default: False).        
+        """
         return self._read(self.table_bound, as_dict=as_dict)
         
 
     def _read(self, table, columns=None, as_dict=False):
+        """
+        Read a target row from the database table.
+
+        :param table:
+            The bound table to read from.
+        
+        :param columns: (optional)
+            Optionally return only these specific columns (default: entire table).
+        
+        :param as_dict: (optional)
+            Optionally return the result as a dictionary (default: False).
+        """
         columns = columns or [table]
         with self.engine.begin() as connection:
             s = sqlalchemy.select(columns).where(
@@ -114,6 +136,13 @@ class BaseDatabaseTarget(luigi.Target):
 
 
     def write(self, data):
+        """
+        Write a result to the database target.
+
+        :param data:
+            A dictionary where keys represent column names and values represent the result value.
+        """
+        
         exists = self.exists()
         table = self.table_bound
         sanitised_data = {}
@@ -150,36 +179,31 @@ class DatabaseTarget(BaseDatabaseTarget):
     """ 
     A database target for outputs of task results. 
     
-    This class should be sub-classed, where the sub-class has the attribute `results_schema` that is a list containing the
-    table columns for the results table. For example:
+    This class should be sub-classed, where the sub-class has attributes that define the schema. For example::
 
     ```
-    results_schema = [
-        sqlalchemy.Column("effective_temperature", sqlalchemy.Float()),
-        sqlalchemy.Column("surface_gravity", sqlalchemy.Float())
-    ]
+    class MyDatabaseTarget(DatabaseTarget):
+
+        teff = sqlalchemy.Column("effective_temperature", sqlalchemy.Float)
+        logg = sqlalchemy.Column("surface_gravity", sqlalchemy.Float)
     ```
 
     The `task_id` of the task supplied will be added as a column by default.
+
+
+    :param task:
+        The task that this output will be the target for. This is necessary to reference the task ID, and to generate the table
+        schema for the task parameters.
+
+    :param echo: [optional]
+        Echo the SQL queries that are supplied (default: False).
+    
+    :param only_significant: [optional]
+        When storing the parameter values of the task in a database, only store the significant parameters (default: True).
+
     """
 
     def __init__(self, task, echo=False, only_significant=True):
-        """
-        A database target for outputs of task results.
-
-        :param task:
-            The task that this output will be the target for. This is necessary to reference the task ID, and to generate the table
-            schema for the task parameters.
-
-        :param results_schema: [optional]
-            Optionally provide the results schema here, instead of setting it through self.
-
-        :param echo: [optional]
-            Echo the SQL queries that are supplied (default: False).
-        
-        :param only_significant: [optional]
-            When storing the parameter values of the task in a database, only store the significant parameters (default: True).
-        """
         
         self.task = task
         self.only_significant = only_significant
@@ -200,19 +224,41 @@ class DatabaseTarget(BaseDatabaseTarget):
         )
         return None
 
+
     def write(self, data, mark_complete=True):
+        """
+        Write a result to the database target row.
+
+        :param data:
+            A dictionary where keys represent column names and values represent the result value.
+
+        :param mark_complete: (optional)
+            Trigger the event as being completed successfully (default: True)
+        """
+
         # Update with parameter keyword arguments.
         data = data.copy()
-        for parameter_name in self.task.get_param_names():
-            data[parameter_name] = getattr(self.task, parameter_name)
-        
+        if self.only_significant:
+            for parameter_name in self.task.get_param_names():
+                data[parameter_name] = getattr(self.task, parameter_name)
+        else:
+            data.update(self.task.param_kwargs)
+
         super(DatabaseTarget, self).write(data)
         if mark_complete:
             self.task.trigger_event(Event.SUCCESS, self.task)
             
 
 def generate_parameter_schema(task, only_significant=True):
+    """
+    Generate SQLAlchemy table schema for a task's parameters.
 
+    :param task:
+        The task to generate the table schema for.
+    
+    :param only_significant: (optional)
+        Only generate columns for parameters that are defined as significant (default: True).
+    """
     jsonify = lambda _: json.dumps(_)
 
     mapping = {
