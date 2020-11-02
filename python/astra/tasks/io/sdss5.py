@@ -8,11 +8,11 @@ class SDSS5DataModelTask(SDSSDataModelTask):
     """ A task to represent a SDSS-V data product. """
 
     release = astra.Parameter(default="sdss5")
-    telescope = astra.Parameter()
+    telescope = astra.Parameter(batch_method=tuple)
 
 
 class ApVisitFile(SDSS5DataModelTask):
-    
+
     """
     A task to represent a SDSS-V ApVisit data product.
 
@@ -40,11 +40,11 @@ class ApVisitFile(SDSS5DataModelTask):
 
     sdss_data_model_name = "apVisit"
 
-    fiber = astra.IntParameter()
-    plate = astra.Parameter()
-    field = astra.Parameter()
-    mjd = astra.IntParameter()
-    apred = astra.Parameter()
+    fiber = astra.IntParameter(batch_method=tuple)
+    plate = astra.Parameter(batch_method=tuple)
+    field = astra.Parameter(batch_method=tuple)
+    mjd = astra.IntParameter(batch_method=tuple)
+    apred = astra.Parameter(batch_method=tuple)
 
     
 class ApStarFile(SDSS5DataModelTask):
@@ -65,7 +65,7 @@ class ApStarFile(SDSS5DataModelTask):
         A string indicating the kind of object (usually 'star').
     
     :param apred:
-        The ASPCAP reduction version number (e.g., r12).
+        The data reduction version number (e.g., daily).
 
     :param release:
         The name of the SDSS data release (e.g., sdss5).
@@ -73,10 +73,11 @@ class ApStarFile(SDSS5DataModelTask):
 
     sdss_data_model_name = "apStar"
     
-    obj = astra.Parameter()
-    healpix = astra.IntParameter()
-    apstar = astra.Parameter(default="star")
-    apred = astra.Parameter()    
+    obj = astra.Parameter(batch_method=tuple)
+    healpix = astra.IntParameter(batch_method=tuple)
+    # TODO: Consider whether apstar is needed, or if it should be a batch parameter
+    apstar = astra.Parameter(default="star", batch_method=tuple)
+    apred = astra.Parameter(batch_method=tuple) 
 
     def writer(self, spectrum, path, **kwargs):
         from astra.tools.spectrum.loaders import write_sdss_apstar

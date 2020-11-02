@@ -10,9 +10,10 @@ from sqlalchemy import (Column, Float, String)
 
 from luigi.util import (inherits, requires)
 from luigi.parameter import ParameterVisibility
+from luigi.mock import MockTarget
 from torch.autograd import Variable
 from scipy.special import logsumexp
-from astra.tasks.io import (ApVisitFile, SDSS4ApVisitFile, LocalTargetTask)
+from astra.tasks.io import (ApVisitFile, ApStarFile, SDSS4ApVisitFile, LocalTargetTask)
 from astra.tools.spectrum import Spectrum1D
 
 from astra.tasks.base import BaseTask
@@ -53,9 +54,36 @@ class ClassifySource(ClassifierMixin):
         raise NotImplementedError("this should be over-written by sub-classes")
 
     
+    def prepare_result(self, log_probs):
+        
+        class_names = list(map(str.lower, self.class_names))
+
+        # Unnormalised results.
+        result = dict(zip(
+            [f"lp_{class_name}" for class_name in class_names],
+            log_probs
+        ))
+
+        # Normalised probabilities
+        with np.errstate(under="ignore"):
+            relative_log_probs = log_probs - logsumexp(log_probs)
+        
+        probs = np.exp(relative_log_probs)
+        result.update(dict(zip(
+            [f"prob_{class_name}" for class_name in class_names],
+            probs
+        )))
+        
+        # Most probable class.
+        result["most_probable_class"] = class_names[np.argmax(probs)]
+        if not np.any(np.isfinite(probs)):
+            result["most_probable_class"] = "unknown"
+        return result
 
 
-class ClassifierResult(DatabaseTarget):
+
+
+class ClassifyApVisitResult(DatabaseTarget):
 
     """ A database target (row) indicating the result from the classifier. """
 
@@ -73,6 +101,25 @@ class ClassifierResult(DatabaseTarget):
 
     most_probable = Column("most_probable_class", String(10))
 
+
+
+class ClassifyApStarResult(DatabaseTarget):
+
+    """ A database target (row) indicating the result from the classifier. """
+
+    # Output (unnormalised) log probabilities.
+    lp_sb2 = Column("lp_sb2", Float)
+    lp_yso = Column("lp_yso", Float)
+    lp_fgkm = Column("lp_fgkm", Float)
+    lp_hotstar = Column("lp_hotstar", Float)
+    
+    # Normalised probabilities
+    prob_sb2 = Column("prob_sb2", Float)
+    prob_yso = Column("prob_yso", Float)
+    prob_fgkm = Column("prob_fgkm", Float)
+    prob_hotstar = Column("prob_hotstar", Float)
+
+    most_probable = Column("most_probable_class", String(10))
 
 
 class ClassifySourceGivenApVisitFileBase(ClassifySource):
@@ -102,30 +149,6 @@ class ClassifySourceGivenApVisitFileBase(ClassifySource):
         return flux / np.nanmedian(flux, axis=2)[:, :, None]
 
 
-    def prepare_result(self, log_probs):
-        
-        class_names = list(map(str.lower, self.class_names))
-
-        # Unnormalised results.
-        result = dict(zip(
-            [f"lp_{class_name}" for class_name in class_names],
-            log_probs
-        ))
-
-        # Normalised probabilities
-        with np.errstate(under="ignore"):
-            relative_log_probs = log_probs - logsumexp(log_probs)
-        
-        probs = np.exp(relative_log_probs)
-        result.update(dict(zip(
-            [f"prob_{class_name}" for class_name in class_names],
-            probs
-        )))
-        
-        # Most probable class.
-        result["most_probable_class"] = class_names[np.argmax(probs)]
-        return result
-
 
     def run(self):
         """
@@ -148,26 +171,12 @@ class ClassifySourceGivenApVisitFileBase(ClassifySource):
 
             task.output().write(result)
 
-            #with open(task.output().path, "w") as fp:
-            #    fp.write(yaml.dump(class_probs))
 
-    """
     def output(self):
+        """ The output of the task. """
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
-        
-        path = os.path.join(
-            self.output_base_dir,
-            f"visit/{self.telescope}/{self.field}/{self.plate}/{self.mjd}",
-            f"apVisit-{self.apred}-{self.plate}-{self.mjd}-{self.fiber:0>3}-{self.task_id}.yml"
-        )
-        # Create the directory structure if it does not exist already.
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        return luigi.LocalTarget(path)
-    """
-
-    def output(self):
-        return ClassifierResult(self)
+        return ClassifyApVisitResult(self)
 
 
 @requires(TrainNIRSpectrumClassifier, ApVisitFile)
@@ -190,6 +199,53 @@ class ClassifySourceGivenApVisitFile(ClassifySourceGivenApVisitFileBase):
         return batch
 
 
+
+class ClassifySourceGivenApStarFile(ClassifySource, ApStarFile):
+
+    """
+    Classify an ApStar source from the joint classifications of individual visits (the ApVisit files that went into that ApStar).
+
+    This task requires the same parameters required by :py:mod:`astra.contrib.classifer.train.TrainNIRSpectrumClassifier`,
+    and those required by :py:mod:`astra.tasks.io.ApStarFile`.
+
+    """
+
+    def requires(self):
+        """ We require the classifications from individual visits of this source. """        
+
+        # TODO: This should go elsewhere.
+        from astra.tasks.daily import get_visits_given_star
+
+        common_kwds = self.get_common_param_kwargs(ClassifySourceGivenApVisitFile)    
+        for task in tqdm(self.get_batch_tasks(), desc="Matching stars to visits", total=self.get_batch_size()):
+            for visit_kwds in get_visits_given_star(task.obj, task.apred):
+                yield ClassifySourceGivenApVisitFile(**{ **common_kwds, **visit_kwds })
+
+
+    def run(self):
+        """ Execute the task. """
+        for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
+
+            # We probably don't need to use dictionaries here but it prevents any mis-ordering.
+            log_probs = { f"lp_{k}": 0 for k in task.class_names }
+            for classification in task.requires():
+                output = classification.output().read(as_dict=True)
+                for key in log_probs.keys():
+                    if np.isfinite(output[key]):
+                        log_probs[key] += output[key]
+        
+            result = self.prepare_result([log_probs[f"lp_{k}"] for k in task.class_names])
+            task.output().write(result)
+
+        return None
+    
+
+    def output(self):
+        """ The output for these results. """
+        if self.is_batch_mode:
+            return [task.output() for task in self.get_batch_tasks()]
+        return ClassifyApStarResult(self)
+        
 
 @requires(TrainNIRSpectrumClassifier, SDSS4ApVisitFile)
 class ClassifySourceGivenSDSS4ApVisitFile(ClassifySourceGivenApVisitFileBase):

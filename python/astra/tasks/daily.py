@@ -187,6 +187,48 @@ class GetDailyReducedDataProducts(GetDailyMixin):
         
 
 
+# TODO: This should go somewhere else, probably.
+def get_visits_given_star(obj, apred):
+    """
+    Get the keywords of individual visits (ApVisit files) that went into a star (ApStar) file.
+
+    :param obj:
+        The name of the object (e.g., 2M00000+000000).
+    
+    :param apred:
+        The version of the APOGEE reduction pipeline used.
+    """
+    
+    connection_string = "postgresql://sdss_remote@operations.sdss.org/sdss5db"
+
+    engine = create_engine(connection_string)
+
+    with engine.begin() as connection:
+
+        md = sqlalchemy.MetaData(schema="apogee_drp")
+        visit = sqlalchemy.Table("visit", md, autoload=True, autoload_with=connection)
+
+        columns = [
+            visit.c.fiberid.label("fiber"),
+            visit.c.plate,
+            visit.c.mjd,
+            visit.c.telescope,
+            visit.c.field,
+            visit.c.apred_vers.label("apred"),
+        ]
+
+        s = sqlalchemy.select(columns).where(
+                (visit.c.apogee_id == obj) & (visit.c.apred_vers == apred)
+            )
+
+        rows = engine.execute(s).fetchall()
+        keys = [column.name for column in columns]
+
+    for row in rows:
+        yield dict(zip(keys, row))
+    
+
+
 if __name__ == "__main__":
 
     mjd = 59146

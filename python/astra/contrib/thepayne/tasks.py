@@ -1,11 +1,16 @@
 
 import astra
+import numpy as np
+import os
 import pickle
 from astra.tasks.base import BaseTask
 from astra.tasks.io import (ApStarFile, LocalTargetTask)
+from astra.tasks.targets import LocalTarget, DatabaseTarget
+from astra.tasks.continuum import Sinusoidal
 from astra.tools.spectrum import Spectrum1D
 from astra.contrib.thepayne import training, test as testing
-from luigi import LocalTarget
+
+from sqlalchemy import (Column, Float)
 
 
 class ThePayneMixin(BaseTask):
@@ -17,6 +22,65 @@ class ThePayneMixin(BaseTask):
     weight_decay = astra.FloatParameter(default=0)
     learning_rate = astra.FloatParameter(default=0.001)
     training_set_path = astra.Parameter()
+
+
+class ThePayneResult(DatabaseTarget):
+
+    """ A database row to represent an output. """
+
+    teff = Column('teff', Float)
+    logg = Column('logg', Float)
+    v_turb = Column('v_turb', Float)
+    c_h = Column('c_h', Float)
+    n_h = Column('n_h', Float)
+    o_h = Column('o_h', Float)
+    na_h = Column('na_h', Float)
+    mg_h = Column('mg_h', Float)
+    al_h = Column('al_h', Float)
+    si_h = Column('si_h', Float)
+    p_h = Column('p_h', Float)
+    s_h = Column('s_h', Float)
+    k_h = Column('k_h', Float)
+    ca_h = Column('ca_h', Float)
+    ti_h = Column('ti_h', Float)
+    v_h = Column('v_h', Float)
+    cr_h = Column('cr_h', Float)
+    mn_h = Column('mn_h', Float)
+    fe_h = Column('fe_h', Float)
+    co_h = Column('co_h', Float)
+    ni_h = Column('ni_h', Float)
+    cu_h = Column('cu_h', Float)
+    ge_h = Column('ge_h', Float)
+    c12_c13 = Column('c12_c13', Float)
+    v_macro = Column('v_macro', Float)
+
+    u_teff = Column('u_teff', Float)
+    u_logg = Column('u_logg', Float)
+    u_v_turb = Column('u_v_turb', Float)
+    u_c_h = Column('u_c_h', Float)
+    u_n_h = Column('u_n_h', Float)
+    u_o_h = Column('u_o_h', Float)
+    u_na_h = Column('u_na_h', Float)
+    u_mg_h = Column('u_mg_h', Float)
+    u_al_h = Column('u_al_h', Float)
+    u_si_h = Column('u_si_h', Float)
+    u_p_h = Column('u_p_h', Float)
+    u_s_h = Column('u_s_h', Float)
+    u_k_h = Column('u_k_h', Float)
+    u_ca_h = Column('u_ca_h', Float)
+    u_ti_h = Column('u_ti_h', Float)
+    u_v_h = Column('u_v_h', Float)
+    u_cr_h = Column('u_cr_h', Float)
+    u_mn_h = Column('u_mn_h', Float)
+    u_fe_h = Column('u_fe_h', Float)
+    u_co_h = Column('u_co_h', Float)
+    u_ni_h = Column('u_ni_h', Float)
+    u_cu_h = Column('u_cu_h', Float)
+    u_ge_h = Column('u_ge_h', Float)
+    u_c12_c13 = Column('u_c12_c13', Float)
+    u_v_macro = Column('u_v_macro', Float)
+
+
 
 
 class TrainThePayne(ThePayneMixin):
@@ -81,8 +145,16 @@ class TrainThePayne(ThePayneMixin):
 
     def output(self):
         """ The output of this task. """
-        return LocalTarget(f"{self.task_id}.pkl")
-        
+        path = os.path.join(
+            self.output_base_dir,
+            f"{self.task_id}.pkl"
+        )
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        return LocalTarget(path)
+
+
+
 
 
 class EstimateStellarParameters(ThePayneMixin):
@@ -125,14 +197,38 @@ class EstimateStellarParameters(ThePayneMixin):
 
             p_opt, p_cov, meta = result = testing.test(spectrum, **state)
 
-            with open(self.output().path, "wb") as fp:
+            # Write database row.
+            row = p_opt.copy()
+            row.update(dict(zip(
+                [f"u_{k}" for k in p_opt.keys()],
+                np.sqrt(np.diag(p_cov))
+            )))
+            self.output()["database"].write(row)
+            
+            # Write additional things.
+            with open(self.output()["etc"].path, "wb") as fp:
                 pickle.dump(result, fp)
         
         return None
 
+
     def output(self):
         """ The output of this task. """
-        return LocalTarget(f"{self.task_id}.pkl")
+        if self.is_batch_mode:
+            return [task.output() for task in self.get_batch_tasks()]
+        
+        path = os.path.join(
+            self.output_base_dir,
+            f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
+            f"apStar-{self.apred}-{self.obj}-{self.task_id}.pkl"
+        )
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        return {
+            "database": ThePayneResult(self),
+            "etc": LocalTarget(path)
+        }
+        
 
 
 
@@ -173,3 +269,75 @@ class EstimateStellarParametersGivenApStarFile(EstimateStellarParameters, ApStar
             requirements.update(observation=ApStarFile(**self.get_common_param_kwargs(ApStarFile)))
         return requirements
 
+
+
+class ContinuumNormalize(Sinusoidal, ApStarFile):
+
+    """
+    Pseudo-continuum normalise ApStar stacked spectra using a sum of sines and cosines. 
+    
+    :param continuum_regions_path:
+        A path containing a list of (start, end) wavelength values that represent the regions to
+        fit as continuum.
+    """
+
+    # Just take the first spectrum, which is stacked by individual pixel weighting.
+    # (We will ignore individual visits).
+    spectrum_kwds = dict(data_slice=(slice(0, 1), slice(None)))
+
+    def requires(self):
+        return ApStarFile(**self.get_common_param_kwargs(ApStarFile))
+
+
+    def output(self):
+        path = os.path.join(
+            self.output_base_dir,
+            f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
+            f"apStar-{self.apred}-{self.obj}-{self.task_id}.fits"
+        )
+        # Create the directory structure if it does not exist already.
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        return LocalTarget(path)
+
+
+
+class EstimateStellarParametersGivenNormalisedApStarFile(EstimateStellarParameters, ApStarFile):
+    """
+    Estimate stellar parameters given a single-layer neural network and an ApStar file.
+
+    This task also requires all parameters that `astra.tasks.io.ApStarFile` requires,
+    and that the `astra.tasks.continuum.Sinusoidal` task requires.
+
+    :param training_set_path:
+        The path where the training set spectra and labels are stored.
+        This should be a binary pickle file that contains a dictionary with the following keys:
+
+        - wavelength: an array of shape (P, ) where P is the number of pixels
+        - spectra: an array of shape (N, P) where N is the number of spectra and P is the number of pixels
+        - labels: an array of shape (L, P) where L is the number of labels and P is the number of pixels
+        - label_names: a tuple of length L that contains the names of the labels
+    
+    :param n_steps: (optional)
+        The number of steps to train the network for (default 100000).
+    
+    :param n_neurons: (optional)
+        The number of neurons to use in the hidden layer (default: 300).
+    
+    :param weight_decay: (optional)
+        The weight decay to use during training (default: 0)
+    
+    :param learning_rate: (optional)
+        The learning rate to use during training (default: 0.001).
+
+    :param continuum_regions_path:
+        A path containing a list of (start, end) wavelength values that represent the regions to
+        fit as continuum.
+    """
+
+    def requires(self):
+        requirements = dict(model=TrainThePayne(**self.get_common_param_kwargs(TrainThePayne)))
+        if not self.is_batch_mode:
+            requirements.update(
+                observation=ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
+            )
+        return requirements    

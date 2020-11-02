@@ -6,12 +6,13 @@ import torch
 import yaml
 from tqdm import tqdm
 from luigi.parameter import ParameterVisibility
+from sqlalchemy import Column, Float
 
 import astra
 from astra.tasks.base import BaseTask
+from astra.tasks.targets import DatabaseTarget
 from astra.tasks.io import ApStarFile
 from astra.tools.spectrum import Spectrum1D
-
 from astra.contrib.apogeenet.model import Net, predict
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -35,6 +36,18 @@ class TrainedAPOGEENetModel(APOGEENetMixin):
     def output(self):    
         return luigi.LocalTarget(self.model_path)
 
+
+class APOGEENetResult(DatabaseTarget):
+
+    """ A target database row for an APOGEENet result. """
+
+    teff = Column("teff", Float)
+    logg = Column("logg", Float)
+    fe_h = Column("fe_h", Float)
+    u_teff = Column("u_teff", Float)
+    u_logg = Column("u_logg", Float)
+    u_fe_h = Column("u_fe_h", Float)
+    
 
 class EstimateStellarParameters(APOGEENetMixin):
 
@@ -60,8 +73,8 @@ class EstimateStellarParameters(APOGEENetMixin):
         """ The output produced by this task. """
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
-        return luigi.LocalTarget(f"{self.task_id}.yaml")
-        
+        return APOGEENetResult(self)
+
 
     def read_model(self):
         """ Read in the trained APOGEENet model. """
@@ -99,16 +112,25 @@ class EstimateStellarParameters(APOGEENetMixin):
         n_pixels = spectrum.flux.shape[1]
         
         # Build flux tensor as described.
+        dtype = np.float32
         idx = 0
-        flux = torch.from_numpy(spectrum.flux.value[idx].astype(np.float32)).to(device)
-        error = torch.from_numpy(spectrum.uncertainty.array[idx]**-0.5).to(device)
+
+        flux = spectrum.flux.value[idx].astype(dtype)
+        error = spectrum.uncertainty.array[idx].astype(dtype)**-0.5
+
+        bad = ~np.isfinite(flux) + ~np.isfinite(error)
+        flux[bad] = np.nanmedian(flux)
+        error[bad] = 1e+10
+
+        flux = torch.from_numpy(flux).to(device)
+        error = torch.from_numpy(error).to(device)
 
         flux_tensor = torch.randn(self.uncertainty, 1, n_pixels).to(device)
 
         median_error = torch.median(error).item()
         
         error = torch.where(error == 1.0000e+10, flux, error)
-        error_t = torch.tensor([5 * median_error]).to(device)
+        error_t = torch.tensor(np.array([5 * median_error], dtype=dtype)).to(device)
         error_t.repeat(n_pixels)
         error = torch.where(error >= 5 * median_error, error_t, error)
 
@@ -119,26 +141,8 @@ class EstimateStellarParameters(APOGEENetMixin):
         return predict(model, flux_tensor)
 
 
-    def write_output(self, result):        
-        """
-        Write stellar parameter estimates to the output location of this task.
-
-        :param result:
-            A dictionary containing the parameter names as keys, and quantities as values.
-        """
-
-        sanitised_result = { k: float(v) for k, v in result.items() }
-        with open(self.output().path, "w") as fp:
-            yaml.dump(sanitised_result, fp)
-
-        self.trigger_event(luigi.Event.SUCCESS, self)
-        return None
-
-
     def run(self):
-        """
-        Estimate stellar parameters given an APOGEENet model and ApStarFile(s).
-        """
+        """ Estimate stellar parameters given an APOGEENet model and ApStarFile(s). """
 
         model = self.read_model()
 
@@ -147,7 +151,7 @@ class EstimateStellarParameters(APOGEENetMixin):
         for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
             spectrum = task.read_observation()    
             result = task.estimate_stellar_parameters(model, spectrum)
-            task.write_output(result)
+            task.output().write(result)
 
         return None
 
