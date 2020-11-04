@@ -162,6 +162,10 @@ def sines_and_cosines(
     scalar = kwargs.pop("__magic_scalar", 1e-6) # MAGIC
     flux, ivar = np.atleast_2d(flux), np.atleast_2d(ivar)
 
+    bad = ~np.isfinite(var) + ~np.isfinite(flux)
+    ivar[bad] = 0
+    flux[bad] = 1
+
     if regions is None:
         regions = [(dispersion[0], dispersion[-1])]
 

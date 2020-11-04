@@ -2,7 +2,7 @@
 import astra
 import datetime
 from astra.tasks.base import BaseTask
-from astra.tasks.io import SDSS4ApStarFile as ApStarFile
+from astra.contrib.ferre.tasks import ApStarFile
 
 # TODO: Is this in SDSS access? Or if it's just an environment variable?!
 SPECLIB_DIR = "/home/andy/data/sdss/apogeework/apogee/spectro/speclib/"

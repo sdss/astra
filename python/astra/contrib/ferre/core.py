@@ -129,7 +129,11 @@ class Ferre(object):
         try:
             self._directory
         except AttributeError:
-            self._directory = mkdtemp(**(self._directory_kwds or dict()))
+            kwds = self._directory_kwds or dict()
+            # Make the parent directory if we need to.
+            if kwds.get("dir", None) is not None:
+                os.makedirs(kwds["dir"], exist_ok=True)
+            self._directory = mkdtemp(**kwds)
             log.info(f"Created temporary directory {self._directory}")
         
         return self._directory
@@ -203,7 +207,7 @@ class Ferre(object):
         return parsed_initial_parameters
 
 
-    def fit(self, spectra, initial_parameters=None, full_output=False):
+    def fit(self, spectra, initial_parameters=None, full_output=False, names=None):
 
         if isinstance(spectra, Spectrum1D):
             spectra = [spectra]
@@ -219,6 +223,11 @@ class Ferre(object):
 
         assert flux.shape[0] == len(spectra), "Mis-match in flux array"
         assert uncertainties.shape[0] == len(spectra), "Mis-match in uncertainties array"
+
+        # Make sure we are not sending nans etc.
+        bad = ~np.isfinite(flux) + ~np.isfinite(uncertainties) + (uncertainties == 0)
+        flux[bad] = 1.0
+        uncertainties[bad] = 1e6
 
         # We only send specific set of pixels to FERRE.
         mask = self.wavelength_mask(wavelengths[0])
@@ -248,10 +257,15 @@ class Ferre(object):
         )
 
         # Write initial parameters to disk.
-        with open(os.path.join(self.directory, self.kwds["input_parameter_path"]), "w") as fp:
-            for i, each in enumerate(parsed_initial_parameters):
-                fp.write(utils.format_ferre_input_parameters(*each, star_name=f"idx_{i:.0f}"))
-
+        if names is None:
+            names = [f"idx_{i:.0f}" for i in range(len(parsed_initial_parameters))]
+        
+        with open(os.path.join(self.directory, self.kwds["input_parameter_path"]), "w") as fp:            
+            #for i, each in enumerate(parsed_initial_parameters):
+            #    fp.write(utils.format_ferre_input_parameters(*each, star_name=f"idx_{i:.0f}"))
+            for star_name, ip in zip(names, parsed_initial_parameters):
+                fp.write(utils.format_ferre_input_parameters(*ip, star_name=star_name))
+            
         # Execute.
         process = self._execute()
 

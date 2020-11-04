@@ -203,10 +203,10 @@ class EstimateStellarParameters(ThePayneMixin):
                 [f"u_{k}" for k in p_opt.keys()],
                 np.sqrt(np.diag(p_cov))
             )))
-            self.output()["database"].write(row)
+            task.output()["database"].write(row)
             
             # Write additional things.
-            with open(self.output()["etc"].path, "wb") as fp:
+            with open(task.output()["etc"].path, "wb") as fp:
                 pickle.dump(result, fp)
         
         return None

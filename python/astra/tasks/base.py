@@ -162,12 +162,11 @@ class BaseTask(luigi.Task, metaclass=Register):
 
 
     def get_batch_task_kwds(self, include_non_batch_keywords=True):
-        kwds = self.param_kwargs.copy() if include_non_batch_keywords else {}
-        if not self.batchable:
-            yield kwds
+        
+        batch_param_names = self.batch_param_names()
 
-        else:
-            batch_param_names = self.batch_param_names()
+        if self.is_batch_mode:
+            kwds = self.param_kwargs.copy() if include_non_batch_keywords else {}
 
             all_batch_kwds = {}
             
@@ -184,7 +183,12 @@ class BaseTask(luigi.Task, metaclass=Register):
             for batch_values in zip(*map(all_batch_kwds.get, batch_param_names)):
                 yield { **kwds, **dict(zip(batch_param_names, batch_values)) }
 
-        
+        else:
+            # We have no batch keywords yet.
+            kwds = { k: v for k, v in self.param_kwargs.items() if k in batch_param_names or include_non_batch_keywords }
+            yield kwds
+
+
     def get_batch_tasks(self):
         # This task can be run in single mode or batch mode.
         if self.is_batch_mode:

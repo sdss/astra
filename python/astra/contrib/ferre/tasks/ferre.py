@@ -50,9 +50,9 @@ class EstimateStellarParametersGivenApStarFile(FerreMixin):
         path = os.path.join(
             self.output_base_dir,
             # For SDSS-V:
-            #f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
+            f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
             # For SDSS-IV:
-            f"star/{self.telescope}/{self.field}/",
+            #f"star/{self.telescope}/{self.field}/",
             f"apStar-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.pkl"
         )
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -88,6 +88,14 @@ class EstimateStellarParametersGivenApStarFile(FerreMixin):
         # Load spectra.
         spectra = self.read_input_observations()
         
+        # Directory keywords. By default use a scratch location.
+        directory_kwds = self.directory_kwds or {}
+        directory_kwds.setdefault(
+            "dir",
+            os.path.join(self.output_base_dir, "scratch")
+        )
+        
+
         # Load the model.
         model = Ferre(
             grid_header_path=self.input()["grid_header"].path,
@@ -108,17 +116,22 @@ class EstimateStellarParametersGivenApStarFile(FerreMixin):
             input_weights_path=self.input_weights_path,
             input_lsf_path=self.input_lsf_path,
             # TODO: Consider what is most efficient. Consider removing as a task parameter.
+            #use_direct_access=True, 
             use_direct_access=(True if N <= self.max_batch_size_for_direct_access else False),
             n_threads=self.n_threads,
             debug=self.debug,
-            directory_kwds=self.directory_kwds,
+            directory_kwds=directory_kwds,
         )
+
+        # Star names to monitor output.
+        names = [f"{i:.0f}_{telescope}_{obj}" for i, (telescope, obj) in enumerate(zip(self.telescope, self.obj))]
 
         # Get initial parameter estimates.
         p_opt, p_opt_err, model_flux, meta = results = model.fit(
             spectra,
             initial_parameters=self.initial_parameters,
-            full_output=True
+            full_output=True,
+            names=names
         )
 
         for i, task in enumerate(self.get_batch_tasks()):

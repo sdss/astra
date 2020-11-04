@@ -1,6 +1,6 @@
 import os
-from astra.tasks.io import SDSS4ApStarFile as ApStarFile
 from astra.tasks.targets import (LocalTarget, DatabaseTarget)
+from astra.contrib.ferre.tasks import ApStarFile
 from astra.contrib.ferre.tasks.mixin import GridHeaderFileMixin
 from sqlalchemy import (Column, Float)
 

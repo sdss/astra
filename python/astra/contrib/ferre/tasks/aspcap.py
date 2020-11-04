@@ -8,6 +8,7 @@ from astropy.io.fits import getheader
 from glob import glob
 from tqdm import tqdm
 from luigi import WrapperTask
+from luigi.task import flatten
 
 from sdss_access import SDSSPath
 from astropy.nddata.nduncertainty import InverseVariance
@@ -21,18 +22,22 @@ from astra.contrib.ferre.tasks.mixin import (
 )
 from astra.contrib.ferre.tasks.ferre import EstimateStellarParametersGivenApStarFile
 from astra.contrib.ferre.continuum import median_filtered_correction
-from astra.tasks.io import SDSS4ApStarFile as ApStarFile
+from astra.contrib.ferre.tasks import ApStarFile
+from astra.tasks.targets import LocalTarget
+from astra.contrib.ferre.tasks.targets import FerreResult
 
 
-class DispatchFerreTasksGivenApStarFile(WrapperTask, DispatcherMixin):
+class DispatchFerreTasks(DispatcherMixin):
     
     """ A dispatcher task to distribute ApStarFiles across multiple grids. """
 
     def dispatcher(self):
         """ A generator that yields grid keywords that are suitable for the given ApStarFile. """
         common_kwds = self.get_common_param_kwargs(self.task_factory)
-        for kwds in tqdm(self._dispatcher(), desc="Dispatching"):
-            yield { **common_kwds, **kwds }
+        with tqdm(desc="Dispatching", total=self.get_batch_size()) as pbar:
+            for iteration, kwds in self._dispatcher():
+                pbar.update(iteration)
+                yield { **common_kwds, **kwds }
             
 
     def _dispatcher(self):
@@ -56,10 +61,8 @@ class DispatchFerreTasksGivenApStarFile(WrapperTask, DispatcherMixin):
         # Common keywords.
         common_kwds = self.get_common_param_kwargs(self.task_factory)
         
-        
-
         sdss_paths = {}
-        for batch_kwds in self.get_batch_task_kwds(include_non_batch_keywords=False):
+        for i, batch_kwds in enumerate(self.get_batch_task_kwds(include_non_batch_keywords=False)):
             try:
                 sdss_path = sdss_paths[self.release]
             except KeyError:
@@ -106,7 +109,8 @@ class DispatchFerreTasksGivenApStarFile(WrapperTask, DispatcherMixin):
                 any_suitable_grids = False
                 for path, grid_kwds in utils.yield_suitable_grids(header_dict, grid_limits):
                     any_suitable_grids = True
-                    yield { **common_kwds, **batch_kwds, **grid_kwds }
+                    # We yield an integer so we can see progress of unique objects.
+                    yield (i, { **common_kwds, **batch_kwds, **grid_kwds })
 
                 if not any_suitable_grids:
                     log.warn(f"No suitable grids found for apStar keywords: {batch_kwds} with headers {header_dict}")
@@ -128,24 +132,6 @@ class DispatchFerreTasksGivenApStarFile(WrapperTask, DispatcherMixin):
         # Overwrite the inherited method that will mark this wrapper task as done and never re-run it.
         pass
 
-
-
-
-class ASPCAPDispatchFerreTasksGivenApStarFile(DispatchFerreTasksGivenApStarFile):
-
-    """
-    A task that dispatches an ApStarFile to multiple FERRE grids, in a similar way done by ASPCAP in SDSS-IV.
-    """
-
-    def dispatcher(self):
-        # We want to add some custom logic for the initial dispatching.
-        # Specifically, we want to set LOG10VDOP to be frozen for all grids,
-        # and for dwarf grids we want to fix C and N to be zero.
-        for kwds in super(ASPCAPDispatchFerreTasksGivenApStarFile, self).dispatcher():
-            kwds.update(frozen_parameters=dict(LOG10VDOP=None))
-            if kwds["gd"] == "d":
-                kwds["frozen_parameters"].update(C=0.0, N=0.0)
-            yield kwds
 
 
 
@@ -236,34 +222,32 @@ class EstimateStellarParametersGivenMedianFilteredApStarFile(EstimateStellarPara
 
 
 
-class IterativeEstimateOfStellarParametersGivenApStarFile(BaseFerreMixin, ApStarFile):
+class InitialEstimateOfStellarParametersGivenApStarFile(DispatchFerreTasks):
 
-    """ 
-    (Nearly) reproduce the steps used to estimate stellar parameters for the DR16 data release. 
-    
-    This task will read the headers of an ApStarFile, search the SPECLIB for grid header files,
-    and generate tasks to estimate stellar parameters using all grids where the initial estimate
-    of stellar parameters falls within the boundaries of the grid. 
-    
-    This could yield several estimates of stellar parameters, each with different grids. 
-    Then this task will find the best among those estimates (based on a \chi^2 score), and
-    and will use the result from the best estimate to correct the continuum normalisation.
-    With the continuum-corrected spectra, a new task will estimate the stellar parameters
-    from the grid where the best initial estimate was found, using the previous estimate
-    and the continuum-corrected spectra.
+    """
+    A task that dispatches an ApStarFile to multiple FERRE grids, in a similar way done by ASPCAP in SDSS-IV.
     """
 
-    def requires(self):
-        """ The requirements of this task. """
-        return ASPCAPDispatchFerreTasksGivenApStarFile(
-            task_factory=EstimateStellarParametersGivenApStarFile,
-            **self.get_common_param_kwargs(EstimateStellarParametersGivenApStarFile)
-        ).requires()
+    task_factory = EstimateStellarParametersGivenApStarFile
+
+    def dispatcher(self):
+        """ Dispatch sources to multiple FERRE grids. """
+
+        # We want to add some custom logic for the initial dispatching.
+        # Specifically, we want to set LOG10VDOP to be frozen for all grids,
+        # and for dwarf grids we want to fix C and N to be zero.
+        for kwds in super(InitialEstimateOfStellarParametersGivenApStarFile, self).dispatcher():
+            kwds.update(frozen_parameters=dict(LOG10VDOP=None))
+            if kwds["gd"] == "d":
+                kwds["frozen_parameters"].update(C=0.0, N=0.0)
+            yield kwds
 
 
     def run(self):
+        """ Execute this task. """
+
         # Get the best task among the initial estimates.
-        uid = lambda task: "_".join([getattr(task, pn) for pn in ApStarFile.batch_param_names()])
+        uid = lambda task: "_".join([f"{getattr(task, pn)}" for pn in ApStarFile.batch_param_names()])
 
         best_tasks = {}
         for task in self.requires():
@@ -281,32 +265,145 @@ class IterativeEstimateOfStellarParametersGivenApStarFile(BaseFerreMixin, ApStar
                 log_chisq_fit += np.log(10)
 
             if log_chisq_fit < best_tasks[key][0]:
-                best_tasks[key] = (log_chisq_fit, task)
 
-        # Supply new tasks (with the best grid from chi-sq value) where initial value is final value
-        # from previous iteration.
-        self.iterated_tasks = []
-        for _, (log_chisq_fit, task) in best_tasks.items():
+                kwds = task.param_kwargs.copy()
+                # Set C, N to be frozen if this is a dwarf grid.
+                frozen_parameters = None if kwds["gd"] == "g" else dict(C=0.0, N=0.0)
+                # Update with initial estimate from previous task.
+                kwds.update(
+                    frozen_parameters=frozen_parameters,
+                    # TODO: This is bad practice...
+                    initial_parameters={ k: v for k, v in output.items() if k.upper() == k }
+                )
 
-            kwds = task.param_kwargs.copy()
-            # Set C, N to be frozen if this is a dwarf grid.
-            frozen_parameters = None if kwds["gd"] == "g" else dict(C=0.0, N=0.0)
-            # Update with initial estimate from previous task.
-            previous_result = task.output()["database"].read(as_dict=True)
-            kwds.update(
-                frozen_parameters=frozen_parameters,
-                # TODO: This is bad practice...
-                initial_parameters={ k: v for k, v in previous_result.items() if k.upper() == k }
-            )
-            self.iterated_tasks.append(EstimateStellarParametersGivenMedianFilteredApStarFile(**kwds))
-        
-        yield self.iterated_tasks
-        
+                best_tasks[key] = (log_chisq_fit, kwds)
+
+        # Write outputs for individual tasks
+        for task in self.get_batch_tasks():
+            key = uid(task)
+
+            try:
+                result = best_tasks[key]
+
+            except KeyError:
+                # No result for this source. 
+                # Initial value from header is likely outside all grid bounds.
+                result = (+np.inf, {})
+
+            finally:
+                with open(task.output().path, "wb") as fp:
+                    pickle.dump(result, fp)
+
+        return None
+
 
     def output(self):
-        try:
-            return [task.output() for task in self.iterated_tasks]
-            
-        except:
-            from luigi.mock import MockTarget
-            return MockTarget(f"{self.task_id}")
+        """ The outputs produced by this task. """
+        if self.is_batch_mode:
+            return [task.output() for task in self.get_batch_tasks()]
+        
+        path = os.path.join(
+            self.output_base_dir,
+            # For SDSS-V:
+            f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
+            # For SDSS-IV:
+            #f"star/{self.telescope}/{self.field}/",
+            f"apStar-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.pkl"
+        )
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        return LocalTarget(path)
+
+
+
+
+class IterativeEstimateOfStellarParametersGivenApStarFile(BaseFerreMixin, ApStarFile):
+
+    """ 
+    (Nearly) reproduce the steps used to estimate stellar parameters for the DR16 data release. 
+    
+    This task will read the headers of an ApStarFile, search the SPECLIB for grid header files,
+    and generate tasks to estimate stellar parameters using all grids where the initial estimate
+    of stellar parameters falls within the boundaries of the grid. 
+    
+    This could yield several estimates of stellar parameters, each with different grids. 
+    Then this task will find the best among those estimates (based on a \chi^2 score), and
+    and will use the result from the best estimate to correct the continuum normalisation.
+    With the continuum-corrected spectra, a new task will estimate the stellar parameters
+    from the grid where the best initial estimate was found, using the previous estimate
+    and the continuum-corrected spectra.
+
+    NOTE: Although Astra will schedule tasks and batch them together to be efficient,
+          you should run this task with *many* ApStar keywords (i.e., batch together many
+          ApStar objects at once). This will make sure that the final step of parameter
+          estimation is efficient.
+    """
+
+    def requires(self):
+        """ This task requires the initial estimates of stellar parameters from many grids. """
+        return InitialEstimateOfStellarParametersGivenApStarFile(
+            **self.get_common_param_kwargs(InitialEstimateOfStellarParametersGivenApStarFile)
+        )
+
+
+    def run(self):
+        """ Execute the task. """
+
+        tasks = []
+        for previous_estimate in self.requires().output():
+            with open(previous_estimate.path, "rb") as fp:
+                log_chisq_fit, kwds = pickle.load(fp)
+
+            if np.isfinite(log_chisq_fit):
+                tasks.append(
+                    EstimateStellarParametersGivenMedianFilteredApStarFile(**kwds)
+                )
+
+        yield tasks
+
+        for task in tasks:
+
+            # Get the result from the median filtered run.
+            result = task.output()["database"].read(as_dict=True)
+            ignore = task.get_param_names() + ["task_id"]
+
+            result = { k: v or np.nan for k, v in result.items() if k not in ignore }
+
+            for key, value in task.output().items():
+                if key == "database":
+                    # Write result to a symbolic task.
+                    symbolic_task = self.__class__(**task.get_common_param_kwargs(self))
+                    symbolic_task.output()[key].write(result)
+
+                else:
+                    # Write symbolic link.
+                    source = value.path
+                    destination = symbolic_task.output()[key].path
+                    if os.path.exists(destination):
+                        os.unlink(destination)
+                    
+                    os.symlink(source, destination)
+                    
+        return None
+
+
+    def output(self):
+        """ The outputs of this task. """
+        if self.is_batch_mode:
+            return [task.output() for task in self.get_batch_tasks()]
+
+        path = os.path.join(
+            self.output_base_dir,
+            # For SDSS-V:
+            f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
+            # For SDSS-IV:
+            #f"star/{self.telescope}/{self.field}/",
+            f"apStar-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.pkl"
+        )
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        return {
+            "database": FerreResult(self),
+            "spectrum": LocalTarget(path)
+        }
+
