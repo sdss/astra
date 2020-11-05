@@ -66,6 +66,9 @@ class BaseFerreMixin(BaseTask):
 
     directory_kwds = astra.DictParameter(default=None, significant=False)
 
+    use_queue = astra.BoolParameter(default=False, significant=False)
+    queue_kwds = astra.DictParameter(default=None, significant=False)
+    
 
 class GridHeaderFileMixin(BaseTask):
 

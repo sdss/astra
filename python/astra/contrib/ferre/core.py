@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 
 from collections import OrderedDict
 from glob import glob
@@ -14,12 +15,13 @@ from io import StringIO, BytesIO
 from inspect import getfullargspec
 from shutil import copyfile, rmtree
 from tempfile import mkdtemp
+from tqdm import tqdm
 
 from astra.utils import log
 from astra.tools.spectrum import Spectrum1D
 from astropy import units as u
 
-from astra_ferre.core import utils
+from astra.contrib.ferre import utils
 from collections import OrderedDict
 from luigi.freezing import FrozenOrderedDict
 
@@ -267,10 +269,7 @@ class Ferre(object):
                 fp.write(utils.format_ferre_input_parameters(*ip, star_name=star_name))
             
         # Execute.
-        process = self._execute()
-
-        # Get outputs.
-        self.stdout, self.stderr = process.communicate()
+        self._execute(total=N)
 
         erroneous_output = -999.999
 
@@ -381,7 +380,7 @@ class Ferre(object):
         return input_path
     
 
-    def _execute(self, bufsize=1, encoding="utf-8"):
+    def _execute(self, bufsize=1, encoding="utf-8", interactive=False, total=None):
         """
         Write an input file and execute FERRE.
         """
@@ -401,12 +400,45 @@ class Ferre(object):
                 encoding=encoding,
                 close_fds="posix" in sys.builtin_module_names
             )
+
         except subprocess.CalledProcessError:
             log.exception(f"Exception when calling {self.executable} in {self.directory}")
             raise
 
         else:
-            return self.process
+            if interactive:
+                return self.process
+
+            # Show progress.
+            self._show_progress(total=total)
+                
+            self.stdout, self.stderr = self.process.communicate()
+            return None
+
+
+    def _show_progress(self, total=None, interval=1):
+
+        # Monitor progress.
+        # Note: FERRE normally writes fluxes before parameters, so we will use the flux path to
+        # monitor progress.
+        t_init = time.time()
+        output_flux_path = os.path.join(self.directory, self.kwds["output_flux_path"])
+
+        done = 0
+        with tqdm(total=total, desc="FERRE", units="spectra") as pbar:
+            while N > done:
+                # pls hold.
+                time.sleep(interval)
+
+                if os.path.exists(output_flux_path):
+                    lines = utils.line_count(output_flux_path)
+
+                    if lines > done:
+                        pbar.update(lines - done)
+                        done += lines
+    
+        return None
+
 
 
     def _setup(self):
@@ -451,7 +483,7 @@ class Ferre(object):
             self.kwds["n_parameters"] = 0
         
         # Execute FERRE.
-        process = self._execute()
+        process = self._execute(interactive=True)
 
         # Set up non-blocking thread.
         self._queue = mp.Queue()
@@ -475,6 +507,47 @@ class Ferre(object):
 
         self.teardown()
         return None
+
+
+
+class FerreQueue(Ferre):
+
+    def _execute(self, bufsize=1, encoding="utf-8", total=None, **kwargs):
+        """
+        Write an input file and execute FERRE, using the PBS/slurm queue submission system.
+        """
+
+        self._setup()
+        self._write_ferre_input_file()
+
+        # It's bad practice to import things here, but we do so to avoid import errors on
+        # non-Utah systems, since the pbs package is not a requirement and only available
+        # at Utah.
+        import pbs
+
+        kwds = dict(
+            label="FERRE",
+            nodes=1,
+            ppn=16,
+            walltime='24:00:00',
+            alloc='sdss-kp',
+            verbose=True
+        )        
+        kwds.update(self.queue_kwds)
+
+        queue = pbs.queue()
+        queue.create(**kwds)
+        queue.append(
+            self.executable,
+            dir=self.directory
+        )
+        queue.commit(hard=True, submit=True)
+        print(f"PBS queue key: {queue.key}")
+        
+        self._show_progress()
+        return None
+    
+
 
 
 def _non_blocking_pipe_read(stream, queue):

@@ -221,6 +221,28 @@ class EstimateStellarParametersGivenMedianFilteredApStarFile(EstimateStellarPara
         return spectra
 
 
+    def output(self):
+        """ The outputs of this task. """
+        if self.is_batch_mode:
+            return [task.output() for task in self.get_batch_tasks()]
+
+        path = os.path.join(
+            self.output_base_dir,
+            # For SDSS-V:
+            f"star/{self.telescope}/{int(self.healpix)/1000:.0f}/{self.healpix}/",
+            # For SDSS-IV:
+            #f"star/{self.telescope}/{self.field}/",
+            f"apStar-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.pkl"
+        )
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        return {
+            "database": FerreResult(self),
+            "spectrum": LocalTarget(path)
+        }
+
+
+
 
 class InitialEstimateOfStellarParametersGivenApStarFile(DispatchFerreTasks):
 

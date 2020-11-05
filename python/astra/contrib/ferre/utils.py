@@ -2,9 +2,15 @@
 import datetime
 import numpy as np
 import re
+import subprocess
 
 from collections import OrderedDict
 from inspect import getfullargspec
+
+
+def line_count(filename):
+    return int(subprocess.check_output(['wc', '-l', filename]).split()[0])
+
 
 def wavelength_array_from_ferre_header(header):
     wave = header["WAVE"][0] + np.arange(header["NPIX"]) * header["WAVE"][1]

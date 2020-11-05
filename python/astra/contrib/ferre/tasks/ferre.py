@@ -9,7 +9,7 @@ from astra.tasks.targets import LocalTarget
 from astra.tools.spectrum import Spectrum1D
 from astra.utils import log
 
-from astra.contrib.ferre.core import Ferre
+from astra.contrib.ferre.core import (Ferre, FerreQueue)
 from astra.contrib.ferre import utils
 from astra.contrib.ferre.tasks.mixin import FerreMixin
 from astra.contrib.ferre.tasks.targets import (ApStarFile, FerreResult, GridHeaderFile)
@@ -95,9 +95,10 @@ class EstimateStellarParametersGivenApStarFile(FerreMixin):
             os.path.join(self.output_base_dir, "scratch")
         )
         
+        FerreProcess = FerreQueue if self.use_queue else Ferre
 
         # Load the model.
-        model = Ferre(
+        model = FerreProcess(
             grid_header_path=self.input()["grid_header"].path,
             interpolation_order=self.interpolation_order,
             init_algorithm_flag=self.init_algorithm_flag,
