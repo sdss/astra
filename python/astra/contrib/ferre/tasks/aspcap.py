@@ -305,7 +305,7 @@ class InitialEstimateOfStellarParametersGivenApStarFile(DispatchFerreTasks):
         path = os.path.join(
             self.output_base_dir,
             # For SDSS-V:
-            f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
+            f"star/{self.telescope}/{int(self.healpix)/1000:.0f}/{self.healpix}/",
             # For SDSS-IV:
             #f"star/{self.telescope}/{self.field}/",
             f"apStar-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.pkl"
@@ -313,7 +313,6 @@ class InitialEstimateOfStellarParametersGivenApStarFile(DispatchFerreTasks):
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         return LocalTarget(path)
-
 
 
 
@@ -350,7 +349,7 @@ class IterativeEstimateOfStellarParametersGivenApStarFile(BaseFerreMixin, ApStar
         """ Execute the task. """
 
         tasks = []
-        for previous_estimate in self.requires().output():
+        for previous_estimate in flatten(self.input()):
             with open(previous_estimate.path, "rb") as fp:
                 log_chisq_fit, kwds = pickle.load(fp)
 
@@ -359,7 +358,7 @@ class IterativeEstimateOfStellarParametersGivenApStarFile(BaseFerreMixin, ApStar
                     EstimateStellarParametersGivenMedianFilteredApStarFile(**kwds)
                 )
 
-        yield tasks
+        yield [task for task in tasks if not task.complete()]
 
         for task in tasks:
 
@@ -384,7 +383,13 @@ class IterativeEstimateOfStellarParametersGivenApStarFile(BaseFerreMixin, ApStar
                     
                     os.symlink(source, destination)
                     
-        return None
+        for task in self.get_batch_tasks():
+            if not task.complete():
+                # Write empty files to indicate we tried.
+                task.output()["database"].write({})
+                with open(task.output()["spectrum"].path, "w") as fp:
+                    fp.write("")
+
 
 
     def output(self):
@@ -395,11 +400,19 @@ class IterativeEstimateOfStellarParametersGivenApStarFile(BaseFerreMixin, ApStar
         path = os.path.join(
             self.output_base_dir,
             # For SDSS-V:
-            f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
+            f"star/{self.telescope}/{int(self.healpix)/1000:.0f}/{self.healpix}/",
             # For SDSS-IV:
             #f"star/{self.telescope}/{self.field}/",
             f"apStar-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.pkl"
         )
+        """
+        except:
+            print(self.is_batch_mode)
+            for param_name in self.batch_param_names():
+                print(param_name, type(getattr(self, param_name)), getattr(self, param_name))
+                
+            raise a
+        """
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         return {

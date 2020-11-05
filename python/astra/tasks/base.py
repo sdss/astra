@@ -8,13 +8,14 @@ from time import time
 
 from luigi.mock import MockTarget
 from luigi.task_register import Register
-from luigi.parameter import ParameterVisibility
+from luigi.parameter import ParameterVisibility, _DictParamEncoder, FrozenOrderedDict
 
 from astra.tasks.targets import DatabaseTarget
 from astra.utils import log
 
 from packaging.version import parse as parse_version
 from astra import __version__
+
 
 astra_version = parse_version(__version__)
 
@@ -128,11 +129,28 @@ class BaseTask(luigi.Task, metaclass=Register):
         """
         params_str = {}
         params = dict(self.get_params())
+        batch_param_names = self.batch_param_names()
+        is_batch_mode = self.is_batch_mode
+
         for param_name, param_value in self.param_kwargs.items():
             if (((not only_significant) or params[param_name].significant)
                     and ((not only_public) or params[param_name].visibility == ParameterVisibility.PUBLIC)
                     and params[param_name].visibility != ParameterVisibility.PRIVATE):
-                params_str[param_name] = params[param_name].serialize(param_value)
+
+                if param_name in batch_param_names and is_batch_mode:
+                    # TODO: Revisit this.
+                    # The reason for doing this is so that we can serialize and de-serialize task parameters
+                    # that are batched with tuples. In general you would think that luigi would manage all
+                    # the batching and we don't have to do it ourselves, but not when we have dynamic
+                    # dependencies. When we have dynamic dependencies that we have to yield() from run(),
+                    # the task executes them one at a time, which can be extremely inefficient if there is
+                    # overhead related to individual tasks. In that situation we *have* to supply one task
+                    # to yield(), which has batch parameters. Those batch parameters then need to get
+                    # serialized, which is where we are.
+                    params_str[param_name] = json.dumps(param_value, cls=_DictParamEncoder)
+                    
+                else:
+                    params_str[param_name] = params[param_name].serialize(param_value)
 
         return params_str
 
@@ -148,6 +166,36 @@ class BaseTask(luigi.Task, metaclass=Register):
         return set(a).intersection(b)
     
 
+    @classmethod
+    def from_str_params(cls, params_str):
+        """
+        Creates an instance from a str->str hash.
+        :param params_str: dict of param name -> value as string.
+        """
+        kwargs = {}
+        batch_params = cls.batch_param_names()
+        
+        for param_name, param in cls.get_params():
+            if param_name in params_str:
+
+                param_str = params_str[param_name]
+
+                if param_name in batch_params:    
+                    try:
+                        # See notes above about to_str_params().
+                        kwargs[param_name] = json.loads(param_str, object_pairs_hook=FrozenOrderedDict)
+                    except:
+                        None
+                    else:
+                        continue
+                            
+                if isinstance(param_str, list):
+                    kwargs[param_name] = param._parse_list(param_str)
+                else:
+                    kwargs[param_name] = param.parse(param_str)
+
+        return cls(**kwargs)
+
     @property
     def is_batch_mode(self):
         try:
@@ -155,7 +203,7 @@ class BaseTask(luigi.Task, metaclass=Register):
         except AttributeError:
             self._is_batch_mode = len(self.batch_param_names()) > 0 \
                 and all(
-                    isinstance(getattr(self, param_name), tuple) or getattr(self, param_name) is None \
+                    isinstance(getattr(self, param_name), (list, tuple)) or getattr(self, param_name) is None \
                     for param_name in self.batch_param_names()
                 )
         return self._is_batch_mode

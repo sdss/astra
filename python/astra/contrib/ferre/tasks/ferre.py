@@ -50,7 +50,7 @@ class EstimateStellarParametersGivenApStarFile(FerreMixin):
         path = os.path.join(
             self.output_base_dir,
             # For SDSS-V:
-            f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
+            f"star/{self.telescope}/{int(self.healpix)/1000:.0f}/{self.healpix}/",
             # For SDSS-IV:
             #f"star/{self.telescope}/{self.field}/",
             f"apStar-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.pkl"

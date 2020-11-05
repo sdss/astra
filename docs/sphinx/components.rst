@@ -388,7 +388,30 @@ observations.
 The best-fitting model spectrum by chi-squared minimisation, with a few optimisation
 algorithms available.
 FERRE was used (as part of ASPCAP) for the APOGEE analysis of SDSS-IV data. 
-Astra has tasks that reproduce the functionality of ASPCAP.
+Astra has tasks that reproduce the functionality of ASPCAP, but this functionality all exists within the `astra.contrib.ferre` module.
+
+
+The most relevant tasks for running FERRE (or reproducing ASPCAP functionality) are:
+
+- :py:mod:`astra.contrib.ferre.tasks.ferre.EstimateStellarParametersGivenApStarFile`
+- :py:mod:`astra.contrib.ferre.tasks.aspcap.IterativeEstimateOfStellarParametersGivenApStarFile`
+- :py:mod:`astra.contrib.ferre.tasks.aspcap.EstimateStellarParametersGivenMedianFilteredApStarFile`
+- :py:mod:`astra.contrib.ferre.tasks.aspcap.ASPCAPDispatchFerreTasksGivenApStarFile`
+- :py:mod:`astra.contrib.ferre.tasks.aspcap.DispatchFerreTasksGivenApStarFile`
+
+
+Let's go through how to run FERRE on it's own before we talk about reproducing ASPCAP functionality.
+
+If you want to run FERRE on it's own the relevant task is :py:mod:`astra.contrib.ferre.tasks.ferre.EstimateStellarParametersGivenApStarFile`.
+This task requires many parameters: analysis parameters (e.g., interpolation order); model grid parameters (e.g., isotopes used or model photospheres); and those required to locate an `ApStarFile`.
+
+
+# TODO: List all parameters.
+
+
+You can reproduce ASPCAP functionality by calling FERRE multiple times
+
+
 
 API
 ---

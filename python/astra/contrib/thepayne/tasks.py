@@ -290,6 +290,9 @@ class ContinuumNormalize(Sinusoidal, ApStarFile):
 
 
     def output(self):
+        if self.is_batch_mode:
+            return [task.output() for task in self.get_batch_tasks()]
+        
         path = os.path.join(
             self.output_base_dir,
             f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
@@ -335,9 +338,7 @@ class EstimateStellarParametersGivenNormalisedApStarFile(EstimateStellarParamete
     """
 
     def requires(self):
-        requirements = dict(model=TrainThePayne(**self.get_common_param_kwargs(TrainThePayne)))
-        if not self.is_batch_mode:
-            requirements.update(
-                observation=ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
-            )
-        return requirements    
+        return {
+            "model": TrainThePayne(**self.get_common_param_kwargs(TrainThePayne)),
+            "observation": ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
+        }

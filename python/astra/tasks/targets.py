@@ -135,17 +135,18 @@ class BaseDatabaseTarget(luigi.Target):
         return row
 
 
-    def write(self, data):
+    def write(self, data=None):
         """
         Write a result to the database target.
 
-        :param data:
+        :param data: (optional)
             A dictionary where keys represent column names and values represent the result value.
         """
         
         exists = self.exists()
         table = self.table_bound
-        sanitised_data = {}
+        data = data or dict()
+        sanitised_data = dict()
         for key, value in data.items():
             # Don't sanitise booleans or date/datetime objects.
             if not isinstance(value, (datetime.datetime, datetime.date, bool)):
@@ -225,11 +226,11 @@ class DatabaseTarget(BaseDatabaseTarget):
         return None
 
 
-    def write(self, data, mark_complete=True):
+    def write(self, data=None, mark_complete=True):
         """
         Write a result to the database target row.
 
-        :param data:
+        :param data: (optional)
             A dictionary where keys represent column names and values represent the result value.
 
         :param mark_complete: (optional)
@@ -237,7 +238,7 @@ class DatabaseTarget(BaseDatabaseTarget):
         """
 
         # Update with parameter keyword arguments.
-        data = data.copy()
+        data = (data or dict()).copy()
         if self.only_significant:
             for parameter_name in self.task.get_param_names():
                 data[parameter_name] = getattr(self.task, parameter_name)
