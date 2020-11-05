@@ -1,18 +1,13 @@
 
 import astra
-from luigi.task import WrapperTask, flatten
 from astra.utils import batcher
 from astra.tasks.io import ApStarFile
-from astra.tasks.targets import LocalTarget
 from astra.tasks.daily import (GetDailyApStarFiles, get_visits, get_visits_given_star, get_stars)
-from astra.contrib.classifier.tasks.test import (
-    ClassifySourceGivenApVisitFile,
-    ClassifySourceGivenApStarFile
-)
 import astra.contrib.apogeenet.tasks as apogeenet
+import astra.contrib.ferre.tasks.aspcap as aspcap
+import astra.contrib.classifier.tasks.test as classifier
 #import astra.contrib.thecannon.tasks as thecannon
 import astra.contrib.thepayne.tasks as thepayne
-import astra.contrib.ferre.tasks.aspcap as aspcap
 
 from astra.tasks.targets import DatabaseTarget
 from sqlalchemy import Boolean, Column
@@ -29,7 +24,9 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
 
     def requires(self):
         """ This task requires classifications of individual sources. """
-        return ClassifySourceGivenApStarFile(**self.get_common_param_kwargs(ClassifySourceGivenApStarFile))
+        return classifier.ClassifySourceGivenApStarFile(
+            **self.get_common_param_kwargs(classifier.ClassifySourceGivenApStarFile)
+        )
 
 
     def run(self):
@@ -37,11 +34,11 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
 
         conditions = [
             # Young stellar objects.
-            (lambda classification, task: classification["lp_yso"] > 0.7, [
+            (lambda classification: classification["lp_yso"] > 0.7, [
                 apogeenet.EstimateStellarParametersGivenApStarFile
             ]),
             # FGKM stars
-            (lambda classification, task: classification["lp_fgkm"] > 0.7, [
+            (lambda classification: classification["lp_fgkm"] > 0.7, [
                 thepayne.EstimateStellarParametersGivenNormalisedApStarFile,
                 aspcap.IterativeEstimateOfStellarParametersGivenApStarFile
             ])
@@ -53,7 +50,7 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
             classification = requirement.read(as_dict=True)
 
             for condition, factories in conditions:
-                if condition(classification, requirement.task):
+                if condition(classification):
                     for factory in factories:
                         distributed_tasks.setdefault(factory, [])
                         distributed_tasks[factory].append(
@@ -102,9 +99,8 @@ mjd = 59146
 
 # [ ] Put everything into a fits table: apVisit outputs per MJD?
 # [ ] Put everything into a fits table: apStar outputs per MJD?
-star_kwds = batcher(list(get_stars(mjd=mjd))[:101])
+star_kwds = batcher(get_stars(mjd=mjd))
 
-#task = aspcap.IterativeEstimateOfStellarParametersGivenApStarFile(**star_kwds)
 task = DistributeAnalysisGivenApStarFile(**star_kwds)
 
 astra.build(
