@@ -10,6 +10,18 @@ class SDSS5DataModelTask(SDSSDataModelTask):
     release = astra.Parameter(default="sdss5")
     telescope = astra.Parameter(batch_method=tuple)
 
+    # By default, SDSS-V data that we are processing is not public!
+    public = astra.BoolParameter(
+        default=False,
+        significant=False,
+        parsing=astra.BoolParameter.IMPLICIT_PARSING
+    )
+    use_remote = astra.BoolParameter(
+        default=True,
+        significant=False,
+        parsing=astra.BoolParameter.IMPLICIT_PARSING
+    )
+    
 
 class ApVisitFile(SDSS5DataModelTask):
 

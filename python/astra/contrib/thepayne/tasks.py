@@ -336,7 +336,7 @@ class EstimateStellarParametersGivenNormalisedApStarFile(EstimateStellarParamete
         - label_names: a tuple of length L that contains the names of the labels
     
     :param n_steps: (optional)
-        The number of steps to train the network for (default 100000).
+        The number of steps to train the network for (default: 100000).
     
     :param n_neurons: (optional)
         The number of neurons to use in the hidden layer (default: 300).

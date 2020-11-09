@@ -10,15 +10,20 @@ from torch import nn
 from torch.autograd import Variable
 
 # Check for CUDA support.
+"""
 try:
     torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
-except TypeError:
+except (TypeError, RuntimeError):
     print("Torch not compiled with CUDA support")
     CUDA_AVAILABLE = False
 
 else:
     CUDA_AVAILABLE = True
+"""
+
+CUDA_AVAILABLE = torch.cuda.is_available()
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 default_tensor_type = torch.cuda.FloatTensor if CUDA_AVAILABLE else torch.FloatTensor
 torch.set_default_tensor_type(default_tensor_type)
@@ -93,7 +98,7 @@ def train(
 
     print(f"Weight imbalance: {weight_imbalance}")
 
-    weights = torch.Tensor([1. / w for w in weight_imbalance])
+    weights = torch.Tensor([1. / w for w in weight_imbalance], device=device)
     print(f"Inverse weight imbalance: {weights}")
 
     if CUDA_AVAILABLE:
@@ -138,7 +143,7 @@ def train(
             batch_labels = training_labels[idx]
             batch_spectra = training_spectra[idx]
 
-            batch = torch.Tensor(batch_spectra)
+            batch = torch.Tensor(batch_spectra, device=device)
             if CUDA_AVAILABLE:
                 batch = batch.cuda()
 
@@ -147,7 +152,8 @@ def train(
             pred = network.forward(Variable(batch))
 
             y = torch.LongTensor(
-                batch_labels
+                batch_labels,
+                device=device
             )
             y_var = Variable(y)
             if CUDA_AVAILABLE:
@@ -187,12 +193,12 @@ def train(
         with torch.no_grad():
             status_message.append("-" * 10)
 
-            batch = torch.Tensor(validation_spectra)
+            batch = torch.Tensor(validation_spectra, device=device)
             if CUDA_AVAILABLE:
                 batch = batch.cuda()
             pred = network.forward(Variable(batch))
             
-            y = torch.LongTensor(validation_labels)
+            y = torch.LongTensor(validation_labels, device=device)
             y_var = Variable(y)
             if CUDA_AVAILABLE:
                 y_var = y_var.cuda()
@@ -226,12 +232,12 @@ def train(
             status_message.append("-" * 10)
 
         # Test.
-        batch = torch.Tensor(test_spectra)
+        batch = torch.Tensor(test_spectra, device=device)
         if CUDA_AVAILABLE:
             batch = batch.cuda()
         pred = network.forward(Variable(batch))
 
-        y = torch.LongTensor(test_labels)
+        y = torch.LongTensor(test_labels, device=device)
         y_var = Variable(y)
         if CUDA_AVAILABLE:
             y_var = y_var.cuda()
@@ -291,7 +297,7 @@ def predict_classes(network, spectra):
     Predict an object class given a trained network and some spectra.
     """
     net = torch.load(model_path)
-    batch = torch.Tensor(spectra)
+    batch = torch.Tensor(spectra, device=device)
     if CUDA_AVAILABLE:
         batch = batch.cuda()
 

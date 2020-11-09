@@ -78,13 +78,11 @@ class BaseDatabaseTarget(luigi.Target):
         with self.engine.begin() as con:
             metadata = sqlalchemy.MetaData()
             if not con.dialect.has_table(con, self.__tablename__):
-                try:
-                    self._table_bound = sqlalchemy.Table(
-                        self.__tablename__, metadata, *self.schema
-                    )
-                    metadata.create_all(self.engine)
-                except:
-                    raise a
+                self._table_bound = sqlalchemy.Table(
+                    self.__tablename__, metadata, *self.schema
+                )
+                metadata.create_all(self.engine)
+
             else:
                 #metadata.reflect(only=[self.results_table], bind=self.engine)
                 #self._table_bound = metadata.tables[self.results_table]
