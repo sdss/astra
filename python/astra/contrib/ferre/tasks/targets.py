@@ -3,8 +3,6 @@ from astra.tasks.targets import (LocalTarget, DatabaseTarget)
 from astra.contrib.ferre.tasks.mixin import GridHeaderFileMixin
 from sqlalchemy import (Column, Float)
 
-from astra.contrib.ferre.tasks.mixin import SPECLIB_DIR
-
 class GridHeaderFile(GridHeaderFileMixin):
 
     """
@@ -40,7 +38,7 @@ class GridHeaderFile(GridHeaderFileMixin):
         date_str = self.grid_creation_date.strftime("%y%m%d")
         return LocalTarget(
             os.path.join(
-                SPECLIB_DIR,
+                self.speclib_dir,
                 self.radiative_transfer_code,
                 self.model_photospheres,
                 self.isotopes,

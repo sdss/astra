@@ -19,7 +19,7 @@ from astra.tasks.targets import LocalTarget
 from astra.tools.spectrum import Spectrum1D
 from astra.contrib.ferre import utils
 from astra.contrib.ferre.tasks.mixin import (
-    ApStarMixin, BaseFerreMixin, DispatcherMixin, FerreMixin, SPECLIB_DIR
+    ApStarMixin, BaseFerreMixin, DispatcherMixin, FerreMixin
 )
 from astra.contrib.ferre.continuum import median_filtered_correction
 from astra.contrib.ferre.tasks.targets import FerreResult
@@ -47,7 +47,7 @@ class DispatchFerreTasks(DispatcherMixin):
         date_str = self.grid_creation_date.strftime("%y%m%d") if self.grid_creation_date is not None else "*"
         header_paths = glob(
             os.path.join(
-                SPECLIB_DIR,
+                self.speclib_dir,
                 self.radiative_transfer_code,
                 self.model_photospheres,
                 self.isotopes,

@@ -4,7 +4,7 @@ import datetime
 from astra.tasks.base import BaseTask
 
 # TODO: Is this in SDSS access? Or if it's just an environment variable?!
-SPECLIB_DIR = "/home/andy/data/sdss/apogeework/apogee/spectro/speclib/"
+
 
 
 class BaseDispatcherMixin(BaseTask):
@@ -155,6 +155,10 @@ class GridHeaderFileMixin(BaseTask):
     lsf = astra.Parameter()
     aspcap = astra.Parameter()
 
+    # TODO: Put elsewhere?
+    speclib_dir = astra.Parameter(
+        config_path=dict(section="FERRE", name="speclib_dir")
+    )
 
 
 class ApStarMixin(BaseTask):
