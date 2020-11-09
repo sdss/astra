@@ -25,4 +25,5 @@ dependencies:
     - "--editable=git+https://github.com/sdss/astra.git@master#egg=astra"
     - sdsstools
     - sdss-access
+    - sdssdb
     
