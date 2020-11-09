@@ -3,6 +3,7 @@ import astra
 import numpy as np
 import os
 import pickle
+from tqdm import tqdm
 from astra.tasks.base import BaseTask
 from astra.tasks.io import (ApStarFile, LocalTargetTask)
 from astra.tasks.targets import LocalTarget, DatabaseTarget
@@ -191,7 +192,7 @@ class EstimateStellarParameters(ThePayneMixin):
         state = testing.load_state(self.input()["model"].path)
 
         # We can run this in batch mode.
-        for task in self.get_batch_tasks():
+        for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
 
             spectrum = Spectrum1D.read(task.input()["observation"].path)
 

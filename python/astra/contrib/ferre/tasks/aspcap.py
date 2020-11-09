@@ -15,17 +15,17 @@ from astropy.nddata.nduncertainty import InverseVariance
 
 import astra
 from astra.utils import log
+from astra.tasks.targets import LocalTarget
 from astra.tools.spectrum import Spectrum1D
 from astra.contrib.ferre import utils
 from astra.contrib.ferre.tasks.mixin import (
     ApStarMixin, BaseFerreMixin, DispatcherMixin, FerreMixin, SPECLIB_DIR
 )
-from astra.contrib.ferre.tasks.ferre import EstimateStellarParametersGivenApStarFile
 from astra.contrib.ferre.continuum import median_filtered_correction
-from astra.contrib.ferre.tasks import ApStarFile
-from astra.tasks.targets import LocalTarget
 from astra.contrib.ferre.tasks.targets import FerreResult
 
+from astra.tasks.io import ApStarFile as SDSS5ApStarFile
+from astra.tasks.io.sdss4 import ApStarFile as SDSS4ApStarFile
 
 class DispatchFerreTasks(DispatcherMixin):
     
@@ -41,6 +41,7 @@ class DispatchFerreTasks(DispatcherMixin):
             
 
     def _dispatcher(self):
+        """ Dispatch analysis tasks given the input parameters and the limits of available grids. """
 
         # Header stuff first.
         date_str = self.grid_creation_date.strftime("%y%m%d") if self.grid_creation_date is not None else "*"
@@ -136,7 +137,7 @@ class DispatchFerreTasks(DispatcherMixin):
 
 
 
-class EstimateStellarParametersGivenMedianFilteredApStarFile(EstimateStellarParametersGivenApStarFile):
+class EstimateStellarParametersGivenMedianFilteredApStarFileBase(FerreMixin):
 
     """
     Estimate the stellar parameters given a median filtered ApStarFile. 
@@ -162,14 +163,6 @@ class EstimateStellarParametersGivenMedianFilteredApStarFile(EstimateStellarPara
     bad_minimum_flux = astra.FloatParameter(default=0.01)
     non_finite_err_value = astra.FloatParameter(default=1e10)
     
-    def requires(self):
-        """ The requirements of this task, which include the previous estimate. """
-        requirements = super(EstimateStellarParametersGivenMedianFilteredApStarFile, self).requires()
-        requirements.update(
-            previous_estimate=EstimateStellarParametersGivenApStarFile(**self.get_common_param_kwargs(EstimateStellarParametersGivenApStarFile))
-        )
-        return requirements
-        
     
     def read_input_observations(self):
         """ Read the input observations and return median-filtered-corrected spectra. """
@@ -222,35 +215,16 @@ class EstimateStellarParametersGivenMedianFilteredApStarFile(EstimateStellarPara
 
 
     def output(self):
-        """ The outputs of this task. """
-        if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
-
-        path = os.path.join(
-            self.output_base_dir,
-            # For SDSS-V:
-            f"star/{self.telescope}/{int(self.healpix)/1000:.0f}/{self.healpix}/",
-            # For SDSS-IV:
-            #f"star/{self.telescope}/{self.field}/",
-            f"apStar-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.pkl"
-        )
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
-        return {
-            "database": FerreResult(self),
-            "spectrum": LocalTarget(path)
-        }
+        raise RuntimeError("this should be over-written by the parent classes")
 
 
 
 
-class InitialEstimateOfStellarParametersGivenApStarFile(DispatchFerreTasks):
+class InitialEstimateOfStellarParametersGivenApStarFileBase(DispatchFerreTasks):
 
     """
     A task that dispatches an ApStarFile to multiple FERRE grids, in a similar way done by ASPCAP in SDSS-IV.
     """
-
-    task_factory = EstimateStellarParametersGivenApStarFile
 
     def dispatcher(self):
         """ Dispatch sources to multiple FERRE grids. """
@@ -258,7 +232,7 @@ class InitialEstimateOfStellarParametersGivenApStarFile(DispatchFerreTasks):
         # We want to add some custom logic for the initial dispatching.
         # Specifically, we want to set LOG10VDOP to be frozen for all grids,
         # and for dwarf grids we want to fix C and N to be zero.
-        for kwds in super(InitialEstimateOfStellarParametersGivenApStarFile, self).dispatcher():
+        for kwds in super(InitialEstimateOfStellarParametersGivenApStarFileBase, self).dispatcher():
             kwds.update(frozen_parameters=dict(LOG10VDOP=None))
             if kwds["gd"] == "d":
                 kwds["frozen_parameters"].update(C=0.0, N=0.0)
@@ -269,8 +243,9 @@ class InitialEstimateOfStellarParametersGivenApStarFile(DispatchFerreTasks):
         """ Execute this task. """
 
         # Get the best task among the initial estimates.
-        uid = lambda task: "_".join([f"{getattr(task, pn)}" for pn in ApStarFile.batch_param_names()])
-
+        batch_param_names = set(self.batch_param_names()).difference(["initial_estimate"])
+        uid = lambda task: "_".join([f"{getattr(task, pn)}" for pn in batch_param_names])
+        
         best_tasks = {}
         for task in self.requires():
             key = uid(task)
@@ -321,24 +296,15 @@ class InitialEstimateOfStellarParametersGivenApStarFile(DispatchFerreTasks):
 
     def output(self):
         """ The outputs produced by this task. """
-        if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
-        
-        path = os.path.join(
-            self.output_base_dir,
-            # For SDSS-V:
-            f"star/{self.telescope}/{int(self.healpix)/1000:.0f}/{self.healpix}/",
-            # For SDSS-IV:
-            #f"star/{self.telescope}/{self.field}/",
-            f"apStar-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.pkl"
-        )
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
-        return LocalTarget(path)
+        raise RuntimeError("this should be over-written by the parent class")
 
 
 
-class IterativeEstimateOfStellarParametersGivenApStarFile(BaseFerreMixin, ApStarFile):
+
+
+
+
+class IterativeEstimateOfStellarParametersGivenApStarFileBase(BaseFerreMixin, ApStarMixin):
 
     """ 
     (Nearly) reproduce the steps used to estimate stellar parameters for the DR16 data release. 
@@ -361,10 +327,7 @@ class IterativeEstimateOfStellarParametersGivenApStarFile(BaseFerreMixin, ApStar
     """
 
     def requires(self):
-        """ This task requires the initial estimates of stellar parameters from many grids. """
-        return InitialEstimateOfStellarParametersGivenApStarFile(
-            **self.get_common_param_kwargs(InitialEstimateOfStellarParametersGivenApStarFile)
-        )
+        raise RuntimeError("this should be over-written by sub-classes")
 
 
     def run(self):
@@ -411,34 +374,4 @@ class IterativeEstimateOfStellarParametersGivenApStarFile(BaseFerreMixin, ApStar
                 task.output()["database"].write({})
                 with open(task.output()["spectrum"].path, "w") as fp:
                     fp.write("")
-
-
-
-    def output(self):
-        """ The outputs of this task. """
-        if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
-
-        path = os.path.join(
-            self.output_base_dir,
-            # For SDSS-V:
-            f"star/{self.telescope}/{int(self.healpix)/1000:.0f}/{self.healpix}/",
-            # For SDSS-IV:
-            #f"star/{self.telescope}/{self.field}/",
-            f"apStar-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.pkl"
-        )
-        """
-        except:
-            print(self.is_batch_mode)
-            for param_name in self.batch_param_names():
-                print(param_name, type(getattr(self, param_name)), getattr(self, param_name))
-                
-            raise a
-        """
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
-        return {
-            "database": FerreResult(self),
-            "spectrum": LocalTarget(path)
-        }
 

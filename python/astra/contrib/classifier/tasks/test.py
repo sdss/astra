@@ -192,12 +192,12 @@ class ClassifySourceGivenApVisitFile(ClassifySourceGivenApVisitFileBase):
     def prepare_batch(self):
         spectrum = self.read_observation()
 
-        # 2020-11-01: For some reason the SDSS5 ApVisit spectra have half as many pixels as SDSS4 ApVisit spectra.
-        # TODO: Resolve this with Nidever and fix here.
-        flux = np.repeat(spectrum.flux.value, 2).reshape((1, 3, -1))
+        # 2020-11-01: Undithered ApVisit spectra have half as many pixels as dithered spectra.
+        #             This is a hack to make them work together. Consider doing something clever.
+        flux = np.repeat(spectrum.flux.value, 2) if spectrum.flux.size == 6144 else spectrum.flux
+        flux = flux.reshape((1, 3, -1))
         batch = flux / np.nanmedian(flux, axis=2)[:, :, None]
         return batch
-
 
 
 class ClassifySourceGivenApStarFile(ClassifySource, ApStarFile):

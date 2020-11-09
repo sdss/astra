@@ -1,2 +1,6 @@
-from astra.tasks.io import ApStarFile # sdss5
-#from astra.tasks.io import SDSS4ApStarFile as ApStarFile # sdss4
+from astra.contrib.ferre.tasks.sdss5 import (    
+    EstimateStellarParametersGivenSDSS5ApStarFile as EstimateStellarParametersGivenApStarFile,
+    EstimateStellarParametersGivenMedianFilteredSDSS5ApStarFile as EstimateStellarParametersGivenMedianFilteredApStarFile,
+    InitialEstimateOfStellarParametersGivenSDSS5ApStarFile as InitialEstimateOfStellarParametersGivenApStarFile,
+    IterativeEstimateOfStellarParametersGivenSDSS5ApStarFile as IterativeEstimateOfStellarParametersGivenApStarFile
+)

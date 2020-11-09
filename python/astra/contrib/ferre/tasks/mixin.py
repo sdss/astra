@@ -2,7 +2,6 @@
 import astra
 import datetime
 from astra.tasks.base import BaseTask
-from astra.contrib.ferre.tasks import ApStarFile
 
 # TODO: Is this in SDSS access? Or if it's just an environment variable?!
 SPECLIB_DIR = "/home/andy/data/sdss/apogeework/apogee/spectro/speclib/"
@@ -86,7 +85,7 @@ class GridHeaderFileMixin(BaseTask):
 
 
 
-class ApStarMixin(ApStarFile):
+class ApStarMixin(BaseTask):
 
     """ Mixin class for dealing with ApStarFile objects in FERRE. """
 

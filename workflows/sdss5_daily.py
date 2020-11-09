@@ -4,9 +4,10 @@ from astra.utils import batcher
 from astra.tasks.io import ApStarFile
 from astra.tasks.daily import (GetDailyApStarFiles, get_visits, get_visits_given_star, get_stars)
 import astra.contrib.apogeenet.tasks as apogeenet
-import astra.contrib.ferre.tasks.aspcap as aspcap
+import astra.contrib.ferre.tasks as ferre
 import astra.contrib.classifier.tasks.test as classifier
-#import astra.contrib.thecannon.tasks as thecannon
+# TODO: revise
+import astra.contrib.thecannon.tasks.sdss5 as thecannon
 import astra.contrib.thepayne.tasks as thepayne
 
 from astra.tasks.targets import DatabaseTarget
@@ -34,13 +35,17 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
 
         conditions = [
             # Young stellar objects.
-            (lambda classification: classification["lp_yso"] > 0.7, [
+            (lambda classification: classification["lp_yso"] > 0.5, [
                 apogeenet.EstimateStellarParametersGivenApStarFile
             ]),
             # FGKM stars
-            (lambda classification: classification["lp_fgkm"] > 0.7, [
+            (lambda classification: classification["lp_fgkm"] > 0.75, [
+                ferre.IterativeEstimateOfStellarParametersGivenApStarFile
+            ]),
+            # FGKM stars (less probable)
+            (lambda classification: classification["lp_fgkm"] > 0.1, [
+                thecannon.EstimateStellarParametersGivenApStarFile,
                 thepayne.EstimateStellarParametersGivenNormalisedApStarFile,
-                aspcap.IterativeEstimateOfStellarParametersGivenApStarFile
             ])
         ]
 
@@ -87,7 +92,7 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
 
 # [X] Outputs from APOGEENet to database, and [-] saved pkl file.
 # [X] Execute FERRE... outputs to database, and saved pkl file.
-# [ ] Execute TC... outputs to database, and saved pkl file.
+# [X] Execute TC... outputs to database, and saved pkl file.
 # [X] Execute TP... outputs to database, and saved pkl file.
 
 #
@@ -107,6 +112,121 @@ astra.build(
     [task],
     local_scheduler=True
 )
+
+
+import numpy as np
+import sqlalchemy
+def get_all_star_targets(star_kwds, join_with_star=True):
+
+    # We want to get additional information...
+
+    task = DistributeAnalysisGivenApStarFile(**star_kwds)
+
+    output = task.output()[0]
+    engine = output.engine
+    table_names = engine.table_names()
+    batch_param_names = task.batch_param_names() 
+   
+    result = output.read(as_dict=True)
+
+    rows = {}
+    column_names = {}
+
+    # Get star table.
+    star_table = astra.tasks.daily.star_table
+    s = sqlalchemy.select([star_table])
+    r = astra.tasks.daily.engine.execute(s).fetchall()
+
+    rows[star_table.name] = r
+    column_names[star_table.name] = [c.name for c in star_table.c]
+
+    for table_name in table_names:
+
+        metadata = sqlalchemy.MetaData()
+        table = sqlalchemy.Table(
+            table_name, 
+            metadata,
+            autoload=True,
+            autoload_with=engine
+        )
+
+        rows[table_name] = []
+        column_names[table_name] = [c.name for c in table.c]
+
+        # Check that this is an allStar set.
+        if not all(pn in column_names[table_name] for pn in batch_param_names):
+            print(f"Skipping {table_name}")
+            continue
+
+        for output in task.output():
+            result = output.read(as_dict=True)
+
+            s = sqlalchemy.select([table]).where(
+                sqlalchemy.and_(
+                    *[getattr(table.c, pn) == result[pn] for pn in batch_param_names]
+                )
+            )
+
+            r = engine.execute(s).fetchall()
+
+            print(table_name, result["obj"], r)
+            rows[table_name].extend(r)
+
+
+    return (rows, column_names)
+
+
+
+
+rows, column_names = get_all_star_targets(star_kwds)
+
+import astropy.table
+
+_translate = {
+    "apogee_id": "obj",
+    "apred_vers": "apred"
+
+}
+names = [_translate.get(k, k) for k in column_names["star"]]
+
+star_table = astropy.table.Table(
+    rows=rows["star"], 
+    names=names
+)
+
+
+
+for table_name, v in rows.items():
+    if len(v) == 0:
+        print(f"Skipping {table_name}")
+        continue
+
+    t = astropy.table.Table(rows=v, names=column_names[table_name])
+
+    if table_name != "star":
+        joined_t = astropy.table.join(
+            t, 
+            star_table,
+            table_names=["", "star"]
+        )
+
+        raise a
+    
+    filename = f"DailyStar-{mjd}-"
+
+    raise a
+    
+    filename = f"{namespace}{task_name}_{mjd}.csv"
+    t.write(filename)
+
+    print(filename)
+
+
+
+
+
+
+
 raise a
 
 task = DistributeAnalysisGivenApStarFile(**star_kwds)

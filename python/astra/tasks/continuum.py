@@ -25,7 +25,7 @@ class Sinusoidal(BaseTask):
         continuum_regions = np.loadtxt(self.continuum_regions_path)
 
         # This can be run in single star mode or batch mode.
-        for task in tqdm(self.get_batch_tasks()):
+        for task in tqdm(self.get_batch_tasks(), desc="Continuum normalising", total=self.get_batch_size()):
             if task.complete(): continue
                 
             spectrum = Spectrum1D.read(task.input().path, **self.spectrum_kwds)
@@ -70,9 +70,5 @@ class Sinusoidal(BaseTask):
 
 
     def output(self):
-        # Put it relative to the input path.
-        if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
-        output_path_prefix, ext = os.path.splitext(self.input().path)
-        return luigi.LocalTarget(f"{output_path_prefix}-{self.task_id}.fits")
+        raise RuntimeError("this should be over-written by the parent classes")
     
