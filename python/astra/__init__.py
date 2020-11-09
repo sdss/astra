@@ -6,11 +6,19 @@ import os
 import yaml
 from pkg_resources import parse_version
 
-from luigi import build
-from luigi.util import inherits, requires
-from luigi.parameter import (Parameter, OptionalParameter, DateParameter,
-    IntParameter, FloatParameter, BoolParameter, TaskParameter, DictParameter,
-    EnumParameter, EnumListParameter, ListParameter, NumericalParameter, ChoiceParameter)
+
+__version__ = '0.1.11-dev'
+
+try:
+    from luigi import build
+    from luigi.util import inherits, requires
+    from luigi.parameter import (Parameter, OptionalParameter, DateParameter,
+        IntParameter, FloatParameter, BoolParameter, TaskParameter, DictParameter,
+        EnumParameter, EnumListParameter, ListParameter, NumericalParameter, ChoiceParameter)
+
+except ImportError:
+    # When the user is running python setup.py install we want them to be able to 
+    print(f"Warning: cannot import luigi requirements")
 
 def merge(user, default):
     """Merges a user configuration with the default one."""
@@ -45,4 +53,3 @@ if os.path.exists(custom_config_path):
     config = merge(custom_config, config)
 
 
-__version__ = '0.1.11-dev'
