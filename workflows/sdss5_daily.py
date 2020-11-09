@@ -14,6 +14,8 @@ from astra.tasks.targets import DatabaseTarget
 from sqlalchemy import Boolean, Column
 
 
+from luigi.mock import MockTarget
+
 class DistributeAnalysisGivenApStarFileResult(DatabaseTarget):
 
     """ A database row indicating we distributed analysis tasks for that object. """
@@ -39,7 +41,7 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
                 apogeenet.EstimateStellarParametersGivenApStarFile
             ]),
             # FGKM stars
-            (lambda classification: classification["lp_fgkm"] > 0.75, [
+            (lambda classification: classification["lp_fgkm"] > 0.9, [
                 ferre.IterativeEstimateOfStellarParametersGivenApStarFile
             ]),
             # FGKM stars (less probable)
@@ -86,7 +88,8 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
         """ Outputs of this task. """
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
-        return DistributeAnalysisGivenApStarFileResult(self)
+        #return DistributeAnalysisGivenApStarFileResult(self)
+        return MockTarget(self.task_id)
 
 
 
@@ -104,7 +107,18 @@ mjd = 59146
 
 # [ ] Put everything into a fits table: apVisit outputs per MJD?
 # [ ] Put everything into a fits table: apStar outputs per MJD?
-star_kwds = batcher(get_stars(mjd=mjd))
+foo = list(get_stars(mjd=mjd))
+star_kwds = batcher(foo)
+
+"""
+task = ferre.IterativeEstimateOfStellarParametersGivenApStarFile(**foo[388])
+
+astra.build(
+    [task],
+    local_scheduler=True
+)
+"""
+
 
 task = DistributeAnalysisGivenApStarFile(**star_kwds)
 
@@ -204,19 +218,13 @@ for table_name, v in rows.items():
     t = astropy.table.Table(rows=v, names=column_names[table_name])
 
     if table_name != "star":
-        joined_t = astropy.table.join(
+        t = astropy.table.join(
             t, 
             star_table,
-            table_names=["", "star"]
+            table_names=[table_name.split(".")[0], "star"]
         )
 
-        raise a
-    
-    filename = f"DailyStar-{mjd}-"
-
-    raise a
-    
-    filename = f"{namespace}{task_name}_{mjd}.csv"
+    filename = f"DailyStar-{mjd}-{table_name}.csv"
     t.write(filename)
 
     print(filename)
