@@ -25,7 +25,8 @@ class APOGEENetMixin(BaseTask):
 
     model_path = astra.Parameter(
         description="The path of the trained APOGEENet model.",
-        always_in_help=True
+        always_in_help=True,
+        config_path=dict(section=task_namespace, name="model_path")
     )
 
 

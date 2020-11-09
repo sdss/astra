@@ -18,11 +18,25 @@ class ThePayneMixin(BaseTask):
 
     task_namespace = "ThePayne"
 
-    n_steps = astra.IntParameter(default=100000)
-    n_neurons = astra.IntParameter(default=300)
-    weight_decay = astra.FloatParameter(default=0)
-    learning_rate = astra.FloatParameter(default=0.001)
-    training_set_path = astra.Parameter()
+    n_steps = astra.IntParameter(
+        default=100000,
+        config_path=dict(section=task_namespace, name="n_steps")
+    )
+    n_neurons = astra.IntParameter(
+        default=300,
+        config_path=dict(section=task_namespace, name="n_neurons")
+    )
+    weight_decay = astra.FloatParameter(
+        default=0.0,
+        config_path=dict(section=task_namespace, name="weight_decay")
+    )
+    learning_rate = astra.FloatParameter(
+        default=0.001,
+        config_path=dict(section=task_namespace, name="learning_rate")
+    )
+    training_set_path = astra.Parameter(
+        config_path=dict(section=task_namespace, name="training_set_path")
+    )
 
 
 class ThePayneResult(DatabaseTarget):

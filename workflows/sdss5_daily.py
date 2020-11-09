@@ -110,14 +110,13 @@ mjd = 59146
 foo = list(get_stars(mjd=mjd))
 star_kwds = batcher(foo)
 
-"""
 task = ferre.IterativeEstimateOfStellarParametersGivenApStarFile(**foo[388])
 
+raise a
 astra.build(
     [task],
     local_scheduler=True
 )
-"""
 
 
 task = DistributeAnalysisGivenApStarFile(**star_kwds)

@@ -150,7 +150,9 @@ class TrainTheCannonGivenTrainingSetTarget(TrainTheCannonBase):
         Produce quality assurance figures after training (default: True).
     """
 
-    training_set_path = astra.Parameter()
+    training_set_path = astra.Parameter(
+        config_path=dict(section="TheCannon", name="training_set_path")
+    )
 
     def requires(self):
         """ Requirements of this task. """

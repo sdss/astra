@@ -143,6 +143,20 @@ To make it available in your current session you can use the command::
   module load astra
 
 
+Installing bleeding-version of |astra| from source at Utah
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You almost never want to do this. This is just for Andy Casey because this kind of information is not written down anywhere!
+
+```
+module switch python/3.7.3
+git clone git@github.com:sdss/astra.git
+cd astra/
+pip install -r requirements.txt
+python setup.py install --prefix=~/.local
+```
+
+And don't forget to set your `~/.pgpass` to avoid `psycopg2.OperationalError` exceptions.
 
 ..
   TODO:

@@ -21,8 +21,13 @@ class TheCannonMixin(BaseTask):
     task_namespace = "TheCannon"
 
     # These parameters are needed for both training and testing.
-    label_names = luigi.ListParameter()
-    order = luigi.IntParameter(default=2)
+    label_names = luigi.ListParameter(
+        config_path=dict(section=task_namespace, name="label_names")
+    )
+    order = luigi.IntParameter(
+        default=2,
+        config_path=dict(section=task_namespace, name="order")
+    )
     
 
 
