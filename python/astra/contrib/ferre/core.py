@@ -439,7 +439,12 @@ class Ferre(object):
                     pbar.update(lines - done)
                     done = lines
                 
+                error_count = self.stderr.lower().count("error")
+                if error_count > 0:
+                    pbar.set_description(f"FERRE ({error_count:.0f} errors)")
+
                 pbar.refresh()
+
         
         # Do a final I/O communicate because we are done.
         if self.process is not None:
@@ -469,6 +474,8 @@ class Ferre(object):
                 self.kwds["input_weights_path"],
                 os.path.join(self.directory, basename)
             )
+            # Replace with relative path.
+            self.kwds["input_weights_path"] = basename
 
         return None
 

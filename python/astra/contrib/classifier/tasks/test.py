@@ -142,12 +142,12 @@ class ClassifySourceGivenApVisitFileBase(ClassifySource):
         """ Prepare the input observation for being batched through the network. """
         spectrum = self.read_observation()
 
-        # Normalise the same way the hard-coded training spectra have been.
-        # TODO: Consider separating this normalisation if/when the training set for this classifier
-        #       is ever updated.
-        flux = spectrum.flux.value.reshape((1, 3, -1))
-        return flux / np.nanmedian(flux, axis=2)[:, :, None]
-
+        # 2020-11-01: Undithered ApVisit spectra have half as many pixels as dithered spectra.
+        #             This is a hack to make them work together. Consider doing something clever.
+        flux = np.repeat(spectrum.flux.value, 2) if spectrum.flux.size == 6144 else spectrum.flux
+        flux = flux.reshape((1, 3, -1))
+        batch = flux / np.nanmedian(flux, axis=2)[:, :, None]
+        return batch
 
 
     def run(self):
@@ -158,7 +158,7 @@ class ClassifySourceGivenApVisitFileBase(ClassifySource):
         network = self.read_network()
 
         # This can be run in batch mode.
-        for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
+        for task in tqdm(self.get_batch_tasks(), desc="Classifying", total=self.get_batch_size()):
 
             batch = task.prepare_batch()
 
@@ -166,10 +166,7 @@ class ClassifySourceGivenApVisitFileBase(ClassifySource):
                 pred = network.forward(Variable(torch.Tensor(batch)))
                 log_probs = pred.data.numpy().flatten()
 
-            result = self.prepare_result(log_probs)
-            print(f"Result: {result}")
-
-            task.output().write(result)
+            task.output().write(self.prepare_result(log_probs))
 
 
     def output(self):
@@ -189,15 +186,7 @@ class ClassifySourceGivenApVisitFile(ClassifySourceGivenApVisitFileBase):
     and those required by :py:mod:`astra.tasks.io.ApVisitFile`.
     """
     
-    def prepare_batch(self):
-        spectrum = self.read_observation()
-
-        # 2020-11-01: Undithered ApVisit spectra have half as many pixels as dithered spectra.
-        #             This is a hack to make them work together. Consider doing something clever.
-        flux = np.repeat(spectrum.flux.value, 2) if spectrum.flux.size == 6144 else spectrum.flux
-        flux = flux.reshape((1, 3, -1))
-        batch = flux / np.nanmedian(flux, axis=2)[:, :, None]
-        return batch
+    pass
 
 
 class ClassifySourceGivenApStarFile(ClassifySource, ApStarFile):

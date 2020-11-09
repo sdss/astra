@@ -139,7 +139,14 @@ class BaseFerreMixin(BaseTask):
         default=None, significant=False,
         config_path=dict(section=task_namespace, name="queue_kwds")
     )
-    
+
+
+    # TODO: Put elsewhere?
+    speclib_dir = astra.Parameter(
+        config_path=dict(section="FERRE", name="speclib_dir")
+    )
+
+
 
 class GridHeaderFileMixin(BaseTask):
 
