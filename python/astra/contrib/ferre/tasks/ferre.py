@@ -19,8 +19,8 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
 
     """ Use FERRE to estimate stellar parameters given a single spectrum. """
 
-    max_batch_size = 500
-    max_batch_size_for_direct_access = 10
+    max_batch_size = 1000
+    max_batch_size_for_direct_access = 25
 
     def requires(self):
         """ The requirements for this task. """

@@ -227,7 +227,10 @@ class Ferre(object):
         assert uncertainties.shape[0] == len(spectra), "Mis-match in uncertainties array"
 
         # Make sure we are not sending nans etc.
-        bad = ~np.isfinite(flux) + ~np.isfinite(uncertainties) + (uncertainties == 0)
+        bad = ~np.isfinite(flux) \
+            + ~np.isfinite(uncertainties) \
+            + (uncertainties == 0) \
+            + (flux < 0) # TODO: Trying.....
         flux[bad] = 1.0
         uncertainties[bad] = 1e6
 
@@ -270,7 +273,7 @@ class Ferre(object):
             
         # Execute.
         self._execute(total=N)
-
+        
         erroneous_output = -999.999
 
         # Parse outputs.
@@ -409,36 +412,50 @@ class Ferre(object):
             if interactive:
                 return self.process
 
-            # Show progress.
-            self._show_progress(total=total)
+            self._monitor_progress(total=total)
                 
-            self.stdout, self.stderr = self.process.communicate()
             return None
 
 
-    def _show_progress(self, total=None, interval=1):
+    def _monitor_progress(self, total=None, interval=1):
+    
+        self.stdout, self.stderr = ("", "")
 
         # Monitor progress.
         # Note: FERRE normally writes fluxes before parameters, so we will use the flux path to
         # monitor progress.
-        t_init = time.time()
         output_flux_path = os.path.join(self.directory, self.kwds["output_flux_path"])
 
         done = 0
-        with tqdm(total=total, desc="FERRE", units="spectra") as pbar:
-            while N > done:
-                # pls hold.
-                time.sleep(interval)
+        with tqdm(total=total, desc="FERRE", unit="star") as pbar:
+            while total > done:
+                if self.process is not None:
+                    self._communicate(timeout=interval)
+                else:
+                    sleep(interval)
 
                 if os.path.exists(output_flux_path):
                     lines = utils.line_count(output_flux_path)
-
-                    if lines > done:
-                        pbar.update(lines - done)
-                        done += lines
-    
+                    pbar.update(lines - done)
+                    done = lines
+                
+                pbar.refresh()
+        
+        # Do a final I/O communicate because we are done.
+        if self.process is not None:
+            self._communicate()
         return None
 
+
+    def _communicate(self, timeout=None):
+        try:
+            stdout, stderr = self.process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            None
+        else:
+            self.stdout += stdout
+            self.stderr += stderr
+        return None
 
 
     def _setup(self):
@@ -543,8 +560,9 @@ class FerreQueue(Ferre):
         )
         queue.commit(hard=True, submit=True)
         print(f"PBS queue key: {queue.key}")
-        
-        self._show_progress()
+        self.process = None
+
+        self._monitor_progress()
         return None
     
 

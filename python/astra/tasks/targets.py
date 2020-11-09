@@ -78,10 +78,13 @@ class BaseDatabaseTarget(luigi.Target):
         with self.engine.begin() as con:
             metadata = sqlalchemy.MetaData()
             if not con.dialect.has_table(con, self.__tablename__):
-                self._table_bound = sqlalchemy.Table(
-                    self.__tablename__, metadata, *self.schema
-                )
-                metadata.create_all(self.engine)
+                try:
+                    self._table_bound = sqlalchemy.Table(
+                        self.__tablename__, metadata, *self.schema
+                    )
+                    metadata.create_all(self.engine)
+                except:
+                    raise a
             else:
                 #metadata.reflect(only=[self.results_table], bind=self.engine)
                 #self._table_bound = metadata.tables[self.results_table]
@@ -173,6 +176,21 @@ class BaseDatabaseTarget(luigi.Target):
                 )
             connection.execute(insert)
         return None
+
+
+    def delete(self):
+        """
+        Delete a result target from the database. 
+        """
+
+        table = self.table_bound
+        with self.engine.begin() as connection:
+            connection.execute(
+                table.delete().where(table.c.task_id == self.task_id)
+            )
+
+        return None
+
 
 
 

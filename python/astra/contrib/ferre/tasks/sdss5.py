@@ -32,7 +32,7 @@ class SDSS5Mixin:
 
 
 
-class EstimateStellarParametersGivenSDSS5ApStarFile(SDSS5ApStarFile, EstimateStellarParametersGivenApStarFileBase, SDSS5Mixin):
+class EstimateStellarParametersGivenSDSS5ApStarFile(SDSS5Mixin, EstimateStellarParametersGivenApStarFileBase, SDSS5ApStarFile):
 
     """ Use FERRE to estimate stellar parameters given a SDSS-V ApStar file. """
 
@@ -41,20 +41,20 @@ class EstimateStellarParametersGivenSDSS5ApStarFile(SDSS5ApStarFile, EstimateSte
 
 
 
-class EstimateStellarParametersGivenMedianFilteredSDSS5ApStarFile(SDSS5ApStarFile, EstimateStellarParametersGivenMedianFilteredApStarFileBase, SDSS5Mixin):
-
+class EstimateStellarParametersGivenMedianFilteredSDSS5ApStarFile(EstimateStellarParametersGivenMedianFilteredApStarFileBase, EstimateStellarParametersGivenSDSS5ApStarFile):
+    
     def requires(self):
         """ The requirements of this task, which include the previous estimate. """
-        requirements = super(EstimateStellarParametersGivenMedianFilteredApStarFileBase, self).requires()
+        requirements = super(EstimateStellarParametersGivenMedianFilteredSDSS5ApStarFile, self).requires()
         requirements.update(
-            previous_estimate=EstimateStellarParametersGivenSDSS5ApStarFile(**self.get_commInitialEstimateOfStellarParametersGivenApStarFileBaseon_param_kwargs(EstimateStellarParametersGivenSDSS5ApStarFile))
+            previous_estimate=EstimateStellarParametersGivenSDSS5ApStarFile(**self.get_common_param_kwargs(EstimateStellarParametersGivenSDSS5ApStarFile))
         )
         return requirements
         
 
     
 
-class InitialEstimateOfStellarParametersGivenSDSS5ApStarFile(InitialEstimateOfStellarParametersGivenApStarFileBase):
+class InitialEstimateOfStellarParametersGivenSDSS5ApStarFile(InitialEstimateOfStellarParametersGivenApStarFileBase, SDSS5ApStarFile):
 
     """
     A task that dispatches an ApStarFile to multiple FERRE grids, in a similar way done by ASPCAP in SDSS-IV.
@@ -62,10 +62,23 @@ class InitialEstimateOfStellarParametersGivenSDSS5ApStarFile(InitialEstimateOfSt
 
     task_factory = EstimateStellarParametersGivenSDSS5ApStarFile
 
+    def output(self):
+        if self.is_batch_mode:
+            return [task.output() for task in self.get_batch_tasks()]
+        
+        path = os.path.join(
+            self.output_base_dir,
+            f"star/{self.telescope}/{int(self.healpix)/1000:.0f}/{self.healpix}/",
+            f"apStar-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.pkl"
+        )
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        return LocalTarget(path)
 
 
 
-class IterativeEstimateOfStellarParametersGivenSDSS5ApStarFile(IterativeEstimateOfStellarParametersGivenApStarFileBase, SDSS5ApStarFile, SDSS5Mixin):
+class IterativeEstimateOfStellarParametersGivenSDSS5ApStarFile(SDSS5Mixin, IterativeEstimateOfStellarParametersGivenApStarFileBase, SDSS5ApStarFile):
+
+    task_factory = EstimateStellarParametersGivenMedianFilteredSDSS5ApStarFile
 
     def requires(self):
         """ This task requires the initial estimates of stellar parameters from many grids. """

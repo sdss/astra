@@ -60,9 +60,9 @@ class InitialEstimateOfStellarParametersGivenSDSS4ApStarFile(InitialEstimateOfSt
     task_factory = EstimateStellarParametersGivenSDSS4ApStarFile
 
 
-
-
 class IterativeEstimateOfStellarParametersGivenSDSS4ApStarFile(IterativeEstimateOfStellarParametersGivenApStarFileBase, SDSS4ApStarFile, SDSS4Mixin):
+
+    task_factory = EstimateStellarParametersGivenMedianFilteredSDSS4ApStarFile
 
     def requires(self):
         """ This task requires the initial estimates of stellar parameters from many grids. """

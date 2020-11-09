@@ -214,9 +214,6 @@ class EstimateStellarParametersGivenMedianFilteredApStarFileBase(FerreMixin):
         return spectra
 
 
-    def output(self):
-        raise RuntimeError("this should be over-written by the parent classes")
-
 
 
 
@@ -243,7 +240,7 @@ class InitialEstimateOfStellarParametersGivenApStarFileBase(DispatchFerreTasks):
         """ Execute this task. """
 
         # Get the best task among the initial estimates.
-        batch_param_names = set(self.batch_param_names()).difference(["initial_estimate"])
+        batch_param_names = self.task_factory.observation_task.batch_param_names()
         uid = lambda task: "_".join([f"{getattr(task, pn)}" for pn in batch_param_names])
         
         best_tasks = {}
@@ -339,10 +336,8 @@ class IterativeEstimateOfStellarParametersGivenApStarFileBase(BaseFerreMixin, Ap
                 log_chisq_fit, kwds = pickle.load(fp)
 
             if np.isfinite(log_chisq_fit):
-                tasks.append(
-                    EstimateStellarParametersGivenMedianFilteredApStarFile(**kwds)
-                )
-
+                tasks.append(self.task_factory(**kwds))
+                
         yield [task for task in tasks if not task.complete()]
 
         for task in tasks:
@@ -353,10 +348,20 @@ class IterativeEstimateOfStellarParametersGivenApStarFileBase(BaseFerreMixin, Ap
 
             result = { k: v or np.nan for k, v in result.items() if k not in ignore }
 
+
             for key, value in task.output().items():
                 if key == "database":
                     # Write result to a symbolic task.
-                    symbolic_task = self.__class__(**task.get_common_param_kwargs(self))
+                    kwds = task.get_common_param_kwargs(self)
+                    # (Need to make sure the common task keywords are the same, or we will
+                    # end up with a different task id)
+                    # TODO: This requires a thinko.
+                    kwds.update(
+                        initial_parameters=None,
+                        frozen_parameters=None,
+                    )
+
+                    symbolic_task = self.__class__(**kwds)
                     symbolic_task.output()[key].write(result)
 
                 else:
