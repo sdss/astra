@@ -5,21 +5,26 @@ Tasks for daily running.
 
 import astra
 import sqlalchemy
+from luigi import Config
 from sqlalchemy import create_engine
 from luigi.task import flatten
 from astra.tasks.base import BaseTask
 from astra.tasks.io import (ApStarFile, ApVisitFile)
 
 
+class DailyMixin(Config):
+    operations_user = astra.Parameter(
+        config_path=dict(section="Daily", name="operations_user")
+    )
+
 # todo: move elsewhere and refactor.
-connection_string = "postgresql://sdss_remote@operations.sdss.org/sdss5db"
+connection_string = f"postgresql://{DailyMixin().operations_user}@operations.sdss.org/sdss5db"
 
 engine = create_engine(connection_string)
 
-connection = engine.connect()#begin()
+connection = engine.connect()
 md = sqlalchemy.MetaData(schema="apogee_drp")
 visit_table = sqlalchemy.Table("visit", md, autoload=True, autoload_with=connection)
-
 star_table = sqlalchemy.Table("star", md, autoload=True, autoload_with=connection)
 
 
