@@ -9,19 +9,9 @@ from tqdm import tqdm
 from torch import nn
 from torch.autograd import Variable
 
-# Check for CUDA support.
-try:
-    torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
-except TypeError:
-    print("Torch not compiled with CUDA support")
-    CUDA_AVAILABLE = False
-
-else:
-    CUDA_AVAILABLE = True
-
-default_tensor_type = torch.cuda.FloatTensor if CUDA_AVAILABLE else torch.FloatTensor
-torch.set_default_tensor_type(default_tensor_type)
+#default_tensor_type = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+#torch.set_default_tensor_type(default_tensor_type)
 
 
 class OpticalCNN(nn.Module):

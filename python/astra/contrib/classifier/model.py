@@ -25,8 +25,8 @@ else:
 CUDA_AVAILABLE = torch.cuda.is_available()
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-default_tensor_type = torch.cuda.FloatTensor if CUDA_AVAILABLE else torch.FloatTensor
-torch.set_default_tensor_type(default_tensor_type)
+#default_tensor_type = torch.cuda.FloatTensor if CUDA_AVAILABLE else torch.FloatTensor
+#torch.set_default_tensor_type(default_tensor_type)
 
 
 def train(
@@ -98,7 +98,7 @@ def train(
 
     print(f"Weight imbalance: {weight_imbalance}")
 
-    weights = torch.Tensor([1. / w for w in weight_imbalance], device=device)
+    weights = torch.Tensor(1.0 / weight_imbalance, device=device)
     print(f"Inverse weight imbalance: {weights}")
 
     if CUDA_AVAILABLE:
