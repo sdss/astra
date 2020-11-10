@@ -31,9 +31,9 @@ class BaseDispatcherMixin(BaseTask):
         config_path=dict(section=task_namespace, name="grid_creation_date")
     )
 
-    gd = astra.Parameter(default="*")
+    gd = astra.Parameter(default="?")
     spectral_type = astra.Parameter(default="*")
-    lsf = astra.Parameter(default="*")
+    lsf = astra.Parameter(default="?")
     aspcap = astra.Parameter(default="*")
     
     # Task Factory.
