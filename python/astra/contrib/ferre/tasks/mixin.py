@@ -105,7 +105,7 @@ class BaseFerreMixin(BaseTask):
         config_path=dict(section=task_namespace, name="lsf_shape_flag")
     )
     use_direct_access = astra.BoolParameter(
-        default=True, significant=False,
+        default=False, significant=False,
         config_path=dict(section=task_namespace, name="use_direct_access")
     )
     n_threads = astra.IntParameter(

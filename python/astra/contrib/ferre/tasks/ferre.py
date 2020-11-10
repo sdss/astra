@@ -94,7 +94,8 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
             input_lsf_path=self.input_lsf_path,
             # TODO: Consider what is most efficient. Consider removing as a task parameter.
             #use_direct_access=True, 
-            use_direct_access=(True if N <= self.max_batch_size_for_direct_access else False),
+            use_direct_access=self.use_direct_access,
+            #(True if N <= self.max_batch_size_for_direct_access else False),
             n_threads=self.n_threads,
             debug=self.debug,
             directory_kwds=directory_kwds,
