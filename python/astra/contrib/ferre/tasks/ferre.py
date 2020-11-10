@@ -98,6 +98,7 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
             n_threads=self.n_threads,
             debug=self.debug,
             directory_kwds=directory_kwds,
+            executable=self.ferre_executable
         )
 
         # Star names to monitor output.
