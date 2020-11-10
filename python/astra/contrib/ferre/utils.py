@@ -139,11 +139,18 @@ def parse_grid_limits(header_paths):
 
     grids = {}
     for header_path in header_paths:
-        headers = read_ferre_headers(header_path)
-        meta = parse_header_path(header_path)
+        try:
+            headers = read_ferre_headers(header_path)
+            meta = parse_header_path(header_path)
 
-        # Get grid limits.
-        grids[header_path] = (meta, headers[0]["LLIMITS"], headers[0]["ULIMITS"])
+        except:
+            # TODO: switch to log
+            print(f"Unable to parse FERRE headers for {header_path}")
+            continue
+    
+        else:
+            # Get grid limits.
+            grids[header_path] = (meta, headers[0]["LLIMITS"], headers[0]["ULIMITS"])
 
     return grids
         
