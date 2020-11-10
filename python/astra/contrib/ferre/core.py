@@ -455,8 +455,15 @@ class Ferre(object):
     def _communicate(self, timeout=None):
         try:
             stdout, stderr = self.process.communicate(timeout=timeout)
+
         except subprocess.TimeoutExpired:
             None
+
+        except ValueError:
+            # See https://bugs.python.org/issue35182
+            # Child has finished.
+            None
+            
         else:
             self.stdout += stdout
             self.stderr += stderr
