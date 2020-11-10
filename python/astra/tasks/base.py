@@ -262,6 +262,7 @@ class BaseTask(luigi.Task, metaclass=Register):
         return os.path.join(
             os.environ.get("SAS_BASE_DIR"),
             "sdsswork",
+            "mwm",
             "astra",
             f"{self.astra_version_major}.{self.astra_version_minor}.{self.astra_version_micro}",
             self.task_namespace
