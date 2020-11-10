@@ -11,11 +11,25 @@ class BaseDispatcherMixin(BaseTask):
 
     """ A mixin class for dispatching FERRE tasks. """
 
+    task_namespace = "FERRE"
+
     # Grid path parameters.
-    radiative_transfer_code = astra.Parameter(default="*")
-    model_photospheres = astra.Parameter(default="*")
-    isotopes = astra.Parameter(default="*")
-    grid_creation_date = astra.DateParameter(default=datetime.date(2018, 9, 1))
+    radiative_transfer_code = astra.Parameter(
+        default="*",
+        config_path=dict(section=task_namespace, name="radiative_transfer_code")
+    )
+    model_photospheres = astra.Parameter(
+        default="*",
+        config_path=dict(section=task_namespace, name="model_photospheres")
+    )
+    isotopes = astra.Parameter(
+        default="*",
+        config_path=dict(section=task_namespace, name="isotopes")
+    )
+    grid_creation_date = astra.DateParameter(
+        default=datetime.date(2018, 9, 1),
+        config_path=dict(section=task_namespace, name="grid_creation_date")
+    )
 
     gd = astra.Parameter(default="*")
     spectral_type = astra.Parameter(default="*")
