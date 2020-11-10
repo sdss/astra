@@ -46,20 +46,6 @@ class BaseFerreMixin(BaseTask):
 
     task_namespace = "FERRE"
 
-    # Current FERRE version at time of writing is 4.8.5
-    ferre_version_major = astra.IntParameter(
-        default=4,
-        config_path=dict(section=task_namespace, name="ferre_version_major")
-    )
-    ferre_version_minor = astra.IntParameter(
-        default=8,
-        config_path=dict(section=task_namespace, name="ferre_version_minor")
-    )
-    ferre_version_patch = astra.IntParameter(
-        default=5,
-        config_path=dict(section=task_namespace, name="ferre_version_patch")
-    )
-
     # Instead of providing the grid header path here, we will pass it through other parameters
     # that can be used to reconstruct the grid header path.
     interpolation_order = astra.IntParameter(
@@ -160,6 +146,24 @@ class BaseFerreMixin(BaseTask):
         config_path=dict(section="FERRE", name="speclib_dir")
     )
 
+    # Current FERRE version at time of writing is 4.8.5
+    ferre_version_major = astra.IntParameter(
+        default=4,
+        config_path=dict(section=task_namespace, name="ferre_version_major")
+    )
+    ferre_version_minor = astra.IntParameter(
+        default=8,
+        config_path=dict(section=task_namespace, name="ferre_version_minor")
+    )
+    ferre_version_patch = astra.IntParameter(
+        default=5,
+        config_path=dict(section=task_namespace, name="ferre_version_patch")
+    )
+
+    ferre_executable = astra.Parameter(
+        default="ferre.x",
+        config_path=dict(section=task_namespace, name="ferre_executable")
+    )
 
 
 class GridHeaderFileMixin(BaseTask):
