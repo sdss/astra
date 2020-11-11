@@ -220,6 +220,7 @@ class ClassifySourceGivenApStarFile(ClassifySource, ApStarFile):
             for classification in task.requires():
                 output = classification.output().read(as_dict=True)
                 for key in log_probs.keys():
+                    log_prob = output[key] or np.nan # Sometimes we get nans / Nones.
                     if np.isfinite(output[key]):
                         log_probs[key] += output[key]
         
