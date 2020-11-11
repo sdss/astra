@@ -88,9 +88,8 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
         """ Outputs of this task. """
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
-        #return DistributeAnalysisGivenApStarFileResult(self)
-        return MockTarget(self.task_id)
-
+        return DistributeAnalysisGivenApStarFileResult(self)
+        
 
 
 # [X] Outputs from APOGEENet to database, and [-] saved pkl file.
@@ -102,7 +101,7 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
 
 # Note that many parameters are set in sdss5.cfg
 mjd = 59146
-
+mjd = 59159
 
 
 # [ ] Put everything into a fits table: apVisit outputs per MJD?
@@ -110,21 +109,17 @@ mjd = 59146
 foo = list(get_stars(mjd=mjd))
 star_kwds = batcher(foo)
 
-task = ferre.IterativeEstimateOfStellarParametersGivenApStarFile(**foo[388])
+#task = ferre.IterativeEstimateOfStellarParametersGivenApStarFile(**foo[388])
+
+
+task = DistributeAnalysisGivenApStarFile(use_remote=True, **star_kwds)
+
+astra.build(
+    [task],
+    local_scheduler=True
+)
 
 raise a
-astra.build(
-    [task],
-    local_scheduler=True
-)
-
-
-task = DistributeAnalysisGivenApStarFile(**star_kwds)
-
-astra.build(
-    [task],
-    local_scheduler=True
-)
 
 
 import numpy as np
