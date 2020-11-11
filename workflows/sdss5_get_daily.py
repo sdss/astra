@@ -36,6 +36,7 @@ for description, task in tasks:
             ])
 
 
+print(f"Report for MJD {mjd}")
 for description, items in missing.items():
     print(f"There are {len(items)} missing {description}")
     if len(items) > 0:
