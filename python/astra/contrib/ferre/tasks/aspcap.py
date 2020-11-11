@@ -169,8 +169,12 @@ class EstimateStellarParametersGivenMedianFilteredApStarFileBase(FerreMixin):
         spectra = []
 
         # TODO: dont do this.
-        with open("/home/ubuntu/data/sdss/astra-components/wavelength_mask.pkl", "rb") as fp:
-            mask = pickle.load(fp)
+        if self.input_wavelength_mask_path:
+            with open(self.input_wavelength_mask_path, "rb") as fp:
+                mask = pickle.load(fp)
+        
+        else:
+            mask = None
 
         for task in self.get_batch_tasks():
             observation = Spectrum1D.read(

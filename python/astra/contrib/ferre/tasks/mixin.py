@@ -117,6 +117,10 @@ class BaseFerreMixin(BaseTask):
         default="",
         config_path=dict(section=task_namespace, name="input_weights_path")
     )
+    input_wavelength_mask_path = astra.OptionalParameter(
+        default="",
+        config_path=dict(section=task_namespace, name="input_wavelength_mask_path")
+    )
     input_lsf_path = astra.OptionalParameter(
         default="",
         config_path=dict(section=task_namespace, name="input_lsf_path")
