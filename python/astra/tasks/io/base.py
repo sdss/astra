@@ -77,7 +77,28 @@ class SDSSDataModelTask(BaseTask):
             self._local_path = self.tree.full(self.sdss_data_model_name, **self.param_kwargs)
             
         return self._local_path
-        
+
+
+    @property
+    def remote_path(self):
+        """ 
+        The remote path of the file. Useful for debugging path problems.
+
+        This is relatively expensive to return, so don't use this to download sources.
+        Instead use one instance of sdss_access.HttpAccess to get the remote paths of
+        many sources.
+        """
+        http = HttpAccess(
+            verbose=self.verbose,
+            public=self.public,
+            release=self.release
+        )
+        http.remote()
+        return http.url(self.sdss_data_model_name, **{
+                k: getattr(self, k) for k in self.tree.lookup_keys(self.sdss_data_model_name)
+            }
+        )
+
 
     @classmethod
     def get_local_path(cls, release, public=True, mirror=False, verbose=True, **kwargs):
