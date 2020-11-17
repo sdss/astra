@@ -141,42 +141,41 @@ class EstimateStellarParametersGivenApStarFileBase(TrainTheCannonGivenTrainingSe
             )
 
             # Write astraSource target.
-            astraSource_path = task.output().get("astraSource", None)
-            if astraSource_path is not None:                    
-                model_flux = np.array([ea["model_flux"] for ea in op_meta[si:si + N_spectra]])
+            path = task.output()["astraSource"].path
+            model_flux = np.array([ea["model_flux"] for ea in op_meta[si:si + N_spectra]])
 
-                from astropy.table import Table
+            from astropy.table import Table
 
-                data_table = Table(
-                    data=labels[si:si + N_spectra],
-                    names=model.vectorizer.label_names
-                )
-                keys = ("snr", "r_chi_sq", "chi_sq", "x0")
-                for key in keys:
-                    data_table[key] = [row[key] for row in op_meta[si:si + N_spectra]]
-                
-                data_table["cov"] = cov[si:si + N_spectra]
-                
-                image = create_astra_source(
-                    # TODO: Check with Nidever on CATID/catalogid.
-                    catalog_id=spectrum.meta["header"]["CATID"],
-                    obj=task.obj,
-                    telescope=task.telescope,
-                    healpix=task.healpix,
-                    normalized_flux=flux[si:si + N_spectra],
-                    normalized_ivar=ivar[si:si + N_spectra],
-                    model_flux=model_flux,
-                    # TODO: Will this work with BOSS as well?
-                    crval=spectrum.meta["header"]["CRVAL1"],
-                    cdelt=spectrum.meta["header"]["CDELT1"],
-                    crpix=spectrum.meta["header"]["CRPIX1"],
-                    ctype=spectrum.meta["header"]["CTYPE1"],
-                    header=spectrum.meta["header"],
-                    data_table=data_table,
-                    reference_task=task
-                )
-                
-                image.writeto(astraSource_path)
+            data_table = Table(
+                data=labels[si:si + N_spectra],
+                names=model.vectorizer.label_names
+            )
+            keys = ("snr", "r_chi_sq", "chi_sq", "x0")
+            for key in keys:
+                data_table[key] = [row[key] for row in op_meta[si:si + N_spectra]]
+            
+            data_table["cov"] = cov[si:si + N_spectra]
+            
+            image = create_astra_source(
+                # TODO: Check with Nidever on CATID/catalogid.
+                catalog_id=spectrum.meta["header"]["CATID"],
+                obj=task.obj,
+                telescope=task.telescope,
+                healpix=task.healpix,
+                normalized_flux=flux[si:si + N_spectra],
+                normalized_ivar=ivar[si:si + N_spectra],
+                model_flux=model_flux,
+                # TODO: Will this work with BOSS as well?
+                crval=spectrum.meta["header"]["CRVAL1"],
+                cdelt=spectrum.meta["header"]["CDELT1"],
+                crpix=spectrum.meta["header"]["CRPIX1"],
+                ctype=spectrum.meta["header"]["CTYPE1"],
+                header=spectrum.meta["header"],
+                data_table=data_table,
+                reference_task=task
+            )
+            
+            image.writeto(path)
 
             
             # Write database result.
