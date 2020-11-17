@@ -141,14 +141,23 @@ def test(spectrum, neural_network_coefficients, scales, wavelength, label_names,
                 absolute_sigma=True, method="trf")
 
     p_opt, p_cov = curve_fit(objective_function, **kwds)
-    model_flux = objective_function(x, *p_opt)
-
+    
     # Un-scale entries.
     x_min, x_max = scales
     p_opt = (x_max - x_min) * (p_opt + 0.5) + x_min
 
     # TODO: YST does this but I am not yet convinced that it is correct!
     p_cov = p_cov * (x_max - x_min)
-    meta = dict(model_flux=model_flux)
+    # Put model flux back onto the observed array.
+    
+    model_flux = np.interp(
+        x_original,
+        wavelength,
+        objective_function(x, *p_opt),
+        **interp_kwds
+    )
+    meta = dict(
+        model_flux=model_flux
+    )
     
     return (OrderedDict(zip(label_names, p_opt)), p_cov, meta)

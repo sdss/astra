@@ -4,11 +4,13 @@ import numpy as np
 import os
 import pickle
 from tqdm import tqdm
+from astropy.table import Table
 from astra.tasks.base import BaseTask
 from astra.tasks.io import (ApStarFile, LocalTargetTask)
 from astra.tasks.targets import LocalTarget, DatabaseTarget
 from astra.tasks.continuum import Sinusoidal
 from astra.tools.spectrum import Spectrum1D
+from astra.tools.spectrum.writers import create_astra_source
 from astra.contrib.thepayne import training, test as testing
 
 from sqlalchemy import (Column, Float)
@@ -221,8 +223,33 @@ class EstimateStellarParameters(ThePayneMixin):
             task.output()["database"].write(row)
             
             # Write additional things.
-            with open(task.output()["etc"].path, "wb") as fp:
-                pickle.dump(result, fp)
+            #with open(task.output()["etc"].path, "wb") as fp:
+            #    pickle.dump(result, fp)
+
+            astraSource_path = task.output()["astraSource"].path
+            
+            data_table = Table(rows=[row])
+
+            image = create_astra_source(
+                    # TODO: Check with Nidever on CATID/catalogid.
+                    catalog_id=spectrum.meta["header"]["CATID"],
+                    obj=task.obj,
+                    telescope=task.telescope,
+                    healpix=task.healpix,
+                    normalized_flux=spectrum.flux.value,
+                    normalized_ivar=spectrum.uncertainty.array,
+                    model_flux=meta["model_flux"],
+                    # TODO: Will this work with BOSS as well?
+                    crval=spectrum.meta["header"]["CRVAL1"],
+                    cdelt=spectrum.meta["header"]["CDELT1"],
+                    crpix=spectrum.meta["header"]["CRPIX1"],
+                    ctype=spectrum.meta["header"]["CTYPE1"],
+                    header=spectrum.meta["header"],
+                    data_table=data_table,
+                    reference_task=task
+                )
+            image.writeto(astraSource_path)
+
         
         return None
 
@@ -235,15 +262,17 @@ class EstimateStellarParameters(ThePayneMixin):
         path = os.path.join(
             self.output_base_dir,
             f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
-            f"apStar-{self.apred}-{self.obj}-{self.task_id}.pkl"
+            f"astraSource-{self.apred}-{self.obj}-{self.task_id}.fits"
         )
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         return {
             "database": ThePayneResult(self),
-            "etc": LocalTarget(path)
+            "astraSource": LocalTarget(path)
         }
         
+
+
 
 
 
