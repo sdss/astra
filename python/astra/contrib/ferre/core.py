@@ -300,14 +300,16 @@ class Ferre(object):
                 )
 
                 if self.kwds["continuum_flag"] is not None:
-
                     normalized_flux = np.atleast_2d(
                         np.loadtxt(
                             os.path.join(self.directory, self.kwds["output_normalized_input_flux_path"])
                         )
                     )
 
-                    meta.update(normalized_input_flux=normalized_flux)
+                    meta.update(
+                        mask=mask,
+                        normalized_input_flux=normalized_flux
+                    )
 
                 return (param, param_errs, output_flux, meta)
 

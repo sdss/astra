@@ -2,9 +2,12 @@ import os
 import numpy as np
 import pickle
 from astropy import units as u
+from astropy.table import Table
+from collections import OrderedDict
 
 from astra.tasks.targets import LocalTarget
 from astra.tools.spectrum import Spectrum1D
+from astra.tools.spectrum.writers import create_astra_source
 from astra.utils import log
 
 from astra.contrib.ferre.core import (Ferre, FerreQueue)
@@ -106,21 +109,63 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
         names = [f"{i:.0f}_{telescope}_{obj}" for i, (telescope, obj) in enumerate(zip(self.telescope, self.obj))]
 
         # Get initial parameter estimates.
-        p_opt, p_opt_err, model_flux, meta = results = model.fit(
+        p_opt, p_opt_err, masked_model_flux, meta = results = model.fit(
             spectra,
             initial_parameters=self.initial_parameters,
             full_output=True,
             names=names
         )
 
-        for i, task in enumerate(self.get_batch_tasks()):
-            # Write output spectra.
+        # Use the mask to put the model flux back on the same pixels
+        # as the observations.
+        mask = meta["mask"]
+        model_flux = np.nan * np.ones((N, spectra[0].wavelength.size))
+        model_flux[:, mask] = masked_model_flux
+
+        for i, (task, spectrum) in enumerate(zip(self.get_batch_tasks(), spectra)):
+            # Write astraSource object.
+            path = task.output()["astraSource"].path
+
+            row = OrderedDict(zip(model.parameter_names, p_opt[i]))
+            for key, value in self.initial_parameters[i].items():
+                row.update({ f"INITIAL_{key}": value })
+
+            row.update({
+                "log_snr_sq": meta["log_snr_sq"][i],
+                "log_chisq_fit": meta["log_chisq_fit"][i],
+            })
+
+            data_table = Table(rows=[row])
+            
+            image = create_astra_source(
+                # TODO: Check with Nidever on CATID/catalogid.
+                catalog_id=spectrum.meta["header"]["CATID"],
+                obj=task.obj,
+                telescope=task.telescope,
+                healpix=task.healpix,
+                # TODO: Should we be passing in the output from FERRE here?
+                normalized_flux=spectrum.flux.value,
+                normalized_ivar=spectrum.uncertainty.array,
+                model_flux=model_flux[i],
+                # TODO: Will this work with BOSS as well?
+                crval=spectrum.meta["header"]["CRVAL1"],
+                cdelt=spectrum.meta["header"]["CDELT1"],
+                crpix=spectrum.meta["header"]["CRPIX1"],
+                ctype=spectrum.meta["header"]["CTYPE1"],
+                header=spectrum.meta["header"],
+                data_table=data_table,
+                reference_task=task
+            )
+            image.writeto(path)
+
+            """
             write_spectra = dict(
                 model_spectrum=model_flux[i],
                 normalized_observed_flux=meta["normalized_input_flux"][i]
             )
             with open(task.output()["spectrum"].path, "wb") as fp:
                 pickle.dump(write_spectra, fp)
+            """
 
             # Write result to database.
             result = dict(zip(model.parameter_names, p_opt[i]))
