@@ -1,5 +1,4 @@
 
-import luigi
 import numpy as np
 import os
 import torch
@@ -9,10 +8,12 @@ from luigi.parameter import ParameterVisibility
 from sqlalchemy import Column, Float
 
 import astra
+from astropy.table import Table
 from astra.tasks.base import BaseTask
-from astra.tasks.targets import DatabaseTarget
+from astra.tasks.targets import DatabaseTarget, LocalTarget
 from astra.tasks.io import ApStarFile
 from astra.tools.spectrum import Spectrum1D
+from astra.tools.spectrum.writers import create_astra_source
 from astra.contrib.apogeenet.model import Net, predict
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -35,7 +36,7 @@ class TrainedAPOGEENetModel(APOGEENetMixin):
     """ A trained APOGEENet model file. """
 
     def output(self):    
-        return luigi.LocalTarget(self.model_path)
+        return LocalTarget(self.model_path)
 
 
 class APOGEENetResult(DatabaseTarget):
@@ -74,7 +75,18 @@ class EstimateStellarParameters(APOGEENetMixin):
         """ The output produced by this task. """
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
-        return APOGEENetResult(self)
+        
+        path = os.path.join(
+            self.output_base_dir,
+            f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
+            f"astraSource-{self.apred}-{self.obj}-{self.task_id}.fits"
+        )
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        return {
+            "database": APOGEENetResult(self),
+            "astraSource": LocalTarget(path)
+        }
 
 
     def read_model(self):
@@ -152,7 +164,33 @@ class EstimateStellarParameters(APOGEENetMixin):
         for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
             spectrum = task.read_observation()    
             result = task.estimate_stellar_parameters(model, spectrum)
-            task.output().write(result)
+            task.output()["database"].write(result)
+
+            # Write astraSource.
+            astraSource_path = task.output()["astraSource"].path
+            
+            data_table = Table(rows=[result])
+
+            image = create_astra_source(
+                # TODO: Check with Nidever on CATID/catalogid.
+                catalog_id=spectrum.meta["header"]["CATID"],
+                obj=task.obj,
+                telescope=task.telescope,
+                healpix=task.healpix,
+                normalized_flux=spectrum.flux.value,
+                normalized_ivar=spectrum.uncertainty.array,
+                model_flux=np.nan * np.ones_like(spectrum.flux.value),
+                # TODO: Will this work with BOSS as well?
+                crval=spectrum.meta["header"]["CRVAL1"],
+                cdelt=spectrum.meta["header"]["CDELT1"],
+                crpix=spectrum.meta["header"]["CRPIX1"],
+                ctype=spectrum.meta["header"]["CTYPE1"],
+                header=spectrum.meta["header"],
+                data_table=data_table,
+                reference_task=task
+            )
+            image.writeto(astraSource_path)
+
 
         return None
 
