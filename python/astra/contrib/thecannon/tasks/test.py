@@ -6,6 +6,7 @@ import numpy as np
 from astra.tasks.base import BaseTask
 from astra.utils import log
 from astra.tools.spectrum import Spectrum1D
+from astra.tools.spectrum.writers import create_astra_source
 from astra.tasks.io import ApStarFile
 from tqdm import tqdm
 
@@ -93,6 +94,7 @@ class EstimateStellarParametersGivenApStarFileBase(TrainTheCannonGivenTrainingSe
         # per ApStar file (or per task).
         data = []
         task_meta = []
+        task_spectra = []
         for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
             spectrum = task.read_observation()
             flux, ivar = task.resample_observation(model.dispersion, spectrum=spectrum)
@@ -111,6 +113,7 @@ class EstimateStellarParametersGivenApStarFileBase(TrainTheCannonGivenTrainingSe
                 snr_visits=snr_visits,
                 snr_combined=snr_combined
             ))
+            task_spectra.append(spectrum)
             
         flux, ivar = map(np.vstack, zip(*data))
 
@@ -123,7 +126,7 @@ class EstimateStellarParametersGivenApStarFileBase(TrainTheCannonGivenTrainingSe
         )
 
         si = 0
-        for i, (task, meta) in enumerate(zip(self.get_batch_tasks(), task_meta)):
+        for i, (task, spectrum, meta) in enumerate(zip(self.get_batch_tasks(), task_spectra, task_meta)):
             
             N_spectra = meta["N_spectra"]
             result = dict(
@@ -137,9 +140,44 @@ class EstimateStellarParametersGivenApStarFileBase(TrainTheCannonGivenTrainingSe
                 label_names=model.vectorizer.label_names
             )
 
-            # Write result.
-            with open(task.output()["etc"].path, "wb") as fp:
-                pickle.dump(result, fp)
+            # Write astraSource target.
+            astraSource_path = task.output().get("astraSource", None)
+            if astraSource_path is not None:                    
+                model_flux = np.array([ea["model_flux"] for ea in op_meta[si:si + N_spectra]])
+
+                from astropy.table import Table
+
+                data_table = Table(
+                    data=labels[si:si + N_spectra],
+                    names=model.vectorizer.label_names
+                )
+                keys = ("snr", "r_chi_sq", "chi_sq", "x0")
+                for key in keys:
+                    data_table[key] = [row[key] for row in op_meta[si:si + N_spectra]]
+                
+                data_table["cov"] = cov[si:si + N_spectra]
+                
+                image = create_astra_source(
+                    # TODO: Check with Nidever on CATID/catalogid.
+                    catalog_id=spectrum.meta["header"]["CATID"],
+                    obj=task.obj,
+                    telescope=task.telescope,
+                    healpix=task.healpix,
+                    normalized_flux=flux[si:si + N_spectra],
+                    normalized_ivar=ivar[si:si + N_spectra],
+                    model_flux=model_flux,
+                    # TODO: Will this work with BOSS as well?
+                    crval=spectrum.meta["header"]["CRVAL1"],
+                    cdelt=spectrum.meta["header"]["CDELT1"],
+                    crpix=spectrum.meta["header"]["CRPIX1"],
+                    ctype=spectrum.meta["header"]["CTYPE1"],
+                    header=spectrum.meta["header"],
+                    data_table=data_table,
+                    reference_task=task
+                )
+                
+                image.writeto(astraSource_path)
+
             
             # Write database result.
             if "database" in task.output():

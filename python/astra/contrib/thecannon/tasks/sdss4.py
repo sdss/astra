@@ -61,12 +61,13 @@ class EstimateStellarParametersGivenSDSS4ApStarFile(EstimateStellarParametersGiv
         path = os.path.join(
             self.output_base_dir,
             f"star/{self.telescope}/{self.field}/",
-            f"apStar-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.pkl"
+            f"astraSource-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.fits"
         )
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         return {
-            "etc": LocalTarget(path),
+            #"etc": LocalTarget(path),
+            "astraSource": LocalTarget(path),
             "database": TheCannonResult(self)
         }
         
