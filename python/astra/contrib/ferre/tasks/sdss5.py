@@ -1,7 +1,7 @@
 
 import os
 from astra.tasks.io import ApStarFile as SDSS5ApStarFile
-from astra.tasks.targets import LocalTarget
+from astra.tasks.targets import (LocalTarget, AstraSource)
 from astra.contrib.ferre.tasks.ferre import EstimateStellarParametersGivenApStarFileBase
 from astra.contrib.ferre.tasks.aspcap import (
     EstimateStellarParametersGivenMedianFilteredApStarFileBase,
@@ -18,16 +18,9 @@ class SDSS5Mixin:
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
 
-        path = os.path.join(
-            self.output_base_dir,
-            f"star/{self.telescope}/{int(self.healpix)/1000:.0f}/{self.healpix}/",
-            f"astraSource-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.fits"
-        )
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
         return {
             "database": FerreResult(self),
-            "astraSource": LocalTarget(path)
+            "AstraSource": AstraSource(self)
         }
 
 
@@ -79,6 +72,11 @@ class InitialEstimateOfStellarParametersGivenSDSS5ApStarFile(InitialEstimateOfSt
 class IterativeEstimateOfStellarParametersGivenSDSS5ApStarFile(SDSS5Mixin, IterativeEstimateOfStellarParametersGivenApStarFileBase, SDSS5ApStarFile):
 
     task_factory = EstimateStellarParametersGivenMedianFilteredSDSS5ApStarFile
+
+    @property
+    def task_short_id(self):
+        return f"{self.task_namespace}-{self.task_id.split('_')[-1]}"
+
 
     def requires(self):
         """ This task requires the initial estimates of stellar parameters from many grids. """

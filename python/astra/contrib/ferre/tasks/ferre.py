@@ -23,7 +23,7 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
     """ Use FERRE to estimate stellar parameters given a single spectrum. """
 
     max_batch_size = 1000
-    max_batch_size_for_direct_access = 25
+    max_batch_size_for_direct_access = 25 # TODO: Currently ignored.
 
     def requires(self):
         """ The requirements for this task. """
@@ -48,13 +48,25 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
         # to supply a data_slice parameter to only return the first spectrum.        
         spectra = []
 
+        # TODO: Consider a better way to do this.
+        keys = ("pseudo_continuum_normalized_observation", "observation")
         for task in self.get_batch_tasks():
-            spectra.append(
-                Spectrum1D.read(
-                    task.input()["observation"].path, 
-                    data_slice=(slice(0, 1), slice(None))
-                )
-            )
+            for key in keys:
+                try:
+                    spectrum = Spectrum1D.read(
+                        task.input()[key].path,
+                        data_slice=(slice(0, 1), slice(None))
+                    )
+                except KeyError:
+                    continue
+
+                else:
+                    spectra.append(spectrum)
+                    break
+            
+            else:
+                raise
+            
         return spectra
         
 
@@ -96,7 +108,6 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
             input_weights_path=self.input_weights_path,
             input_lsf_path=self.input_lsf_path,
             # TODO: Consider what is most efficient. Consider removing as a task parameter.
-            #use_direct_access=True, 
             use_direct_access=self.use_direct_access,
             #(True if N <= self.max_batch_size_for_direct_access else False),
             n_threads=self.n_threads,
@@ -109,64 +120,14 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
         names = [f"{i:.0f}_{telescope}_{obj}" for i, (telescope, obj) in enumerate(zip(self.telescope, self.obj))]
 
         # Get initial parameter estimates.
-        p_opt, p_opt_err, masked_model_flux, meta = results = model.fit(
+        p_opt, p_opt_err, meta = results = model.fit(
             spectra,
             initial_parameters=self.initial_parameters,
             full_output=True,
             names=names
         )
 
-        # Use the mask to put the model flux back on the same pixels
-        # as the observations.
-        mask = meta["mask"]
-        model_flux = np.nan * np.ones((N, spectra[0].wavelength.size))
-        model_flux[:, mask] = masked_model_flux
-
         for i, (task, spectrum) in enumerate(zip(self.get_batch_tasks(), spectra)):
-            # Write astraSource object.
-            path = task.output()["astraSource"].path
-
-            row = OrderedDict(zip(model.parameter_names, p_opt[i]))
-            for key, value in self.initial_parameters[i].items():
-                row.update({ f"INITIAL_{key}": value })
-
-            row.update({
-                "log_snr_sq": meta["log_snr_sq"][i],
-                "log_chisq_fit": meta["log_chisq_fit"][i],
-            })
-
-            data_table = Table(rows=[row])
-            
-            image = create_astra_source(
-                # TODO: Check with Nidever on CATID/catalogid.
-                catalog_id=spectrum.meta["header"]["CATID"],
-                obj=task.obj,
-                telescope=task.telescope,
-                healpix=task.healpix,
-                # TODO: Should we be passing in the output from FERRE here?
-                normalized_flux=spectrum.flux.value,
-                normalized_ivar=spectrum.uncertainty.array,
-                model_flux=model_flux[i],
-                # TODO: Will this work with BOSS as well?
-                crval=spectrum.meta["header"]["CRVAL1"],
-                cdelt=spectrum.meta["header"]["CDELT1"],
-                crpix=spectrum.meta["header"]["CRPIX1"],
-                ctype=spectrum.meta["header"]["CTYPE1"],
-                header=spectrum.meta["header"],
-                data_table=data_table,
-                reference_task=task
-            )
-            image.writeto(path)
-
-            """
-            write_spectra = dict(
-                model_spectrum=model_flux[i],
-                normalized_observed_flux=meta["normalized_input_flux"][i]
-            )
-            with open(task.output()["spectrum"].path, "wb") as fp:
-                pickle.dump(write_spectra, fp)
-            """
-
             # Write result to database.
             result = dict(zip(model.parameter_names, p_opt[i]))
             result.update(
@@ -174,6 +135,21 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
                 log_chisq_fit=meta["log_chisq_fit"][i],
             )
             task.output()["database"].write(result)
+
+            # Write AstraSource object.
+            # TODO: What if the continuum was not done by FERRE?
+            #       We would get back an array of ones but in truth it was normalized..
+            continuum = meta["continuum"][i]
+            
+            task.output()["AstraSource"].write(
+                spectrum,
+                normalized_flux=spectrum.flux / continuum,
+                normalized_ivar=continuum * spectrum.uncertainty.array * continuum,
+                continuum=continuum,
+                model_flux=meta["model_flux"][i],
+                model_ivar=None,
+                results_table=Table(rows=[result])
+            )
 
         # We are done with this model.
         model.teardown()

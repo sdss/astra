@@ -34,16 +34,32 @@ class TestTheCannon(TheCannonMixin):
 
 
     def read_observation(self):
-        return Spectrum1D.read(self.input()["observation"].path)
+        """
+        Read the input observation, and if continuum is a requirement, normalize it.
+        """
+        observation = Spectrum1D.read(self.input()["observation"].path)
+        if "continuum" in self.input():
+            with open(self.input()["continuum"].path, "rb") as fp:
+                continuum = pickle.load(fp)
+        else:
+            continuum = 1
+
+        return (observation, continuum)
 
 
-    def resample_observation(self, dispersion, spectrum=None):
+    def prepare_observation(self, dispersion, spectrum=None, continuum=None):
         if spectrum is None:
-            spectrum = self.read_observation()
+            spectrum, continuum_ = self.read_observation()
+            if continuum is None:
+                continuum = continuum_
 
         o_x = spectrum.wavelength.value
         o_f = np.atleast_2d(spectrum.flux.value)
         o_i = np.atleast_2d(spectrum.uncertainty.quantity.value)
+
+        # Continuum normalize:
+        o_f /= continuum
+        o_i *= continuum * continuum
 
         N, P = shape = (o_f.shape[0], dispersion.size)
         flux = np.empty(shape)
@@ -61,12 +77,12 @@ class TestTheCannon(TheCannonMixin):
 
 
     def run(self):
-
+        
         model = self.read_model()
 
         # This can be run in batch mode.
         for task in tqdm(self.get_batch_tasks()):
-            flux, ivar = task.resample_observation(model.dispersion)
+            flux, ivar = task.prepare_observation(model.dispersion)
             labels, cov, metadata = model.test(
                 flux,
                 ivar,
@@ -80,7 +96,7 @@ class TestTheCannon(TheCannonMixin):
 
 
 
-class EstimateStellarParametersGivenApStarFileBase(TrainTheCannonGivenTrainingSetTarget, TestTheCannon):
+class EstimateStellarLabelsGivenApStarFileBase(TrainTheCannonGivenTrainingSetTarget, TestTheCannon):
 
     def requires(self):
         return dict(model=TrainTheCannonGivenTrainingSetTarget(**self.get_common_param_kwargs(TrainTheCannonGivenTrainingSetTarget)))
@@ -97,9 +113,13 @@ class EstimateStellarParametersGivenApStarFileBase(TrainTheCannonGivenTrainingSe
         task_meta = []
         task_spectra = []
         for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
-            spectrum = task.read_observation()
-            flux, ivar = task.resample_observation(model.dispersion, spectrum=spectrum)
-            data.append((flux, ivar))
+            spectrum, cont = task.read_observation()
+            flux, ivar = task.prepare_observation(
+                model.dispersion, 
+                spectrum=spectrum, 
+                continuum=cont
+            )
+            data.append((flux, ivar, cont))
 
             N_spectra = flux.shape[0]
             N_visits = spectrum.meta["header"]["NVISITS"]
@@ -116,7 +136,7 @@ class EstimateStellarParametersGivenApStarFileBase(TrainTheCannonGivenTrainingSe
             ))
             task_spectra.append(spectrum)
             
-        flux, ivar = map(np.vstack, zip(*data))
+        flux, ivar, cont = map(np.vstack, zip(*data))
 
         labels, cov, op_meta = model.test(
             flux,
@@ -151,18 +171,12 @@ class EstimateStellarParametersGivenApStarFileBase(TrainTheCannonGivenTrainingSe
             for key in keys:
                 results_table[key] = [row[key] for row in op_meta[si:si + N_spectra]]
 
-            # This is a shit way to have to get the continuum...
-            # TODO: Consider a more holistic way that will work for any intermediate step.
-            _cont = Spectrum1D.read(task.requires()["observation"].output().path)
-            _orig = Spectrum1D.read(task.requires()["observation"].requires().local_path)
-            continuum = (_orig.flux / _cont.flux).value
-
-            # Write astraSource target.
-            task.output()["astraSource"].write(
+            # Write AstraSource target.
+            task.output()["AstraSource"].write(
                 spectrum=spectrum,
                 normalized_flux=flux[si:si + N_spectra],
                 normalized_ivar=ivar[si:si + N_spectra],
-                continuum=continuum,
+                continuum=cont[si:si + N_spectra],
                 model_flux=np.array([ea["model_flux"] for ea in op_meta[si:si + N_spectra]]),
                 # TODO: Project uncertainties to flux space and include here.
                 model_ivar=None,

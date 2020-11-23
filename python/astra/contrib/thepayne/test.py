@@ -54,18 +54,27 @@ def load_state(path):
     return dict(
         neural_network_coefficients=(weights, biases), 
         scales=scales,
-        wavelength=contents["wavelength"],
+        model_wavelength=contents["wavelength"],
         label_names=contents["label_names"]
     )
 
 
-def test(spectrum, neural_network_coefficients, scales, wavelength, label_names, initial_labels=None, 
+def test(wavelength,
+         flux,
+         ivar,
+         neural_network_coefficients, scales, model_wavelength, label_names, initial_labels=None, 
          radial_velocity_tolerance=None, **kwargs):
     r"""
     Use a pre-trained neural network to estimate the stellar labels for the given spectrum.
 
-    :param spectrum:
-        The observed spectrum, which should be a :class:`specutils.Spectrum1D` object.
+    :param wavelength:
+        The wavelength array of the observed spectrum.
+    
+    :param flux:
+        The observed (or pseudo-continuum-normalised) fluxes.
+        
+    :param ivar:
+        The inverse variances of the fluxes.
 
     :param neural_network_coefficients:
         A two-length tuple containing the weights of the neural network, and the biases.
@@ -112,8 +121,8 @@ def test(spectrum, neural_network_coefficients, scales, wavelength, label_names,
         else:
             bounds[:, -1] = radial_velocity_tolerance
 
-    x_original = spectrum.wavelength.value
-    N, P = spectrum.flux.shape
+    
+    N, P = flux.shape
 
     p_opts = np.empty((N, L))
     p_covs = np.empty((N, L, L))
@@ -124,15 +133,15 @@ def test(spectrum, neural_network_coefficients, scales, wavelength, label_names,
 
     for i in range(N):
             
-        y_original = spectrum.flux.value[i].reshape(x_original.shape)
+        y_original = flux[i].reshape(wavelength.shape)
         # TODO: Assuming an inverse variance array (likely true).
-        y_err_original = spectrum.uncertainty.array[i].reshape(x_original.shape)**-0.5
+        y_err_original = ivar[i].reshape(wavelength.shape)**-0.5
 
         # Interpolate data onto model -- not The Right Thing to do!
         interp_kwds = dict()
-        y = np.interp(wavelength, x_original, y_original, **interp_kwds) 
-        y_err = np.interp(wavelength, x_original, y_err_original, **interp_kwds)
-        x = wavelength.copy()
+        y = np.interp(model_wavelength, wavelength, y_original, **interp_kwds) 
+        y_err = np.interp(model_wavelength, wavelength, y_err_original, **interp_kwds)
+        x = model_wavelength.copy()
 
         # Fix non-finite pixels and error values.
         non_finite = ~np.isfinite(y * y_err)
@@ -168,8 +177,8 @@ def test(spectrum, neural_network_coefficients, scales, wavelength, label_names,
         # TODO: YST does this but I am not yet convinced that it is correct!
         p_covs[i, :, :] = p_cov * (x_max - x_min)
         model_fluxes[i, :] = np.interp(
-            x_original,
             wavelength,
+            model_wavelength,
             y_pred,
             **interp_kwds
         )

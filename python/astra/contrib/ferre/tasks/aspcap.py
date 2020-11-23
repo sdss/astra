@@ -381,6 +381,6 @@ class IterativeEstimateOfStellarParametersGivenApStarFileBase(BaseFerreMixin, Ap
             if not task.complete():
                 # Write empty files to indicate we tried.
                 task.output()["database"].write({})
-                with open(task.output()["spectrum"].path, "w") as fp:
-                    fp.write("")
+                #with open(task.output()["spectrum"].path, "w") as fp:
+                #    fp.write("")
 

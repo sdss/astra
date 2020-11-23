@@ -214,17 +214,15 @@ class Ferre(object):
         if isinstance(spectra, Spectrum1D):
             spectra = [spectra]
 
-        N = len(spectra)
-        parsed_initial_parameters = self.parse_initial_parameters(initial_parameters, N)
-
-        # TODO: Apply edge clipping.
-
         wavelengths = np.vstack([spectrum.wavelength.value for spectrum in spectra])
         flux = np.vstack([spectrum.flux.value for spectrum in spectra])
         uncertainties = np.vstack([spectrum.uncertainty.array**-0.5 for spectrum in spectra])
 
+        N, P = flux.shape
         assert flux.shape[0] == len(spectra), "Mis-match in flux array"
         assert uncertainties.shape[0] == len(spectra), "Mis-match in uncertainties array"
+
+        parsed_initial_parameters = self.parse_initial_parameters(initial_parameters, N)
 
         # Make sure we are not sending nans etc.
         bad = ~np.isfinite(flux) \
@@ -293,25 +291,40 @@ class Ferre(object):
                 log.warn(f"FERRE STDOUT:\n{self.stdout}")
 
             if full_output:
-                output_flux = np.atleast_2d(
+
+                # Return the mask.
+                meta["mask"] = mask
+
+                # De-mask the model flux.
+                model_flux = np.nan * np.ones((N, P))
+                model_flux[:, mask] = np.atleast_2d(
                     np.loadtxt(
                         os.path.join(self.directory, self.kwds["output_flux_path"])
                     )
                 )
 
-                if self.kwds["continuum_flag"] is not None:
+                meta["model_flux"] = model_flux
+
+                # Continuum could be done before FERRE, or done by FERRE. 
+                # For consistency we should return something about continuum.
+                if self.kwds.get("continuum_flag", None) is None:
+                    continuum = 1
+                
+                else:
                     normalized_flux = np.atleast_2d(
                         np.loadtxt(
                             os.path.join(self.directory, self.kwds["output_normalized_input_flux_path"])
                         )
                     )
 
-                    meta.update(
-                        mask=mask,
-                        normalized_input_flux=normalized_flux
-                    )
+                    # Infer continuum.
+                    masked_continuum = flux / normalized_flux
+                    continuum = np.nan * np.ones((N, P))
+                    continuum[:, mask] = masked_continuum
+                    
+                meta["continuum"] = continuum
 
-                return (param, param_errs, output_flux, meta)
+                return (param, param_errs, meta)
 
             return (param, param_errs)
         
@@ -321,6 +334,10 @@ class Ferre(object):
             log.error(self.stderr)
             raise 
         
+
+    def fit_abundances(self):
+
+        raise a
 
 
     def __call__(self, *params, timeout=30):
@@ -692,7 +709,7 @@ if __name__ == "__main__":
 
     model = Ferre(**kwds)
     t_init = time()
-    p_opt, p_cov, model_flux, meta = model.fit(
+    p_opt, p_cov, meta = model.fit(
         spectrum, 
         initial_parameters=point[::-1],
         full_output=True,
@@ -701,7 +718,7 @@ if __name__ == "__main__":
 
     model = Ferre(**kwds)
     t_init = time()
-    p_opt, p_cov, model_flux, meta = model.fit(
+    p_opt, p_cov, meta = model.fit(
         spectrum, 
         full_output=True,
     )    

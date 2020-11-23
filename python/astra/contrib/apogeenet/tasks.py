@@ -82,7 +82,7 @@ class EstimateStellarParameters(APOGEENetMixin):
         
         return {
             "database": APOGEENetResult(self),
-            "astraSource": AstraSource(self)
+            "AstraSource": AstraSource(self)
         }
 
 
@@ -170,7 +170,7 @@ class EstimateStellarParameters(APOGEENetMixin):
             task.output()["database"].write(results[0])
 
             # Write astraSource.
-            task.output()["astraSource"].write(
+            task.output()["AstraSource"].write(
                 spectrum,
                 normalized_flux=spectrum.flux.value,
                 normalized_ivar=spectrum.uncertainty.array,

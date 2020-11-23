@@ -1,7 +1,7 @@
 
 import os
 from astra.tasks.io.sdss4 import SDSS4ApStarFile
-from astra.tasks.targets import LocalTarget
+from astra.tasks.targets import (LocalTarget, AstraSource)
 from astra.contrib.ferre.tasks.ferre import EstimateStellarParametersGivenApStarFileBase
 from astra.contrib.ferre.tasks.aspcap import (
     EstimateStellarParametersGivenMedianFilteredApStarFileBase,
@@ -18,16 +18,9 @@ class SDSS4Mixin:
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
 
-        path = os.path.join(
-            self.output_base_dir,
-            f"star/{self.telescope}/{self.field}/",
-            f"astraSource-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.fits"
-        )
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
         return {
             "database": FerreResult(self),
-            "astraSource": LocalTarget(path)
+            "AstraSource": AstraSource(self)
         }
 
 

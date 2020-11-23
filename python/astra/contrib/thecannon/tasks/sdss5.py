@@ -3,7 +3,7 @@ from astra.tasks.io import ApStarFile
 from astra.tasks.continuum import Sinusoidal
 from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
 
-from astra.contrib.thecannon.tasks.test import EstimateStellarParametersGivenApStarFileBase
+from astra.contrib.thecannon.tasks.test import EstimateStellarLabelsGivenApStarFileBase
 
 from sqlalchemy import Column, Float
 
@@ -21,7 +21,7 @@ class TheCannonResult(DatabaseTarget):
     
 
 
-class ContinuumNormalizeIndividualVisitsInApStarFile(Sinusoidal, ApStarFile):
+class ContinuumNormalize(Sinusoidal, ApStarFile):
 
     """
     A pseudo-continuum normalisation task for individual visit spectra 
@@ -43,18 +43,20 @@ class ContinuumNormalizeIndividualVisitsInApStarFile(Sinusoidal, ApStarFile):
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
 
-        # TODO: Put this to astraSource ?
+        # TODO: Put this to AstraSource ?
+        is_apogee = getattr(self, "apred", None) is not None
+        reduction_version = self.apred if is_apogee else self.run2d
         path = os.path.join(
             self.output_base_dir,
             f"star/{self.telescope}/{int(self.healpix)/1000:.0f}/{self.healpix}/",
-            f"apStar-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.fits"
+            f"Continuum-{reduction_version}-{self.telescope}-{self.obj}-{self.task_id}.pkl"
         )
         os.makedirs(os.path.dirname(path), exist_ok=True)
     
         return LocalTarget(path)
         
 
-class EstimateStellarParametersGivenApStarFile(EstimateStellarParametersGivenApStarFileBase, ContinuumNormalizeIndividualVisitsInApStarFile):
+class EstimateStellarLabelsGivenApStarFile(EstimateStellarLabelsGivenApStarFileBase, ContinuumNormalize):
 
     @property
     def task_short_id(self):
@@ -62,10 +64,11 @@ class EstimateStellarParametersGivenApStarFile(EstimateStellarParametersGivenApS
 
 
     def requires(self):
-        requirements = super(EstimateStellarParametersGivenApStarFile, self).requires()
-        requirements.update(
-            observation=ContinuumNormalizeIndividualVisitsInApStarFile(**self.get_common_param_kwargs(ContinuumNormalizeIndividualVisitsInApStarFile))
-        )
+        requirements = super(EstimateStellarLabelsGivenApStarFile, self).requires()
+        requirements.update({
+            "observation": ApStarFile(**self.get_common_param_kwargs(ApStarFile)),
+            "continuum": ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
+        })
         return requirements
         
 
@@ -76,7 +79,7 @@ class EstimateStellarParametersGivenApStarFile(EstimateStellarParametersGivenApS
             return [task.output() for task in self.get_batch_tasks()]
 
         return {
-            "astraSource": AstraSource(self),
+            "AstraSource": AstraSource(self),
             "database": TheCannonResult(self)
         }
         

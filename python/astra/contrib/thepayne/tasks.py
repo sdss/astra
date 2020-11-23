@@ -174,10 +174,10 @@ class TrainThePayne(ThePayneMixin):
 
 
 
-class EstimateStellarParameters(ThePayneMixin):
+class EstimateStellarLabels(ThePayneMixin):
     
     """
-    Use a pre-trained neural network to estimate stellar parameters. This should be sub-classed to inherit properties from the type of spectra to be analysed.
+    Use a pre-trained neural network to estimate stellar labels. This should be sub-classed to inherit properties from the type of spectra to be analysed.
     
     :param training_set_path:
         The path where the training set spectra and labels are stored.
@@ -201,6 +201,24 @@ class EstimateStellarParameters(ThePayneMixin):
         The learning rate to use during training (default: 0.001).
     """
 
+    def prepare_observation(self):
+        """
+        Prepare the observations for analysis.
+        """
+        observation = Spectrum1D.read(self.input()["observation"].path)
+
+        if "continuum" in self.input():
+            with open(self.input()["continuum"].path, "rb") as fp:
+                continuum = pickle.load(fp)
+        else:
+            continuum = 1
+        
+        normalized_flux = observation.flux.value / continuum
+        normalized_ivar = continuum * observation.uncertainty.array * continuum
+
+        return (observation, continuum, normalized_flux, normalized_ivar)
+
+
     def run(self):
         """ Execute this task. """
 
@@ -210,10 +228,15 @@ class EstimateStellarParameters(ThePayneMixin):
         # We can run this in batch mode.
         label_names = state["label_names"]
         for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
-
-            spectrum = Spectrum1D.read(task.input()["observation"].path)
-
-            p_opt, p_cov, model_flux, meta = testing.test(spectrum, **state)
+            
+            spectrum, continuum, normalized_flux, normalized_ivar = task.prepare_observation()
+            
+            p_opt, p_cov, model_flux, meta = testing.test(
+                spectrum.wavelength.value,
+                normalized_flux,
+                normalized_ivar,
+                **state
+            )
 
             rows = []
             for p, u in zip(p_opt, p_cov):
@@ -229,15 +252,10 @@ class EstimateStellarParameters(ThePayneMixin):
             task.output()["database"].write(rows[0])
             
             # Write AstraSource object.
-            # TODO: Consider a better way to get continuum.
-            _cont = Spectrum1D.read(task.requires()["observation"].output().path)
-            _orig = Spectrum1D.read(task.requires()["observation"].requires().local_path)
-            continuum = (_orig.flux / _cont.flux).value
-
-            task.output()["astraSource"].write(
+            task.output()["AstraSource"].write(
                 spectrum=spectrum,
-                normalized_flux=spectrum.flux.value,
-                normalized_ivar=spectrum.uncertainty.array,
+                normalized_flux=normalized_flux,
+                normalized_ivar=normalized_ivar,
                 continuum=continuum,
                 model_flux=model_flux,
                 # TODO: Project uncertainties to flux space.
@@ -255,48 +273,9 @@ class EstimateStellarParameters(ThePayneMixin):
         
         return {
             "database": ThePayneResult(self),
-            "astraSource": AstraSource(self)
+            "AstraSource": AstraSource(self)
         }
         
-
-
-class EstimateStellarParametersGivenApStarFile(EstimateStellarParameters, ApStarFile):
-    """
-    Estimate stellar parameters given a single-layer neural network and an ApStar file.
-
-    This task also requiresd all parameters that `astra.tasks.io.ApStarFile` requires.
-
-    :param training_set_path:
-        The path where the training set spectra and labels are stored.
-        This should be a binary pickle file that contains a dictionary with the following keys:
-
-        - wavelength: an array of shape (P, ) where P is the number of pixels
-        - spectra: an array of shape (N, P) where N is the number of spectra and P is the number of pixels
-        - labels: an array of shape (L, P) where L is the number of labels and P is the number of pixels
-        - label_names: a tuple of length L that contains the names of the labels
-    
-    :param n_steps: (optional)
-        The number of steps to train the network for (default 100000).
-    
-    :param n_neurons: (optional)
-        The number of neurons to use in the hidden layer (default: 300).
-    
-    :param weight_decay: (optional)
-        The weight decay to use during training (default: 0)
-    
-    :param learning_rate: (optional)
-        The learning rate to use during training (default: 0.001).
-    """
-
-    def requires(self):
-        """ The requirements of this task. """
-        requirements = {
-            "model": TrainThePayne(**self.get_common_param_kwargs(TrainThePayne))
-        }
-        if not self.is_batch_mode:
-            requirements.update(observation=ApStarFile(**self.get_common_param_kwargs(ApStarFile)))
-        return requirements
-
 
 
 class ContinuumNormalize(Sinusoidal, ApStarFile):
@@ -309,17 +288,6 @@ class ContinuumNormalize(Sinusoidal, ApStarFile):
         fit as continuum.
     """
 
-    # Row 0 is individual pixel weighting
-    # Row 1 is global pixel weighting
-    # Row 2+ are the individual visits.
-    # We will just analyse them all because it's cheap.
-
-    # Or if you want to just take the first spectrum, 
-    # which is stacked by individual pixel weighting.
-    # (This would ignore individual visits)
-    #spectrum_kwds = dict(data_slice=(slice(0, 1), slice(None)))
-
-
     def requires(self):
         return ApStarFile(**self.get_common_param_kwargs(ApStarFile))
 
@@ -329,10 +297,11 @@ class ContinuumNormalize(Sinusoidal, ApStarFile):
             return [task.output() for task in self.get_batch_tasks()]
         
         # TODO: Move this to AstraSource?
+        # TODO: Assuming this is only running on SDSS-IV spectra.
         path = os.path.join(
             self.output_base_dir,
             f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
-            f"apStar-{self.apred}-{self.obj}-{self.task_id}.fits"
+            f"Continuum-{self.apred}-{self.obj}-{self.task_id}.pkl"
         )
         # Create the directory structure if it does not exist already.
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -340,9 +309,9 @@ class ContinuumNormalize(Sinusoidal, ApStarFile):
 
 
 
-class EstimateStellarParametersGivenNormalisedApStarFile(EstimateStellarParameters, ApStarFile):
+class EstimateStellarLabelsGivenApStarFile(EstimateStellarLabels, ContinuumNormalize, ApStarFile):
     """
-    Estimate stellar parameters given a single-layer neural network and an ApStar file.
+    Estimate stellar labels given a single-layer neural network and an ApStar file.
 
     This task also requires all parameters that `astra.tasks.io.ApStarFile` requires,
     and that the `astra.tasks.continuum.Sinusoidal` task requires.
@@ -382,5 +351,6 @@ class EstimateStellarParametersGivenNormalisedApStarFile(EstimateStellarParamete
     def requires(self):
         return {
             "model": TrainThePayne(**self.get_common_param_kwargs(TrainThePayne)),
-            "observation": ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
+            "observation": ApStarFile(**self.get_common_param_kwargs(ApStarFile)),
+            "continuum": ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
         }
