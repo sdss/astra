@@ -55,7 +55,10 @@ class ApVisitFile(SDSS5DataModelTask):
     fiber = astra.IntParameter(batch_method=tuple)
     plate = astra.Parameter(batch_method=tuple)
     field = astra.Parameter(batch_method=tuple)
-    mjd = astra.IntParameter(batch_method=tuple)
+    mjd = astra.IntParameter(
+        batch_method=tuple,
+        description="The Modified Julian Date of the observation."
+    )
     apred = astra.Parameter(batch_method=tuple)
 
     
@@ -103,3 +106,5 @@ for klass in (ApVisitFile, ApStarFile):
     for lookup_key in klass(release="sdss5").tree.lookup_keys(klass.sdss_data_model_name):
         setattr(klass, lookup_key, astra.Parameter(batch_method=tuple))
 """
+
+

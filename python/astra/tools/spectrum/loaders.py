@@ -65,7 +65,7 @@ def load_sdss_apstar(path, **kwargs):
         verbosity = kwargs.get("verbosity", 1)
         meta = OrderedDict([
             ("header", image[0].header),
-            ("mask", slicer(image[3].data))
+            ("bitmask", slicer(image[3].data))
         ])
 
         if verbosity >= 1:
@@ -101,7 +101,7 @@ def write_sdss_apstar(spectrum, path, **kwargs):
         fits.PrimaryHDU(),
         fits.ImageHDU(spectrum.flux.to(units).value), # flux
         fits.ImageHDU(spectrum.uncertainty.quantity.value**-0.5), # sigma
-        fits.ImageHDU(spectrum.meta["mask"]), # mask
+        fits.ImageHDU(spectrum.meta["bitmask"]), # mask
     ])
 
     for hdu, header in zip(hdu_list, spectrum.meta.get("hdu_headers")):
@@ -147,7 +147,7 @@ def load_sdss_apvisit(path, **kwargs):
             common_meta["hdu_headers"] = [hdu.header for hdu in image]
 
         structured_meta = OrderedDict([
-            ("mask", image[3].data.reshape(flux.shape)),
+            ("bitmask", image[3].data.reshape(flux.shape)),
         ])
 
         if verbosity >= 2:
@@ -198,8 +198,8 @@ def load_sdss_boss(path, hdu=1, **kwargs):
         meta = OrderedDict([
             ("header", image[0].header),
             ("hdu_headers", [hdu.header for hdu in image]),
-            ("mask", dict(and_mask=image[hdu].data["and_mask"].reshape(flux.shape), 
-                           or_mask=image[hdu].data["or_mask"].reshape(flux.shape))),
+            ("bitmask", dict(and_mask=image[hdu].data["and_mask"].reshape(flux.shape), 
+                             or_mask=image[hdu].data["or_mask"].reshape(flux.shape))),
             ("wavelength", image[hdu].data["wdisp"]),
             ("model", image[hdu].data["model"].reshape(flux.shape)),
         ])

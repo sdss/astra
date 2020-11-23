@@ -40,7 +40,6 @@ def get_visits(mjd, full_output=False):
         If set to `False`, only the relevant ApVisit keys will be returned.
     """
 
-
     #with :
     s = sqlalchemy.select([visit_table]).where(visit_table.c.mjd == mjd)
     rows = engine.execute(s).fetchall()
@@ -202,8 +201,6 @@ def get_visits_given_star(obj, apred):
         The version of the APOGEE reduction pipeline used (e.g., daily).
     """
     
-
-
     columns = [
         visit_table.c.fiberid.label("fiber"),
         visit_table.c.plate,

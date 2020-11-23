@@ -10,10 +10,9 @@ from sqlalchemy import Column, Float
 import astra
 from astropy.table import Table
 from astra.tasks.base import BaseTask
-from astra.tasks.targets import DatabaseTarget, LocalTarget
+from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
 from astra.tasks.io import ApStarFile
 from astra.tools.spectrum import Spectrum1D
-from astra.tools.spectrum.writers import create_astra_source
 from astra.contrib.apogeenet.model import Net, predict
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -71,21 +70,19 @@ class EstimateStellarParameters(APOGEENetMixin):
         visibility=ParameterVisibility.HIDDEN,
     )
 
+    @property
+    def task_short_id(self):
+        return f"{self.task_namespace}-{self.task_id.split('_')[-1]}"
+
+
     def output(self):
         """ The output produced by this task. """
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
         
-        path = os.path.join(
-            self.output_base_dir,
-            f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
-            f"astraSource-{self.apred}-{self.obj}-{self.task_id}.fits"
-        )
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
         return {
             "database": APOGEENetResult(self),
-            "astraSource": LocalTarget(path)
+            "astraSource": AstraSource(self)
         }
 
 
@@ -122,36 +119,41 @@ class EstimateStellarParameters(APOGEENetMixin):
             An observed spectrum.
         """
 
-        n_pixels = spectrum.flux.shape[1]
+        N, P = spectrum.flux.shape
         
         # Build flux tensor as described.
         dtype = np.float32
         idx = 0
 
-        flux = spectrum.flux.value[idx].astype(dtype)
-        error = spectrum.uncertainty.array[idx].astype(dtype)**-0.5
+        results = []
+        for i in range(N):
+                
+            flux = spectrum.flux.value[i].astype(dtype)
+            error = spectrum.uncertainty.array[i].astype(dtype)**-0.5
 
-        bad = ~np.isfinite(flux) + ~np.isfinite(error)
-        flux[bad] = np.nanmedian(flux)
-        error[bad] = 1e+10
+            bad = ~np.isfinite(flux) + ~np.isfinite(error)
+            flux[bad] = np.nanmedian(flux)
+            error[bad] = 1e+10
 
-        flux = torch.from_numpy(flux).to(device)
-        error = torch.from_numpy(error).to(device)
+            flux = torch.from_numpy(flux).to(device)
+            error = torch.from_numpy(error).to(device)
 
-        flux_tensor = torch.randn(self.uncertainty, 1, n_pixels).to(device)
+            flux_tensor = torch.randn(self.uncertainty, 1, P).to(device)
 
-        median_error = torch.median(error).item()
+            median_error = torch.median(error).item()
+            
+            error = torch.where(error == 1.0000e+10, flux, error)
+            error_t = torch.tensor(np.array([5 * median_error], dtype=dtype)).to(device)
+            error_t.repeat(P)
+            error = torch.where(error >= 5 * median_error, error_t, error)
+
+            flux_tensor = flux_tensor * error + flux
+            flux_tensor[0][0] = flux
         
-        error = torch.where(error == 1.0000e+10, flux, error)
-        error_t = torch.tensor(np.array([5 * median_error], dtype=dtype)).to(device)
-        error_t.repeat(n_pixels)
-        error = torch.where(error >= 5 * median_error, error_t, error)
-
-        flux_tensor = flux_tensor * error + flux
-        flux_tensor[0][0] = flux
+            # Estimate quantities.
+            results.append(predict(model, flux_tensor))
         
-        # Estimate quantities.
-        return predict(model, flux_tensor)
+        return results
 
 
     def run(self):
@@ -163,34 +165,20 @@ class EstimateStellarParameters(APOGEENetMixin):
         failed_tasks = []
         for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
             spectrum = task.read_observation()    
-            result = task.estimate_stellar_parameters(model, spectrum)
-            task.output()["database"].write(result)
+            results = task.estimate_stellar_parameters(model, spectrum)
+            # Write the first result to the database.
+            task.output()["database"].write(results[0])
 
             # Write astraSource.
-            astraSource_path = task.output()["astraSource"].path
-            
-            data_table = Table(rows=[result])
-
-            image = create_astra_source(
-                # TODO: Check with Nidever on CATID/catalogid.
-                catalog_id=spectrum.meta["header"]["CATID"],
-                obj=task.obj,
-                telescope=task.telescope,
-                healpix=task.healpix,
+            task.output()["astraSource"].write(
+                spectrum,
                 normalized_flux=spectrum.flux.value,
                 normalized_ivar=spectrum.uncertainty.array,
-                model_flux=np.nan * np.ones_like(spectrum.flux.value),
-                # TODO: Will this work with BOSS as well?
-                crval=spectrum.meta["header"]["CRVAL1"],
-                cdelt=spectrum.meta["header"]["CDELT1"],
-                crpix=spectrum.meta["header"]["CRPIX1"],
-                ctype=spectrum.meta["header"]["CTYPE1"],
-                header=spectrum.meta["header"],
-                data_table=data_table,
-                reference_task=task
+                continuum=None,
+                model_flux=None,
+                model_ivar=None,
+                results_table=Table(rows=results)
             )
-            image.writeto(astraSource_path)
-
 
         return None
 
