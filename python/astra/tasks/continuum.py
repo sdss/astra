@@ -15,7 +15,6 @@ from astra.tasks.base import BaseTask
 
 class Sinusoidal(BaseTask):
 
-    sum_axis = luigi.IntParameter(default=-1)
     L = luigi.IntParameter(default=1400)
     continuum_order = luigi.IntParameter(default=3)
     continuum_regions_path = luigi.Parameter()
@@ -40,22 +39,12 @@ class Sinusoidal(BaseTask):
                 full_output=True
             )
 
-            # Stack if asked.
-            if task.sum_axis > -1:
-                sum_ivar = np.sum(normalized_ivar, axis=task.sum_axis)
-                sum_flux = np.sum(normalized_flux * normalized_ivar, axis=task.sum_axis) / sum_ivar
+            """
+            spectrum_kwds = dict(
+                flux=normalized_flux * spectrum.flux.unit, 
+                uncertainty=InverseVariance(normalized_ivar * spectrum.uncertainty.unit)
+            )
 
-                spectrum_kwds = dict(
-                    flux=sum_flux * spectrum.flux.unit,
-                    uncertainty=InverseVariance(sum_ivar * spectrum.uncertainty.unit)
-                )
-
-            else:
-                spectrum_kwds = dict(
-                    flux=normalized_flux * spectrum.flux.unit, 
-                    uncertainty=InverseVariance(normalized_ivar * spectrum.uncertainty.unit)
-                )
-            
             normalized_spectrum = Spectrum1D(
                 wcs=spectrum.wcs,
                 meta=spectrum.meta,
@@ -67,6 +56,10 @@ class Sinusoidal(BaseTask):
                 task.output().path,
                 overwrite=True
             )
+            """
+            
+            with open(task.output().path, "wb") as fp:
+                pickle.dump(continuum, fp)
 
 
     def output(self):

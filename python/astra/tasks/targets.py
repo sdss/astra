@@ -430,14 +430,16 @@ class AstraSource(LocalTarget):
         # If the task has a short-hand descriptor, use that.
         task_short_id = getattr(t, "task_short_id", t.task_id)
 
+        prefix = "AstraSource"
+
         if not is_sdss5:
             # SDSS-IV
             fork = f"{t.telescope}/{t.field}"
-            basename = f"astraSource-{reduction_version}-{t.telescope}-{t.field}-{t.obj}-{task_short_id}.fits"
+            basename = f"{prefix}-{reduction_version}-{t.telescope}-{t.field}-{t.obj}-{task_short_id}.fits"
         else:
             # SDSS-V
             fork = f"{t.telescope}/{int(t.healpix)/1000:.0f}/{t.healpix}"
-            basename = f"astraSource-{reduction_version}-{t.telescope}-{t.obj}-{task_short_id}.fits"
+            basename = f"{prefix}-{reduction_version}-{t.telescope}-{t.obj}-{task_short_id}.fits"
 
         path = os.path.join(
             t.output_base_dir,
@@ -447,7 +449,6 @@ class AstraSource(LocalTarget):
         )
         # Check that the parent directory exists.
         os.makedirs(os.path.dirname(path), exist_ok=True)
-
         return path
         
 

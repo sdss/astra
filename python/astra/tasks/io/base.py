@@ -145,10 +145,10 @@ class SDSSDataModelTask(BaseTask):
         """ Download the remote file using rsync. """
 
         rsync = RsyncAccess(
-            mirror=mirror,
-            public=public,
-            release=release,
-            verbose=verbose
+            mirror=self.mirror,
+            public=self.public,
+            release=self.release,
+            verbose=self.verbose
         )
         rsync.remote()
         rsync.add(
