@@ -3,6 +3,7 @@ import os
 import luigi
 import pickle
 import numpy as np
+from astropy.table import Table
 from astra.tasks.base import BaseTask
 from astra.utils import log
 from astra.tools.spectrum import Spectrum1D
@@ -140,44 +141,34 @@ class EstimateStellarParametersGivenApStarFileBase(TrainTheCannonGivenTrainingSe
                 label_names=model.vectorizer.label_names
             )
 
-            # Write astraSource target.
-            path = task.output()["astraSource"].path
-            model_flux = np.array([ea["model_flux"] for ea in op_meta[si:si + N_spectra]])
-
-            from astropy.table import Table
-
-            data_table = Table(
+            # Create results table.
+            results_table = Table(
                 data=labels[si:si + N_spectra],
                 names=model.vectorizer.label_names
             )
+            results_table["cov"] = cov[si:si + N_spectra]
             keys = ("snr", "r_chi_sq", "chi_sq", "x0")
             for key in keys:
-                data_table[key] = [row[key] for row in op_meta[si:si + N_spectra]]
-            
-            data_table["cov"] = cov[si:si + N_spectra]
-            
-            image = create_astra_source(
-                # TODO: Check with Nidever on CATID/catalogid.
-                catalog_id=spectrum.meta["header"]["CATID"],
-                obj=task.obj,
-                telescope=task.telescope,
-                healpix=task.healpix,
+                results_table[key] = [row[key] for row in op_meta[si:si + N_spectra]]
+
+            # This is a shit way to have to get the continuum...
+            # TODO: Consider a more holistic way that will work for any intermediate step.
+            _cont = Spectrum1D.read(task.requires()["observation"].output().path)
+            _orig = Spectrum1D.read(task.requires()["observation"].requires().local_path)
+            continuum = (_orig.flux / _cont.flux).value
+
+            # Write astraSource target.
+            task.output()["astraSource"].write(
+                spectrum=spectrum,
                 normalized_flux=flux[si:si + N_spectra],
                 normalized_ivar=ivar[si:si + N_spectra],
-                model_flux=model_flux,
-                # TODO: Will this work with BOSS as well?
-                crval=spectrum.meta["header"]["CRVAL1"],
-                cdelt=spectrum.meta["header"]["CDELT1"],
-                crpix=spectrum.meta["header"]["CRPIX1"],
-                ctype=spectrum.meta["header"]["CTYPE1"],
-                header=spectrum.meta["header"],
-                data_table=data_table,
-                reference_task=task
+                continuum=continuum,
+                model_flux=np.array([ea["model_flux"] for ea in op_meta[si:si + N_spectra]]),
+                # TODO: Project uncertainties to flux space and include here.
+                model_ivar=None,
+                results_table=results_table
             )
-            
-            image.writeto(path)
-
-            
+                        
             # Write database result.
             if "database" in task.output():
 

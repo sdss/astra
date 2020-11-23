@@ -2,7 +2,7 @@ import os
 import astropy.table
 from astra.tasks.io.sdss4 import SDSS4ApStarFile as ApStarFile
 from astra.tasks.continuum import Sinusoidal
-from astra.tasks.targets import (DatabaseTarget, LocalTarget)
+from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
 
 from astra.contrib.thecannon.tasks.train import TrainTheCannonGivenTrainingSetTask
 from astra.contrib.thecannon.tasks.test import EstimateStellarParametersGivenApStarFileBase
@@ -39,8 +39,6 @@ class ContinuumNormalizeIndividualVisitsInSDSS4ApStarFile(Sinusoidal, ApStarFile
 
 
 
-
-
 class EstimateStellarParametersGivenSDSS4ApStarFile(EstimateStellarParametersGivenApStarFileBase, ContinuumNormalizeIndividualVisitsInSDSS4ApStarFile):
 
 
@@ -58,16 +56,8 @@ class EstimateStellarParametersGivenSDSS4ApStarFile(EstimateStellarParametersGiv
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
 
-        path = os.path.join(
-            self.output_base_dir,
-            f"star/{self.telescope}/{self.field}/",
-            f"astraSource-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.fits"
-        )
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
         return {
-            #"etc": LocalTarget(path),
-            "astraSource": LocalTarget(path),
+            "astraSource": AstraSource(self),
             "database": TheCannonResult(self)
         }
         

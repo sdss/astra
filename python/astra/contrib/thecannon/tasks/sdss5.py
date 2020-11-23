@@ -1,7 +1,7 @@
 import os
 from astra.tasks.io import ApStarFile
 from astra.tasks.continuum import Sinusoidal
-from astra.tasks.targets import (DatabaseTarget, LocalTarget)
+from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
 
 from astra.contrib.thecannon.tasks.test import EstimateStellarParametersGivenApStarFileBase
 
@@ -43,6 +43,7 @@ class ContinuumNormalizeIndividualVisitsInApStarFile(Sinusoidal, ApStarFile):
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
 
+        # TODO: Put this to astraSource ?
         path = os.path.join(
             self.output_base_dir,
             f"star/{self.telescope}/{int(self.healpix)/1000:.0f}/{self.healpix}/",
@@ -54,6 +55,11 @@ class ContinuumNormalizeIndividualVisitsInApStarFile(Sinusoidal, ApStarFile):
         
 
 class EstimateStellarParametersGivenApStarFile(EstimateStellarParametersGivenApStarFileBase, ContinuumNormalizeIndividualVisitsInApStarFile):
+
+    @property
+    def task_short_id(self):
+        return f"{self.task_namespace}-{self.task_id.split('_')[-1]}"
+
 
     def requires(self):
         requirements = super(EstimateStellarParametersGivenApStarFile, self).requires()
@@ -69,16 +75,8 @@ class EstimateStellarParametersGivenApStarFile(EstimateStellarParametersGivenApS
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
 
-        path = os.path.join(
-            self.output_base_dir,
-            f"star/{self.telescope}/{int(self.healpix)/1000:.0f}/{self.healpix}/",
-            f"astraSource-{self.apred}-{self.telescope}-{self.obj}-{self.task_id}.fits"
-        )
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-    
         return {
-            #"etc": LocalTarget(path),
-            "astraSource": LocalTarget(path),
+            "astraSource": AstraSource(self),
             "database": TheCannonResult(self)
         }
         
