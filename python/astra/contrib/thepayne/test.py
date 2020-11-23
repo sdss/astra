@@ -113,51 +113,78 @@ def test(spectrum, neural_network_coefficients, scales, wavelength, label_names,
             bounds[:, -1] = radial_velocity_tolerance
 
     x_original = spectrum.wavelength.value
-    y_original = spectrum.flux.value.reshape(x_original.shape)
-    # TODO: Assuming an inverse variance array (likely true).
-    y_err_original = spectrum.uncertainty.array.reshape(x_original.shape)**-0.5
+    N, P = spectrum.flux.shape
 
-    # Interpolate data onto model -- not The Right Thing to do!
-    interp_kwds = dict()
-    y = np.interp(wavelength, x_original, y_original, **interp_kwds) 
-    y_err = np.interp(wavelength, x_original, y_err_original, **interp_kwds)
-    x = wavelength.copy()
+    p_opts = np.empty((N, L))
+    p_covs = np.empty((N, L, L))
+    model_fluxes = np.empty((N, P))
+    meta = []
 
-    # Fix non-finite pixels and error values.
-    non_finite = ~np.isfinite(y * y_err)
-    y[non_finite] = 1
-    y_err[non_finite] = LARGE
-
-    def objective_function(x, *labels):
-        y_pred = _predict_stellar_spectrum(labels[:K], weights, biases)
-        if fit_radial_velocity:
-            # Here we are shifting the *observed* spectra. That's not the Right Thing to do, but it
-            # probably doesn't matter here.
-            y_pred = _redshift(x, y_pred, labels[-1])
-        return y_pred
-
-    kwds = kwargs.copy()
-    kwds.update(xdata=x, ydata=y, sigma=y_err, p0=initial_labels, bounds=bounds, 
-                absolute_sigma=True, method="trf")
-
-    p_opt, p_cov = curve_fit(objective_function, **kwds)
-    
-    # Un-scale entries.
     x_min, x_max = scales
-    p_opt = (x_max - x_min) * (p_opt + 0.5) + x_min
 
-    # TODO: YST does this but I am not yet convinced that it is correct!
-    p_cov = p_cov * (x_max - x_min)
-    # Put model flux back onto the observed array.
+    for i in range(N):
+            
+        y_original = spectrum.flux.value[i].reshape(x_original.shape)
+        # TODO: Assuming an inverse variance array (likely true).
+        y_err_original = spectrum.uncertainty.array[i].reshape(x_original.shape)**-0.5
+
+        # Interpolate data onto model -- not The Right Thing to do!
+        interp_kwds = dict()
+        y = np.interp(wavelength, x_original, y_original, **interp_kwds) 
+        y_err = np.interp(wavelength, x_original, y_err_original, **interp_kwds)
+        x = wavelength.copy()
+
+        # Fix non-finite pixels and error values.
+        non_finite = ~np.isfinite(y * y_err)
+        y[non_finite] = 1
+        y_err[non_finite] = LARGE
+
+        def objective_function(x, *labels):
+            y_pred = _predict_stellar_spectrum(labels[:K], weights, biases)
+            if fit_radial_velocity:
+                # Here we are shifting the *observed* spectra. That's not the Right Thing to do, but it
+                # probably doesn't matter here.
+                y_pred = _redshift(x, y_pred, labels[-1])
+            return y_pred
+
+        kwds = kwargs.copy()
+        kwds.update(
+            xdata=x, 
+            ydata=y, 
+            sigma=y_err, 
+            p0=initial_labels, 
+            bounds=bounds, 
+            absolute_sigma=True, 
+            method="trf"
+        )
+
+        p_opt, p_cov = curve_fit(objective_function, **kwds)
+        y_pred = objective_function(x, *p_opt)
+        
+        # Calculate summary statistics.
+        chi_sq, r_chi_sq = get_chi_sq(y_pred, y, y_err, L)
+
+        p_opts[i, :] = (x_max - x_min) * (p_opt + 0.5) + x_min
+        # TODO: YST does this but I am not yet convinced that it is correct!
+        p_covs[i, :, :] = p_cov * (x_max - x_min)
+        model_fluxes[i, :] = np.interp(
+            x_original,
+            wavelength,
+            y_pred,
+            **interp_kwds
+        )
+
+        meta.append(dict(
+            chi_sq=chi_sq,
+            r_chi_sq=r_chi_sq
+        ))    
     
-    model_flux = np.interp(
-        x_original,
-        wavelength,
-        objective_function(x, *p_opt),
-        **interp_kwds
-    )
-    meta = dict(
-        model_flux=model_flux
-    )
-    
-    return (OrderedDict(zip(label_names, p_opt)), p_cov, meta)
+    return (p_opts, p_covs, model_fluxes, meta)
+
+
+
+def get_chi_sq(expectation, y, y_err, L):
+    P = np.sum(np.isfinite(y * y_err) * (y_err < LARGE))
+    chi_sq = np.nansum(((y - expectation)/y_err)**2)
+    r_chi_sq = chi_sq / (P - L - 1)
+    return (chi_sq, r_chi_sq)

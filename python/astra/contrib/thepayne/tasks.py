@@ -7,7 +7,7 @@ from tqdm import tqdm
 from astropy.table import Table
 from astra.tasks.base import BaseTask
 from astra.tasks.io import (ApStarFile, LocalTargetTask)
-from astra.tasks.targets import LocalTarget, DatabaseTarget
+from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
 from astra.tasks.continuum import Sinusoidal
 from astra.tools.spectrum import Spectrum1D
 from astra.tools.spectrum.writers import create_astra_source
@@ -208,49 +208,43 @@ class EstimateStellarParameters(ThePayneMixin):
         state = testing.load_state(self.input()["model"].path)
 
         # We can run this in batch mode.
+        label_names = state["label_names"]
         for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
 
             spectrum = Spectrum1D.read(task.input()["observation"].path)
 
-            p_opt, p_cov, meta = result = testing.test(spectrum, **state)
+            p_opt, p_cov, model_flux, meta = testing.test(spectrum, **state)
 
-            # Write database row.
-            row = p_opt.copy()
-            row.update(dict(zip(
-                [f"u_{k}" for k in p_opt.keys()],
-                np.sqrt(np.diag(p_cov))
-            )))
-            task.output()["database"].write(row)
+            rows = []
+            for p, u in zip(p_opt, p_cov):
+                row = dict(zip(label_names, p))
+                row.update(dict(zip(
+                    (f"u_{ln}" for ln in label_names),
+                    np.sqrt(np.diag(u))
+                )))
+                rows.append(row)
+
+            # Write database row given the first result
+            # (Which is either a stacked spectrum, or a single visit)
+            task.output()["database"].write(rows[0])
             
-            # Write additional things.
-            #with open(task.output()["etc"].path, "wb") as fp:
-            #    pickle.dump(result, fp)
+            # Write AstraSource object.
+            # TODO: Consider a better way to get continuum.
+            _cont = Spectrum1D.read(task.requires()["observation"].output().path)
+            _orig = Spectrum1D.read(task.requires()["observation"].requires().local_path)
+            continuum = (_orig.flux / _cont.flux).value
 
-            astraSource_path = task.output()["astraSource"].path
-            
-            data_table = Table(rows=[row])
+            task.output()["astraSource"].write(
+                spectrum=spectrum,
+                normalized_flux=spectrum.flux.value,
+                normalized_ivar=spectrum.uncertainty.array,
+                continuum=continuum,
+                model_flux=model_flux,
+                # TODO: Project uncertainties to flux space.
+                model_ivar=None,
+                results_table=Table(rows=rows)
+            )
 
-            image = create_astra_source(
-                    # TODO: Check with Nidever on CATID/catalogid.
-                    catalog_id=spectrum.meta["header"]["CATID"],
-                    obj=task.obj,
-                    telescope=task.telescope,
-                    healpix=task.healpix,
-                    normalized_flux=spectrum.flux.value,
-                    normalized_ivar=spectrum.uncertainty.array,
-                    model_flux=meta["model_flux"],
-                    # TODO: Will this work with BOSS as well?
-                    crval=spectrum.meta["header"]["CRVAL1"],
-                    cdelt=spectrum.meta["header"]["CDELT1"],
-                    crpix=spectrum.meta["header"]["CRPIX1"],
-                    ctype=spectrum.meta["header"]["CTYPE1"],
-                    header=spectrum.meta["header"],
-                    data_table=data_table,
-                    reference_task=task
-                )
-            image.writeto(astraSource_path)
-
-        
         return None
 
 
@@ -259,21 +253,11 @@ class EstimateStellarParameters(ThePayneMixin):
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
         
-        path = os.path.join(
-            self.output_base_dir,
-            f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
-            f"astraSource-{self.apred}-{self.obj}-{self.task_id}.fits"
-        )
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
         return {
             "database": ThePayneResult(self),
-            "astraSource": LocalTarget(path)
+            "astraSource": AstraSource(self)
         }
         
-
-
-
 
 
 class EstimateStellarParametersGivenApStarFile(EstimateStellarParameters, ApStarFile):
@@ -325,9 +309,16 @@ class ContinuumNormalize(Sinusoidal, ApStarFile):
         fit as continuum.
     """
 
-    # Just take the first spectrum, which is stacked by individual pixel weighting.
-    # (We will ignore individual visits).
-    spectrum_kwds = dict(data_slice=(slice(0, 1), slice(None)))
+    # Row 0 is individual pixel weighting
+    # Row 1 is global pixel weighting
+    # Row 2+ are the individual visits.
+    # We will just analyse them all because it's cheap.
+
+    # Or if you want to just take the first spectrum, 
+    # which is stacked by individual pixel weighting.
+    # (This would ignore individual visits)
+    #spectrum_kwds = dict(data_slice=(slice(0, 1), slice(None)))
+
 
     def requires(self):
         return ApStarFile(**self.get_common_param_kwargs(ApStarFile))
@@ -337,6 +328,7 @@ class ContinuumNormalize(Sinusoidal, ApStarFile):
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
         
+        # TODO: Move this to AstraSource?
         path = os.path.join(
             self.output_base_dir,
             f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
@@ -380,6 +372,12 @@ class EstimateStellarParametersGivenNormalisedApStarFile(EstimateStellarParamete
         A path containing a list of (start, end) wavelength values that represent the regions to
         fit as continuum.
     """
+
+    @property
+    def task_short_id(self):
+        # Since this is the primary task for The Payne, let's give it a short ID.
+        return f"{self.task_namespace}-{self.task_id.split('_')[-1]}"
+    
 
     def requires(self):
         return {
