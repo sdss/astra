@@ -63,14 +63,14 @@ class ClassifyWhiteDwarfMixin(BaseTask):
         ]
     )
 
-"""
-class WDClassification(DatabaseTarget):
-    results_schema = [
-        sqlalchemy.Column("wd_class", sqlalchemy.String(2)),
-        sqlalchemy.Column("flag", sqlalchemy.Boolean())
-    ]
-"""
 
+class WDClassification(DatabaseTarget):
+    
+    """ A target database row for a WD classification result. """
+
+    wd_class = sqlalchemy.Column("wd_class", sqlalchemy.String(2))
+    flag = sqlalchemy.Column("flag", sqlalchemy.Boolean())
+    
 
 class ClassifyWhiteDwarfGivenSpecFile(ClassifyWhiteDwarfMixin, SpecFile):
 
@@ -109,11 +109,12 @@ class ClassifyWhiteDwarfGivenSpecFile(ClassifyWhiteDwarfMixin, SpecFile):
 
         # This can be run in batch mode.
         tasks = list(self.get_batch_tasks())
-    
+        spectra = [Spectrum1D.read(t.input()["observation"].path) for t in tasks]
+
         features = np.empty((len(tasks), len(self.wavelength_regions)))
-        for i, task in enumerate(tqdm(tasks)):
+        for i, (task, spectrum) in enumerate(tqdm(zip(tasks, spectra))):
             features[i, :] = line_features(
-                Spectrum1D.read(task.input()["observation"].path),
+                spectrum,
                 wavelength_regions=self.wavelength_regions,
                 polyfit_regions=self.polyfit_regions,
                 polyfit_order=self.polyfit_order
@@ -134,17 +135,15 @@ class ClassifyWhiteDwarfGivenSpecFile(ClassifyWhiteDwarfMixin, SpecFile):
         else:
             flags = cycle([False])
 
+        # Write results to database.
         for task, wd_class, flag in zip(tasks, classifier.predict(features), flags):
-            #task.output().write(dict(wd_class=wd_class, flag=flag))
-            with open(task.output().path, "wb") as fp:
-                pickle.dump(dict(wd_class=wd_class, flag=flag), fp)
-
+            task.output()["database"].write(dict(wd_class=wd_class, flag=flag))
+            
 
     def output(self):
         """ The output of this task. """
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
-        return LocalTarget(f"{self.task_id}.pkl")
-
-    #def output(self):
-    #    return WDClassification(self)
+        
+        return dict(database=WDClassification(self))
+    
