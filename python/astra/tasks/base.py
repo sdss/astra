@@ -185,11 +185,13 @@ class BaseTask(luigi.Task, metaclass=Register):
                         # See notes above about to_str_params().
                         kwargs[param_name] = json.loads(param_str, object_pairs_hook=FrozenOrderedDict)
                     except:
-                        try:
-                            kwargs[param_name] = json.loads(param_str)
-                        except TypeError:
-                            kwargs[param_name] = param_str
-                        continue
+
+                        print(param_name, param_str, type(param_str))
+                        import pickle
+                        with open("wtf.pkl", "wb") as fp:
+                            pickle.dump((batch_params, cls.get_params()), fp)
+                        
+                        raise 
                     else:
                         continue
                             
