@@ -9,6 +9,7 @@ import astra.contrib.classifier.tasks.test as classifier
 # TODO: revise
 import astra.contrib.thecannon.tasks.sdss5 as thecannon
 import astra.contrib.thepayne.tasks as thepayne
+import astra.contrib.wd.tasks as wd
 
 from astra.tasks.targets import DatabaseTarget
 from sqlalchemy import Boolean, Column
@@ -40,15 +41,19 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
             (lambda classification: classification["lp_yso"] > 0.5, [
                 apogeenet.EstimateStellarParametersGivenApStarFile
             ]),
-            # FGKM stars
-            (lambda classification: classification["lp_fgkm"] > 0.9, [
-                ferre.IterativeEstimateOfStellarParametersGivenApStarFile
-            ]),
             # FGKM stars (less probable)
-            (lambda classification: classification["lp_fgkm"] > 0.1, [
-                thecannon.EstimateStellarParametersGivenApStarFile,
-                thepayne.EstimateStellarParametersGivenNormalisedApStarFile,
-            ])
+            (lambda classification: classification["lp_fgkm"] > 0.0, [
+                thecannon.EstimateStellarLabelsGivenApStarFile,
+                thepayne.EstimateStellarLabelsGivenApStarFile,
+            ]),
+            # FGKM stars
+            #(lambda classification: classification["lp_fgkm"] > 0.9, [
+            #    ferre.IterativeEstimateOfStellarParametersGivenApStarFile
+            #]),    
+            # White Dwarf classifications
+            #(lambda classification: True, [
+            #    wd.ClassifyWhiteDwarfGivenSpecFile
+            #])
         ]
 
         distributed_tasks = {}
@@ -102,6 +107,7 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
 # Note that many parameters are set in sdss5.cfg
 mjd = 59146
 mjd = 59159
+mjd = 59163
 
 
 # [ ] Put everything into a fits table: apVisit outputs per MJD?
