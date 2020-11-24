@@ -97,153 +97,28 @@ class DistributeAnalysisGivenApStarFile(ApStarFile):
         
 
 
-# [X] Outputs from APOGEENet to database, and [-] saved pkl file.
-# [X] Execute FERRE... outputs to database, and saved pkl file.
-# [X] Execute TC... outputs to database, and saved pkl file.
-# [X] Execute TP... outputs to database, and saved pkl file.
-
-#
-
+# TODO: Grab these from database when we get back on-sky!
+mjds = [
+    59146,
+    59159,
+    59163,
+    59164,
+    59165,
+    59166,
+    59167,
+    59168,
+    59169
+]
 # Note that many parameters are set in sdss5.cfg
-mjd = 59146
-mjd = 59159
-mjd = 59163
 
 
-# [ ] Put everything into a fits table: apVisit outputs per MJD?
-# [ ] Put everything into a fits table: apStar outputs per MJD?
-foo = list(get_stars(mjd=mjd))
-star_kwds = batcher(foo)
-
-#task = ferre.IterativeEstimateOfStellarParametersGivenApStarFile(**foo[388])
-
-
-task = DistributeAnalysisGivenApStarFile(use_remote=True, **star_kwds)
+tasks = []
+for mjd in mjds:
+    tasks.append(
+        DistributeAnalysisGivenApStarFile(use_remote=True, **batcher(get_stars(mjd=mjd)))
+    )
 
 astra.build(
-    [task],
+    tasks,
     local_scheduler=True
 )
-
-raise a
-
-
-import numpy as np
-import sqlalchemy
-def get_all_star_targets(star_kwds, join_with_star=True):
-
-    # We want to get additional information...
-
-    task = DistributeAnalysisGivenApStarFile(**star_kwds)
-
-    output = task.output()[0]
-    engine = output.engine
-    table_names = engine.table_names()
-    batch_param_names = task.batch_param_names() 
-   
-    result = output.read(as_dict=True)
-
-    rows = {}
-    column_names = {}
-
-    # Get star table.
-    star_table = astra.tasks.daily.star_table
-    s = sqlalchemy.select([star_table])
-    r = astra.tasks.daily.engine.execute(s).fetchall()
-
-    rows[star_table.name] = r
-    column_names[star_table.name] = [c.name for c in star_table.c]
-
-    for table_name in table_names:
-
-        metadata = sqlalchemy.MetaData()
-        table = sqlalchemy.Table(
-            table_name, 
-            metadata,
-            autoload=True,
-            autoload_with=engine
-        )
-
-        rows[table_name] = []
-        column_names[table_name] = [c.name for c in table.c]
-
-        # Check that this is an allStar set.
-        if not all(pn in column_names[table_name] for pn in batch_param_names):
-            print(f"Skipping {table_name}")
-            continue
-
-        for output in task.output():
-            result = output.read(as_dict=True)
-
-            s = sqlalchemy.select([table]).where(
-                sqlalchemy.and_(
-                    *[getattr(table.c, pn) == result[pn] for pn in batch_param_names]
-                )
-            )
-
-            r = engine.execute(s).fetchall()
-
-            print(table_name, result["obj"], r)
-            rows[table_name].extend(r)
-
-
-    return (rows, column_names)
-
-
-
-
-rows, column_names = get_all_star_targets(star_kwds)
-
-import astropy.table
-
-_translate = {
-    "apogee_id": "obj",
-    "apred_vers": "apred"
-
-}
-names = [_translate.get(k, k) for k in column_names["star"]]
-
-star_table = astropy.table.Table(
-    rows=rows["star"], 
-    names=names
-)
-
-
-
-for table_name, v in rows.items():
-    if len(v) == 0:
-        print(f"Skipping {table_name}")
-        continue
-
-    t = astropy.table.Table(rows=v, names=column_names[table_name])
-
-    if table_name != "star":
-        t = astropy.table.join(
-            t, 
-            star_table,
-            table_names=[table_name.split(".")[0], "star"]
-        )
-
-    filename = f"DailyStar-{mjd}-{table_name}.csv"
-    t.write(filename)
-
-    print(filename)
-
-
-
-
-
-
-
-raise a
-
-task = DistributeAnalysisGivenApStarFile(**star_kwds)
-
-astra.build(
-    [task],
-)
-
-
-raise a
-
-
