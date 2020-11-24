@@ -185,7 +185,10 @@ class BaseTask(luigi.Task, metaclass=Register):
                         # See notes above about to_str_params().
                         kwargs[param_name] = json.loads(param_str, object_pairs_hook=FrozenOrderedDict)
                     except:
-                        kwargs[param_name] = json.loads(param_str)
+                        try:
+                            kwargs[param_name] = json.loads(param_str)
+                        except TypeError:
+                            kwargs[param_name] = param_str
                         continue
                     else:
                         continue
