@@ -14,6 +14,7 @@ from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
 from astra.tasks.io import ApStarFile
 from astra.tools.spectrum import Spectrum1D
 from astra.contrib.apogeenet.model import Net, predict
+from astra.utils import log
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -164,21 +165,31 @@ class EstimateStellarParameters(APOGEENetMixin):
         # This task can be run in batch mode.
         failed_tasks = []
         for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
-            spectrum = task.read_observation()    
-            results = task.estimate_stellar_parameters(model, spectrum)
-            # Write the first result to the database.
-            task.output()["database"].write(results[0])
+            if task.complete(): 
+                continue
+            
+            try:
+                spectrum = task.read_observation()
 
-            # Write astraSource.
-            task.output()["AstraSource"].write(
-                spectrum,
-                normalized_flux=spectrum.flux.value,
-                normalized_ivar=spectrum.uncertainty.array,
-                continuum=None,
-                model_flux=None,
-                model_ivar=None,
-                results_table=Table(rows=results)
-            )
+                results = task.estimate_stellar_parameters(model, spectrum)
+
+                # Write the first result to the database.
+                task.output()["database"].write(results[0])
+
+                # Write astraSource.
+                task.output()["AstraSource"].write(
+                    spectrum,
+                    normalized_flux=spectrum.flux.value,
+                    normalized_ivar=spectrum.uncertainty.array,
+                    continuum=None,
+                    model_flux=None,
+                    model_ivar=None,
+                    results_table=Table(rows=results)
+                )
+
+            except:
+                log.exception(f"Exception in running {task.task_id} on {task}:")
+                continue
 
         return None
 
