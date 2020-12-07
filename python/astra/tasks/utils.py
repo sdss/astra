@@ -1,4 +1,5 @@
 import os
+"""
 import luigi
 import types
 import numpy as np
@@ -11,6 +12,108 @@ from astra.tasks.base import BaseTask
 from astra.tasks.io import AllStarFile
 
 from astropy.io import fits
+"""
+
+_profile_keywords = {
+    "notchpeak": {
+        "account": "sdss",
+        "partition": "notchpeak",
+        "ntasks": 16,
+        "mem": "48G",
+        # TODO: Ask Holtz why he has this constraint
+        "constraint": "rom",
+        "time": "48:00:00",
+        "nodes": 1
+    },
+    "tacc": {
+        "partition": "normal",
+        "ntasks-per-node": 24
+    },
+    "np": {
+        "account": "sdss-np",
+        "partition": "np",
+        "ntasks": 64,
+        "time": "48:00:00",
+        "nodes": 1
+    },
+    "kingspeak-fast": {
+        "account": "sdss-kp-fast",
+        "partition": "sdss-kp",
+        "ntasks": 16,
+        "nodes": 1
+    },
+    "kingspeak": {
+        "account": "sdss-kp",
+        "partition": "sdss-kp",
+        "ntasks": 16,
+        "nodes": 1
+    }    
+}
+
+
+def prepare_slurm_file(
+        commands,
+        name,
+        profile="kingspeak",
+        cwd=None,
+        query_host=None,
+        query_port=None,       
+        max_run=1,
+        num_py_threads=None,
+        **kwargs
+    ):
+
+    if name is None:
+        name = commands[0].split()[0].strip()
+    
+    if cwd is not None:
+        cwd = os.getcwd()
+    
+    try:
+        kwds = _profile_keywords[profile]
+    
+    except KeyError:
+        raise KeyError(f"unknown profile '{profile}'. Available: {','.join(list(_profile_keywords.keys()))}")
+
+    kwds.update(kwargs)
+
+    content = ["#!/bin/csh"]
+
+    for key, value in kwds.items():
+        content.append(f"#SBATCH --{key}={value}")
+    
+    # Error / output:
+    content.extend([
+        f"#SBATCH -o {name}.slurm.out",
+        f"#SBATCH -e {name}.slurm.out"
+    ])
+    if num_py_threads is not None:
+        keys = (
+            "OMP_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+            "NUMEXPR_NUM_THREADS"
+        )
+        for key in keys:
+            content.append(f"setenv {key} {num_py_threads}")
+
+    content.append(f"cd {cwd}")
+    content.extend(commands)
+
+    content.extend([
+        "",
+        "wait",
+        "echo FIN"
+    ])
+
+    return "\n".join(content)
+
+
+if __name__ == "__main__":
+
+    foo = prepare_slurm_file(["echo FOOBAR"], "echo_test", time="01:00:00")
+    with open("test.slurm", "w") as fp:
+        fp.write(foo)
 
 
 
