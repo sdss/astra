@@ -113,6 +113,10 @@ class EstimateStellarLabelsGivenApStarFileBase(TrainTheCannonGivenTrainingSetTar
         task_meta = []
         task_spectra = []
         for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
+            if task.complete():
+                task_spectra.append(None)
+                task_meta.append(None)
+                continue
             spectrum, cont = task.read_observation()
             flux, ivar = task.prepare_observation(
                 model.dispersion, 
@@ -148,7 +152,8 @@ class EstimateStellarLabelsGivenApStarFileBase(TrainTheCannonGivenTrainingSetTar
 
         si = 0
         for i, (task, spectrum, meta) in enumerate(zip(self.get_batch_tasks(), task_spectra, task_meta)):
-            
+            if spectrum is None and meta is None:
+                continue 
             N_spectra = meta["N_spectra"]
             result = dict(
                 N_visits=meta["N_visits"],

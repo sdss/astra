@@ -228,13 +228,14 @@ class EstimateStellarLabels(ThePayneMixin):
         # We can run this in batch mode.
         label_names = state["label_names"]
         for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
-            
+            if task.complete():
+                continue 
             spectrum, continuum, normalized_flux, normalized_ivar = task.prepare_observation()
             
             p_opt, p_cov, model_flux, meta = testing.test(
                 spectrum.wavelength.value,
-                normalized_flux,
-                normalized_ivar,
+                normalized_flux[[0]],
+                normalized_ivar[[0]],
                 **state
             )
 
@@ -254,9 +255,9 @@ class EstimateStellarLabels(ThePayneMixin):
             # Write AstraSource object.
             task.output()["AstraSource"].write(
                 spectrum=spectrum,
-                normalized_flux=normalized_flux,
-                normalized_ivar=normalized_ivar,
-                continuum=continuum,
+                normalized_flux=normalized_flux[[0]],
+                normalized_ivar=normalized_ivar[[0]],
+                continuum=continuum[[0]],
                 model_flux=model_flux,
                 # TODO: Project uncertainties to flux space.
                 model_ivar=None,
