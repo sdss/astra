@@ -223,6 +223,7 @@ def get_visits_given_star(obj, apred):
 
 
 
+
 if __name__ == "__main__":
 
     mjd = 59146

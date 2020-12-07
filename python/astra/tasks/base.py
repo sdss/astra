@@ -179,7 +179,7 @@ class BaseTask(luigi.Task, metaclass=Register):
             if param_name in params_str:
 
                 param_str = params_str[param_name]
-
+                '''
                 if param_name in batch_params:    
                     try:
                         # See notes above about to_str_params().
@@ -189,16 +189,18 @@ class BaseTask(luigi.Task, metaclass=Register):
                         print(param_name, param_str, type(param_str))
                         import pickle
                         with open("wtf.pkl", "wb") as fp:
-                            pickle.dump((batch_params, cls.get_params()), fp)
+                            pickle.dump((batch_params, params_str, cls.get_params()), fp)
                         
                         raise 
                     else:
                         continue
-                            
+                '''
                 if isinstance(param_str, list):
                     kwargs[param_name] = param._parse_list(param_str)
                 else:
                     kwargs[param_name] = param.parse(param_str)
+                    
+                print(f"PARAM: {param_name} PARSED {kwargs[param_name]} FROM {type(param_str)} and {param_str}")
 
         return cls(**kwargs)
 

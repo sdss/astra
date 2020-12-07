@@ -12,10 +12,11 @@ from astra.tasks.io import AllStarFile
 
 from astropy.io import fits
 
-@requires(AllStarFile)
 
 
 
+
+"""
 @requires(AllStarFile)
 class GetAllStarResult(BaseTask):
 
@@ -88,3 +89,4 @@ if __name__ == "__main__":
     )
     
     task.run()
+"""
