@@ -1,60 +1,24 @@
-import os
-from astra.tasks.targets import (LocalTarget, DatabaseTarget)
-from astra.contrib.ferre.tasks.mixin import GridHeaderFileMixin
-from sqlalchemy import (Column, Float)
 
-class GridHeaderFile(GridHeaderFileMixin):
+import json
+import re
+from astra.tasks.targets import (LocalTarget, DatabaseTarget, BaseDatabaseTarget)
+from sqlalchemy import (Column, Float, String)
+from luigi import ExternalTask, Parameter, DictParameter
 
-    """
-    A task to represent a grid header file.
 
-    :param radiative_transfer_code:
-        A string description of the radiative transfer code used (e.g., turbospectrum).
+class GridHeaderTarget(ExternalTask):
 
-    :param model_photospheres:
-        A string description of the model photospheres used (e.g., marcs).
-    
-    :param isotopes:
-        A description of the isotope ratios used (e.g., giantisotopes).
-    
-    :param gd:
-        A (legacy) character indicating whether this is a giant grid or a dwarf grid.
-    
-    :param spectral_type:
-        The spectral type of the grid.
-    
-    :param grid_creation_date:
-        The date that the grid was created.
-    
-    :param lsf:
-        A single character describing the LSF of the grid (e.g., 'a', 'b', 'c', or 'd').
-    
-    :param aspcap:
-        The ASPCAP reduction version. (TODO: Legacy keywords.)
-
-    """
+    path = Parameter()
 
     def output(self):
-        date_str = self.grid_creation_date.strftime("%y%m%d")
-        return LocalTarget(
-            os.path.join(
-                self.speclib_dir,
-                self.radiative_transfer_code,
-                self.model_photospheres,
-                self.isotopes,
-                # TODO: Check with HoltZ what the format is here. Is it always t prefix or is that for turbospectrum?
-                f"t{self.gd}{self.spectral_type}_{date_str}_lsf{self.lsf}_{self.aspcap}",
-                # TODO: Check with HoltZ on what 012_075 means
-                f"p_apst{self.gd}{self.spectral_type}_{date_str}_lsf{self.lsf}_{self.aspcap}_012_075.hdr"
-            )
-        )
+        return LocalTarget(self.path)
 
+        
 
 class FerreResult(DatabaseTarget):
 
     """ A database row representing an output target from FERRE. """
 
-    # TODO: We should consider generating this results schema from the grid header file.    
     teff = Column("TEFF", Float)
     logg = Column("LOGG", Float)
     metals = Column("METALS", Float)
@@ -68,4 +32,72 @@ class FerreResult(DatabaseTarget):
     log_chisq_fit = Column("log_chisq_fit", Float)
     
 
-    
+
+class FerreResultProxy(DatabaseTarget):
+
+    proxy_task_id = Column("proxy_task_id", String(length=128))
+
+    def copy_from(self, source):
+        return self.write(dict(proxy_task_id=source.task_id))
+
+    def read(self, as_dict=False, include_parameters=True):
+        return self.resolve().read(as_dict=as_dict, include_parameters=include_parameters)
+
+
+    def resolve(self):
+        """ Resolve the proxy of this object and return the FerreResult target. """
+
+        proxy_task_id, = self._read(self.table_bound, as_dict=False, include_parameters=False)
+        task_id = proxy_task_id
+        task_family = task_id.split("_")[0]
+        task_namespace = task_family.split(".")[0]
+        
+        db = BaseDatabaseTarget(
+            self.connection_string,
+            task_namespace,    
+            task_family,
+            task_id,
+            []
+        )
+
+        # TODO: Should probably resolve this the same way luigi does..
+        from astra.contrib.ferre.tasks.aspcap import FerreGivenApStarFile
+        kwds = db.read(as_dict=True, include_parameters=True)
+        task_kwds = {}
+        for k, p in FerreGivenApStarFile.get_params():
+
+            try:
+                value = kwds[k]
+
+            except KeyError:
+                try:
+                    parsed_value = getattr(self, k)
+
+                except AttributeError:
+                    # Default value.
+                    continue
+            else:
+                try:
+                    parsed_value = p.parse(value)
+
+                except json.JSONDecodeError:
+
+                    # See https://stackoverflow.com/questions/39491420/python-jsonexpecting-property-name-enclosed-in-double-quotes
+                    # Basically, postgres/sql can store the dict parameters using single quotes around keys, but to
+                    # parse this back in Python, JSON *requires* double quotes. So we need to do a hack to fix this.
+                    if isinstance(p, DictParameter):
+                        sub = re.compile('(?<!\\\\)\'')
+                        value = sub.sub('\"', value)
+
+                        # And it turns out Nones are shit.
+                        # https://stackoverflow.com/questions/3548635/python-json-what-happened-to-none
+                        value = value.replace(" None", " null")
+                        parsed_value = p.parse(value)
+                    else:
+                        raise
+            
+            task_kwds[k] = parsed_value
+
+        task = FerreGivenApStarFile(**task_kwds)
+        assert task.task_id == proxy_task_id
+        return FerreResult(task)

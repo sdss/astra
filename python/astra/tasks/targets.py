@@ -6,6 +6,8 @@ import json
 import luigi
 import numpy as np
 import sqlalchemy
+from astra.utils import symlink_force
+from shutil import copy2 as copyfile
 from time import gmtime, strftime
 from astropy.io import fits
 from astropy.table import Table
@@ -106,17 +108,21 @@ class BaseDatabaseTarget(luigi.Target):
         return r is not None
 
 
-    def read(self, as_dict=False):
+    def read(self, as_dict=False, include_parameters=True):
         """ 
         Read the target from the database. 
 
         :param as_dict: (optional)
             Optionally return the result as a dictionary (default: False).        
         """
-        return self._read(self.table_bound, as_dict=as_dict)
+        return self._read(
+            self.table_bound, 
+            as_dict=as_dict, 
+            include_parameters=include_parameters
+        )
         
 
-    def _read(self, table, columns=None, as_dict=False):
+    def _read(self, table, columns=None, as_dict=False, include_parameters=True):
         """
         Read a target row from the database table.
 
@@ -129,14 +135,26 @@ class BaseDatabaseTarget(luigi.Target):
         :param as_dict: (optional)
             Optionally return the result as a dictionary (default: False).
         """
-        columns = columns or [table]
+        if columns is None and not include_parameters:
+            N = 0
+            for key, value in self.__class__.__dict__.items():
+                if isinstance(value, sqlalchemy.Column):
+                    N += 1
+            
+            columns = [column for column in table.columns][-N:]
+            column_names = [column.name for column in columns]
+            
+        else:
+            columns = columns or [table]
+            column_names = (column.name for column in table.columns)
+
         with self.engine.begin() as connection:
             s = sqlalchemy.select(columns).where(
                 table.c.task_id == self.task_id
             ).limit(1)
             row = connection.execute(s).fetchone()
         if as_dict:
-            column_names = (column.name for column in table.columns)
+            
             return collections.OrderedDict(zip(column_names, row))
         return row
 
@@ -157,6 +175,9 @@ class BaseDatabaseTarget(luigi.Target):
         for key, value in data.items():
             # Don't sanitise booleans or date/datetime objects.
             if not isinstance(value, (datetime.datetime, datetime.date, bool)):
+                if value is None:
+                    continue
+                
                 try:
                     value = str(value)
                 except:
@@ -278,6 +299,18 @@ class DatabaseTarget(BaseDatabaseTarget):
         """
 
         raise NotImplementedError()
+
+
+    def copy_from(self, source):
+        """ 
+        Copy a result from another DatabaseTarget.
+
+        :param source:
+            The source result to copy from.
+        """
+        return self.write(source.read(as_dict=True, include_parameters=False))
+
+
 
 
 def generate_parameter_schema(task, only_significant=True):
@@ -450,6 +483,20 @@ class AstraSource(LocalTarget):
         # Check that the parent directory exists.
         os.makedirs(os.path.dirname(path), exist_ok=True)
         return path
+    
+    
+    def copy_from(self, source, use_symbolic_link=True):
+        """
+        Write an AstraSource object as a copy from an existing AstraSource object.
+
+        :param source:
+            An existing AstraSource object.
+        """
+
+        assert os.path.exists(source.path)
+        f = symlink_force if use_symbolic_link else copyfile
+        return f(source.path, self.path)
+        
         
 
     def write(

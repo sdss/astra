@@ -156,24 +156,36 @@ def parse_grid_limits(header_paths):
         
 
 
-def yield_suitable_grids(headers, grid_limits, offset=-3,):
+def yield_suitable_grids(grid_limits, mean_fiber, teff, logg, fe_h):
     """
     Yield suitable FERRE grids given header information from an observation and a dictionary of grid limits.
-
-    :param headers:
-        Headers from an observation. The necessary keywords are: `MEANFIB`, `RV_TEFF`, `RV_LOGG`, `RV_FEH`.
     
     :param grid_limits:
         A dictionary containing header paths as keys, and a three-length tuple as values: (1) metadata, (2) lower limits, (3) upper limits.
         This is the expected output from `parse_grid_limits`.
+    
+    :param mean_fiber:
+        The mean fiber number of observations.
+    
+    :param teff:
+        An initial guess of the effective temperature.
+    
+    :param logg:
+        An initial guess of the surface gravity.
+    
+    :param fe_h:
+        An initial guess of the metallicity.
     
     :returns:
         A generator that yields two-length tuples containing header path, and metadata.       
     """
 
     # Figure out which grids are suitable.
-    lsf_grid = get_lsf_grid_name(int(np.round(headers["MEANFIB"])))
+    lsf_grid = get_lsf_grid_name(int(np.round(mean_fiber)))
 
+    point = np.array([fe_h, logg, teff])
+    P = point.size
+    
     for header_path, (meta, lower_limits, upper_limits) in grid_limits.items():
 
         if meta["lsf"] != lsf_grid:
@@ -181,11 +193,7 @@ def yield_suitable_grids(headers, grid_limits, offset=-3,):
 
         # We will take the RV parameters as the initial parameters. 
         # Check to see if they are within bounds of the grid.
-        point = np.array([headers[key] for key in ("RV_FEH", "RV_LOGG", "RV_TEFF")])
-        point_in_limits = np.all((point >= lower_limits[offset:])) \
-                      and np.all((point <= upper_limits[offset:]))
-
-        if point_in_limits:
+        if np.all(point >= lower_limits[-P:]) and np.all(point <= upper_limits[-P:]):
             yield (header_path, meta)
 
 
@@ -420,7 +428,8 @@ def prepare_ferre_input_keywords(
         full_covariance=False,
         pca_project=False,
         pca_chi=False,
-        use_direct_access=True
+        use_direct_access=True,
+        ferre_kwds=None
     ):
 
     arg_spec = getfullargspec(prepare_ferre_input_keywords)
@@ -480,7 +489,7 @@ def prepare_ferre_input_keywords(
         raise ValueError(f"init_flag must be one of (0, 1)")
 
     if isinstance(kwds["init_algorithm_flag"], int):
-        v = np.ones(kwds["n_dimensions"], dtype=int) * kwds["init_algorithm_flag"]
+        v = np.ones(kwds["n_parameters"], dtype=int) * kwds["init_algorithm_flag"]
         kwds["init_algorithm_flag"] = " ".join([f"{_:.0f}" for _ in v])
 
     available = (0, 1, 2, 3, 4, 11, 12, 13, 14)
@@ -519,6 +528,7 @@ def prepare_ferre_input_keywords(
         "input_flux_path", 
         "input_uncertainties_path", 
         "input_weights_path",
+        "init_algorithm_flag",
         "continuum_observations_flag"
     )
     for keyword in remove_keywords_if_none:
@@ -532,15 +542,17 @@ def prepare_ferre_input_keywords(
             None
 
     # Translate keywords.
-    ferre_kwds = OrderedDict([])
+    parsed_ferre_kwds = OrderedDict([])
     for k, v in kwds.items():
         if k == "parameter_search_indices":
             # Remember: indices are backwards for FERRE.
             #ferre_indices = np.sort(kwds["n_dimensions"] - v)
-            ferre_kwds[_translate_keyword[k]] = " ".join(map(str, v))
+            parsed_ferre_kwds[_translate_keyword[k]] = " ".join(map(str, v))
 
         else:
-            ferre_kwds[_translate_keyword[k]] = v
+            parsed_ferre_kwds[_translate_keyword[k]] = v
 
+    if ferre_kwds is not None:
+        parsed_ferre_kwds.update(ferre_kwds)
 
-    return ferre_kwds
+    return parsed_ferre_kwds

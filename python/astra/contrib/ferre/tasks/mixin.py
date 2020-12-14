@@ -3,44 +3,8 @@ import astra
 import datetime
 from astra.tasks.base import BaseTask
 
-# TODO: Is this in SDSS access? Or if it's just an environment variable?!
 
-
-
-class BaseDispatcherMixin(BaseTask):
-
-    """ A mixin class for dispatching FERRE tasks. """
-
-    task_namespace = "FERRE"
-
-    # Grid path parameters.
-    radiative_transfer_code = astra.Parameter(
-        default="*",
-        config_path=dict(section=task_namespace, name="radiative_transfer_code")
-    )
-    model_photospheres = astra.Parameter(
-        default="*",
-        config_path=dict(section=task_namespace, name="model_photospheres")
-    )
-    isotopes = astra.Parameter(
-        default="*",
-        config_path=dict(section=task_namespace, name="isotopes")
-    )
-    grid_creation_date = astra.DateParameter(
-        default=datetime.date(2018, 9, 1),
-        config_path=dict(section=task_namespace, name="grid_creation_date")
-    )
-
-    gd = astra.Parameter(default="?")
-    spectral_type = astra.Parameter(default="*")
-    lsf = astra.Parameter(default="?")
-    aspcap = astra.Parameter(default="*")
-    
-    # Task Factory.
-    task_factory = astra.TaskParameter()
-
-
-class BaseFerreMixin(BaseTask):
+class FerreMixin(BaseTask):
 
     """ A mixin class for FERRE tasks. """
 
@@ -150,59 +114,21 @@ class BaseFerreMixin(BaseTask):
         config_path=dict(section="FERRE", name="speclib_dir")
     )
 
-    # Current FERRE version at time of writing is 4.8.5
-    ferre_version_major = astra.IntParameter(
-        default=4,
-        config_path=dict(section=task_namespace, name="ferre_version_major")
-    )
-    ferre_version_minor = astra.IntParameter(
-        default=8,
-        config_path=dict(section=task_namespace, name="ferre_version_minor")
-    )
-    ferre_version_patch = astra.IntParameter(
-        default=5,
-        config_path=dict(section=task_namespace, name="ferre_version_patch")
-    )
-
     ferre_executable = astra.Parameter(
         default="ferre.x",
         config_path=dict(section=task_namespace, name="ferre_executable")
     )
 
+    ferre_kwds = astra.DictParameter(default=None)
 
-class GridHeaderFileMixin(BaseTask):
-
-    """ A mixin class for grid header files. """
-
-    # Use parameters to find the grid path, not provide the grid path itself.
-    radiative_transfer_code = astra.Parameter()
-    model_photospheres = astra.Parameter()
-    isotopes = astra.Parameter()
-    gd = astra.Parameter()
-    spectral_type = astra.Parameter()
-    grid_creation_date = astra.DateParameter(default=datetime.date(2018, 9, 1)) # TODO
-    lsf = astra.Parameter()
-    aspcap = astra.Parameter()
-
-    # TODO: Put elsewhere?
-    speclib_dir = astra.Parameter(
-        config_path=dict(section="FERRE", name="speclib_dir")
-    )
+    # Optionally disable generating AstraSource objects.
+    write_source_output = astra.BoolParameter(default=True, significant=False)
 
 
-class ApStarMixin(BaseTask):
+class SourceMixin(BaseTask):
 
-    """ Mixin class for dealing with ApStarFile objects in FERRE. """
+    """ Mixin class for dealing with multiple objects in FERRE. """
 
-    # Initial parameters can vary between objects, but frozen parameters cannot.
-    #initial_parameters = astra.ListParameter(default=None, batch_method=lambda _: tuple((_, ))[0])
     initial_parameters = astra.DictParameter(default=None, batch_method=tuple)
     frozen_parameters = astra.DictParameter(default=None)
 
-
-class FerreMixin(BaseFerreMixin, ApStarMixin, GridHeaderFileMixin):
-    """ Mixin class for running FERRE on ApStar spectra. """
-    pass
-
-class DispatcherMixin(BaseDispatcherMixin, ApStarMixin, BaseFerreMixin):
-    pass

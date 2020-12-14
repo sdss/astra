@@ -2,6 +2,9 @@
 #from .logger import log
 from sdsstools.logger import get_logger
 
+import os
+import tempfile
+
 log = get_logger(__name__.split(".")[0])
 log.propagate = False
 
@@ -34,3 +37,27 @@ def batcher(iterable, task_factory=None):
         return batch_kwds
 
 
+
+
+
+def symlink_force(source, destination):
+    '''
+    Create a symbolic link destination pointing to source.
+    Overwrites destination if it exists.
+    '''
+
+    # os.replace() may fail if files are on different filesystems
+    link_dir = os.path.dirname(destination)
+
+    while True:
+        temp_destination = tempfile.mktemp(dir=link_dir)
+        try:
+            os.symlink(source, temp_destination)
+            break
+        except FileExistsError:
+            pass
+    try:
+        os.replace(temp_destination, destination)
+    except OSError:  # e.g. permission denied
+        os.remove(temp_destination)
+        raise
