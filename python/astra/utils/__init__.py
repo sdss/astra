@@ -1,6 +1,7 @@
 
 #from .logger import log
 
+import json
 import os, tempfile
 from sdsstools.logger import get_logger
 
@@ -53,9 +54,16 @@ def symlink(target, link_name, overwrite=False):
         raise
 
 
-def batcher(iterable, task_factory=None):
+def batcher(iterable, task_factory=None, unique=False):
     all_kwds = {}
+    uniques = []
     for item in iterable:
+        if unique:
+            u = json.dumps(item)
+            if u in uniques:
+                continue
+            uniques.append(u)
+
         for k, v in item.items():
             all_kwds.setdefault(k, [])
             all_kwds[k].append(v)

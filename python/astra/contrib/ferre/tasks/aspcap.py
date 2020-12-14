@@ -392,8 +392,8 @@ class EstimateChemicalAbundanceGivenApStarFile(ApStarMixin, FerreMixin):
         This task requires a median-filtered ApStar file, and the previously 
         determined stellar parameters.
         """
-        if self.is_batch_mode:
-            return [task.requires() for task in self.get_batch_tasks()]
+        #if self.is_batch_mode:
+        #    return [task.requires() for task in self.get_batch_tasks()]
 
         return {
             "observation": self.clone(CreateMedianFilteredApStarFile),
@@ -427,7 +427,7 @@ class EstimateChemicalAbundanceGivenApStarFile(ApStarMixin, FerreMixin):
             execute_tasks.append(task.clone(
                 FerreGivenApStarFile,
                 # TODO: Need to put all the speclib contents in a nicer way together.
-                input_weights_path=f"{task.speclib_dir}/masks/{task.element}.mask",
+                input_weights_path=f"/uufs/chpc.utah.edu/common/home/u6020307/astra-component-data/FERRE/masks/{task.element}.mask",
                 grid_header_path=output["grid_header_path"],
                 initial_parameters={ k: v for k, v in output.items() if k in label_names },
                 frozen_parameters=frozen_parameters,

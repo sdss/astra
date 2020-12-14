@@ -8,12 +8,13 @@ import luigi
 from tqdm import tqdm
 
 import astra
+import astra.utils
 from astra.tasks.io.sdss4 import ApStarFile
 from astra.contrib.ferre.tasks.aspcap import (
     EstimateChemicalAbundanceGivenApStarFile, EstimateChemicalAbundancesGivenApStarFile
 )
 
-calibration_set = astropy.table.Table.read("/home/andy/data/sdss/apogeework/apogee/spectro/aspcap/r12/l33/allCal-r12-l33.fits")
+calibration_set = astropy.table.Table.read("/uufs/chpc.utah.edu/common/home/sdss50/dr16/apogee/spectro/aspcap/r12/l33/allCal-r12-l33.fits")
 
 # Only need unique entries of these to start.
 calibration_set = astropy.table.unique(calibration_set, ("TELESCOPE", "FIELD", "APOGEE_ID"))
@@ -53,10 +54,10 @@ for parameter_name in ApStarFile.batch_param_names():
 
 
 workflow_keywords = dict(
-    connection_string="sqlite:////home/ubuntu/data/sdss/astra/m67.db",
+    connection_string="sqlite:////uufs/chpc.utah.edu/common/home/u6020307/astra/m67.db",
     
     # Analysis keywords.
-    interpolation_order=1,
+    interpolation_order=3,
     continuum_flag=1,
     continuum_order=4,
     continuum_reject=0.1,
@@ -64,15 +65,31 @@ workflow_keywords = dict(
     error_algorithm_flag=1,
     optimization_algorithm_flag=3,
     wavelength_interpolation_flag=0,
-    input_weights_path="/home/ubuntu/data/sdss/astra-components/astra_ferre/python/astra_ferre/core/global_mask_v02.txt",
+    input_weights_path="/uufs/chpc.utah.edu/common/home/u6020307/astra-component-data/FERRE/masks/global_mask_v02.txt",
     pca_project=False,
     pca_chi=False,
-    directory_kwds=dict(dir="/home/ubuntu/data/sdss/astra-components/astra_ferre/tmp/"),
-    n_threads=4,
+    #directory_kwds=dict(dir="/home/ubuntu/data/sdss/astra-components/astra_ferre/tmp/"),
+    n_threads=24,
     debug=True,
-    use_direct_access=True
+    use_direct_access=False
 )
 
+
+from astra.contrib.ferre.tasks.aspcap import dispatch_apstars_for_analysis
+
+
+
+dispatch = EstimateChemicalAbundancesGivenApStarFile(
+    **workflow_keywords,
+    **batch_kwds
+)
+
+batch_kwds = list(dispatch.get_batch_task_kwds(False))
+moo = dispatch_apstars_for_analysis(batch_kwds, "../astra-component-data/FERRE/grid_header_paths.utah.list", release="DR16")
+foo = [ea[1] for ea in moo]
+
+
+batch_kwds = astra.utils.batcher(foo, unique=True)
 
 dispatch = EstimateChemicalAbundancesGivenApStarFile(
     **workflow_keywords,
@@ -85,7 +102,7 @@ import astra
 astra.build(
     [dispatch],
     workers=1,
-    local_scheduler=True,
+    #local_scheduler=True,
     detailed_summary=True
 
 )

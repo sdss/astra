@@ -200,7 +200,7 @@ class BaseTask(luigi.Task, metaclass=Register):
                 else:
                     kwargs[param_name] = param.parse(param_str)
                     
-                print(f"PARAM: {param_name} PARSED {kwargs[param_name]} FROM {type(param_str)} and {param_str}")
+                #print(f"PARAM: {param_name} PARSED {kwargs[param_name]} FROM {type(param_str)} and {param_str}")
 
         return cls(**kwargs)
 
