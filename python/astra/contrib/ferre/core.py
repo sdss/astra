@@ -32,6 +32,7 @@ class Ferre(object):
             grid_header_path,
             frozen_parameters=None,
             interpolation_order=1,
+            init_flag=1,
             init_algorithm_flag=1,
             error_algorithm_flag=0,
             continuum_flag=None,
@@ -47,6 +48,7 @@ class Ferre(object):
             input_weights_path=None,
             input_lsf_path=None,
             debug=False,
+            ferre_kwds=None,
             **kwargs
         ):        
 
@@ -109,8 +111,8 @@ class Ferre(object):
         self._directory_kwds = directory_kwds
 
         self.kwds = kwds
-        self.debug = debug
 
+        self.debug = debug
         return None
 
 
@@ -335,12 +337,7 @@ class Ferre(object):
             raise 
         
 
-    def fit_abundances(self):
-
-        raise a
-
-
-    def __call__(self, *params, timeout=30):
+    def __call__(self, x, timeout=30):
 
         try:
             self.process
@@ -348,12 +345,43 @@ class Ferre(object):
         except AttributeError:
             raise RuntimeError("this function can only be called when used as a context manager")
         
-        # Write the parameters to the process stdin.
-        content = utils.format_ferre_input_parameters(*params)
-        with open(os.path.join(self.directory, "params.input"), "w") as fp:
-            fp.write(content)
 
-        self.process.stdin.write(content)
+        if isinstance(x, dict):
+            x = self.parse_initial_parameters([x], 1)[0]
+        else:
+            if len(x) < len(self.parameter_names) and self.frozen_parameters is not None:
+                pns = [pn for pn in self.parameter_names if pn not in self.frozen_parameters]
+
+                x_ = np.nan * np.ones(len(self.parameter_names))
+                for i, pn in enumerate(pns):
+                    index = self.parameter_names.index(pn)
+                    x_[index] = x[i]
+                
+                for pn, v in self.frozen_parameters.items():
+                    index = self.parameter_names.index(pn)
+                    x_[index] = v
+                
+                x = x_
+        
+        lower, upper = self.grid_limits
+        if not np.all(upper >= x) or not np.all(x >= lower):
+            limits = np.array([upper >= x, x >= lower])
+            # Generate a mini-report.
+            indices = ~np.all(limits, axis=0)
+            report = " and ".join([
+                f"{upper[i]} >= {x[i]} >= {lower[i]} for {self.parameter_names[i]}" for i in np.where(indices)[0]
+            ])
+
+            msg = f"x is not within grid boundaries: {report}"
+            raise ValueError(msg)
+
+
+        # Write the parameters to the process stdin.
+        inputs = utils.format_ferre_input_parameters(*x)
+        with open(os.path.join(self.directory, "params.input"), "w") as fp:
+            fp.write(inputs)
+
+        self.process.stdin.write(inputs)
         self.process.stdin.flush()
 
         # Get outputs.
@@ -553,7 +581,10 @@ class Ferre(object):
         self._thread.needed = False
 
         # Capture outputs for verbosity.
-        self.stdout, self.stderr = self.process.communicate()
+        try:
+            self.stdout, self.stderr = self.process.communicate(timeout=1)
+        except:
+            None
 
         self.teardown()
         return None
@@ -656,16 +687,9 @@ if __name__ == "__main__":
 
     #point = np.array([ 6.1508e+03,  4.5033e+00,  6.2916e-02,  0, 0, 0, 0])
     
-    kwds = dict(
-        grid_header_path=grid_header_path, 
-        debug=True,
-        continuum_flag=1,
-        continuum_order=4,
-        continuum_reject=0.1,
-        optimization_algorithm_flag=3,
-        wavelength_interpolation_flag=0,
-        input_weights_path="global_mask_v02.txt"
-    )
+
+
+
 
     '''
 
@@ -685,16 +709,30 @@ if __name__ == "__main__":
             ok.append(np.any(flux > -1000))
             print(p, ok[-1])
 
-    '''
 
     with Ferre(**kwds) as model:
         interpolated_flux = model(*point[::-1])
         interpolated_flux2 = model(*point)
 
 
+    '''
     
 
     from time import time
+
+    kwds = dict(
+        grid_header_path=grid_header_path, 
+        debug=True,
+        continuum_flag=1,
+        continuum_order=4,
+        continuum_reject=0.1,
+        interpolation_order=3,
+        optimization_algorithm_flag=3,
+        wavelength_interpolation_flag=0,
+        input_weights_path="/home/andy/data/sdss/astra-component-data/FERRE/Al.mask",
+        n_ties=0,
+        type_tie=1,
+    )
 
 
     point = np.array([
@@ -706,27 +744,30 @@ if __name__ == "__main__":
         1.290000e-01,
         -5.000000e-01
     ])
+    parameter_names = ['LOG10VDOP', 'C', 'N', 'O Mg Si S Ca Ti', 'METALS', 'LOGG', 'TEFF']
+
+    initial_parameters = dict(zip(parameter_names[::-1], point))
+
+    frozen_parameters = initial_parameters.copy()
+    del frozen_parameters["O Mg Si S Ca Ti"]
+
+    kwds.update(
+        frozen_parameters=frozen_parameters,
+        init_flag=0,
+        init_algorithm_flag=None
+    )
 
     model = Ferre(**kwds)
     t_init = time()
     p_opt, p_cov, meta = model.fit(
         spectrum, 
-        initial_parameters=point[::-1],
+        #initial_parameters=initial_parameters,
         full_output=True,
     )
     print(time() - t_init, p_opt[0], meta["log_chisq_fit"])
 
-    model = Ferre(**kwds)
-    t_init = time()
-    p_opt, p_cov, meta = model.fit(
-        spectrum, 
-        full_output=True,
-    )    
-    print(time() - t_init, p_opt[0], meta["log_chisq_fit"])
 
-    print(p_opt)
-
-
+    
     import matplotlib.pyplot as plt
     import matplotlib.gridspec as gridspec
     from matplotlib.ticker import NullFormatter
@@ -748,7 +789,19 @@ if __name__ == "__main__":
         zorder=-1
     )
 
+    weights = np.loadtxt(kwds["input_weights_path"])
+
+
+    ax.plot(
+        spectrum.wavelength[meta["mask"]],
+        weights,
+        c="tab:blue",
+        zorder=10
+    )
+
     ax.set_ylim(0, 3500)
+
+    
 
     fig.savefig("tmp1.png")
 

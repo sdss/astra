@@ -2,11 +2,15 @@
 import numpy as np
 import scipy.signal
 
+from scipy.ndimage.filters import median_filter
+
+
 def median_filtered_correction(
         wavelength,
         normalised_observed_flux, 
         normalised_observed_flux_err,
         normalised_model_flux,
+        segment_indices=None,
         width=151,
         bad_minimum_flux=0.01,
         non_finite_err_value=1e10,
@@ -17,8 +21,8 @@ def median_filtered_correction(
     Perform a median filter correction to the normalised observed spectrum, given some best-fitting normalised model flux.
 
     :param wavelength:
-        A 1-D array of wavelength values, or a N-length tuple containing separate wavelength segments.
-
+        A 1-D array of wavelength values.
+        
     :param normalised_observed_flux:
         The pseudo-continuum normalised observed flux array. This should be the same format as `wavelength`.
     
@@ -29,11 +33,11 @@ def median_filtered_correction(
         The best-fitting pseudo-continuum normalised model flux. This should have the same format as `wavelength`.
 
     :param width: [optional]
-        The width (int) or widths (N-length tuple of ints) for the median filter (default: 151).
+        The width (int) for the median filter (default: 151).
     
     :param bad_minimum_flux: [optional]
-        The value at which to set pixels as bad and median filter over them. This should be a float, or a N-length tuple of
-        floats, or `None` to set no low-flux filtering (default: 0.01).
+        The value at which to set pixels as bad and median filter over them. This should be a float,
+        or `None` to set no low-flux filtering (default: 0.01).
     
     :param non_finite_err_value: [optional]
         The error value to set for pixels with non-finite fluxes (default: 1e10).
@@ -45,6 +49,7 @@ def median_filtered_correction(
         A two-length tuple of the pseudo-continuum segments, and the corrected pseudo-continuum-normalised observed flux errors.
     """
 
+    '''
     if isinstance(wavelength, np.ndarray):
         wavelength = (wavelength, )
     if isinstance(normalised_observed_flux, np.ndarray):
@@ -54,27 +59,45 @@ def median_filtered_correction(
     if isinstance(normalised_model_flux, np.ndarray):
         normalised_model_flux = (normalised_model_flux, )
         
-    N = len(wavelength)
+    N = len(normalised_observed_flux)
     if isinstance(width, int):
         width = tuple([width] * N)
     if isinstance(bad_minimum_flux, float):
         bad_minimum_flux = tuple([bad_minimum_flux] * N)
+    '''
 
-    segment_continuum = []
-    segment_errs = []
-    for i, (wl, flux, err, model) \
-    in enumerate(zip(wavelength, normalised_observed_flux, normalised_observed_flux_err, normalised_model_flux)):
+    data = (wavelength, normalised_observed_flux, normalised_observed_flux_err, normalised_model_flux)
 
-        median_filter = scipy.ndimage.filters.median_filter(
-            flux, 
-            [5 * width[i]],
-            mode=mode,
-            **kwargs
-        )
+    if segment_indices is None:
+        segment_indices = np.array([[0, wavelength.size]])
+    
+    continuum = np.nan * np.ones_like(normalised_observed_flux)
 
-        bad = np.where(flux < bad_minimum_flux[i])[0]
+    E = 9
+
+    for j, (start, end) in enumerate(segment_indices):
+
+        wl = wavelength[start:end]
+        flux = normalised_observed_flux[start:end]
+        flux_err = normalised_observed_flux_err[start:end]
+        model_flux = normalised_model_flux[start:end]
+        
+        median = median_filter(flux, width, mode=mode, **kwargs)
+
+        bad = np.where(flux < bad_minimum_flux)[0]
+        
         flux_copy = flux.copy()
-        flux_copy[bad] = median_filter[bad]
+        flux_copy[bad] = median[bad]
+
+        ratio = flux_copy / model_flux
+
+        # Clip edges.
+        ratio[0] = np.median(ratio[:E])
+        ratio[-1] = np.median(ratio[-E:])
+
+        continuum[start:end] = median_filter(ratio, width, mode=mode)
+
+        '''
 
         err_copy = err.copy() * flux / flux_copy
 
@@ -85,7 +108,7 @@ def median_filtered_correction(
         ratio = flux_copy / model
         correction = scipy.ndimage.filters.median_filter(
             ratio,
-            [width[i]],
+            width[i],
             mode=mode,
             **kwargs
         )
@@ -94,5 +117,7 @@ def median_filtered_correction(
 
         segment_continuum.append(correction)
         segment_errs.append(err_copy)
+        '''
 
-    return (tuple(segment_continuum), tuple(segment_errs))
+    return continuum
+
