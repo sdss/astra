@@ -8,7 +8,6 @@ class SDSS5DataModelTask(SDSSDataModelTask):
     """ A task to represent a SDSS-V data product. """
 
     release = astra.Parameter(default="sdss5")
-    telescope = astra.Parameter(batch_method=tuple)
 
     # By default, SDSS-V data that we are processing is not public!
     public = astra.BoolParameter(
@@ -60,6 +59,7 @@ class ApVisitFile(SDSS5DataModelTask):
         description="The Modified Julian Date of the observation."
     )
     apred = astra.Parameter(batch_method=tuple)
+    telescope = astra.Parameter(batch_method=tuple)
 
     
 class ApStarFile(SDSS5DataModelTask):
@@ -93,10 +93,42 @@ class ApStarFile(SDSS5DataModelTask):
     # TODO: Consider whether apstar is needed, or if it should be a batch parameter
     apstar = astra.Parameter(default="star", batch_method=tuple)
     apred = astra.Parameter(batch_method=tuple) 
+    telescope = astra.Parameter(batch_method=tuple)
+
 
     def writer(self, spectrum, path, **kwargs):
         from astra.tools.spectrum.loaders import write_sdss_apstar
         return write_sdss_apstar(spectrum, path, **kwargs)
+
+
+class SpecFile(SDSS5DataModelTask):
+
+    """
+    A task to represent a SDSS-V BHM Spec data product.
+
+    :param mjd:
+        The modified Julian date of observations.
+
+    :param fiberid:
+        The fiber number used for observations.
+
+    :param plateid:
+        The identifier of the plate used for observations.
+
+    :param run2d:
+        The version of the data reduction pipeline used.
+
+    :param release:
+        The name of the SDSS data release (e.g., sdss5).
+    """
+
+    sdss_data_model_name = "spec"
+
+    mjd = astra.IntParameter(batch_method=tuple)
+    fiberid = astra.IntParameter(batch_method=tuple)
+    plateid = astra.IntParameter(batch_method=tuple)
+    run2d = astra.Parameter(batch_method=tuple)
+
 
 
 """
