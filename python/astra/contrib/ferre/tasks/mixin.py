@@ -99,13 +99,9 @@ class FerreMixin(BaseTask):
         config_path=dict(section=task_namespace, name="directory_kwds")
     )
 
-    use_queue = astra.BoolParameter(
-        default=False, significant=False,
-        config_path=dict(section=task_namespace, name="use_queue")
-    )
-    queue_kwds = astra.DictParameter(
+    slurm_kwds = astra.DictParameter(
         default=None, significant=False,
-        config_path=dict(section=task_namespace, name="queue_kwds")
+        config_path=dict(section=task_namespace, name="slurm_kwds")
     )
 
 

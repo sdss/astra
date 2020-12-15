@@ -57,7 +57,7 @@ workflow_keywords = dict(
     connection_string="sqlite:////uufs/chpc.utah.edu/common/home/u6020307/astra/m67.db",
     
     # Analysis keywords.
-    interpolation_order=3,
+    interpolation_order=1,
     continuum_flag=1,
     continuum_order=4,
     continuum_reject=0.1,
@@ -69,8 +69,13 @@ workflow_keywords = dict(
     pca_project=False,
     pca_chi=False,
     #directory_kwds=dict(dir="/home/ubuntu/data/sdss/astra-components/astra_ferre/tmp/"),
-    n_threads=24,
+    n_threads=64,
     debug=True,
+    slurm_kwds=dict(
+        alloc='sdss-np',
+        ppn=64,
+        walltime='01:00:00'
+    ),
     use_direct_access=False
 )
 
@@ -101,8 +106,8 @@ import astra
 
 astra.build(
     [dispatch],
-    workers=1,
-    #local_scheduler=True,
+    # Workers sets the number of simultaneous workers, but these are bound by number of active
+    # Slurm jobs because we interactively wait for a Slurm job to finish.
+    workers=2,
     detailed_summary=True
-
 )

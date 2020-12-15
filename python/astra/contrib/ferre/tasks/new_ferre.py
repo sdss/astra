@@ -1,7 +1,7 @@
 
 import os
 from astra.utils import log
-from astra.contrib.ferre.core import (Ferre as FerreNoQueue, FerreQueue)
+from astra.contrib.ferre.core import (Ferre as FerreNoQueue, FerreSlurmQueue)
 from astra.contrib.ferre.tasks.mixin import (FerreMixin, SourceMixin)
 #from astra.contrib.ferre.tasks.targets import GridHeaderTarget
 from astropy.table import Table
@@ -28,10 +28,24 @@ class FerreBase(FerreMixin, SourceMixin):
         return directory_kwds
 
 
-    def get_ferre_class(self):
-        """ Get the class to run FERRE. """
-        return FerreQueue if self.use_queue else FerreNoQueue
+    def get_ferre_model(self):
+        """ Get the model class to run FERRE, depending on whether you are running through Slurm or not. """
 
+        kwds = self.get_ferre_kwds()
+
+        if not self.slurm_kwds:
+            Ferre = FerreNoQueue
+        else:
+            Ferre = FerreSlurmQueue
+
+            # Include task identifier as label.
+            slurm_kwds = dict(label=self.task_id)
+            slurm_kwds.update(self.slurm_kwds)
+
+            kwds.update(slurm_kwds=slurm_kwds)
+
+        return Ferre(**kwds)
+            
     
     def get_ferre_kwds(self):
         """ Return human-readable keywords that will be used with FERRE. """
@@ -77,12 +91,10 @@ class FerreBase(FerreMixin, SourceMixin):
         N = self.get_batch_size()
         log.info(f"Running {N} task{('s in batch mode' if N > 1 else '')}: {self}")
 
-        Ferre = self.get_ferre_class()
-
-        model = Ferre(**self.get_ferre_kwds())
-
         spectra = self.read_input_observations()
 
+        model = self.get_ferre_model()
+        
         results = model.fit(
             spectra,
             initial_parameters=self.initial_parameters,

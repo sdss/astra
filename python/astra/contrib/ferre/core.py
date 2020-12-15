@@ -15,6 +15,7 @@ from io import StringIO, BytesIO
 from inspect import getfullargspec
 from shutil import copyfile, rmtree
 from tempfile import mkdtemp
+from time import sleep
 from tqdm import tqdm
 
 from astra.utils import log
@@ -49,6 +50,7 @@ class Ferre(object):
             input_lsf_path=None,
             debug=False,
             ferre_kwds=None,
+            slurm_kwds=None,
             **kwargs
         ):        
 
@@ -113,6 +115,8 @@ class Ferre(object):
         self.kwds = kwds
 
         self.debug = debug
+
+        self.slurm_kwds = kwds.pop("slurm_kwds", {})
         return None
 
 
@@ -211,7 +215,7 @@ class Ferre(object):
         return parsed_initial_parameters
 
 
-    def fit(self, spectra, initial_parameters=None, full_output=False, names=None):
+    def fit(self, spectra, initial_parameters=None, full_output=False, names=None, **kwargs):
 
         if isinstance(spectra, Spectrum1D):
             spectra = [spectra]
@@ -272,7 +276,7 @@ class Ferre(object):
                 fp.write(utils.format_ferre_input_parameters(*ip, star_name=star_name))
             
         # Execute.
-        self._execute(total=N)
+        self._execute(total=N, **kwargs)
         
         erroneous_output = -999.999
 
@@ -430,7 +434,7 @@ class Ferre(object):
         return input_path
     
 
-    def _execute(self, bufsize=1, encoding="utf-8", interactive=False, total=None):
+    def _execute(self, bufsize=1, encoding="utf-8", interactive=False, total=None, **kwargs):
         """
         Write an input file and execute FERRE.
         """
@@ -465,6 +469,7 @@ class Ferre(object):
 
 
     def _monitor_progress(self, total=None, interval=1):
+        # TODO: Monitor the Slurm job completeness instead?
     
         self.stdout, self.stderr = ("", "")
 
@@ -591,42 +596,41 @@ class Ferre(object):
 
 
 
-class FerreQueue(Ferre):
+class FerreSlurmQueue(Ferre):
 
     def _execute(self, bufsize=1, encoding="utf-8", total=None, **kwargs):
         """
-        Write an input file and execute FERRE, using the PBS/slurm queue submission system.
+        Write an input file and execute FERRE, using the Slurm queue submission system.
         """
-
+        
         self._setup()
         self._write_ferre_input_file()
 
-        # It's bad practice to import things here, but we do so to avoid import errors on
-        # non-Utah systems, since the pbs package is not a requirement and only available
-        # at Utah.
-        import pbs
-
         kwds = dict(
-            label="FERRE",
             nodes=1,
-            ppn=16,
+            ppn=64,
             walltime='24:00:00',
-            alloc='sdss-kp',
-            verbose=True
-        )        
-        kwds.update(self.queue_kwds)
-
-        queue = pbs.queue()
-        queue.create(**kwds)
-        queue.append(
-            self.executable,
+            alloc='sdss-np',
             dir=self.directory
         )
+        kwds.update(self.slurm_kwds)
+
+        # It's bad practice to import things here, but we do so to avoid import errors on
+        # non-Utah systems, since the slurm package is not a requirement and only available
+        # at Utah.
+        from slurm import queue as SlurmQueue
+
+        queue = SlurmQueue(verbose=True)
+        queue.create(**kwds)
+        queue.append(self.executable)
         queue.commit(hard=True, submit=True)
-        print(f"PBS queue key: {queue.key}")
+        log.info(f"Slurm job submitted with {queue.key}")
+        
         self.process = None
 
-        self._monitor_progress()
+        # Monitor progress through length of output files.
+        self._monitor_progress(total=total)
+        # TODO: Monitor the Slurm job completeness instead?
         return None
     
 
