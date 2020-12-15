@@ -467,8 +467,23 @@ class Ferre(object):
                 
             return None
 
+    def _check_progress(self, output_flux_path, interval):
+        if self.process is not None:
+            self._communicate(timeout=interval)
+        else:
+            sleep(interval)
 
-    def _monitor_progress(self, total=None, interval=1):
+        if os.path.exists(output_flux_path):
+            n_done = utils.line_count(output_flux_path)
+        else:
+            n_done = 0
+
+        n_errors = self.stderr.lower().count("error")
+        
+        return (n_done, n_errors)
+        
+
+    def _monitor_progress(self, total=None, interval=1, use_tqdm=True):
         # TODO: Monitor the Slurm job completeness instead?
     
         self.stdout, self.stderr = ("", "")
@@ -478,25 +493,28 @@ class Ferre(object):
         # monitor progress.
         output_flux_path = os.path.join(self.directory, self.kwds["output_flux_path"])
 
-        done = 0
-        with tqdm(total=total, desc="FERRE", unit="star") as pbar:
+        if use_tqdm:
+            done = 0
+            with tqdm(total=total, desc="FERRE", unit="star") as pbar:
+                while total > done:
+                    n_done, errors = self._check_progress(output_flux_path, interval)
+                    pbar.update(n_done - done)
+                    done = n_done
+
+                    if errors > 0:
+                        pbar.set_description(f"FERRE ({error_count:.0f} errors)")
+                    pbar.refresh()
+
+        else:
+            done = 0
             while total > done:
-                if self.process is not None:
-                    self._communicate(timeout=interval)
-                else:
-                    sleep(interval)
+                done, errors = self._check_progress(output_flux_path, interval)
 
-                if os.path.exists(output_flux_path):
-                    lines = utils.line_count(output_flux_path)
-                    pbar.update(lines - done)
-                    done = lines
-                
-                error_count = self.stderr.lower().count("error")
-                if error_count > 0:
-                    pbar.set_description(f"FERRE ({error_count:.0f} errors)")
+                log.info(f"FERRE in {self.directory} has completed {done} / {total}")
 
-                pbar.refresh()
-
+                if errors > 0:
+                    log.error(f"FERRE in {self.directory} has {errors} errors")
+            
         
         # Do a final I/O communicate because we are done.
         if self.process is not None:
@@ -606,13 +624,7 @@ class FerreSlurmQueue(Ferre):
         self._setup()
         self._write_ferre_input_file()
 
-        kwds = dict(
-            nodes=1,
-            ppn=64,
-            walltime='24:00:00',
-            alloc='sdss-np',
-            dir=self.directory
-        )
+        kwds = dict(dir=self.directory)
         kwds.update(self.slurm_kwds)
 
         # It's bad practice to import things here, but we do so to avoid import errors on
@@ -629,7 +641,7 @@ class FerreSlurmQueue(Ferre):
         self.process = None
 
         # Monitor progress through length of output files.
-        self._monitor_progress(total=total)
+        self._monitor_progress(total=total, interval=30, use_tqdm=False)
         # TODO: Monitor the Slurm job completeness instead?
         return None
     

@@ -2,9 +2,13 @@
 import astra
 import datetime
 from astra.tasks.base import BaseTask
+from astra.tasks.slurm import slurm_mixin_factory
 
 
-class FerreMixin(BaseTask):
+SlurmMixin = slurm_mixin_factory("FERRE")
+
+
+class FerreMixin(SlurmMixin, BaseTask):
 
     """ A mixin class for FERRE tasks. """
 
@@ -99,11 +103,6 @@ class FerreMixin(BaseTask):
         config_path=dict(section=task_namespace, name="directory_kwds")
     )
 
-    slurm_kwds = astra.DictParameter(
-        default=None, significant=False,
-        config_path=dict(section=task_namespace, name="slurm_kwds")
-    )
-
 
     # TODO: Put elsewhere?
     speclib_dir = astra.Parameter(
@@ -120,6 +119,28 @@ class FerreMixin(BaseTask):
     # Optionally disable generating AstraSource objects.
     write_source_output = astra.BoolParameter(default=True, significant=False)
 
+    '''
+    use_slurm = astra.BoolParameter(
+        default=True, significant=False,
+        config_path=dict(section=task_namespace, name="use_slurm")
+    )
+    slurm_nodes = astra.IntParameter(
+        default=1, significant=False,
+        config_path=dict(section=task_namespace, name="slurm_nodes")
+    )
+    slurm_ppn = astra.IntParameter(
+        default=64, significant=False,
+        config_path=dict(section=task_namespace, name="slurm_ppn")
+    )
+    slurm_walltime = astra.Parameter(
+        default="24:00:00", significant=False,
+        config_path=dict(section=task_namespace, name="slurm_walltime")        
+    )
+    slurm_alloc = astra.Parameter(
+        significant=False, default="sdss-np", # The SDSS-V cluster.
+        config_path=dict(section=task_namespace, name="slurm_alloc")
+    )
+    '''
 
 class SourceMixin(BaseTask):
 

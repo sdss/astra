@@ -33,15 +33,21 @@ class FerreBase(FerreMixin, SourceMixin):
 
         kwds = self.get_ferre_kwds()
 
-        if not self.slurm_kwds:
+        if not self.use_slurm:
             Ferre = FerreNoQueue
+            # Testing edge cases where it should be using slurm and it doesn't!
+            assert False
         else:
             Ferre = FerreSlurmQueue
 
             # Include task identifier as label.
-            slurm_kwds = dict(label=self.task_id)
-            slurm_kwds.update(self.slurm_kwds)
-
+            slurm_kwds = dict(
+                label=self.task_id,
+                alloc=self.slurm_alloc,
+                nodes=self.slurm_nodes,
+                ppn=self.slurm_ppn,
+                walltime=self.slurm_walltime
+            )
             kwds.update(slurm_kwds=slurm_kwds)
 
         return Ferre(**kwds)

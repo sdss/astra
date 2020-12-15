@@ -75,7 +75,6 @@ class FerreGivenApStarFile(ApStarMixin, FerreBase):
     grid_header_path = astra.Parameter()
 
 
-
 class InitialEstimateOfStellarParametersGivenApStarFile(ApStarMixin, FerreMixin):
     
     grid_header_list_path = astra.Parameter(
