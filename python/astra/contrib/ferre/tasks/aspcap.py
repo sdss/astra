@@ -13,11 +13,11 @@ from tqdm import tqdm
 import astra
 from astra.contrib.ferre.continuum import median_filtered_correction
 from astra.contrib.ferre.tasks.mixin import (FerreMixin, SourceMixin)
-from astra.contrib.ferre.tasks.new_ferre import FerreBase
+from astra.contrib.ferre.tasks.ferre import FerreBase
 from astra.contrib.ferre.tasks.targets import (FerreResult, FerreResultProxy)
 from astra.contrib.ferre import utils
 from astra.tasks.targets import AstraSource, LocalTarget
-from astra.tasks.io.sdss4 import ApStarFile
+from astra.tasks.io.sdss4 import ApStarFile, ApVisitFile
 from astra.tools.spectrum import Spectrum1D
 from astra.utils import log, symlink_force
 from luigi import WrapperTask
@@ -54,15 +54,16 @@ class ApStarMixin(ApStarFile):
 
     def read_input_observations(self, **kwargs):
         """ Read the input observations. """
-        # Since ApStar files contain the combined spectrum and all individual visits, we are going
-        # to supply a data_slice parameter to only return the first spectrum.        
+        
+        kwds = kwargs.copy()
+        if not self.analyse_individual_visits:
+            # Since ApStar files contain the combined spectrum and all individual visits, we are going
+            # to supply a data_slice parameter to only return the first spectrum.            
+            kwds.update(data_slice=(slice(0, 1), slice(None)))
+        
         spectra = []
         for task in self.get_batch_tasks():
-            spectra.append(Spectrum1D.read(
-                task.input()["observation"].path,
-                data_slice=(slice(0, 1), slice(None)),
-                **kwargs
-            ))
+            spectra.append(Spectrum1D.read(task.input()["observation"].path, **kwds))
         return spectra
     
     
@@ -71,8 +72,12 @@ class ApStarMixin(ApStarFile):
         return [f"{i:.0f}_{telescope}_{obj}" for i, (telescope, obj) in enumerate(zip(self.telescope, self.obj))]
 
 
+
 class FerreGivenApStarFile(ApStarMixin, FerreBase):
     grid_header_path = astra.Parameter()
+    analyse_individual_visits = astra.BoolParameter(default=False)
+
+    
 
 
 class InitialEstimateOfStellarParametersGivenApStarFile(ApStarMixin, FerreMixin):
@@ -133,13 +138,15 @@ class InitialEstimateOfStellarParametersGivenApStarFile(ApStarMixin, FerreMixin)
             best_tasks.setdefault(key, (np.inf, None))
 
             result = output["database"].read(as_dict=True)
-            log_chisq_fit = result["log_chisq_fit"]
+
+            log_chisq_fit, *_ = result["log_chisq_fit"]
+            previous_teff, *_ = result["TEFF"]
 
             parsed_header = utils.parse_header_path(task.grid_header_path)
 
             # Penalise chi-sq in the same way they did for DR16.
             # See github.com/sdss/apogee/python/apogee/aspcap/aspcap.py#L492
-            if parsed_header["spectral_type"] == "GK" and result["TEFF"] < 3985:
+            if parsed_header["spectral_type"] == "GK" and previous_teff < 3985:
                 # \chi^2 *= 10
                 log_chisq_fit += np.log(10)
 
@@ -351,7 +358,10 @@ class EstimateStellarParametersGivenApStarFile(ApStarMixin, FerreMixin):
             execute_tasks.append(task.clone(
                 FerreGivenApStarFile,
                 grid_header_path=output["grid_header_path"],
-                initial_parameters={ k: v for k, v in output.items() if k in headers[0]["LABEL"] }
+                # We want to analyse all spectra at this point.
+                analyse_individual_visits=True,
+                # Take the first parameter value for each.
+                initial_parameters={ k: v[0] for k, v in output.items() if k in headers[0]["LABEL"] }
             ))
         
         outputs = yield execute_tasks

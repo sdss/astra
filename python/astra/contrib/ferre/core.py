@@ -184,10 +184,13 @@ class Ferre(object):
     def in_grid_limits(self, points):
         lower, upper = self.grid_limits
         return (upper >= points) * (points >= lower)
-            
-    def parse_initial_parameters(self, initial_parameters, N):
 
+
+    def parse_initial_parameters(self, initial_parameters, Ns):
+
+        N = sum(Ns)
         parsed_initial_parameters = np.tile(self.grid_mid_point, N).reshape((N, -1))
+        
         if initial_parameters is not None and len(initial_parameters) > 0:
             self.kwds["init_algorithm_flag"] = 0
 
@@ -196,14 +199,18 @@ class Ferre(object):
                 initial_parameters = [initial_parameters]
             
             D = self.headers[0]["N_OF_DIM"]
+            si = 0
             for i, ip in enumerate(initial_parameters):
+                N = Ns[i]
                 for j, pn in enumerate(self.parameter_names):
                     try:
                         v = ip[pn]
                     except KeyError:
                         continue
                     else:
-                        parsed_initial_parameters[i, j] = v
+                        parsed_initial_parameters[si:si+N, j] = v
+                si += N
+            
             
         # Apply frozen parameters.
         if self.frozen_parameters is not None:
@@ -220,15 +227,19 @@ class Ferre(object):
         if isinstance(spectra, Spectrum1D):
             spectra = [spectra]
 
-        wavelengths = np.vstack([spectrum.wavelength.value for spectrum in spectra])
+        
         flux = np.vstack([spectrum.flux.value for spectrum in spectra])
         uncertainties = np.vstack([spectrum.uncertainty.array**-0.5 for spectrum in spectra])
-
+        Ns = np.array([spectrum.flux.shape[0] for spectrum in spectra])
+        wavelengths = np.vstack([
+            np.tile(spectrum.wavelength.value, n).reshape((n, -1)) \
+            for (spectrum, n) in zip(spectra, Ns)
+        ])
+        
         N, P = flux.shape
-        assert flux.shape[0] == len(spectra), "Mis-match in flux array"
-        assert uncertainties.shape[0] == len(spectra), "Mis-match in uncertainties array"
-
-        parsed_initial_parameters = self.parse_initial_parameters(initial_parameters, N)
+        assert flux.shape == uncertainties.shape
+        
+        parsed_initial_parameters = self.parse_initial_parameters(initial_parameters, Ns)
 
         # Make sure we are not sending nans etc.
         bad = ~np.isfinite(flux) \
@@ -269,12 +280,21 @@ class Ferre(object):
         if names is None:
             names = [f"idx_{i:.0f}" for i in range(len(parsed_initial_parameters))]
         
+        else:
+            # Expand out names if needed.
+            if len(names) == len(spectra) and sum(Ns) > len(spectra):
+                expanded_names = []
+                for i, (name, n) in enumerate(zip(names, Ns)):
+                    for j in range(n):
+                        expanded_names.append(f"{name}_{j}")
+                names = expanded_names
+
         with open(os.path.join(self.directory, self.kwds["input_parameter_path"]), "w") as fp:            
             #for i, each in enumerate(parsed_initial_parameters):
             #    fp.write(utils.format_ferre_input_parameters(*each, star_name=f"idx_{i:.0f}"))
             for star_name, ip in zip(names, parsed_initial_parameters):
                 fp.write(utils.format_ferre_input_parameters(*ip, star_name=star_name))
-            
+
         # Execute.
         self._execute(total=N, **kwargs)
         
@@ -330,6 +350,9 @@ class Ferre(object):
                     
                 meta["continuum"] = continuum
 
+                # Add n_spectra_per_source
+                meta["n_spectra_per_source"] = tuple(Ns)
+
                 return (param, param_errs, meta)
 
             return (param, param_errs)
@@ -351,7 +374,7 @@ class Ferre(object):
         
 
         if isinstance(x, dict):
-            x = self.parse_initial_parameters([x], 1)[0]
+            x = self.parse_initial_parameters([x], [1])[0]
         else:
             if len(x) < len(self.parameter_names) and self.frozen_parameters is not None:
                 pns = [pn for pn in self.parameter_names if pn not in self.frozen_parameters]

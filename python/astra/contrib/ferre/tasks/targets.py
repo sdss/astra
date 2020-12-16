@@ -3,33 +3,38 @@ import json
 import re
 from astra.tasks.targets import (LocalTarget, DatabaseTarget, BaseDatabaseTarget)
 from sqlalchemy import (Column, Float, String)
+from sqlalchemy.types import ARRAY as Array
 from luigi import ExternalTask, Parameter, DictParameter
-
-
-class GridHeaderTarget(ExternalTask):
-
-    path = Parameter()
-
-    def output(self):
-        return LocalTarget(self.path)
-
-        
 
 class FerreResult(DatabaseTarget):
 
     """ A database row representing an output target from FERRE. """
 
-    teff = Column("TEFF", Float)
-    logg = Column("LOGG", Float)
-    metals = Column("METALS", Float)
-    alpha_m = Column("O Mg Si S Ca Ti", Float)
-    n_m = Column("N", Float)
-    c_m = Column("C", Float)
-    log10vdop = Column("LOG10VDOP", Float)
+    # We use arrays to allow for multiple analyses (individual visits and stacks)
+    # per ApStar object.
+
+    teff = Column("TEFF", Array(Float))
+    logg = Column("LOGG", Array(Float))
+    metals = Column("METALS", Array(Float))
+    alpha_m = Column("O Mg Si S Ca Ti", Array(Float))
+    n_m = Column("N", Array(Float))
+    c_m = Column("C", Array(Float))
+    log10vdop = Column("LOG10VDOP", Array(Float))
     # Not all grids have LGVSINI.
-    lgvsini = Column("LGVSINI", Float, nullable=True)
-    log_snr_sq = Column("log_snr_sq", Float)
-    log_chisq_fit = Column("log_chisq_fit", Float)
+    lgvsini = Column("LGVSINI", Array(Float), nullable=True)
+
+    e_teff = Column("E_TEFF", Array(Float))
+    e_logg = Column("E_LOGG", Array(Float))
+    e_metals = Column("E_METALS", Array(Float))
+    e_alpha_m = Column("E_O Mg Si S Ca Ti", Array(Float))
+    e_n_m = Column("E_N", Array(Float))
+    e_c_m = Column("E_C", Array(Float))
+    e_log10vdop = Column("E_LOG10VDOP", Array(Float))
+    # Not all grids have LGVSINI.
+    e_lgvsini = Column("E_LGVSINI", Array(Float), nullable=True)
+
+    log_snr_sq = Column("log_snr_sq", Array(Float))
+    log_chisq_fit = Column("log_chisq_fit", Array(Float))
     
 
 

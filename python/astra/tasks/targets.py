@@ -178,10 +178,14 @@ class BaseDatabaseTarget(luigi.Target):
                 if value is None:
                     continue
                 
-                try:
-                    value = str(value)
-                except:
-                    value = json.dumps(value)
+                if isinstance(getattr(table.c, key).type, sqlalchemy.ARRAY):
+                    if not isinstance(value, (tuple, list, np.ndarray)):
+                        value = [value]
+                else:
+                    try:
+                        value = str(value)
+                    except:
+                        value = json.dumps(value)
                 
             sanitised_data[key] = value
     
