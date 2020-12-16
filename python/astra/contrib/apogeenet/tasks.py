@@ -16,9 +16,14 @@ from astra.tools.spectrum import Spectrum1D
 from astra.contrib.apogeenet.model import Net, predict
 from astra.utils import log
 
+from astra.tasks.slurm import slurm_mixin_factory, slurmify
+
+
+SlurmMixin = slurm_mixin_factory("APOGEE")
+
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-class APOGEENetMixin(BaseTask):
+class APOGEENetMixin(SlurmMixin, BaseTask):
 
     """ A mixin class for APOGEENet tasks. """
 
@@ -156,7 +161,7 @@ class EstimateStellarParameters(APOGEENetMixin):
         
         return results
 
-
+    @slurmify
     def run(self):
         """ Estimate stellar parameters given an APOGEENet model and ApStarFile(s). """
 
