@@ -12,11 +12,13 @@ from astra.tasks.continuum import Sinusoidal
 from astra.tools.spectrum import Spectrum1D
 from astra.tools.spectrum.writers import create_astra_source
 from astra.contrib.thepayne import training, test as testing
-
+from astra.tasks.slurm import (slurm_mixin_factory, slurmify)
 from sqlalchemy import (Column, Float)
 
 
-class ThePayneMixin(BaseTask):
+SlurmMixin = slurm_mixin_factory("ThePayne")
+
+class ThePayneMixin(SlurmMixin, BaseTask):
 
     task_namespace = "ThePayne"
 
@@ -131,7 +133,7 @@ class TrainThePayne(ThePayneMixin):
         """ The requirements of this task."""
         return LocalTargetTask(path=self.training_set_path)
 
-
+    @slurmify
     def run(self):
         """ Execute this task. """
 
@@ -169,8 +171,6 @@ class TrainThePayne(ThePayneMixin):
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         return LocalTarget(path)
-
-
 
 
 
@@ -218,7 +218,7 @@ class EstimateStellarLabels(ThePayneMixin):
 
         return (observation, continuum, normalized_flux, normalized_ivar)
 
-
+    @slurmify
     def run(self):
         """ Execute this task. """
 
@@ -290,8 +290,8 @@ class ContinuumNormalize(Sinusoidal, ApStarFile):
     """
 
     def requires(self):
-        return ApStarFile(**self.get_common_param_kwargs(ApStarFile))
-
+        return self.clone(ApStarFile)
+        
 
     def output(self):
         if self.is_batch_mode:
@@ -351,7 +351,7 @@ class EstimateStellarLabelsGivenApStarFile(EstimateStellarLabels, ContinuumNorma
 
     def requires(self):
         return {
-            "model": TrainThePayne(**self.get_common_param_kwargs(TrainThePayne)),
-            "observation": ApStarFile(**self.get_common_param_kwargs(ApStarFile)),
-            "continuum": ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
+            "model": self.clone(TrainThePayne),
+            "observation": self.clone(ApStarFile),
+            "continuum": self.clone(ContinuumNormalize)
         }
