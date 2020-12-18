@@ -29,27 +29,31 @@ def slurm_mixin_factory(task_namespace):
             significant=False, default="sdss-np", # The SDSS-V cluster.
             config_path=dict(section=task_namespace, name="slurm_alloc")
         )
+        slurm_partition = Parameter(
+            significant=False, default="",
+            config_path=dict(section=task_namespace, name="slurm_partition")
+        )
+        slurm_mem = Parameter(
+            significant=False, default="",
+            config_path=dict(section=task_namespace, name="slurm_mem")
+        )
+        slurm_gres = Parameter(
+            significant=False, default="",
+            config_path=dict(section=task_namespace, name="slurm_gres")
+        )
 
     return SlurmMixin
 
 
 class SlurmMixin(BaseTask):
-    use_slurm = BoolParameter(
-        default=False, significant=False,
-    )
-    slurm_nodes = IntParameter(
-        default=1, significant=False,
-    )
-    slurm_ppn = IntParameter(
-        default=64, significant=False,
-    )
-    slurm_walltime = Parameter(
-        default="24:00:00", significant=False,
-    )
-    slurm_alloc = Parameter(
-        significant=False, default="sdss-np", # The SDSS-V cluster.
-    )
-
+    use_slurm = BoolParameter(default=False, significant=False)
+    slurm_nodes = IntParameter(default=1, significant=False)
+    slurm_ppn = IntParameter(default=64, significant=False)
+    slurm_walltime = Parameter(default="24:00:00", significant=False)
+    slurm_alloc = Parameter(significant=False, default="sdss-np") # The SDSS-V cluster.
+    slurm_partition = Parameter(significant=False, default="")
+    slurm_mem = Parameter(significant=False, default="")
+    slurm_gres = Parameter(significant=False, default="") # resources.
 
 
 class SlurmTask(WrapperTask):
@@ -81,7 +85,7 @@ def slurmify(func):
     """
 
     def wrapper(self, *args, **kwargs):
-        if not hasattr(self, "use_slurm", False):
+        if not getattr(self, "use_slurm", False):
             return func(self, *args, **kwargs)
         else:
             # Save the task params etc to disk.
@@ -107,10 +111,10 @@ def slurmify(func):
             from slurm import queue as SlurmQueue
 
             kwds = dict(label=self.task_id)
-            for key in ("ppn", "nodes", "walltime", "alloc"):
+            for key in ("ppn", "nodes", "walltime", "alloc", "partition", "mem", "gres"):
                 sk = f"slurm_{key}"
-                if hasattr(self, sk):
-                    kwds[sk] = getattr(self, sk)
+                if getattr(self, sk, None):
+                    kwds[key] = getattr(self, sk)
 
             queue = SlurmQueue(verbose=True)
             queue.create(**kwds)
