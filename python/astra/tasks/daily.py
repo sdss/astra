@@ -14,6 +14,7 @@ from astra.tasks.io import (ApStarFile, ApVisitFile)
 
 class DailyMixin(Config):
     operations_user = astra.Parameter(
+        default="sdss",
         config_path=dict(section="Daily", name="operations_user")
     )
 
@@ -26,6 +27,47 @@ connection = engine.connect()
 md = sqlalchemy.MetaData(schema="apogee_drp")
 visit_table = sqlalchemy.Table("visit", md, autoload=True, autoload_with=connection)
 star_table = sqlalchemy.Table("star", md, autoload=True, autoload_with=connection)
+
+
+def get_bhm_mwm_visits(mjd=None, plate=None, run2d=None):
+    """
+    Yield visits that were observed by BHM, but are of interest to MWM.
+
+    :param mjd: (optional)
+        Modified Julian Date of the observations (default: None).
+
+    :param plate: (optional)
+        The plate of the observations (default: None).
+
+    :param run2d: (optional)
+        The BHM reduction pipeline version (default: None).
+    """
+
+    md = sqlalchemy.MetaData(schema="catalogdb")
+    table = sqlalchemy.Table("sdssv_boss_spall", md, autoload=True, autoload_with=connection)
+
+    columns = [
+        table.c.catalogid,
+        table.c.fiberid,
+        table.c.mjd,
+        table.c.run2d,
+        table.c.plate
+    ]
+
+    s = sqlalchemy.select(columns).where(table.c.firstcarton.like("mwm_%"))
+    if mjd is not None:
+        s = s.where(table.c.mjd == mjd)
+    if run2d is not None:
+        s = s.where(table.c.run2d == run2d)
+    if plate is not None:
+        s = s.where(table.c.plate == plate)
+
+    rows = engine.execute(s).fetchall()
+    column_names = [column.name for column in columns]
+    
+    for row in rows:
+        yield dict(zip(column_names, row))
+
 
 
 def get_visits(mjd, full_output=False):
@@ -223,7 +265,7 @@ def get_visits_given_star(obj, apred):
 
 
 
-
+"""
 if __name__ == "__main__":
 
     mjd = 59146
@@ -240,3 +282,4 @@ if __name__ == "__main__":
     #       apogee_id -> obj
     #       remove apstar?
 
+"""

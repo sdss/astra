@@ -15,8 +15,10 @@ class SDSS5DataModelTask(SDSSDataModelTask):
         significant=False,
         parsing=astra.BoolParameter.IMPLICIT_PARSING
     )
+    # Avoid circular loop trying to access "remote" files that are 
+    # actually "local", but just don't exist.
     use_remote = astra.BoolParameter(
-        default=True,
+        default=False,
         significant=False,
         parsing=astra.BoolParameter.IMPLICIT_PARSING
     )
@@ -109,10 +111,10 @@ class SpecFile(SDSS5DataModelTask):
     :param mjd:
         The modified Julian date of observations.
 
-    :param fiberid:
-        The fiber number used for observations.
+    :param catalogid:
+        The catalog identifier of the object.
 
-    :param plateid:
+    :param plate:
         The identifier of the plate used for observations.
 
     :param run2d:
@@ -124,11 +126,22 @@ class SpecFile(SDSS5DataModelTask):
 
     sdss_data_model_name = "spec"
 
-    mjd = astra.IntParameter(batch_method=tuple)
     fiberid = astra.IntParameter(batch_method=tuple)
-    plateid = astra.IntParameter(batch_method=tuple)
+    catalogid = astra.IntParameter(batch_method=tuple)
+    mjd = astra.IntParameter(batch_method=tuple)
+    plate = astra.Parameter(batch_method=tuple)
     run2d = astra.Parameter(batch_method=tuple)
 
+
+    @property
+    def local_path(self):
+        """ A monkey-patch while upstream people figure out their shit. """
+        import os
+        boss_spectro_redux = os.getenv("BOSS_SPECTRO_REDUX")
+        
+        identifier = max(self.fiberid, self.catalogid)
+        return f"{boss_spectro_redux}/{self.run2d}/spectra/{self.plate}p/{self.mjd}/spec-{self.plate}-{self.mjd}-{identifier:0>11}.fits"
+            
 
 
 """

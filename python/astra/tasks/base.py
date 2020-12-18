@@ -9,7 +9,6 @@ from time import time
 from luigi.mock import MockTarget
 from luigi.task_register import Register
 from luigi.parameter import ParameterVisibility, _DictParamEncoder, FrozenOrderedDict
-
 from astra.tasks.targets import DatabaseTarget
 from astra.utils import log
 
@@ -22,9 +21,11 @@ astra_version = parse_version(__version__)
 
 class BaseTask(luigi.Task, metaclass=Register):
 
+    """ A base task class for Astra. """
+
     connection_string = luigi.Parameter(
-        default="sqlite://", # By default create database in memory.
-        config_path=dict(section="task_history", name="db_connection"),
+        default=":memory:", # By default create database in memory.
+        config_path=dict(section="astra", name="db_connection_string"),
         visibility=luigi.parameter.ParameterVisibility.HIDDEN,
         significant=False
     )

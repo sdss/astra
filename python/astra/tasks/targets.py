@@ -62,9 +62,9 @@ class BaseDatabaseTarget(luigi.Target):
 
     @property
     def __tablename__(self):
-        """ The name of the table in the database. """
-        #return f"{self.task_namespace}_{self.task_family}"
-        return self.task_family
+        """ The name of the table in the database. """        
+        # Don't allow '.' in table names!
+        return self.task_family.replace(".", "_")
     
 
     @property
