@@ -13,7 +13,7 @@ from astra.tools.spectrum import Spectrum1D
 from astra.tools.spectrum.writers import create_astra_source
 from astra.contrib.thepayne import training, test as testing
 from astra.tasks.slurm import (slurm_mixin_factory, slurmify)
-from sqlalchemy import (Column, Float)
+from sqlalchemy import (ARRAY as Array, Column, Float)
 
 
 SlurmMixin = slurm_mixin_factory("ThePayne")
@@ -45,59 +45,61 @@ class ThePayneMixin(SlurmMixin, BaseTask):
 
 class ThePayneResult(DatabaseTarget):
 
+    table_name = "thepayne_apstar"
+
     """ A database row to represent an output. """
 
-    teff = Column('teff', Float)
-    logg = Column('logg', Float)
-    v_turb = Column('v_turb', Float)
-    c_h = Column('c_h', Float)
-    n_h = Column('n_h', Float)
-    o_h = Column('o_h', Float)
-    na_h = Column('na_h', Float)
-    mg_h = Column('mg_h', Float)
-    al_h = Column('al_h', Float)
-    si_h = Column('si_h', Float)
-    p_h = Column('p_h', Float)
-    s_h = Column('s_h', Float)
-    k_h = Column('k_h', Float)
-    ca_h = Column('ca_h', Float)
-    ti_h = Column('ti_h', Float)
-    v_h = Column('v_h', Float)
-    cr_h = Column('cr_h', Float)
-    mn_h = Column('mn_h', Float)
-    fe_h = Column('fe_h', Float)
-    co_h = Column('co_h', Float)
-    ni_h = Column('ni_h', Float)
-    cu_h = Column('cu_h', Float)
-    ge_h = Column('ge_h', Float)
-    c12_c13 = Column('c12_c13', Float)
-    v_macro = Column('v_macro', Float)
+    teff = Column('teff', Array(Float))
+    logg = Column('logg', Array(Float))
+    v_turb = Column('v_turb', Array(Float))
+    c_h = Column('c_h', Array(Float))
+    n_h = Column('n_h', Array(Float))
+    o_h = Column('o_h', Array(Float))
+    na_h = Column('na_h', Array(Float))
+    mg_h = Column('mg_h', Array(Float))
+    al_h = Column('al_h', Array(Float))
+    si_h = Column('si_h', Array(Float))
+    p_h = Column('p_h', Array(Float))
+    s_h = Column('s_h', Array(Float))
+    k_h = Column('k_h', Array(Float))
+    ca_h = Column('ca_h', Array(Float))
+    ti_h = Column('ti_h', Array(Float))
+    v_h = Column('v_h', Array(Float))
+    cr_h = Column('cr_h', Array(Float))
+    mn_h = Column('mn_h', Array(Float))
+    fe_h = Column('fe_h', Array(Float))
+    co_h = Column('co_h', Array(Float))
+    ni_h = Column('ni_h', Array(Float))
+    cu_h = Column('cu_h', Array(Float))
+    ge_h = Column('ge_h', Array(Float))
+    c12_c13 = Column('c12_c13', Array(Float))
+    v_macro = Column('v_macro', Array(Float))
 
-    u_teff = Column('u_teff', Float)
-    u_logg = Column('u_logg', Float)
-    u_v_turb = Column('u_v_turb', Float)
-    u_c_h = Column('u_c_h', Float)
-    u_n_h = Column('u_n_h', Float)
-    u_o_h = Column('u_o_h', Float)
-    u_na_h = Column('u_na_h', Float)
-    u_mg_h = Column('u_mg_h', Float)
-    u_al_h = Column('u_al_h', Float)
-    u_si_h = Column('u_si_h', Float)
-    u_p_h = Column('u_p_h', Float)
-    u_s_h = Column('u_s_h', Float)
-    u_k_h = Column('u_k_h', Float)
-    u_ca_h = Column('u_ca_h', Float)
-    u_ti_h = Column('u_ti_h', Float)
-    u_v_h = Column('u_v_h', Float)
-    u_cr_h = Column('u_cr_h', Float)
-    u_mn_h = Column('u_mn_h', Float)
-    u_fe_h = Column('u_fe_h', Float)
-    u_co_h = Column('u_co_h', Float)
-    u_ni_h = Column('u_ni_h', Float)
-    u_cu_h = Column('u_cu_h', Float)
-    u_ge_h = Column('u_ge_h', Float)
-    u_c12_c13 = Column('u_c12_c13', Float)
-    u_v_macro = Column('u_v_macro', Float)
+    u_teff = Column('u_teff', Array(Float))
+    u_logg = Column('u_logg', Array(Float))
+    u_v_turb = Column('u_v_turb', Array(Float))
+    u_c_h = Column('u_c_h', Array(Float))
+    u_n_h = Column('u_n_h', Array(Float))
+    u_o_h = Column('u_o_h', Array(Float))
+    u_na_h = Column('u_na_h', Array(Float))
+    u_mg_h = Column('u_mg_h', Array(Float))
+    u_al_h = Column('u_al_h', Array(Float))
+    u_si_h = Column('u_si_h', Array(Float))
+    u_p_h = Column('u_p_h', Array(Float))
+    u_s_h = Column('u_s_h', Array(Float))
+    u_k_h = Column('u_k_h', Array(Float))
+    u_ca_h = Column('u_ca_h', Array(Float))
+    u_ti_h = Column('u_ti_h', Array(Float))
+    u_v_h = Column('u_v_h', Array(Float))
+    u_cr_h = Column('u_cr_h', Array(Float))
+    u_mn_h = Column('u_mn_h', Array(Float))
+    u_fe_h = Column('u_fe_h', Array(Float))
+    u_co_h = Column('u_co_h', Array(Float))
+    u_ni_h = Column('u_ni_h', Array(Float))
+    u_cu_h = Column('u_cu_h', Array(Float))
+    u_ge_h = Column('u_ge_h', Array(Float))
+    u_c12_c13 = Column('u_c12_c13', Array(Float))
+    u_v_macro = Column('u_v_macro', Array(Float))
 
 
 
@@ -218,6 +220,7 @@ class EstimateStellarLabels(ThePayneMixin):
 
         return (observation, continuum, normalized_flux, normalized_ivar)
 
+
     @slurmify
     def run(self):
         """ Execute this task. """
@@ -234,34 +237,31 @@ class EstimateStellarLabels(ThePayneMixin):
             
             p_opt, p_cov, model_flux, meta = testing.test(
                 spectrum.wavelength.value,
-                normalized_flux[[0]],
-                normalized_ivar[[0]],
+                normalized_flux,
+                normalized_ivar,
                 **state
             )
 
-            rows = []
-            for p, u in zip(p_opt, p_cov):
-                row = dict(zip(label_names, p))
-                row.update(dict(zip(
-                    (f"u_{ln}" for ln in label_names),
-                    np.sqrt(np.diag(u))
-                )))
-                rows.append(row)
+            results = dict(zip(label_names, p_opt.T))
+            L = len(results)
+            results.update(dict(zip(
+                (f"u_{ln}" for ln in label_names),
+                np.sqrt(p_cov[:, np.arange(L), np.arange(L)].T)
+            )))
 
-            # Write database row given the first result
-            # (Which is either a stacked spectrum, or a single visit)
-            task.output()["database"].write(rows[0])
+            # Write output to database.
+            task.output()["database"].write(results)
             
             # Write AstraSource object.
             task.output()["AstraSource"].write(
                 spectrum=spectrum,
-                normalized_flux=normalized_flux[[0]],
-                normalized_ivar=normalized_ivar[[0]],
-                continuum=continuum[[0]],
+                normalized_flux=normalized_flux,
+                normalized_ivar=normalized_ivar,
+                continuum=continuum,
                 model_flux=model_flux,
                 # TODO: Project uncertainties to flux space.
                 model_ivar=None,
-                results_table=Table(rows=rows)
+                results_table=Table(results)
             )
 
         return None
