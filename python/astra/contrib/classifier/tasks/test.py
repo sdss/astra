@@ -87,6 +87,8 @@ class ClassifyApVisitResult(DatabaseTarget):
 
     """ A database target (row) indicating the result from the classifier. """
 
+    table_name = "classify_apvisit"
+
     # Output (unnormalised) log probabilities.
     lp_sb2 = Column("lp_sb2", Float)
     lp_yso = Column("lp_yso", Float)
@@ -106,6 +108,8 @@ class ClassifyApVisitResult(DatabaseTarget):
 class ClassifyApStarResult(DatabaseTarget):
 
     """ A database target (row) indicating the result from the classifier. """
+
+    table_name = "classify_apstar"
 
     # Output (unnormalised) log probabilities.
     lp_sb2 = Column("lp_sb2", Float)
