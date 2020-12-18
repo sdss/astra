@@ -174,36 +174,37 @@ class BaseTask(luigi.Task, metaclass=Register):
         :param params_str: dict of param name -> value as string.
         """
         kwargs = {}
-        batch_params = cls.batch_param_names()
+        batch_param_names = cls.batch_param_names()
         
         for param_name, param in cls.get_params():
             if param_name in params_str:
 
-                param_str = params_str[param_name]
-                '''
-                if param_name in batch_params:    
-                    try:
-                        # See notes above about to_str_params().
-                        kwargs[param_name] = json.loads(param_str, object_pairs_hook=FrozenOrderedDict)
-                    except:
+                # JSON will dump tuples and lists as if they are lists,
+                # and will load lists as lists even if they were tuples.
 
-                        print(param_name, param_str, type(param_str))
-                        import pickle
-                        with open("wtf.pkl", "wb") as fp:
-                            pickle.dump((batch_params, params_str, cls.get_params()), fp)
-                        
-                        raise 
+                param_str = params_str[param_name]
+                assert isinstance(param_str, (str, bytes))
+
+                # A "string" parameter will be parsed by param.parse as if it is a single
+                # string value, even if it is actually a JSON dump of a tuple with many strings.
+                if param_name in batch_param_names:
+                    # Duck-type test for whether this is batch mode.
+                    try:
+                        value = json.loads(param_str, object_pairs_hook=FrozenOrderedDict)
+                    except:
+                        value = param.parse(param_str)
                     else:
-                        continue
-                '''
-                if isinstance(param_str, list):
-                    kwargs[param_name] = param._parse_list(param_str)
+                        if isinstance(value, list) and not isinstance(value, luigi.ListParameter):
+                            value = tuple(value)
+                        else:
+                            value = param.parse(value)
                 else:
-                    kwargs[param_name] = param.parse(param_str)
-                    
-                #print(f"PARAM: {param_name} PARSED {kwargs[param_name]} FROM {type(param_str)} and {param_str}")
+                    value = param.parse(param_str)
+                
+                kwargs[param_name] = value
 
         return cls(**kwargs)
+
 
     @property
     def is_batch_mode(self):

@@ -122,7 +122,7 @@ class SDSSDataModelTask(BaseTask):
 
                 if not os.path.exists(self.local_path):
                     self.get_remote()
-        
+
             return SDSSDataProduct(self.local_path)
 
 

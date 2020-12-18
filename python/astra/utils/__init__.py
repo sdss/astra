@@ -69,7 +69,8 @@ def batcher(iterable, task_factory=None, unique=False):
             all_kwds[k].append(v)
 
     if task_factory is None:
-        return all_kwds
+        return { k: (tuple(v) if isinstance(v, list) else v) for k, v in all_kwds.items() }
+
     
     else:
         batch_kwds = {}
@@ -83,7 +84,7 @@ def batcher(iterable, task_factory=None, unique=False):
                 assert len(unique_values) == 1
                 batch_kwds[param_name] = unique_values[0]
 
-        return batch_kwds
+        return { k: (tuple(v) if k in batch_param_names else v) for k, v in batch_kwds.items() }
 
 
 
