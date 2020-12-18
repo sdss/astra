@@ -21,6 +21,7 @@ class BaseDatabaseTarget(luigi.Target):
     
     """ A mixin class for DatabaseTargets. """
 
+    _database_schema = "astra"
     _engine_dict = {}
     Connection = collections.namedtuple("Connection", "engine pid")
 
@@ -61,11 +62,11 @@ class BaseDatabaseTarget(luigi.Target):
 
 
     @property
-    def __tablename__(self):
+    def table_name(self):
         """ The name of the table in the database. """        
-        # Don't allow '.' in table names!
+        # Don't allow '.' in table names, and specify the 'astra' schema.
         return self.task_family.replace(".", "_")
-    
+
 
     @property
     def table_bound(self):
@@ -82,10 +83,10 @@ class BaseDatabaseTarget(luigi.Target):
         Use a separate connection since the transaction might have to be reset.
         """
         with self.engine.begin() as con:
-            metadata = sqlalchemy.MetaData()
-            if not con.dialect.has_table(con, self.__tablename__):
+            metadata = sqlalchemy.MetaData(schema=self._database_schema)
+            if not con.dialect.has_table(con, self.table_name, schema=self._database_schema):
                 self._table_bound = sqlalchemy.Table(
-                    self.__tablename__, metadata, *self.schema
+                    self.table_name, metadata, *self.schema
                 )
                 metadata.create_all(self.engine)
 
@@ -93,7 +94,7 @@ class BaseDatabaseTarget(luigi.Target):
                 #metadata.reflect(only=[self.results_table], bind=self.engine)
                 #self._table_bound = metadata.tables[self.results_table]
                 self._table_bound = sqlalchemy.Table(
-                    self.__tablename__,
+                    self.table_name,
                     metadata,
                     autoload=True,
                     autoload_with=self.engine

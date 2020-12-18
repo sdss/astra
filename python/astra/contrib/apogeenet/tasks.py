@@ -5,7 +5,7 @@ import torch
 import yaml
 from tqdm import tqdm
 from luigi.parameter import ParameterVisibility
-from sqlalchemy import Column, Float
+from sqlalchemy import (ARRAY as Array, Column, Float)
 
 import astra
 from astropy.table import Table
@@ -14,7 +14,7 @@ from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
 from astra.tasks.io import ApStarFile
 from astra.tools.spectrum import Spectrum1D
 from astra.contrib.apogeenet.model import Net, predict
-from astra.utils import log
+from astra.utils import (batcher, log)
 
 from astra.tasks.slurm import slurm_mixin_factory, slurmify
 
@@ -48,12 +48,14 @@ class APOGEENetResult(DatabaseTarget):
 
     """ A target database row for an APOGEENet result. """
 
-    teff = Column("teff", Float)
-    logg = Column("logg", Float)
-    fe_h = Column("fe_h", Float)
-    u_teff = Column("u_teff", Float)
-    u_logg = Column("u_logg", Float)
-    u_fe_h = Column("u_fe_h", Float)
+    table_name = "apogeenet"
+
+    teff = Column("teff", Array(Float))
+    logg = Column("logg", Array(Float))
+    fe_h = Column("fe_h", Array(Float))
+    u_teff = Column("u_teff", Array(Float))
+    u_logg = Column("u_logg", Array(Float))
+    u_fe_h = Column("u_fe_h", Array(Float))
     
 
 class EstimateStellarParameters(APOGEENetMixin):
@@ -88,7 +90,7 @@ class EstimateStellarParameters(APOGEENetMixin):
         
         return {
             "database": APOGEENetResult(self),
-            "AstraSource": AstraSource(self)
+            #"AstraSource": AstraSource(self)
         }
 
 
@@ -167,34 +169,14 @@ class EstimateStellarParameters(APOGEENetMixin):
 
         model = self.read_model()
 
-        # This task can be run in batch mode.
-        failed_tasks = []
         for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
             if task.complete(): 
                 continue
-            
-            try:
-                spectrum = task.read_observation()
+        
+            spectrum = task.read_observation()
+            results = task.estimate_stellar_parameters(model, spectrum)
 
-                results = task.estimate_stellar_parameters(model, spectrum)
-
-                # Write the first result to the database.
-                task.output()["database"].write(results[0])
-
-                # Write astraSource.
-                task.output()["AstraSource"].write(
-                    spectrum,
-                    normalized_flux=spectrum.flux.value,
-                    normalized_ivar=spectrum.uncertainty.array,
-                    continuum=None,
-                    model_flux=None,
-                    model_ivar=None,
-                    results_table=Table(rows=results)
-                )
-
-            except:
-                log.exception(f"Exception in running {task.task_id} on {task}:")
-                continue
+            task.output()["database"].write(batcher(results))
 
         return None
 
