@@ -126,9 +126,10 @@ def read_ferre_headers(path):
         return headers
 
 
-def parse_grid_limits(header_paths):
+def parse_grid_information(header_paths):
     """
-    Parse the parameter limits of a pre-computed grid (e.g., in effective temperature) from grid header paths provided.
+    Parse the parameter limits of a pre-computed grid (e.g., in effective temperature) from grid header paths provided,
+    and other possibly relevant information (e.g., telescope of the LSF model).
 
     :param header_paths:
         A list of paths that store information about pre-computed grids.
@@ -156,13 +157,13 @@ def parse_grid_limits(header_paths):
         
 
 
-def yield_suitable_grids(grid_limits, mean_fiber, teff, logg, fe_h):
+def yield_suitable_grids(grid_info, mean_fiber, teff, logg, fe_h, telescope):
     """
     Yield suitable FERRE grids given header information from an observation and a dictionary of grid limits.
     
-    :param grid_limits:
+    :param grid_info:
         A dictionary containing header paths as keys, and a three-length tuple as values: (1) metadata, (2) lower limits, (3) upper limits.
-        This is the expected output from `parse_grid_limits`.
+        This is the expected output from `parse_grid_information`.
     
     :param mean_fiber:
         The mean fiber number of observations.
@@ -177,7 +178,7 @@ def yield_suitable_grids(grid_limits, mean_fiber, teff, logg, fe_h):
         An initial guess of the metallicity.
     
     :returns:
-        A generator that yields two-length tuples containing header path, and metadata.       
+        A generator that yields two-length tuples containing header path, and metadata..
     """
 
     # Figure out which grids are suitable.
@@ -186,9 +187,12 @@ def yield_suitable_grids(grid_limits, mean_fiber, teff, logg, fe_h):
     point = np.array([fe_h, logg, teff])
     P = point.size
     
-    for header_path, (meta, lower_limits, upper_limits) in grid_limits.items():
+    for header_path, (meta, lower_limits, upper_limits) in grid_info.items():
 
-        if meta["lsf"] != lsf_grid:
+        print(meta["lsf"], lsf_grid, telescope, meta["lsf_telescope_model"], header_path)
+        # Match star to LSF fiber number model (a, b, c, d) and telescope model (apo25m/lco25m).
+        # TODO: This is a very APOGEE-specific thing and perhaps should be moved elsewhere.
+        if meta["lsf"] != lsf_grid or telescope != meta["lsf_telescope_model"]:
             continue
 
         # We will take the RV parameters as the initial parameters. 
@@ -236,7 +240,9 @@ def parse_header_path(header_path):
     gd, spectral_type = (parts[1][_], parts[1][_ + 1:])
     date_str = parts[2]
     year, month, day = (2000 + int(date_str[:2]), int(date_str[2:4]), int(date_str[4:]))
-    lsf = parts[3][-1]
+    lsf = parts[3][3]
+    lsf_telescope_model = "lco25m" if parts[3][4:] == "s" else "apo25m"
+
     aspcap = parts[4]
 
     is_giant_grid = gd == "g"
@@ -246,6 +252,7 @@ def parse_header_path(header_path):
         model_photospheres=model_photospheres,
         isotopes=isotopes,
         gd=gd,
+        lsf_telescope_model=lsf_telescope_model,
         spectral_type=spectral_type,
         grid_creation_date=datetime.date(year, month, day),
         lsf=lsf,

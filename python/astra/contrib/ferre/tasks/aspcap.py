@@ -166,7 +166,7 @@ def dispatch_apstars_for_analysis(sources, grid_header_list_path, release=None, 
     with open(grid_header_list_path, "r") as fp:
         grid_header_paths = list(map(str.strip, fp.readlines()))
     
-    grid_limits = utils.parse_grid_limits(grid_header_paths)
+    grid_info = utils.parse_grid_information(grid_header_paths)
 
     sdss_paths = {}
     for i, source in enumerate(sources):
@@ -187,15 +187,19 @@ def dispatch_apstars_for_analysis(sources, grid_header_list_path, release=None, 
             teff = utils.safe_read_header(header, ("RV_TEFF", "RVTEFF"))
             logg = utils.safe_read_header(header, ("RV_LOGG", "RVLOGG"))
             fe_h = utils.safe_read_header(header, ("RV_FEH", "RVFEH"))
+
+            # In order to match sources to suitable grids we need the initial parameters,
+            # the fiber information, and the telescope used for observation.
             kwds = {
                 "mean_fiber": header["MEANFIB"],
+                "telescope": source["telescope"],
                 "teff": teff,
                 "logg": logg,
                 "fe_h": fe_h
             }
 
-        except:
-            log.exception("Exception: ")
+        except Exception as exception:
+            log.exception(f"Exception: {exception}")
             continue
 
         else:
@@ -212,7 +216,7 @@ def dispatch_apstars_for_analysis(sources, grid_header_list_path, release=None, 
             })
 
             any_suitable_grids = False
-            for grid_header_path, parsed_header_path in utils.yield_suitable_grids(grid_limits, **kwds):
+            for grid_header_path, parsed_header_path in utils.yield_suitable_grids(grid_info, **kwds):
                 any_suitable_grids = True
                 
                 # In the initial FERRE run we freeze LOG10VDOP.
