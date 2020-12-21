@@ -14,14 +14,19 @@ from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
 from astra.tasks.io import ApStarFile
 from astra.tools.spectrum import Spectrum1D
 from astra.contrib.apogeenet.model import Net, predict
-from astra.utils import (batcher, log)
+from astra.utils import log
 
 from astra.tasks.slurm import slurm_mixin_factory, slurmify
 
 
-SlurmMixin = slurm_mixin_factory("APOGEE")
+SlurmMixin = slurm_mixin_factory("APOGEENet")
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu")
+
+print(f"Using {device} in APOGEENet because {torch.cuda.is_available()}")
+print(os.environ.get('CUDA_VISIBLE_DEVICES'))
+print("^ CUDA_VISIBLE_DEVICES")
 
 class APOGEENetMixin(SlurmMixin, BaseTask):
 
@@ -56,6 +61,8 @@ class APOGEENetResult(DatabaseTarget):
     u_teff = Column("u_teff", Array(Float))
     u_logg = Column("u_logg", Array(Float))
     u_fe_h = Column("u_fe_h", Array(Float))
+
+    snr = Column("snr", Array(Float))
     
 
 class EstimateStellarParameters(APOGEENetMixin):
@@ -133,7 +140,7 @@ class EstimateStellarParameters(APOGEENetMixin):
         dtype = np.float32
         idx = 0
 
-        results = []
+        results = { "snr": spectrum.meta["snr"] }
         for i in range(N):
                 
             flux = spectrum.flux.value[i].astype(dtype)
@@ -159,9 +166,13 @@ class EstimateStellarParameters(APOGEENetMixin):
             flux_tensor[0][0] = flux
         
             # Estimate quantities.
-            results.append(predict(model, flux_tensor))
-        
+            result = predict(model, flux_tensor)
+            for key, value in result.items():
+                results.setdefault(key, [])
+                results[key].append(value)
+
         return results
+
 
     @slurmify
     def run(self):
@@ -176,7 +187,7 @@ class EstimateStellarParameters(APOGEENetMixin):
             spectrum = task.read_observation()
             results = task.estimate_stellar_parameters(model, spectrum)
 
-            task.output()["database"].write(batcher(results))
+            task.output()["database"].write(results)
 
         return None
 

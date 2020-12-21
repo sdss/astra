@@ -71,6 +71,8 @@ def predict(model, eval_inputs):
     
     with torch.no_grad():
         eval_outputs = model.forward(eval_inputs)
+    
+    eval_outputs = eval_outputs.cpu().numpy()
 
     # Calculate mean values.
     # TODO: These should not be hard-coded in! They should be stored with the model.
@@ -89,10 +91,10 @@ def predict(model, eval_inputs):
     outputs = eval_outputs * sigmas + means
     
     param_names = ("logg", "teff", "fe_h")
-    result = dict(zip(param_names, torch.mean(outputs, 0).numpy()))
+    result = dict(zip(param_names, np.mean(outputs, axis=0)))
     result.update(zip(
         [f"u_{p}" for p in param_names],
-        torch.std(outputs, 0).numpy()
+        np.std(outputs, axis=0)
     ))
 
     return result
