@@ -183,7 +183,12 @@ class BaseTask(luigi.Task, metaclass=Register):
                 # and will load lists as lists even if they were tuples.
 
                 param_str = params_str[param_name]
-                assert isinstance(param_str, (str, bytes))
+                #if not isinstance(param_str, (str, bytes)):
+                #    print(f"PARAM NAME {param_name}")
+                #    print(f"{type(param_str)}")
+                #    print(f"{param_str}")
+
+
 
                 # A "string" parameter will be parsed by param.parse as if it is a single
                 # string value, even if it is actually a JSON dump of a tuple with many strings.

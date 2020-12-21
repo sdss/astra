@@ -1,38 +1,43 @@
 import os
 from astra.tasks.io import ApStarFile
 from astra.tasks.continuum import Sinusoidal
+from sqlalchemy import (ARRAY as Array, Column, Float)
+
 from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
-
 from astra.contrib.thecannon.tasks.test import EstimateStellarLabelsGivenApStarFileBase
-
-from sqlalchemy import Column, Float
 
 class TheCannonResult(DatabaseTarget):
 
     """ A row in a database representing a result from The Cannon. """
 
+    table_name = "thecannon_apstar"
+
     # TODO: This should be updated when the "production" model of The Cannon is decided.
-    teff = Column("teff", Float)
-    logg = Column("logg", Float)
-    fe_h = Column("fe_h", Float)
-    u_teff = Column("u_teff", Float)
-    u_logg = Column("u_logg", Float)
-    u_fe_h = Column("u_fe_h", Float)
-    
+    teff = Column("teff", Array(Float))
+    logg = Column("logg", Array(Float))
+    fe_h = Column("fe_h", Array(Float))
+    u_teff = Column("u_teff", Array(Float))
+    u_logg = Column("u_logg", Array(Float))
+    u_fe_h = Column("u_fe_h", Array(Float))
+
+    snr = Column("snr", Array(Float))
+    chi_sq = Column("chi_sq", Array(Float))
+    r_chi_sq = Column("r_chi_sq", Array(Float))
 
 
 class ContinuumNormalize(Sinusoidal, ApStarFile):
 
     """
-    A pseudo-continuum normalisation task for individual visit spectra 
-    in ApStarFiles using a sum of sines and cosines to model the continuum.
+    A pseudo-continuum normalisation task for spectra in ApStarFiles
+    using a sum of sines and cosines to model the continuum.
     """
 
     # Row 0 is individual pixel weighting
     # Row 1 is global pixel weighting
     # Row 2+ are the individual visits.
-    # We will just analyse them all because it's cheap.
-
+    
+    # We will analyse all spectra.
+    
     def requires(self):
         return ApStarFile(**self.get_common_param_kwargs(ApStarFile))
 

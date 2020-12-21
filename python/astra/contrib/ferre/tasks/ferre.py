@@ -121,9 +121,12 @@ class FerreBase(FerreMixin, SourceMixin):
             sliced = slice(si, si + N)
 
             # Write result(s) to database.
-            results = dict(zip(model.parameter_names, p_opt[sliced].T))
+            results = dict(zip(
+                map(str.lower, model.parameter_names), 
+                p_opt[sliced].T
+            ))
             results.update(dict(zip(
-                [f"E_{pn}" for pn in model.parameter_names],
+                [f"u_{pn.lower()}" for pn in model.parameter_names],
                 p_err[sliced].T
             )))
             results.update(

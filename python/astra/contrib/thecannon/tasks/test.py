@@ -126,17 +126,9 @@ class EstimateStellarLabelsGivenApStarFileBase(TrainTheCannonGivenTrainingSetTar
             data.append((flux, ivar, cont))
 
             N_spectra = flux.shape[0]
-            N_visits = spectrum.meta["header"]["NVISITS"]
-            snr_combined = spectrum.meta["header"]["SNR"]
-            snr_visits = [spectrum.meta["header"][f"SNRVIS{i}"] for i in range(1, 1 + N_visits)]
-            if N_visits > 1:
-                assert len(snr_visits) == N_visits
-
             task_meta.append(dict(
-                N_visits=N_visits,
                 N_spectra=N_spectra,
-                snr_visits=snr_visits,
-                snr_combined=snr_combined
+                snr=spectrum.meta["snr"],
             ))
             task_spectra.append(spectrum)
             
@@ -154,59 +146,46 @@ class EstimateStellarLabelsGivenApStarFileBase(TrainTheCannonGivenTrainingSetTar
         for i, (task, spectrum, meta) in enumerate(zip(self.get_batch_tasks(), task_spectra, task_meta)):
             if spectrum is None and meta is None:
                 continue 
-            N_spectra = meta["N_spectra"]
+
+            sliced = slice(si, si + meta["N_spectra"])
+            
             result = dict(
-                N_visits=meta["N_visits"],
-                N_spectra=meta["N_spectra"],
-                snr_visits=meta["snr_visits"],
-                snr_combined=meta["snr_combined"],
-                labels=labels[si:si + N_spectra],
-                cov=cov[si:si + N_spectra],
-                metadata=op_meta[si:si + N_spectra],
-                label_names=model.vectorizer.label_names
+                labels=labels[sliced],
+                cov=cov[sliced],
             )
-
-            # Create results table.
-            results_table = Table(
-                data=labels[si:si + N_spectra],
-                names=model.vectorizer.label_names
-            )
-            results_table["cov"] = cov[si:si + N_spectra]
-            keys = ("snr", "r_chi_sq", "chi_sq", "x0")
-            for key in keys:
-                results_table[key] = [row[key] for row in op_meta[si:si + N_spectra]]
-
-            # Write AstraSource target.
-            task.output()["AstraSource"].write(
-                spectrum=spectrum,
-                normalized_flux=flux[si:si + N_spectra],
-                normalized_ivar=ivar[si:si + N_spectra],
-                continuum=cont[si:si + N_spectra],
-                model_flux=np.array([ea["model_flux"] for ea in op_meta[si:si + N_spectra]]),
-                # TODO: Project uncertainties to flux space and include here.
-                model_ivar=None,
-                results_table=results_table
-            )
-                        
-            # Write database result.
+            for key in  ("snr", "r_chi_sq", "chi_sq", "x0"):
+                result[key] = [row[key] for row in op_meta[sliced]]
+                            
+            if "AstraSource" in task.output():
+                # Write AstraSource target.
+                task.output()["AstraSource"].write(
+                    spectrum=spectrum,
+                    normalized_flux=flux[sliced],
+                    normalized_ivar=ivar[sliced],
+                    continuum=cont[sliced],
+                    model_flux=np.array([ea["model_flux"] for ea in op_meta[sliced]]),
+                    # TODO: Project uncertainties to flux space and include here.
+                    model_ivar=None,
+                    results_table=Table(data=result)
+                )
+            
             if "database" in task.output():
-
-                # TODO: Here we are just writing the result from the stacked spectrum.
-                #       Consider including the results from individual visits to the database.
-                #       (These are still accessible through the 'etc' target output.)
-
-                database_result = dict(zip(
+                # Write database rows.
+                L = len(model.vectorizer.label_names)
+                rows = dict(zip(
                     map(str.lower, model.vectorizer.label_names),
-                    labels[si]
+                    result["labels"].T
                 ))
-                database_result.update(dict(zip(
+                rows.update(dict(zip(
                     (f"u_{ln.lower()}" for ln in model.vectorizer.label_names),
-                    np.sqrt(np.diag(cov[si]))
+                    np.sqrt(result["cov"][:, np.arange(L), np.arange(L)]).T
                 )))
+                for key in ("snr", "r_chi_sq", "chi_sq"):
+                    rows.update({ key: result[key] })
 
-                task.output()["database"].write(database_result)
+                task.output()["database"].write(rows)
                 
-            si += N_spectra
+            si += meta["N_spectra"]
 
 
     def output(self):

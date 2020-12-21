@@ -1,5 +1,7 @@
 import os
 import astropy.table
+from sqlalchemy import (ARRAY as Array, Column, Float)
+
 from astra.tasks.io.sdss4 import SDSS4ApStarFile as ApStarFile
 from astra.tasks.continuum import Sinusoidal
 from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
@@ -7,20 +9,26 @@ from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
 from astra.contrib.thecannon.tasks.train import TrainTheCannonGivenTrainingSetTask
 from astra.contrib.thecannon.tasks.test import EstimateStellarLabelsGivenApStarFileBase
 
-from sqlalchemy import Column, Float
+
 
 class TheCannonResult(DatabaseTarget):
 
     """ A row in a database representing a result from The Cannon. """
 
+    table_name = "sdss4_thecannon_apstar"
+
     # TODO: This should be updated when the "production" model of The Cannon is decided.
-    teff = Column("teff", Float)
-    logg = Column("logg", Float)
-    fe_h = Column("fe_h", Float)
-    u_teff = Column("u_teff", Float)
-    u_logg = Column("u_logg", Float)
-    u_fe_h = Column("u_fe_h", Float)
-    
+    teff = Column("teff", Array(Float))
+    logg = Column("logg", Array(Float))
+    fe_h = Column("fe_h", Array(Float))
+    u_teff = Column("u_teff", Array(Float))
+    u_logg = Column("u_logg", Array(Float))
+    u_fe_h = Column("u_fe_h", Array(Float))
+
+    snr = Column("snr", Array(Float))
+    chi_sq = Column("chi_sq", Array(Float))
+    r_chi_sq = Column("r_chi_sq", Array(Float))
+
 
 class ContinuumNormalize(Sinusoidal, ApStarFile):
 

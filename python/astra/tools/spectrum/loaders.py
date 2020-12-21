@@ -11,6 +11,8 @@ from specutils.io.registers import data_loader, get_loaders_by_extension, io_reg
 
 from astra.utils.data_models import parse_data_model
 
+
+
 # De-register some default readers (and identifiers) that cause ambiguity,
 # and would actually fail if they were used.
 ignore_loaders = ("tabular-fits", "APOGEE apVisit", "APOGEE apStar", 
@@ -18,7 +20,7 @@ ignore_loaders = ("tabular-fits", "APOGEE apVisit", "APOGEE apStar",
 for data_format in set(ignore_loaders).intersection(get_loaders_by_extension("fits")):
     io_registry.unregister_identifier(data_format, Spectrum1D)
     io_registry.unregister_identifier(data_format, SpectrumList)
-
+ 
 
 def _wcs_log_linear(header):
     return 10**(np.arange(header["NAXIS1"]) * header["CDELT1"] + header["CRVAL1"]) * u.Angstrom
@@ -63,11 +65,18 @@ def load_sdss_apstar(path, **kwargs):
         uncertainty = InverseVariance(slicer(image[2].data)**-2)
 
         verbosity = kwargs.get("verbosity", 1)
+
+        snr = [image[0].header["SNR"]]
+        n_visits = image[0].header["NVISITS"]
+        if n_visits > 1:
+            snr.append(snr[0])
+            snr.extend([image[0].header[f"SNRVIS{i}"] for i in range(1, 1 + n_visits)])
+
         meta = OrderedDict([
             ("header", image[0].header),
-            ("bitmask", slicer(image[3].data))
+            ("bitmask", slicer(image[3].data)),
+            ("snr", snr)
         ])
-
         if verbosity >= 1:
             meta["hdu_headers"] = [hdu.header for hdu in image]
 
@@ -78,7 +87,7 @@ def load_sdss_apstar(path, **kwargs):
                 ("telluric_flux", slicer(image[6].data) * units),
                 ("telluric_error", slicer(image[7].data) * units),
                 ("lsf_coefficients", slicer(image[8].data)),
-                ("rv_ccf_structure", slicer(image[9].data))
+                ("rv_ccf_structure", slicer(image[9].data)),
             ]))
 
     return Spectrum1D(spectral_axis=spectral_axis, flux=flux, uncertainty=uncertainty, meta=meta)
@@ -149,6 +158,8 @@ def load_sdss_apvisit(path, **kwargs):
         structured_meta = OrderedDict([
             ("bitmask", image[3].data.reshape(flux.shape)),
         ])
+
+        raise NotImplementedError("get snr from header")
 
         if verbosity >= 2:
             structured_meta.update(OrderedDict([

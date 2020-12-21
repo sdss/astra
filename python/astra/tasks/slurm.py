@@ -1,10 +1,12 @@
 
 import json
+import os
 from tempfile import mkstemp
 from luigi import (Parameter, IntParameter, BoolParameter, WrapperTask)
 from luigi.task_register import load_task
 from astra.tasks.base import BaseTask
-
+from astra.utils import log
+from time import (sleep, time)
 
 def slurm_mixin_factory(task_namespace):
     
@@ -66,8 +68,12 @@ class SlurmTask(WrapperTask):
 
     def requires(self):
 
+        print(f"OPENING {self.wrap_task_params_path}")
+        print(os.path.exists(self.wrap_task_params_path))
         with open(self.wrap_task_params_path, "r") as fp:
             task_params = json.load(fp)
+
+        print(f"Task params {task_params}")
 
         yield load_task(
             self.wrap_task_module,
@@ -94,8 +100,10 @@ def slurmify(func):
             # Overwrite slurm parameter so we don't get into a circular loop.
             task_params["use_slurm"] = False
 
-            # Write task parameters to a temporary file.
-            _, task_params_path = mkstemp()
+            # Write task parameters to a temporary file
+            # (Remember: the temporary file has to be accessible to Slurm systems)
+            cwd = os.getcwd()
+            _, task_params_path = mkstemp(dir=cwd)
             with open(task_params_path, "w") as fp:
                 json.dump(task_params, fp)
 
@@ -110,19 +118,34 @@ def slurmify(func):
             # Submit a slurm job to perform the SlurmTask.
             from slurm import queue as SlurmQueue
 
-            kwds = dict(label=self.task_id)
+            kwds = dict(label=self.task_id.replace(".", "_"))
             for key in ("ppn", "nodes", "walltime", "alloc", "partition", "mem", "gres"):
                 sk = f"slurm_{key}"
                 if getattr(self, sk, None):
                     kwds[key] = getattr(self, sk)
 
+            # Have to force this one.
+            kwds["dir"] = cwd
+
             queue = SlurmQueue(verbose=True)
             queue.create(**kwds)
+            queue.append("module load cuda")
+            queue.append("module spider cuda")
             queue.append(cmd)
+
             queue.commit(hard=True, submit=True)
             log.info(f"Slurm job submitted with {queue.key}")
                 
             # Wait for completion.
+            t_init = time()
+            while 100 > queue.get_percent_complete():
+
+                log.info(f"Job with key {queue.key} is {queue.get_percent_complete()}% complete (elapsed: {(time() - t_init)/3600:.1f} hrs)")
+                log.debug(f"Job directory: {queue.job_dir}")
+                # TODO: Check for situation where slurm errors occurred in task and "get_percent_complete" never reaches 100%
+                sleep(60)
+
+
             assert self.complete()
             log.info(f"Executed {self} through Slurm")
             
