@@ -66,21 +66,27 @@ class SlurmTask(WrapperTask):
     wrap_task_family = Parameter()
     wrap_task_params_path = Parameter()
 
+    _complete = False
+
     def requires(self):
 
-        print(f"OPENING {self.wrap_task_params_path}")
-        print(os.path.exists(self.wrap_task_params_path))
         with open(self.wrap_task_params_path, "r") as fp:
             task_params = json.load(fp)
-
-        print(f"Task params {task_params}")
 
         yield load_task(
             self.wrap_task_module,
             self.wrap_task_family,
             task_params
         )
-    
+
+        #self._complete = True
+
+    def run(self):
+        self._complete = True
+
+    def complete(self):
+        return self._complete
+        
 
 
 
@@ -102,6 +108,7 @@ def slurmify(func):
 
             # Write task parameters to a temporary file
             # (Remember: the temporary file has to be accessible to Slurm systems)
+            # TODO: Consider putting this in /scratch/
             cwd = os.getcwd()
             _, task_params_path = mkstemp(dir=cwd)
             with open(task_params_path, "w") as fp:
@@ -124,27 +131,47 @@ def slurmify(func):
                 if getattr(self, sk, None):
                     kwds[key] = getattr(self, sk)
 
-            # Have to force this one.
-            kwds["dir"] = cwd
-
             queue = SlurmQueue(verbose=True)
             queue.create(**kwds)
-            queue.append("module load cuda")
-            queue.append("module spider cuda")
+            queue.append("module avail cuda")
             queue.append(cmd)
 
             queue.commit(hard=True, submit=True)
             log.info(f"Slurm job submitted with {queue.key}")
+            log.info(f"\tJob directory: {queue.job_dir}")
+            log.info(f"\tThere are {self.get_batch_size()} objects to run in batch mode")
                 
             # Wait for completion.
-            t_init = time()
+            stdout_path = os.path.join(queue.job_dir, f"{self.task_id.replace('.', '_')}_01.o")
+            stderr_path = os.path.join(queue.job_dir, f"{self.task_id.replace('.', '_')}_01.e")    
+
+            t_init, seek = (time(), None)
             while 100 > queue.get_percent_complete():
 
-                log.info(f"Job with key {queue.key} is {queue.get_percent_complete()}% complete (elapsed: {(time() - t_init)/3600:.1f} hrs)")
-                log.debug(f"Job directory: {queue.job_dir}")
-                # TODO: Check for situation where slurm errors occurred in task and "get_percent_complete" never reaches 100%
                 sleep(60)
 
+                t = time() - t_init
+
+                if not os.path.exists(stderr_path) and not os.path.exists(stdout_path):
+                    log.info(f"Waiting on job {queue.key} to start (elapsed: {t / 60:.0f} min)")
+
+                else:
+                    if seek is None:
+                        log.info(f"Job {queue.key} has started (elapsed: {t / 60:.0f} min)")
+                        seek = 0
+                    
+                    else:
+                        log.info(f"Job {queue.key} is {queue.get_percent_complete()}% complete (elapsed: {t / 60:.0f} min)")
+                        # TODO: Implement a custom "get_percent_complete() on the *task* and try that first."
+
+                    # Supply newline keyword argument so that tqdm output does not appear as newlines.
+                    with open(stderr_path, "r", newline="\n") as fp:
+                        contents = fp.read()
+                    
+                    log.info(f"Contents of {stderr_path}:\n{contents}")
+                    seek = len(contents)
+            
+                # TODO: Check for situation where slurm errors occurred in task and "get_percent_complete" never reaches 100%
 
             assert self.complete()
             log.info(f"Executed {self} through Slurm")

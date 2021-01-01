@@ -102,15 +102,26 @@ class BaseTask(luigi.Task, metaclass=Register):
         params = self.get_params()
         param_values = self.get_param_values(params, [], self.param_kwargs)
 
+        batch_size = self.get_batch_size()
+        batch_param_names = self.batch_param_names()
+        is_batch_mode = batch_size > 1
+
         # Build up task id
         repr_parts = []
         param_objs = dict(params)
+        shown_batch_size = False
         for i, (param_name, param_value) in enumerate(param_values):
             if param_objs[param_name].significant and param_objs[param_name].visibility == ParameterVisibility.PUBLIC:
-                if param_name in self.batch_param_names() and self.is_batch_mode:
-                    # Show only first two.
-                    v = tuple(list(param_value[:2]) + ["..."])
-                    v = param_objs[param_name].serialize(v)
+                if param_name in batch_param_names and is_batch_mode:
+                    # If we are in batch mode, just show the first two entries per parameter.
+                    S = 2
+                    v = param_objs[param_name].serialize(param_value[:S])
+                    if shown_batch_size:
+                        v = v.replace(")", ", ... )")
+                    else:
+                        # It is often useful to know how many objects are batched up together.
+                        v = v.replace(")", f", ... and {batch_size - S:.0f} others)")
+                        shown_batch_size = True
                     repr_parts.append(f"{param_name}={v}")
                 else:
                     repr_parts.append('%s=%s' % (param_name, param_objs[param_name].serialize(param_value)))
@@ -197,9 +208,12 @@ class BaseTask(luigi.Task, metaclass=Register):
                     try:
                         value = json.loads(param_str, object_pairs_hook=FrozenOrderedDict)
                     except:
-                        value = param.parse(param_str)
+                        if isinstance(param_str, list) and not isinstance(param, luigi.ListParameter):
+                            value = tuple(list(map(param.parse, param_str)))
+                        else:
+                            value = param.parse(param_str)
                     else:
-                        if isinstance(value, list) and not isinstance(value, luigi.ListParameter):
+                        if isinstance(value, list) and not isinstance(param, luigi.ListParameter):
                             value = tuple(value)
                         else:
                             value = param.parse(value)

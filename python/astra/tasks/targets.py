@@ -25,15 +25,15 @@ class BaseDatabaseTarget(luigi.Target):
     _engine_dict = {}
     Connection = collections.namedtuple("Connection", "engine pid")
 
-    def __init__(self, connection_string, task_namespace, task_family, task_id, schema, echo=True):
-        self.task_namespace = task_namespace
-        self.task_family = task_family
+    def __init__(self, connection_string, table_name, task_id=None, schema=None, echo=True):
+        self._table_name = table_name
         self.task_id = task_id
 
         self.schema = [
             sqlalchemy.Column("task_id", sqlalchemy.String(128), primary_key=True),
         ]
-        self.schema.extend(schema)
+        if schema is not None:
+            self.schema.extend(schema)
         self.echo = echo
         self.connect_args = {}
         self.connection_string = connection_string
@@ -65,7 +65,7 @@ class BaseDatabaseTarget(luigi.Target):
     def table_name(self):
         """ The name of the table in the database. """        
         # Don't allow '.' in table names, and specify the 'astra' schema.
-        return self.task_family.replace(".", "_")
+        return self._table_name.replace(".", "_")
 
 
     @property
@@ -109,7 +109,7 @@ class BaseDatabaseTarget(luigi.Target):
         return r is not None
 
 
-    def read(self, as_dict=False, include_parameters=True):
+    def read(self, as_dict=False, include_parameters=True, limit=1):
         """ 
         Read the target from the database. 
 
@@ -119,11 +119,18 @@ class BaseDatabaseTarget(luigi.Target):
         return self._read(
             self.table_bound, 
             as_dict=as_dict, 
-            include_parameters=include_parameters
+            include_parameters=include_parameters,
+            limit=limit,
         )
-        
+    
 
-    def _read(self, table, columns=None, as_dict=False, include_parameters=True):
+    @property
+    def column_names(self):
+        """ Column names in the database table. """
+        return tuple([column.name for column in self.table_bound.columns])
+
+
+    def _read(self, table, columns=None, as_dict=False, include_parameters=True, limit=1):
         """
         Read a target row from the database table.
 
@@ -135,6 +142,14 @@ class BaseDatabaseTarget(luigi.Target):
         
         :param as_dict: (optional)
             Optionally return the result as a dictionary (default: False).
+        
+        :param include_parameters: (optional)
+            Include the task parameters in the SQL query (default: True).
+        
+        :param limit: (optional)
+        
+        
+
         """
         if columns is None and not include_parameters:
             N = 0
@@ -150,12 +165,18 @@ class BaseDatabaseTarget(luigi.Target):
             column_names = (column.name for column in table.columns)
 
         with self.engine.begin() as connection:
-            s = sqlalchemy.select(columns).where(
-                table.c.task_id == self.task_id
-            ).limit(1)
-            row = connection.execute(s).fetchone()
+            s = sqlalchemy.select(columns)
+            if self.task_id is not None:
+                s = s.where(table.c.task_id == self.task_id)
+            if limit is not None:
+                s = s.limit(limit)
+            row = connection.execute(s).fetchall()
+            if limit == 1:
+                if len(row) == 1:
+                    row = row[0]
+                elif len(row) == 0:
+                    row = None
         if as_dict:
-            
             return collections.OrderedDict(zip(column_names, row))
         return row
 
@@ -189,33 +210,37 @@ class BaseDatabaseTarget(luigi.Target):
                         value = json.dumps(value)
                 
             sanitised_data[key] = value
+
+        if self.task_id is None and "task_id" not in sanitised_data:
+            raise KeyError("must supply task_id")
+        
+        if self.task_id is not None:
+            sanitised_data.update(task_id=self.task_id)
     
         with self.engine.begin() as connection:
             if not exists:
-                insert = table.insert().values(
-                    task_id=self.task_id,
-                    **sanitised_data
-                )
+                insert = table.insert().values(**sanitised_data)
             else:
                 insert = table.update().where(
-                    table.c.task_id == self.task_id
-                ).values(
-                    task_id=self.task_id,
-                    **sanitised_data
-                )
+                    table.c.task_id == sanitised_data["task_id"]
+                ).values(**sanitised_data)
             connection.execute(insert)
         return None
 
 
-    def delete(self):
+    def delete(self, task_id=None):
         """
         Delete a result target from the database. 
         """
 
+        task_id = self.task_id or task_id
+        if task_id is None:
+            raise KeyError("must supply task_id")
+
         table = self.table_bound
         with self.engine.begin() as connection:
             connection.execute(
-                table.delete().where(table.c.task_id == self.task_id)
+                table.delete().where(table.c.task_id == task_id)
             )
 
         return None
@@ -263,11 +288,18 @@ class DatabaseTarget(BaseDatabaseTarget):
             if isinstance(value, sqlalchemy.Column):
                 schema.append(value)
 
+        try:
+            task_id = task.task_id
+
+        except AttributeError:
+            task_id, connection_string = (None, task.connection_string.task_value(task, "connection_string"))
+        else:
+            task_id, connection_string = (task.task_id, task.connection_string)
+
         super(DatabaseTarget, self).__init__(
-            task.connection_string,
-            task.task_namespace,
+            connection_string,
             task.task_family,
-            task.task_id,
+            task_id,
             schema,
             echo=echo
         )
@@ -463,7 +495,7 @@ class AstraSource(LocalTarget):
         
         # Check if we are APOGEE or BOSS.
         is_apogee = getattr(t, "apred", None) is not None
-        reduction_version = t.apred if is_apogee else t.run2d
+        reduction_version = t.apred if is_apogee else getattr(t, "run2d", "UNKNOWN")
 
         # If the task has a short-hand descriptor, use that.
         task_short_id = getattr(t, "task_short_id", t.task_id)
@@ -485,8 +517,6 @@ class AstraSource(LocalTarget):
             fork,
             basename
         )
-        # Check that the parent directory exists.
-        os.makedirs(os.path.dirname(path), exist_ok=True)
         return path
     
     
@@ -669,6 +699,8 @@ class AstraSource(LocalTarget):
         )
         kwds.update(kwargs)
 
+        # Check that the parent directory exists.
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
         return image.writeto(self.path, **kwds)
 
 
