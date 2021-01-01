@@ -1,6 +1,7 @@
 
 from time import time
 
+import os
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -10,24 +11,10 @@ from torch import nn
 from torch.autograd import Variable
 
 # Check for CUDA support.
-"""
-try:
-    torch.set_default_tensor_type(torch.cuda.FloatTensor)
-
-except (TypeError, RuntimeError):
-    print("Torch not compiled with CUDA support")
-    CUDA_AVAILABLE = False
-
-else:
-    CUDA_AVAILABLE = True
-"""
+device = torch.device("cuda:0" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu")
 
 CUDA_AVAILABLE = torch.cuda.is_available()
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-#default_tensor_type = torch.cuda.FloatTensor if CUDA_AVAILABLE else torch.FloatTensor
-#torch.set_default_tensor_type(default_tensor_type)
-
+print(f"Using {device} in Classifier because {torch.cuda.is_available()}")
 
 def train(
         network_factory,
@@ -98,19 +85,17 @@ def train(
 
     print(f"Weight imbalance: {weight_imbalance}")
 
-    weights = torch.Tensor(1.0 / weight_imbalance, device=device)
+    weights = torch.Tensor(1.0 / weight_imbalance)
     print(f"Inverse weight imbalance: {weights}")
 
-    if CUDA_AVAILABLE:
-        weights = weights.cuda()
+    #if CUDA_AVAILABLE:
+    #    weights = weights.cuda()
 
-    criterion = nn.CrossEntropyLoss(
-        weight=weights
-    )
+    criterion = nn.CrossEntropyLoss(weight=weights)
 
     network = network_factory(nb_classes=n_unique_classes)
-    if CUDA_AVAILABLE:
-        network = network.cuda()
+    #if CUDA_AVAILABLE:
+    #    network = network.cuda()
 
     optimizer = torch.optim.Adam(
         network.parameters(),
@@ -143,26 +128,20 @@ def train(
             batch_labels = training_labels[idx]
             batch_spectra = training_spectra[idx]
 
-            batch = torch.Tensor(batch_spectra, device=device)
-            if CUDA_AVAILABLE:
-                batch = batch.cuda()
+            batch = torch.Tensor(batch_spectra)
+            #if CUDA_AVAILABLE:
+            #    batch = batch.cuda()
 
             optimizer.zero_grad()
 
             pred = network.forward(Variable(batch))
 
-            y = torch.LongTensor(
-                batch_labels,
-                device=device
-            )
+            y = torch.LongTensor(batch_labels)
             y_var = Variable(y)
-            if CUDA_AVAILABLE:
-                y_var = y_var.cuda()
+            #if CUDA_AVAILABLE:
+            #    y_var = y_var.cuda()
 
-            loss = criterion(
-                pred,
-                y_var
-            )
+            loss = criterion(pred, y_var)
             loss.backward()
 
             optimizer.step()
@@ -193,15 +172,15 @@ def train(
         with torch.no_grad():
             status_message.append("-" * 10)
 
-            batch = torch.Tensor(validation_spectra, device=device)
-            if CUDA_AVAILABLE:
-                batch = batch.cuda()
+            batch = torch.Tensor(validation_spectra)
+            #if CUDA_AVAILABLE:
+            #    batch = batch.cuda()
             pred = network.forward(Variable(batch))
             
-            y = torch.LongTensor(validation_labels, device=device)
+            y = torch.LongTensor(validation_labels)
             y_var = Variable(y)
-            if CUDA_AVAILABLE:
-                y_var = y_var.cuda()
+            #if CUDA_AVAILABLE:
+            #    y_var = y_var.cuda()
             validation_loss = criterion(
                 pred,
                 y_var
@@ -223,7 +202,6 @@ def train(
                 validation_total_per_class += idx_class.size
                 validation_correct_per_class += (preds[idx_class] == j).sum().item()
 
-            
             status_message.append(f"Validation loss: {validation_loss:.4f}")
             status_message.append(f"Validation accuracy: {100 * validation_correct/validation_total:.2f}%")
             for j in range(n_unique_classes):
@@ -232,20 +210,17 @@ def train(
             status_message.append("-" * 10)
 
         # Test.
-        batch = torch.Tensor(test_spectra, device=device)
-        if CUDA_AVAILABLE:
-            batch = batch.cuda()
+        batch = torch.Tensor(test_spectra)
+        #if CUDA_AVAILABLE:
+        #    batch = batch.cuda()
         pred = network.forward(Variable(batch))
 
-        y = torch.LongTensor(test_labels, device=device)
+        y = torch.LongTensor(test_labels)
         y_var = Variable(y)
-        if CUDA_AVAILABLE:
-            y_var = y_var.cuda()
+        #if CUDA_AVAILABLE:
+        #    y_var = y_var.cuda()
 
-        test_loss = criterion(
-            pred,
-            y_var
-        )
+        test_loss = criterion(pred, y_var)
         _, preds = torch.max(pred.data.cpu(), 1)
 
         test_total = n_test_set
@@ -256,9 +231,7 @@ def train(
 
         for j in range(n_unique_classes):
             idx_class = np.argwhere(test_labels == j)
-            idx_class = idx_class.reshape(
-                idx_class.shape[0]
-            )
+            idx_class = idx_class.reshape(idx_class.shape[0])
 
             test_total_per_class[j] += idx_class.size
             test_correct_per_class[j] += (preds[idx_class] == j).sum().item()
@@ -273,8 +246,11 @@ def train(
 
         print("\n".join(status_message))
         if task is not None:
-            task.set_progress_percentage(100 * epoch / n_epochs)
-            task.set_status_message("\n".join(status_message))
+            try:
+                task.set_progress_percentage(100 * epoch / n_epochs)
+                task.set_status_message("\n".join(status_message))
+            except:
+                None
 
 
     state = dict(
@@ -297,9 +273,9 @@ def predict_classes(network, spectra):
     Predict an object class given a trained network and some spectra.
     """
     net = torch.load(model_path)
-    batch = torch.Tensor(spectra, device=device)
-    if CUDA_AVAILABLE:
-        batch = batch.cuda()
+    batch = torch.Tensor(spectra)
+    #if CUDA_AVAILABLE:
+    #    batch = batch.cuda()
 
     pred = net.forward(Variable(batch))
     _, preds = torch.max(pred.data.cpu(), 1)

@@ -11,10 +11,12 @@ from sqlalchemy import (Column, Float, String)
 from luigi.util import (inherits, requires)
 from luigi.parameter import ParameterVisibility
 from luigi.mock import MockTarget
+from luigi.task import flatten
 from torch.autograd import Variable
 from scipy.special import logsumexp
 from astra.tasks.io import (ApVisitFile, ApStarFile, SDSS4ApVisitFile, LocalTargetTask)
 from astra.tools.spectrum import Spectrum1D
+from astra.utils import batcher
 
 from astra.tasks.base import BaseTask
 from astra.tasks.targets import DatabaseTarget
@@ -22,6 +24,7 @@ from astra.contrib.classifier import networks, utils
 
 from astra.contrib.classifier.tasks.mixin import ClassifierMixin
 from astra.contrib.classifier.tasks.train import TrainNIRSpectrumClassifier
+from astra.tasks.slurm import slurmify
 
 class ClassifySource(ClassifierMixin):
 
@@ -154,6 +157,7 @@ class ClassifySourceGivenApVisitFileBase(ClassifySource):
         return batch
 
 
+    @slurmify
     def run(self):
         """
         Execute the task.
@@ -168,7 +172,8 @@ class ClassifySourceGivenApVisitFileBase(ClassifySource):
 
             with torch.no_grad():                
                 pred = network.forward(Variable(torch.Tensor(batch)))
-                log_probs = pred.data.numpy().flatten()
+                log_probs = pred.cpu().numpy().flatten()
+                #log_probs = pred.data.numpy().flatten()
 
             task.output().write(self.prepare_result(log_probs))
 
@@ -209,22 +214,28 @@ class ClassifySourceGivenApStarFile(ClassifySource, ApStarFile):
         # TODO: This should go elsewhere.
         from astra.tasks.daily import get_visits_given_star
 
-        common_kwds = self.get_common_param_kwargs(ClassifySourceGivenApVisitFile)    
-        for task in tqdm(self.get_batch_tasks(), desc="Matching stars to visits", total=self.get_batch_size()):
-            for visit_kwds in get_visits_given_star(task.obj, task.apred):
-                yield ClassifySourceGivenApVisitFile(**{ **common_kwds, **visit_kwds })
+        kwds = self.get_common_param_kwargs(ClassifySourceGivenApVisitFile)
+        for i, task in enumerate(tqdm(self.get_batch_tasks(), total=self.get_batch_size(), desc="Matching stars to visits")):
+            for k, v in batcher(get_visits_given_star(task.obj, task.apred)).items():
+                if i == 0:
+                    # Overwrite common keywords between ClassifySourceGivenApVisitFile and ClassifySourceGivenApStarFile
+                    # that are batch keywords here.
+                    kwds[k] = []
+                kwds[k].extend(v)
 
-
+        return ClassifySourceGivenApVisitFile(**kwds)
+        
+    
     def run(self):
         """ Execute the task. """
         for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
 
             # We probably don't need to use dictionaries here but it prevents any mis-ordering.
             log_probs = { f"lp_{k}": 0 for k in task.class_names }
-            for classification in task.requires():
-                output = classification.output().read(as_dict=True)
+            for output in flatten(task.requires().output()):
+                classification = output.read(as_dict=True)
                 for key in log_probs.keys():
-                    log_prob = output[key] or np.nan # Sometimes we get nans / Nones.
+                    log_prob = classification[key] or np.nan # Sometimes we get nans / Nones.
                     if np.isfinite(log_prob):
                         log_probs[key] += log_prob
         

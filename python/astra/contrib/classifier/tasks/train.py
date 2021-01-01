@@ -1,11 +1,13 @@
 import luigi
 import os
 import torch
+import numpy as np
 from torch.autograd import Variable
 
 from astra.tasks.io import BaseTask, LocalTargetTask
 from astra.contrib.classifier import networks, model, plot_utils, utils
 from astra.contrib.classifier.tasks.mixin import ClassifierMixin
+from astra.tasks.slurm import slurmify
 
 class TrainSpectrumClassifier(ClassifierMixin, BaseTask):
 
@@ -67,7 +69,7 @@ class TrainSpectrumClassifier(ClassifierMixin, BaseTask):
         os.makedirs(os.path.basename(path), exist_ok=True)
         return luigi.LocalTarget(path)
         
-
+    @slurmify
     def run(self):
         """
         Run the task.

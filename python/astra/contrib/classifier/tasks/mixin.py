@@ -1,7 +1,10 @@
 import astra
 from astra.tasks.base import BaseTask
+from astra.tasks.slurm import slurm_mixin_factory
 
-class ClassifierMixin(BaseTask):
+SlurmMixin = slurm_mixin_factory("Classifier")
+
+class ClassifierMixin(SlurmMixin, BaseTask):
 
     """ 
     A mix-in class for classifier parameters. 
