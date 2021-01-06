@@ -7,6 +7,10 @@ from astra.contrib.ferre.tasks.mixin import (FerreMixin, SourceMixin)
 from astropy.table import Table
 
 
+def sanitise_parameter_names(parameter_name):
+    return parameter_name.lower().strip().replace(" ", "_")
+
+
 class FerreBase(FerreMixin, SourceMixin):
 
 
@@ -23,7 +27,7 @@ class FerreBase(FerreMixin, SourceMixin):
         directory_kwds = dict(self.directory_kwds or {})
         directory_kwds.setdefault(
             "dir",
-            os.path.join(self.output_base_dir, "scratch")
+            os.path.join(self.output_base_dir, "scratch", self.task_id.split("_")[1])
         )
         return directory_kwds
 
@@ -33,7 +37,7 @@ class FerreBase(FerreMixin, SourceMixin):
 
         kwds = self.get_ferre_kwds()
 
-        if not self.use_slurm:
+        if False and not self.use_slurm:
             Ferre = FerreNoQueue
         else:
             Ferre = FerreSlurmQueue
@@ -44,10 +48,14 @@ class FerreBase(FerreMixin, SourceMixin):
                 alloc=self.slurm_alloc,
                 nodes=self.slurm_nodes,
                 ppn=self.slurm_ppn,
-                walltime=self.slurm_walltime
+                walltime=self.slurm_walltime,
+                #partition=self.slurm_partition,
+                #mem=self.slurm_mem,
+                #gres=self.slurm_gres
             )
             kwds.update(slurm_kwds=slurm_kwds)
 
+        print(f"Using {Ferre} with {kwds}")
         return Ferre(**kwds)
             
     
@@ -122,11 +130,11 @@ class FerreBase(FerreMixin, SourceMixin):
 
             # Write result(s) to database.
             results = dict(zip(
-                map(str.lower, model.parameter_names), 
+                map(sanitise_parameter_names, model.parameter_names), 
                 p_opt[sliced].T
             ))
             results.update(dict(zip(
-                [f"u_{pn.lower()}" for pn in model.parameter_names],
+                [f"u_{sanitise_parameter_names(pn)}" for pn in model.parameter_names],
                 p_err[sliced].T
             )))
             results.update(

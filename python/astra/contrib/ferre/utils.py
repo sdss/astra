@@ -189,7 +189,7 @@ def yield_suitable_grids(grid_info, mean_fiber, teff, logg, fe_h, telescope):
     
     for header_path, (meta, lower_limits, upper_limits) in grid_info.items():
 
-        print(meta["lsf"], lsf_grid, telescope, meta["lsf_telescope_model"], header_path)
+        #print(meta["lsf"], lsf_grid, telescope, meta["lsf_telescope_model"], header_path)
         # Match star to LSF fiber number model (a, b, c, d) and telescope model (apo25m/lco25m).
         # TODO: This is a very APOGEE-specific thing and perhaps should be moved elsewhere.
         if meta["lsf"] != lsf_grid or telescope != meta["lsf_telescope_model"]:

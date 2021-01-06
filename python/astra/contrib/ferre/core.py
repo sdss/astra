@@ -303,15 +303,16 @@ class Ferre(object):
         # Parse outputs.
         try:
             # Parse parameters.
+            output_parameter_path = os.path.join(self.directory, self.kwds["output_parameter_path"])
             param, param_errs, meta = utils.read_output_parameter_file(
-                os.path.join(self.directory, self.kwds["output_parameter_path"]),
+                output_parameter_path,
                 n_dimensions=self.n_dimensions
             )
 
             any_bad = False
             for j, (p, e) in enumerate(zip(param, param_errs)):
                 if np.all(p == erroneous_output) and np.all(e == erroneous_output):
-                    log.warn(f"Error in output for index {j}")
+                    log.warn(f"Error in output for index {j} of {output_parameter_path}")
             
             if any_bad:
                 log.warn(f"FERRE STDOUT:\n{self.stdout}")
@@ -653,13 +654,15 @@ class FerreSlurmQueue(Ferre):
         # It's bad practice to import things here, but we do so to avoid import errors on
         # non-Utah systems, since the slurm package is not a requirement and only available
         # at Utah.
+        # TODO: Consider using @slurmify for this.
         from slurm import queue as SlurmQueue
 
         queue = SlurmQueue(verbose=True)
         queue.create(**kwds)
         queue.append(self.executable)
         queue.commit(hard=True, submit=True)
-        log.info(f"Slurm job submitted with {queue.key}")
+        
+        log.info(f"Slurm job submitted with {queue.key} and kwds {kwds}")
         
         self.process = None
 

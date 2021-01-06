@@ -6,6 +6,7 @@ from sqlalchemy import (Column, Float, String)
 from sqlalchemy.types import ARRAY as Array
 from luigi import ExternalTask, Parameter, DictParameter
 
+
 class FerreResult(DatabaseTarget):
 
     """ A database row representing an output target from FERRE. """
@@ -13,29 +14,34 @@ class FerreResult(DatabaseTarget):
     # We use arrays to allow for multiple analyses (individual visits and stacks)
     # per ApStar object.
 
-    teff = Column("TEFF", Array(Float))
-    logg = Column("LOGG", Array(Float))
-    metals = Column("METALS", Array(Float))
-    alpha_m = Column("O Mg Si S Ca Ti", Array(Float))
-    n_m = Column("N", Array(Float))
-    c_m = Column("C", Array(Float))
-    log10vdop = Column("LOG10VDOP", Array(Float))
-    # Not all grids have LGVSINI.
-    lgvsini = Column("LGVSINI", Array(Float), nullable=True)
 
-    e_teff = Column("E_TEFF", Array(Float))
-    e_logg = Column("E_LOGG", Array(Float))
-    e_metals = Column("E_METALS", Array(Float))
-    e_alpha_m = Column("E_O Mg Si S Ca Ti", Array(Float))
-    e_n_m = Column("E_N", Array(Float))
-    e_c_m = Column("E_C", Array(Float))
-    e_log10vdop = Column("E_LOG10VDOP", Array(Float))
+    teff = Column("teff", Array(Float))
+    logg = Column("logg", Array(Float))
+    metals = Column("metals", Array(Float))
+    alpha_m = Column("o_mg_si_s_ca_ti", Array(Float))
+    n_m = Column("n", Array(Float))
+    c_m = Column("c", Array(Float))
+    log10vdop = Column("log10vdop", Array(Float))
     # Not all grids have LGVSINI.
-    e_lgvsini = Column("E_LGVSINI", Array(Float), nullable=True)
+    lgvsini = Column("lgvsini", Array(Float), nullable=True)
+
+    u_teff = Column("u_teff", Array(Float))
+    u_logg = Column("u_logg", Array(Float))
+    u_metals = Column("u_metals", Array(Float))
+    u_alpha_m = Column("u_o_mg_si_s_ca_ti", Array(Float))
+    u_n_m = Column("u_n", Array(Float))
+    u_c_m = Column("u_c", Array(Float))
+    u_log10vdop = Column("u_log10vdop", Array(Float))
+    # Not all grids have lgvsini.
+    u_lgvsini = Column("u_lgvsini", Array(Float), nullable=True)
 
     log_snr_sq = Column("log_snr_sq", Array(Float))
     log_chisq_fit = Column("log_chisq_fit", Array(Float))
     
+    
+    @property
+    def table_name(self):
+        return "ferre"
 
 
 class FerreResultProxy(DatabaseTarget):
@@ -55,14 +61,12 @@ class FerreResultProxy(DatabaseTarget):
         proxy_task_id, = self._read(self.table_bound, as_dict=False, include_parameters=False)
         task_id = proxy_task_id
         task_family = task_id.split("_")[0]
-        task_namespace = task_family.split(".")[0]
+        task_namespace = task_family.split(".")[0].lower()
         
         db = BaseDatabaseTarget(
             self.connection_string,
             task_namespace,    
-            task_family,
             task_id,
-            []
         )
 
         # TODO: Should probably resolve this the same way luigi does..
