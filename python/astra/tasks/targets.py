@@ -15,7 +15,8 @@ from luigi.contrib import sqla
 from luigi import LocalTarget
 from luigi.event import Event
 from luigi.mock import MockTarget
-        
+from sqlalchemy.sql import func        
+
 
 class BaseDatabaseTarget(luigi.Target):
     
@@ -31,6 +32,7 @@ class BaseDatabaseTarget(luigi.Target):
 
         self.schema = [
             sqlalchemy.Column("task_id", sqlalchemy.String(128), primary_key=True),
+            sqlalchemy.Column("modified", sqlalchemy.DateTime(timezone=True))
         ]
         if schema is not None:
             self.schema.extend(schema)
@@ -217,6 +219,9 @@ class BaseDatabaseTarget(luigi.Target):
         if self.task_id is not None:
             sanitised_data.update(task_id=self.task_id)
     
+        # Add modified time.
+        sanitised_data["modified"] = datetime.datetime.utcnow()
+
         with self.engine.begin() as connection:
             if not exists:
                 insert = table.insert().values(**sanitised_data)
@@ -277,7 +282,7 @@ class DatabaseTarget(BaseDatabaseTarget):
 
     """
 
-    def __init__(self, task, echo=False, only_significant=True):
+    def __init__(self, task, table_name=None, echo=False, only_significant=True):
         
         self.task = task
         self.only_significant = only_significant
@@ -296,9 +301,11 @@ class DatabaseTarget(BaseDatabaseTarget):
         else:
             task_id, connection_string = (task.task_id, task.connection_string)
 
+        table_name = table_name or task.task_family
+
         super(DatabaseTarget, self).__init__(
             connection_string,
-            task.task_family,
+            table_name,
             task_id,
             schema,
             echo=echo
@@ -350,7 +357,7 @@ class DatabaseTarget(BaseDatabaseTarget):
 
 
 
-def generate_parameter_schema(task, only_significant=True):
+def generate_parameter_schema(task, only_significant=True, max_string_length=None):
     """
     Generate SQLAlchemy table schema for a task's parameters.
 
@@ -361,18 +368,18 @@ def generate_parameter_schema(task, only_significant=True):
         Only generate columns for parameters that are defined as significant (default: True).
     """
     jsonify = lambda _: json.dumps(_)
-
+    
     mapping = {
         # TODO: Including sanitizers if they are useful in future, but may not be needed.
-        luigi.parameter.Parameter: (sqlalchemy.String(1024), None),
-        luigi.parameter.OptionalParameter: (sqlalchemy.String(1024), None),
+        luigi.parameter.Parameter: (sqlalchemy.String(length=max_string_length), None),
+        luigi.parameter.OptionalParameter: (sqlalchemy.String(length=max_string_length), None),
         luigi.parameter.DateParameter: (sqlalchemy.Date(), None),
         luigi.parameter.IntParameter: (sqlalchemy.Integer(), None),
         luigi.parameter.FloatParameter: (sqlalchemy.Float(), None),
         luigi.parameter.BoolParameter: (sqlalchemy.Boolean(), None),
-        luigi.parameter.DictParameter: (sqlalchemy.String(1024), jsonify),
-        luigi.parameter.ListParameter: (sqlalchemy.String(1024), jsonify),
-        luigi.parameter.TupleParameter: (sqlalchemy.String(1024), jsonify)
+        luigi.parameter.DictParameter: (sqlalchemy.String(length=max_string_length), jsonify),
+        luigi.parameter.ListParameter: (sqlalchemy.String(length=max_string_length), jsonify),
+        luigi.parameter.TupleParameter: (sqlalchemy.String(length=max_string_length), jsonify)
     }
     parameters_schema = []
     for parameter_name, parameter_type in task.get_params():
