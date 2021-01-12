@@ -5,7 +5,7 @@ from astra.tasks.targets import (LocalTarget, DatabaseTarget, BaseDatabaseTarget
 from sqlalchemy import (Column, Float, String)
 from sqlalchemy.types import ARRAY as Array
 from luigi import ExternalTask, Parameter, DictParameter
-
+from luigi.task_register import Register
 
 class FerreResult(DatabaseTarget):
 
@@ -39,9 +39,6 @@ class FerreResult(DatabaseTarget):
     log_chisq_fit = Column("log_chisq_fit", Array(Float))
     
     
-    @property
-    def table_name(self):
-        return "ferre"
 
 
 class FerreResultProxy(DatabaseTarget):
@@ -58,10 +55,17 @@ class FerreResultProxy(DatabaseTarget):
     def resolve(self):
         """ Resolve the proxy of this object and return the FerreResult target. """
 
-        proxy_task_id, = self._read(self.table_bound, as_dict=False, include_parameters=False)
+        # TODO: This works it just relies on the column orders being in the right order.
+        #       You can revert back to this next time you drop database after 2020/01/11.
+        #proxy_task_id, = self._read(self.table_bound, as_dict=False, include_parameters=False)
+        proxy_task_id = self._read(self.table_bound, as_dict=True)["proxy_task_id"]
+
         task_id = proxy_task_id
         task_family = task_id.split("_")[0]
-        task_namespace = task_family.split(".")[0].lower()
+        #task_namespace = task_family.split(".")[0].lower()
+        # TODO: This is really hacky...
+        #       Almost need a database redesign..
+        task_namespace = "sdss4_ferre" if "SDSS4" in proxy_task_id else "ferre"
         
         db = BaseDatabaseTarget(
             self.connection_string,
@@ -69,11 +73,12 @@ class FerreResultProxy(DatabaseTarget):
             task_id,
         )
 
-        # TODO: Should probably resolve this the same way luigi does..
-        from astra.contrib.ferre.tasks.aspcap import FerreGivenApStarFile
+        task_class = Register.get_task_cls(task_family)
+        
         kwds = db.read(as_dict=True, include_parameters=True)
+
         task_kwds = {}
-        for k, p in FerreGivenApStarFile.get_params():
+        for k, p in task_class.get_params():
 
             try:
                 value = kwds[k]
@@ -101,12 +106,16 @@ class FerreResultProxy(DatabaseTarget):
                         # And it turns out Nones are shit.
                         # https://stackoverflow.com/questions/3548635/python-json-what-happened-to-none
                         value = value.replace(" None", " null")
-                        parsed_value = p.parse(value)
+                        try:
+                            parsed_value = p.parse(value)
+                        except json.JSONDecodeError:
+                            parsed_value = json.loads(value.replace("(", "[").replace(")", "]"))
                     else:
                         raise
             
             task_kwds[k] = parsed_value
 
-        task = FerreGivenApStarFile(**task_kwds)
+        task = task_class(**task_kwds)
         assert task.task_id == proxy_task_id
-        return FerreResult(task)
+        
+        return FerreResult(task, table_name=task_namespace)

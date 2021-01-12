@@ -46,6 +46,14 @@ class SDSSDataModelTask(BaseTask):
         parsing=luigi.BoolParameter.IMPLICIT_PARSING
     )
 
+    """
+    verify_data_products = luigi.BoolParameter(
+        default=True,
+        significant=False,
+        parsing=luigi.BoolParameter.IMPLICIT_PARSING
+    )
+    """
+
     def __init__(self, *args, **kwargs):
         super(SDSSDataModelTask, self).__init__(*args, **kwargs)
         return None
@@ -110,6 +118,18 @@ class SDSSDataModelTask(BaseTask):
         )
         return tree.full(cls.sdss_data_model_name, **kwargs)
 
+
+
+    def complete(self):
+        """ 
+        Check to see if the files exist.
+
+        Note that this uses a batch proxy (BatchDatabaseTarget) for large sets of files
+        to speed up development and execution.
+        """
+        return self.batch_complete()
+
+        
 
     def output(self):
         if self.is_batch_mode:

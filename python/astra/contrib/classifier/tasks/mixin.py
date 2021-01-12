@@ -75,3 +75,13 @@ class ClassifierMixin(SlurmMixin, BaseTask):
     batch_size = astra.IntParameter(default=100)
     weight_decay = astra.FloatParameter(default=1e-5)
     learning_rate = astra.FloatParameter(default=1e-4)
+
+
+    def get_tqdm_kwds(self, desc=None):
+        kwds = dict(
+            iterable=self.get_batch_tasks(),
+            total=self.get_batch_size(),
+            desc=desc
+        )
+        if kwds["total"] == 1: kwds.update(disable=True)
+        return kwds

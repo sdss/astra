@@ -4,7 +4,9 @@ import numpy as np
 import os
 import pickle
 from tqdm import tqdm
+from astropy.io import fits
 from astropy.table import Table
+from astra.utils import log
 from astra.tasks.base import BaseTask
 from astra.tasks.io import (ApStarFile, LocalTargetTask)
 from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
@@ -13,7 +15,8 @@ from astra.tools.spectrum import Spectrum1D
 from astra.tools.spectrum.writers import create_astra_source
 from astra.contrib.thepayne import training, test as testing
 from astra.tasks.slurm import (slurm_mixin_factory, slurmify)
-from sqlalchemy import (ARRAY as Array, Column, Float)
+from astra import database
+from sqlalchemy import (ARRAY as Array, Column, Float, Integer)
 
 
 SlurmMixin = slurm_mixin_factory("ThePayne")
@@ -48,6 +51,8 @@ class ThePayneResult(DatabaseTarget):
     table_name = "thepayne_apstar"
 
     """ A database row to represent an output. """
+
+    snr = Column("snr", Array(Float))
 
     teff = Column('teff', Array(Float))
     logg = Column('logg', Array(Float))
@@ -210,11 +215,35 @@ class EstimateStellarLabels(ThePayneMixin):
         observation = Spectrum1D.read(self.input()["observation"].path)
 
         if "continuum" in self.input():
-            with open(self.input()["continuum"].path, "rb") as fp:
-                continuum = pickle.load(fp)
+
+            continuum_path = self.input()["continuum"]["continuum"].path
+            while True:
+                with open(continuum_path, "rb") as fp:
+                    continuum = pickle.load(fp)
+
+                # If there is a shape mis-match between the observations and the continuum
+                # then it likely means that there have been observations taken since the
+                # continuum task was run. In this case we need to re-run the continuum
+                # normalisation.
+
+                O = observation.flux.shape[0]
+                C = continuum.shape[0]
+
+                # TODO: Consider if this is what we want to be doing..
+                if O == C:
+                    break
+
+                else:
+                    if O > C:
+                        log.warn(f"Re-doing continuum for task {self} at runtime")
+                    else:
+                        log.warn(f"More continuum than observations in {self}?!")
+                    
+                    os.unlink(continuum_path)
+                    self.requires()["continuum"].run()
         else:
             continuum = 1
-        
+
         normalized_flux = observation.flux.value / continuum
         normalized_ivar = continuum * observation.uncertainty.array * continuum
 
@@ -232,7 +261,8 @@ class EstimateStellarLabels(ThePayneMixin):
         label_names = state["label_names"]
         for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
             if task.complete():
-                continue 
+                continue
+                
             spectrum, continuum, normalized_flux, normalized_ivar = task.prepare_observation()
             
             p_opt, p_cov, model_flux, meta = testing.test(
@@ -243,11 +273,18 @@ class EstimateStellarLabels(ThePayneMixin):
             )
 
             results = dict(zip(label_names, p_opt.T))
+            # Note: we count the number of label names here in case we are sometimes using
+            #       radial velocity determination or not, before we add in the SNR.
+
             L = len(results)
+            # Add in uncertainties on parameters.
             results.update(dict(zip(
                 (f"u_{ln}" for ln in label_names),
                 np.sqrt(p_cov[:, np.arange(L), np.arange(L)].T)
             )))
+
+            # Add in SNR values for conveninence.
+            results.update(snr=spectrum.meta["snr"])
 
             # Write output to database.
             task.output()["database"].write(results)
@@ -279,7 +316,109 @@ class EstimateStellarLabels(ThePayneMixin):
         
 
 
+class ContinuumNormalizeApStarResult(DatabaseTarget):
+
+    """ A database row to represent an output. """
+
+    table_name = "continuum_apstar_sinusoidal"
+
+    nvisits = Column("nvisits", Integer)
+
+
 class ContinuumNormalize(Sinusoidal, ApStarFile):
+
+    """
+    Pseudo-continuum normalise ApStar stacked spectra using a sum of sines and cosines. 
+    
+    :param continuum_regions_path:
+        A path containing a list of (start, end) wavelength values that represent the regions to
+        fit as continuum.
+    """
+    
+    def requires(self):
+        return self.clone(ApStarFile)
+    
+
+    def complete(self):
+        if self.is_batch_mode:
+            return all(task.complete() for task in self.get_batch_tasks())
+        
+        if self.output()["continuum"].exists():
+            # Some continuum has been performed previously
+            # Check whether there are new visits that we need to account for.
+            result = self.output()["database"].read(as_dict=True)
+        
+            # Nicely handle things that we have already determined continuum for,
+            # but we don't know how many nvisits were there
+            if not result:
+                return False
+
+            continuum_nvisits = result["nvisits"]
+
+            # TODO: There are mis-matches between the number of visits that exist in the
+            #       database, and the number that have gone into ApStar files.
+            #       As of 2020/01/11 an example of this is 2M02202229+7135598
+            #       where it has ngoodvisits = 3 in the database, but only 2 visits went
+            #       into the construction of the ApStar file.
+
+            #       Until this is fixed we can't rely on the database for what information
+            #       is correct, so we will revert to checking the actual ApStar files.
+            fixed = False
+            if fixed:
+                            
+                # If a visit is considered "bad" in the APOGEE_DRP, then it does not get
+                # included in the final ApStar file.
+                star_table = database.schema.apogee_drp.star
+                visit_column = star_table.ngoodvisits
+
+                # TODO: Ask Nidever to make the data model and SQL tables consistent so
+                #       that we don't have to hard code in hacks.
+                actual_nvisits, = database.session.query(visit_column).filter(
+                    star_table.apogee_id == self.obj,
+                    star_table.apred_vers == self.apred,
+                    star_table.telescope == self.telescope,
+                    star_table.healpix == self.healpix,
+                ).order_by(visit_column.desc()).first()
+
+
+            else:
+                with fits.open(self.input().path) as image:
+                    N, P = image[1].data.shape
+                actual_nvisits = N if N < 2 else N - 2
+
+            if continuum_nvisits != actual_nvisits:
+                # TODO: Remove when fixed.
+                print(f"Mis-match with {self.obj} / {self.apred} / {self.telescope} / {self.healpix}: {continuum_nvisits} != {actual_nvisits}")
+
+            return continuum_nvisits == actual_nvisits
+
+        else:
+            return False        
+
+
+
+    def output(self):
+        if self.is_batch_mode:
+            return [task.output() for task in self.get_batch_tasks()]
+        
+        # TODO: Re-factor to allow for SDSS-IV.
+        path = os.path.join(
+            self.output_base_dir,
+            f"star/{self.telescope}/{int(self.healpix/1000)}/{self.healpix}/",
+            f"Continuum-{self.apred}-{self.obj}-{self.task_id}.pkl"
+        )
+        # Create the directory structure if it does not exist already.
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        
+        return {
+            "database": ContinuumNormalizeApStarResult(self),
+            "continuum": LocalTarget(path)
+        }
+
+
+
+
+class OldContinuumNormalize(Sinusoidal, ApStarFile):
 
     """
     Pseudo-continuum normalise ApStar stacked spectra using a sum of sines and cosines. 
@@ -291,7 +430,7 @@ class ContinuumNormalize(Sinusoidal, ApStarFile):
 
     def requires(self):
         return self.clone(ApStarFile)
-        
+
 
     def output(self):
         if self.is_batch_mode:
@@ -310,7 +449,7 @@ class ContinuumNormalize(Sinusoidal, ApStarFile):
 
 
 
-class EstimateStellarLabelsGivenApStarFile(EstimateStellarLabels, ContinuumNormalize, ApStarFile):
+class EstimateStellarLabelsGivenApStarFile(EstimateStellarLabels, Sinusoidal, ApStarFile):
     """
     Estimate stellar labels given a single-layer neural network and an ApStar file.
 
@@ -342,6 +481,8 @@ class EstimateStellarLabelsGivenApStarFile(EstimateStellarLabels, ContinuumNorma
         A path containing a list of (start, end) wavelength values that represent the regions to
         fit as continuum.
     """
+
+    max_batch_size = 1_000
 
     @property
     def task_short_id(self):

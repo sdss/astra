@@ -53,3 +53,15 @@ if os.path.exists(custom_config_path):
     config = merge(custom_config, config)
 
 
+# Deal with luigi logging.
+"""
+import logging
+from sdsstools.logger import get_logger
+
+log = get_logger(__name__.split(".")[0])
+log.propagate = False
+
+luigi_interface = logging.getLogger("luigi-interface")
+luigi_interface.propagate = False
+luigi_interface.handlers = log.handlers
+"""

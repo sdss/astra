@@ -15,6 +15,11 @@ def unique_dicts(list_of_dicts):
     return [dict(y) for y in set(tuple(x.items()) for x in list_of_dicts)]
 
 
+def get_default(task_factory, parameter_name):
+    return getattr(task_factory, parameter_name).task_value(task_factory, parameter_name)
+
+
+
 def symlink(target, link_name, overwrite=False):
     '''
     Create a symbolic link named link_name pointing to target.
@@ -56,21 +61,16 @@ def symlink(target, link_name, overwrite=False):
 
 def batcher(iterable, task_factory=None, unique=False):
     all_kwds = {}
-    uniques = []
-    for item in iterable:
-        if unique:
-            u = json.dumps(item)
-            if u in uniques:
-                continue
-            uniques.append(u)
+    if unique:
+        iterable = [dict(s) for s in set(frozenset(d.items()) for d in iterable)]
 
+    for item in iterable:
         for k, v in item.items():
             all_kwds.setdefault(k, [])
             all_kwds[k].append(v)
 
     if task_factory is None:
         return { k: (tuple(v) if isinstance(v, list) else v) for k, v in all_kwds.items() }
-
     
     else:
         batch_kwds = {}

@@ -29,6 +29,7 @@ visit_table = sqlalchemy.Table("visit", md, autoload=True, autoload_with=connect
 star_table = sqlalchemy.Table("star", md, autoload=True, autoload_with=connection)
 
 
+
 def get_bhm_mwm_visits(mjd=None, plate=None, run2d=None):
     """
     Yield visits that were observed by BHM, but are of interest to MWM.
@@ -68,6 +69,37 @@ def get_bhm_mwm_visits(mjd=None, plate=None, run2d=None):
     for row in rows:
         yield dict(zip(column_names, row))
 
+
+
+def get_mjds_of_unclassified_apogee_visits():
+    """
+    Return Modified Julian Dates (MJD) where ApVisit objects were reduced, but no 
+    classifications exist for that MJD. This does not do a *complete* (all) check 
+    against which MJDs have classifications. It only checks to see if there are 
+    *any* MJDs for which there are APOGEE visits, but there are no classifications.
+    """
+
+    # Get distinct MJD end values from the apogee_drp.star table.
+    s_star = sqlalchemy.select([star_table.c.mjdend]).distinct()
+
+    # Get distinct MJD values from the astra.classify_apvisit table.
+    # TODO: Get the table name from the actual Classify task?
+    astra_metadata = sqlalchemy.MetaData(schema="astra")
+    classify_apvisit = sqlalchemy.Table(
+        "classify_apvisit", 
+        astra_metadata, 
+        autoload=True, 
+        autoload_with=connection
+    )
+
+    s_classify = sqlalchemy.select([classify_apvisit.c.mjd]).distinct()
+
+    expected_mjds = flatten(engine.execute(s_star).fetchall())
+    classified_mjds = flatten(engine.execute(s_classify).fetchall())
+
+    return tuple(sorted(set(expected_mjds).difference(classified_mjds)))
+
+    
 
 
 def get_visits(mjd, full_output=False):

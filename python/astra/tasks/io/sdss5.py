@@ -22,6 +22,12 @@ class SDSS5DataModelTask(SDSSDataModelTask):
         significant=False,
         parsing=astra.BoolParameter.IMPLICIT_PARSING
     )
+
+    def complete(self):
+        # TODO: Remove this in production.
+        if self.__class__.__name__ in ("ApVisitFile", "ApStarFile"):
+            return True
+        return super(SDSS5DataModelTask, self).complete()
     
 
 class ApVisitFile(SDSS5DataModelTask):

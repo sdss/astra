@@ -124,9 +124,9 @@ def test(wavelength,
     
     N, P = flux.shape
 
-    p_opts = np.empty((N, L))
-    p_covs = np.empty((N, L, L))
-    model_fluxes = np.empty((N, P))
+    p_opts = np.nan * np.ones((N, L))
+    p_covs = np.nan * np.ones((N, L, L))
+    model_fluxes = np.nan * np.ones((N, P))
     meta = []
 
     x_min, x_max = scales
@@ -167,26 +167,37 @@ def test(wavelength,
             method="trf"
         )
 
-        p_opt, p_cov = curve_fit(objective_function, **kwds)
-        y_pred = objective_function(x, *p_opt)
-        
-        # Calculate summary statistics.
-        chi_sq, r_chi_sq = get_chi_sq(y_pred, y, y_err, L)
+        try:
+            p_opt, p_cov = curve_fit(objective_function, **kwds)
 
-        p_opts[i, :] = (x_max - x_min) * (p_opt + 0.5) + x_min
-        # TODO: YST does this but I am not yet convinced that it is correct!
-        p_covs[i, :, :] = p_cov * (x_max - x_min)
-        model_fluxes[i, :] = np.interp(
-            wavelength,
-            model_wavelength,
-            y_pred,
-            **interp_kwds
-        )
+        except ValueError:
+            log.exception(f"Error occurred fitting spectrum {i}:")
+            
+            meta.append(dict(
+                chi_sq=np.nan,
+                r_chi_sq=np.nan
+            ))
 
-        meta.append(dict(
-            chi_sq=chi_sq,
-            r_chi_sq=r_chi_sq
-        ))    
+        else:
+            y_pred = objective_function(x, *p_opt)
+            
+            # Calculate summary statistics.
+            chi_sq, r_chi_sq = get_chi_sq(y_pred, y, y_err, L)
+
+            p_opts[i, :] = (x_max - x_min) * (p_opt + 0.5) + x_min
+            # TODO: YST does this but I am not yet convinced that it is correct!
+            p_covs[i, :, :] = p_cov * (x_max - x_min)
+            model_fluxes[i, :] = np.interp(
+                wavelength,
+                model_wavelength,
+                y_pred,
+                **interp_kwds
+            )
+
+            meta.append(dict(
+                chi_sq=chi_sq,
+                r_chi_sq=r_chi_sq
+            ))    
     
     return (p_opts, p_covs, model_fluxes, meta)
 

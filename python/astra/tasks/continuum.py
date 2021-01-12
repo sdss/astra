@@ -58,8 +58,13 @@ class Sinusoidal(BaseTask):
             )
             """
             
-            with open(task.output().path, "wb") as fp:
+            with open(task.output()["continuum"].path, "wb") as fp:
                 pickle.dump(continuum, fp)
+
+            N, P = spectrum.flux.shape
+            nvisits = N if N < 2 else N - 2
+            task.output()["database"].write(dict(nvisits=nvisits))
+
 
 
     def output(self):

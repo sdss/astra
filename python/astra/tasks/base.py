@@ -9,7 +9,7 @@ from time import time
 from luigi.mock import MockTarget
 from luigi.task_register import Register
 from luigi.parameter import ParameterVisibility, _DictParamEncoder, FrozenOrderedDict
-from astra.tasks.targets import DatabaseTarget
+from astra.tasks.targets import (BatchDatabaseTarget, DatabaseTarget)
 from astra.utils import log
 
 from packaging.version import parse as parse_version
@@ -97,7 +97,7 @@ class BaseTask(luigi.Task, metaclass=Register):
 
     def __repr__(self):
         """
-        Build a task representation like `MyTask(param1=1.5, param2='5')`
+        Build a task representation like `MyTask(hash: param1=1.5, param2='5')`
         """
         params = self.get_params()
         param_values = self.get_param_values(params, [], self.param_kwargs)
@@ -130,9 +130,10 @@ class BaseTask(luigi.Task, metaclass=Register):
                 repr_parts.append(f"... et al.")
                 break
 
-        task_str = '{}({})'.format(self.get_task_family(), ', '.join(repr_parts))
+        task_family, task_hash = self.task_id.split("_")
 
-        return task_str
+        return f"{task_family}({task_hash}: {', '.join(repr_parts)})"
+
 
 
     def to_str_params(self, only_significant=False, only_public=False):
@@ -282,6 +283,24 @@ class BaseTask(luigi.Task, metaclass=Register):
     def get_batch_size(self):
         """ Get the number of batched tasks. """
         return len(getattr(self, self.batch_param_names()[0])) if self.is_batch_mode else 1
+
+
+
+    def batch_complete(self):
+        """ Check whether this batch task is complete or not. """
+    
+        if self.is_batch_mode:
+            batch_result = BatchDatabaseTarget(self)
+            if batch_result.exists():
+                log.warn(f"Not checking {self.task_id} for all complete outputs. Using {batch_result} instead.")
+                return True
+            
+            complete = super().complete()
+            if complete:
+                batch_result.write()
+            return complete
+        
+        return super().complete()
 
 
     @property

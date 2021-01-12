@@ -24,7 +24,7 @@ is_m67 = calibration_set["FIELD"] == "M67"
 calibration_set = calibration_set[is_m67]
 
 # Limit the sample size for debugging purposes?
-N_sample = None
+N_sample = 5
 
 batch_kwds = {}
 for parameter_name in ApStarFile.batch_param_names():
@@ -54,8 +54,6 @@ for parameter_name in ApStarFile.batch_param_names():
 
 
 workflow_keywords = dict(
-    connection_string="sqlite:////uufs/chpc.utah.edu/common/home/u6020307/astra/m67.db",
-    
     # Analysis keywords.
     interpolation_order=1,
     continuum_flag=1,
@@ -71,17 +69,15 @@ workflow_keywords = dict(
     #directory_kwds=dict(dir="/home/ubuntu/data/sdss/astra-components/astra_ferre/tmp/"),
     n_threads=64,
     debug=True,
-    slurm_kwds=dict(
-        alloc='sdss-np',
-        ppn=64,
-        walltime='01:00:00'
-    ),
-    use_direct_access=False
+    use_direct_access=False,
+#    use_slurm=True,
 )
 
 
 from astra.contrib.ferre.tasks.aspcap import dispatch_apstars_for_analysis
 
+#config = luigi.configuration.get_config()
+#config.read("utah.cfg")
 
 
 dispatch = EstimateChemicalAbundancesGivenApStarFile(
@@ -90,6 +86,9 @@ dispatch = EstimateChemicalAbundancesGivenApStarFile(
 )
 
 batch_kwds = list(dispatch.get_batch_task_kwds(False))
+batch_kwds[-1].update(telescope="lco25m", prefix="as", obj="2M08532214+1112230")
+
+raise a
 moo = dispatch_apstars_for_analysis(batch_kwds, "../astra-component-data/FERRE/grid_header_paths.utah.list", release="DR16")
 foo = [ea[1] for ea in moo]
 
@@ -108,6 +107,7 @@ astra.build(
     [dispatch],
     # Workers sets the number of simultaneous workers, but these are bound by number of active
     # Slurm jobs because we interactively wait for a Slurm job to finish.
-    workers=2,
-    detailed_summary=True
+    local_scheduler=True,
+    workers=24,
+#    detailed_summary=True
 )

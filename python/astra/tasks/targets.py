@@ -178,8 +178,12 @@ class BaseDatabaseTarget(luigi.Target):
                     row = row[0]
                 elif len(row) == 0:
                     row = None
+            
         if as_dict:
-            return collections.OrderedDict(zip(column_names, row))
+            if row is None:
+                return {}
+            else:
+                return collections.OrderedDict(zip(column_names, row))
         return row
 
 
@@ -195,7 +199,8 @@ class BaseDatabaseTarget(luigi.Target):
         exists = self.exists()
         table = self.table_bound
         data = data or dict()
-        sanitised_data = dict()
+        sanitised_data = dict(modified=datetime.datetime.utcnow())
+
         for key, value in data.items():
             # Don't sanitise booleans or date/datetime objects.
             if not isinstance(value, (datetime.datetime, datetime.date, bool)):
@@ -219,9 +224,6 @@ class BaseDatabaseTarget(luigi.Target):
         if self.task_id is not None:
             sanitised_data.update(task_id=self.task_id)
     
-        # Add modified time.
-        sanitised_data["modified"] = datetime.datetime.utcnow()
-
         with self.engine.begin() as connection:
             if not exists:
                 insert = table.insert().values(**sanitised_data)
@@ -249,6 +251,22 @@ class BaseDatabaseTarget(luigi.Target):
             )
 
         return None
+
+
+class BatchDatabaseTarget(BaseDatabaseTarget):
+
+    def __init__(self, task, echo=False):
+
+        self.task = task
+
+        super(BatchDatabaseTarget, self).__init__(
+            task.connection_string,
+            "batch_task_status",
+            task.task_id,
+            schema=[],
+            echo=echo
+        )
+        
 
 
 

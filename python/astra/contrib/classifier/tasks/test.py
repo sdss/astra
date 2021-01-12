@@ -16,10 +16,10 @@ from torch.autograd import Variable
 from scipy.special import logsumexp
 from astra.tasks.io import (ApVisitFile, ApStarFile, SDSS4ApVisitFile, LocalTargetTask)
 from astra.tools.spectrum import Spectrum1D
-from astra.utils import batcher
+from astra.utils import (batcher, log)
 
 from astra.tasks.base import BaseTask
-from astra.tasks.targets import DatabaseTarget
+from astra.tasks.targets import DatabaseTarget, BatchDatabaseTarget
 from astra.contrib.classifier import networks, utils
 
 from astra.contrib.classifier.tasks.mixin import ClassifierMixin
@@ -166,17 +166,23 @@ class ClassifySourceGivenApVisitFileBase(ClassifySource):
         network = self.read_network()
 
         # This can be run in batch mode.
-        for task in tqdm(self.get_batch_tasks(), desc="Classifying", total=self.get_batch_size()):
-
+        for task in tqdm(**self.get_tqdm_kwds("Classifying ApVisitFiles")):
+            if task.complete():
+                continue
+            
             batch = task.prepare_batch()
 
-            with torch.no_grad():                
+            with torch.no_grad():
                 pred = network.forward(Variable(torch.Tensor(batch)))
                 log_probs = pred.cpu().numpy().flatten()
-                #log_probs = pred.data.numpy().flatten()
 
             task.output().write(self.prepare_result(log_probs))
 
+
+    def complete(self):
+        # Since this could be a batch task with lots of inputs, use a batch proxy.
+        return self.batch_complete()
+     
 
     def output(self):
         """ The output of the task. """
@@ -195,6 +201,8 @@ class ClassifySourceGivenApVisitFile(ClassifySourceGivenApVisitFileBase):
     and those required by :py:mod:`astra.tasks.io.ApVisitFile`.
     """
     
+    max_batch_size = 10_000
+
     pass
 
 
@@ -205,8 +213,9 @@ class ClassifySourceGivenApStarFile(ClassifySource, ApStarFile):
 
     This task requires the same parameters required by :py:mod:`astra.contrib.classifer.train.TrainNIRSpectrumClassifier`,
     and those required by :py:mod:`astra.tasks.io.ApStarFile`.
-
     """
+
+    max_batch_size = 10_000
 
     def requires(self):
         """ We require the classifications from individual visits of this source. """        
@@ -215,7 +224,7 @@ class ClassifySourceGivenApStarFile(ClassifySource, ApStarFile):
         from astra.tasks.daily import get_visits_given_star
 
         kwds = self.get_common_param_kwargs(ClassifySourceGivenApVisitFile)
-        for i, task in enumerate(tqdm(self.get_batch_tasks(), total=self.get_batch_size(), desc="Matching stars to visits")):
+        for i, task in enumerate(tqdm(**self.get_tqdm_kwds("Matching stars to visits"))):
             for k, v in batcher(get_visits_given_star(task.obj, task.apred)).items():
                 if i == 0:
                     # Overwrite common keywords between ClassifySourceGivenApVisitFile and ClassifySourceGivenApStarFile
@@ -228,12 +237,21 @@ class ClassifySourceGivenApStarFile(ClassifySource, ApStarFile):
     
     def run(self):
         """ Execute the task. """
-        for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
+        
+        for task in tqdm(**self.get_tqdm_kwds("Classifying ApStarFiles")):
+            if task.complete():
+                continue
 
             # We probably don't need to use dictionaries here but it prevents any mis-ordering.
             log_probs = { f"lp_{k}": 0 for k in task.class_names }
-            for output in flatten(task.requires().output()):
-                classification = output.read(as_dict=True)
+            for output in flatten(task.input()):
+                try:
+                    classification = output.read(as_dict=True)
+                
+                except TypeError:
+                    log.exception(f"Exception occurred:")
+                    continue
+                
                 for key in log_probs.keys():
                     log_prob = classification[key] or np.nan # Sometimes we get nans / Nones.
                     if np.isfinite(log_prob):
@@ -243,6 +261,11 @@ class ClassifySourceGivenApStarFile(ClassifySource, ApStarFile):
             task.output().write(result)
 
         return None
+
+
+    def complete(self):
+        # Since this could be a batch task with lots of inputs, use a batch proxy.
+        return self.batch_complete()
     
 
     def output(self):

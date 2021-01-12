@@ -2,8 +2,9 @@
 import json
 import os
 from tempfile import mkstemp
-from luigi import (Parameter, IntParameter, BoolParameter, WrapperTask)
+from luigi import (Task, Parameter, IntParameter, BoolParameter, WrapperTask)
 from luigi.task_register import load_task
+from luigi.mock import MockTarget
 from astra.tasks.base import BaseTask
 from astra.utils import log
 from time import (sleep, time)
@@ -58,7 +59,7 @@ class SlurmMixin(BaseTask):
     slurm_gres = Parameter(significant=False, default="") # resources.
 
 
-class SlurmTask(WrapperTask):
+class SlurmTask(Task):
 
     """ A wrapper task to execute a task through Slurm. """
 
@@ -66,26 +67,30 @@ class SlurmTask(WrapperTask):
     wrap_task_family = Parameter()
     wrap_task_params_path = Parameter()
 
-    _complete = False
-
     def requires(self):
 
         with open(self.wrap_task_params_path, "r") as fp:
             task_params = json.load(fp)
 
-        yield load_task(
+        return load_task(
             self.wrap_task_module,
             self.wrap_task_family,
             task_params
         )
 
-        #self._complete = True
 
     def run(self):
-        self._complete = True
+        print(f"Running {self}")
+        log.info(f"Running {self}")
+        with self.output().open("w") as fp:
+            fp.write("")
+        log.info(f"Finished {self}")
+        print(f"Finished {self}")
+        
 
-    def complete(self):
-        return self._complete
+    def output(self):
+        return MockTarget(self.task_id)
+
         
 
 
@@ -133,11 +138,11 @@ def slurmify(func):
 
             queue = SlurmQueue(verbose=True)
             queue.create(**kwds)
-            queue.append("module avail cuda")
+            #queue.append("module avail cuda")
             queue.append(cmd)
 
             queue.commit(hard=True, submit=True)
-            log.info(f"Slurm job submitted with {queue.key}")
+            log.info(f"Slurm job submitted with {queue.key} and keywords {kwds}")
             log.info(f"\tJob directory: {queue.job_dir}")
             log.info(f"\tThere are {self.get_batch_size()} objects to run in batch mode")
                 

@@ -22,11 +22,8 @@ from astra.tasks.slurm import slurm_mixin_factory, slurmify
 SlurmMixin = slurm_mixin_factory("APOGEENet")
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-device = torch.device("cuda:0" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu")
 
-print(f"Using {device} in APOGEENet because {torch.cuda.is_available()}")
-print(os.environ.get('CUDA_VISIBLE_DEVICES'))
-print("^ CUDA_VISIBLE_DEVICES")
+log.debug(f"Using Torch device {device}")
 
 class APOGEENetMixin(SlurmMixin, BaseTask):
 
@@ -181,7 +178,7 @@ class EstimateStellarParameters(APOGEENetMixin):
         model = self.read_model()
 
         for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
-            if task.complete(): 
+            if task.complete():
                 continue
         
             spectrum = task.read_observation()

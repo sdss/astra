@@ -93,7 +93,8 @@ if __name__ == "__main__":
         "mjd": 55863,
         "plateid": 4540,
         "release": "DR16",
-        "run2d": "v5_13_0",tmp3.png
+        "run2d": "v5_13_0",
+    }
 
     spec = SpecFile(**kwds)
     assert spec.complete()

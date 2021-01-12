@@ -88,10 +88,11 @@ class FerreBase(FerreMixin, SourceMixin):
         }
 
 
-    def get_source_names(self):
+    def get_source_names(self, spectra):
         """ Return a list of source names for convenience in FERRE. """
-        return list(map(str, range(self.get_batch_size())))
-    
+        N = sum([spectrum.flux.shape[0] for spectrum in spectra])
+        return list(map(str, range(N)))
+        
 
     def read_input_observations(self):
         raise NotImplementedError("this should be implemented by the sub-classes")
@@ -110,7 +111,7 @@ class FerreBase(FerreMixin, SourceMixin):
         results = model.fit(
             spectra,
             initial_parameters=self.initial_parameters,
-            names=self.get_source_names(),
+            names=self.get_source_names(spectra),
             full_output=True
         )
 
