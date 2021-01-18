@@ -1,3 +1,5 @@
+import json
+import hashlib
 from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.ext.declarative import AbstractConcreteBase, declared_attr
@@ -18,23 +20,18 @@ class Base(AbstractConcreteBase, AstraBase):
 
 
 
+class TaskState(Base):
+    __tablename__ = "task_state"
+
+    def __repr__(self):
+        return f"<TaskState (task_id={self.task_id}, code={self.code}, pk={self.pk})>"
+
+
 class TaskParameter(Base):
     __tablename__ = "task_parameter"
     
     def __repr__(self):
         return f"<TaskParameter ({self.pk:x}, pk={self.pk})>"
-
-
-
-class Task(Base):
-    __tablename__ = "task"
-
-    def __repr__(self):
-        return f"<Task ({self.task_name}_{self.parameter_hash}, pk={self.pk})>"
-
-    @property
-    def parameter_hash(self)
-        return f"{self.parameter_pk:x}"
 
 
 class ApogeeVisit(Base):
@@ -77,8 +74,8 @@ class Aspcap(Base):
 
 
 def define_relations():    
-    Task._parameter = relationship(TaskParameter, backref="task")
-    Task.parameters = association_proxy("_parameter", "parameters")
+    TaskState._parameter = relationship(TaskParameter, backref="task_state")
+    TaskState.parameters = association_proxy("_parameter", "parameters")
 
 
 
