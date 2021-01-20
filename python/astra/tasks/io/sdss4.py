@@ -1,6 +1,8 @@
 import astra
 from astra.tasks.io import SDSSDataModelTask
+from astra.database import database, astradb
 
+session = database.Session()
 
 class SDSS4DataModelTask(SDSSDataModelTask):
 
@@ -63,7 +65,24 @@ class ApStarFile(SDSS4DataModelTask):
     """
 
     sdss_data_model_name = "apStar"
-    
+
+
+    def get_or_create_data_model_relationships(self):
+        """ Return the keywords that reference the input data model for this task. """
+        
+        keys = ("release", "apstar", "apred", "telescope", "field", "obj")
+        kwds = { k: getattr(self, k) for k in keys }
+
+        q = session.query(astradb.SDSS4ApogeeStar).filter_by(**kwds)
+        instance = q.one_or_none()
+        if instance is None:
+            instance = astradb.SDSS4ApogeeStar(**kwds)
+            with session.begin():
+                session.add(instance)
+        
+        return { "sdss4_apogee_star_pk": (instance.pk, ) }
+
+
     def writer(self, spectrum, path, **kwargs):
         from astra.tools.spectrum.loaders import write_sdss_apstar
         return write_sdss_apstar(spectrum, path, **kwargs)

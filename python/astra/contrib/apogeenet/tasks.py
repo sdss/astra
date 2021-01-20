@@ -1,27 +1,20 @@
-
 import numpy as np
 import os
 import torch
-import yaml
 from tqdm import tqdm
 from time import time
 from luigi.parameter import ParameterVisibility
-from sqlalchemy import (ARRAY as Array, Column, Float)
 
 import astra
-from astropy.table import Table
-from astra.tasks import BaseTask
-from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
-from astra.tasks.io.sdss5 import ApStarFile
-from astra.tools.spectrum import Spectrum1D
 from astra.contrib.apogeenet.model import Net, predict
-from astra.utils import log, timer
-
-from astra.tasks.slurm import slurm_mixin_factory, slurmify
-
-
 from astra.database import astradb
-from astra.tasks.targets import NewDatabaseTarget
+from astra.tasks import BaseTask
+from astra.tasks.io.sdss5 import ApStarFile
+from astra.tasks.io.sdss4 import (ApStarFile as SDSS4ApStarFile)
+from astra.tasks.slurm import slurm_mixin_factory, slurmify
+from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
+from astra.tools.spectrum import Spectrum1D
+from astra.utils import log, timer
 
 SlurmMixin = slurm_mixin_factory("APOGEENet")
 
@@ -50,22 +43,6 @@ class TrainedAPOGEENetModel(APOGEENetMixin):
         return LocalTarget(self.model_path)
 
 
-class APOGEENetResult(DatabaseTarget):
-
-    """ A target database row for an APOGEENet result. """
-
-    table_name = "apogeenet"
-
-    teff = Column("teff", Array(Float))
-    logg = Column("logg", Array(Float))
-    fe_h = Column("fe_h", Array(Float))
-    u_teff = Column("u_teff", Array(Float))
-    u_logg = Column("u_logg", Array(Float))
-    u_fe_h = Column("u_fe_h", Array(Float))
-
-    snr = Column("snr", Array(Float))
-    
-
 class EstimateStellarParameters(APOGEENetMixin):
 
     """
@@ -86,16 +63,14 @@ class EstimateStellarParameters(APOGEENetMixin):
         visibility=ParameterVisibility.HIDDEN,
     )
 
+    max_batch_size = 10_000
 
     def output(self):
         """ The output produced by this task. """
         if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
+            return (task.output() for task in self.get_batch_tasks())
+        return dict(database=DatabaseTarget(astradb.ApogeeNet, self))
         
-        return {
-            "database": NewDatabaseTarget(astradb.ApogeeNet, self)
-        }
-
 
     def read_model(self):
         """ Read in the trained APOGEENet model. """
@@ -116,7 +91,7 @@ class EstimateStellarParameters(APOGEENetMixin):
 
     def read_observation(self):
         """ Read in the observations. """
-        return Spectrum1D.read(self.input()["observation"].path)
+        return Spectrum1D.read(self.get_input("observation").path)
 
 
     def estimate_stellar_parameters(self, model, spectrum):
@@ -155,7 +130,7 @@ class EstimateStellarParameters(APOGEENetMixin):
             
             error = torch.where(error == 1.0000e+10, flux, error)
             error_t = torch.tensor(np.array([5 * median_error], dtype=dtype)).to(device)
-            error_t.repeat(P)
+
             error = torch.where(error >= 5 * median_error, error_t, error)
 
             flux_tensor = flux_tensor * error + flux
@@ -193,26 +168,17 @@ class EstimateStellarParameters(APOGEENetMixin):
 
 class EstimateStellarParametersGivenApStarFile(EstimateStellarParameters, ApStarFile):
 
-    """
-    Estimate stellar parameters of a young stellar object, given a trained APOGEENet model and an ApStar file.
+    def requires(self):
+        return dict(
+            model=self.clone(TrainedAPOGEENetModel),
+            observation=self.clone(ApStarFile)
+        )
+        
 
-    This task also requires all parameters that `astra.tasks.io.sdss5.ApStarFile` requires.
-
-
-    :param model_path:
-        The path of the trained APOGEENet model.
-
-    :param uncertainty: (optional)
-        The number of draws to use when calculating the uncertainty in the
-        network (default: 100).
-
-    """
-
-    max_batch_size = 10_000
+class EstimateStellarParametersGivenSDSS4ApStarFile(EstimateStellarParameters, SDSS4ApStarFile):
 
     def requires(self):
-        return {
-            "model": self.clone(TrainedAPOGEENetModel),
-            "observation": self.clone(ApStarFile)
-        }
-        
+        return dict(
+            model=self.clone(TrainedAPOGEENetModel),
+            observation=self.clone(SDSS4ApStarFile)
+        )

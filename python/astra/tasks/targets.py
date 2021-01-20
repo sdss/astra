@@ -1,30 +1,29 @@
-
 import os
-import collections
-import datetime
-import json
-import luigi
 import numpy as np
-import sqlalchemy
-from astra.utils import symlink_force
-from shutil import copy2 as copyfile
-from time import gmtime, strftime
 from astropy.io import fits
 from astropy.table import Table
-from luigi.contrib import sqla
-from luigi import LocalTarget
-from luigi.event import Event
-from luigi.mock import MockTarget
-from sqlalchemy.sql import func        
+from luigi import (LocalTarget, Target)
+from shutil import copy2 as copyfile
+from time import gmtime, strftime
 
+from astra.utils import symlink_force
 from astra.database import database
 
 session = database.Session()
 
-class NewDatabaseTarget(luigi.Target):
+class DatabaseTarget(Target):
+
+    """
+    A database target row as the output of a task.
+
+    :param model:
+        The database model class to use (e.g., `astra.database.astradb.ApogeeNet`).
+    
+    :param task:
+        The reference task that is producing the output.
+    """
 
     def __init__(self, model, task):
-
         self.model = model
         self.task = task
         
@@ -36,10 +35,12 @@ class NewDatabaseTarget(luigi.Target):
         
 
     def exists(self):
+        """ Return a boolean whether the database row exists. """
         return self.get_query(self.model.pk).one_or_none() is not None
 
 
     def read(self):
+        """ Read the row from the database. """
         return self.get_query().one_or_none()
 
 
@@ -62,23 +63,6 @@ class NewDatabaseTarget(luigi.Target):
             # Reference the primary key of the task.
             kwds = dict(task_pk=task_pk)
             kwds.update(data)
-            """
-            kwds = {
-                "task_pk": task_pk,
-                "parameter_pk": self.task._database_parameter_pk,        
-            }
-
-            # Get any relationships for the input data models used.
-            try:
-                kwds.update(self.task.get_or_create_data_model_relationships())
-
-            except AttributeError:
-                # No data model used, apparently.
-                None
-
-            # Include the data.
-            kwds.update(data)
-            """
 
             # Create the instance.
             instance = self.model(**kwds)
@@ -91,406 +75,6 @@ class NewDatabaseTarget(luigi.Target):
         
         return instance
 
-
-
-class BaseDatabaseTarget(luigi.Target):
-    
-    """ A mixin class for DatabaseTargets. """
-
-    _database_schema = "astra"
-    _engine_dict = {}
-    Connection = collections.namedtuple("Connection", "engine pid")
-
-    def __init__(self, connection_string, table_name, task_id=None, schema=None, echo=True):
-        self._table_name = table_name
-        self.task_id = task_id
-
-        self.schema = [
-            sqlalchemy.Column("task_id", sqlalchemy.String(128), primary_key=True),
-            sqlalchemy.Column("modified", sqlalchemy.DateTime(timezone=True))
-        ]
-        if schema is not None:
-            self.schema.extend(schema)
-        self.echo = echo
-        self.connect_args = {}
-        self.connection_string = connection_string
-        return None       
-
-
-    @property
-    def engine(self):
-        """
-        Return an engine instance, creating it if it doesn't exist.
-
-        Recreate the engine connection if it wasn't originally created
-        by the current process.
-        """
-        pid = os.getpid()
-        conn = BaseDatabaseTarget._engine_dict.get(self.connection_string)
-        if not conn or conn.pid != pid:
-            # create and reset connection
-            engine = sqlalchemy.create_engine(
-                self.connection_string,
-                connect_args=self.connect_args,
-                echo=self.echo
-            )
-            BaseDatabaseTarget._engine_dict[self.connection_string] = self.Connection(engine, pid)
-        return BaseDatabaseTarget._engine_dict[self.connection_string].engine
-
-
-    @property
-    def table_name(self):
-        """ The name of the table in the database. """        
-        # Don't allow '.' in table names, and specify the 'astra' schema.
-        return self._table_name.replace(".", "_")
-
-
-    @property
-    def table_bound(self):
-        """ A bound reflection of the database table. """
-        try:
-            return self._table_bound
-        except AttributeError:
-            return self.create_table()
-
-
-    def create_table(self):
-        """
-        Create a table if it doesn't exist.
-        Use a separate connection since the transaction might have to be reset.
-        """
-        with self.engine.begin() as con:
-            metadata = sqlalchemy.MetaData(schema=self._database_schema)
-            if not con.dialect.has_table(con, self.table_name, schema=self._database_schema):
-                self._table_bound = sqlalchemy.Table(
-                    self.table_name, metadata, *self.schema
-                )
-                metadata.create_all(self.engine)
-
-            else:
-                #metadata.reflect(only=[self.results_table], bind=self.engine)
-                #self._table_bound = metadata.tables[self.results_table]
-                self._table_bound = sqlalchemy.Table(
-                    self.table_name,
-                    metadata,
-                    autoload=True,
-                    autoload_with=self.engine
-                )
-
-        return self._table_bound
-        
-
-    def exists(self):
-        """ Returns True or False whether the database target exists. """
-        r = self._read(self.table_bound, columns=[self.table_bound.c.task_id]) 
-        return r is not None
-
-
-    def read(self, as_dict=False, include_parameters=True, limit=1):
-        """ 
-        Read the target from the database. 
-
-        :param as_dict: (optional)
-            Optionally return the result as a dictionary (default: False).        
-        """
-        return self._read(
-            self.table_bound, 
-            as_dict=as_dict, 
-            include_parameters=include_parameters,
-            limit=limit,
-        )
-    
-
-    @property
-    def column_names(self):
-        """ Column names in the database table. """
-        return tuple([column.name for column in self.table_bound.columns])
-
-
-    def _read(self, table, columns=None, as_dict=False, include_parameters=True, limit=1):
-        """
-        Read a target row from the database table.
-
-        :param table:
-            The bound table to read from.
-        
-        :param columns: (optional)
-            Optionally return only these specific columns (default: entire table).
-        
-        :param as_dict: (optional)
-            Optionally return the result as a dictionary (default: False).
-        
-        :param include_parameters: (optional)
-            Include the task parameters in the SQL query (default: True).
-        
-        :param limit: (optional)
-        
-        
-
-        """
-        if columns is None and not include_parameters:
-            N = 0
-            for key, value in self.__class__.__dict__.items():
-                if isinstance(value, sqlalchemy.Column):
-                    N += 1
-            
-            columns = [column for column in table.columns][-N:]
-            column_names = [column.name for column in columns]
-            
-        else:
-            columns = columns or [table]
-            column_names = (column.name for column in table.columns)
-
-        with self.engine.begin() as connection:
-            s = sqlalchemy.select(columns)
-            if self.task_id is not None:
-                s = s.where(table.c.task_id == self.task_id)
-            if limit is not None:
-                s = s.limit(limit)
-            row = connection.execute(s).fetchall()
-            if limit == 1:
-                if len(row) == 1:
-                    row = row[0]
-                elif len(row) == 0:
-                    row = None
-            
-        if as_dict:
-            if row is None:
-                return {}
-            else:
-                return collections.OrderedDict(zip(column_names, row))
-        return row
-
-
-
-    def write(self, data=None):
-        """
-        Write a result to the database target.
-
-        :param data: (optional)
-            A dictionary where keys represent column names and values represent the result value.
-        """
-        
-        exists = self.exists()
-        table = self.table_bound
-        data = data or dict()
-        sanitised_data = dict(modified=datetime.datetime.utcnow())
-
-        for key, value in data.items():
-            # Don't sanitise booleans or date/datetime objects.
-            if not isinstance(value, (datetime.datetime, datetime.date, bool)):
-                if value is None:
-                    continue
-                
-                if isinstance(getattr(table.c, key).type, sqlalchemy.ARRAY):
-                    if not isinstance(value, (tuple, list, np.ndarray)):
-                        value = [value]
-                else:
-                    try:
-                        value = str(value)
-                    except:
-                        value = json.dumps(value)
-                
-            sanitised_data[key] = value
-
-        if self.task_id is None and "task_id" not in sanitised_data:
-            raise KeyError("must supply task_id")
-        
-        if self.task_id is not None:
-            sanitised_data.update(task_id=self.task_id)
-    
-        with self.engine.begin() as connection:
-            if not exists:
-                insert = table.insert().values(**sanitised_data)
-            else:
-                insert = table.update().where(
-                    table.c.task_id == sanitised_data["task_id"]
-                ).values(**sanitised_data)
-            connection.execute(insert)
-        return None
-
-
-    def delete(self, task_id=None):
-        """
-        Delete a result target from the database. 
-        """
-
-        task_id = self.task_id or task_id
-        if task_id is None:
-            raise KeyError("must supply task_id")
-
-        table = self.table_bound
-        with self.engine.begin() as connection:
-            connection.execute(
-                table.delete().where(table.c.task_id == task_id)
-            )
-
-        return None
-
-
-class BatchDatabaseTarget(BaseDatabaseTarget):
-
-    def __init__(self, task, echo=False):
-
-        self.task = task
-
-        super(BatchDatabaseTarget, self).__init__(
-            task.connection_string,
-            "batch_task_status",
-            task.task_id,
-            schema=[],
-            echo=echo
-        )
-        
-
-
-
-
-class DatabaseTarget(BaseDatabaseTarget):
-
-    """ 
-    A database target for outputs of task results. 
-    
-    This class should be sub-classed, where the sub-class has attributes that define the schema. For example::
-
-    ```
-    class MyDatabaseTarget(DatabaseTarget):
-
-        teff = sqlalchemy.Column("effective_temperature", sqlalchemy.Float)
-        logg = sqlalchemy.Column("surface_gravity", sqlalchemy.Float)
-    ```
-
-    The `task_id` of the task supplied will be added as a column by default.
-
-
-    :param task:
-        The task that this output will be the target for. This is necessary to reference the task ID, and to generate the table
-        schema for the task parameters.
-
-    :param echo: [optional]
-        Echo the SQL queries that are supplied (default: False).
-    
-    :param only_significant: [optional]
-        When storing the parameter values of the task in a database, only store the significant parameters (default: True).
-
-    """
-
-    def __init__(self, task, table_name=None, echo=False, only_significant=True):
-        
-        self.task = task
-        self.only_significant = only_significant
-
-        schema = generate_parameter_schema(task, only_significant)
-
-        for key, value in self.__class__.__dict__.items():
-            if isinstance(value, sqlalchemy.Column):
-                schema.append(value)
-
-        try:
-            task_id = task.task_id
-
-        except AttributeError:
-            task_id, connection_string = (None, task.connection_string.task_value(task, "connection_string"))
-        else:
-            task_id, connection_string = (task.task_id, task.connection_string)
-
-        table_name = table_name or task.task_family
-
-        super(DatabaseTarget, self).__init__(
-            connection_string,
-            table_name,
-            task_id,
-            schema,
-            echo=echo
-        )
-        return None
-
-
-    def write(self, data=None, mark_complete=True):
-        """
-        Write a result to the database target row.
-
-        :param data: (optional)
-            A dictionary where keys represent column names and values represent the result value.
-
-        :param mark_complete: (optional)
-            Trigger the event as being completed successfully (default: True)
-        """
-
-        # Update with parameter keyword arguments.
-        data = (data or dict()).copy()
-        if self.only_significant:
-            for parameter_name in self.task.get_param_names():
-                data[parameter_name] = getattr(self.task, parameter_name)
-        else:
-            data.update(self.task.param_kwargs)
-
-        super(DatabaseTarget, self).write(data)
-        if mark_complete:
-            self.task.trigger_event(Event.SUCCESS, self.task)
-    
-
-    def remove(self):
-        """
-        Delete the target from the database.
-        """
-
-        raise NotImplementedError()
-
-
-    def copy_from(self, source):
-        """ 
-        Copy a result from another DatabaseTarget.
-
-        :param source:
-            The source result to copy from.
-        """
-        return self.write(source.read(as_dict=True, include_parameters=False))
-
-
-
-
-def generate_parameter_schema(task, only_significant=True, max_string_length=None):
-    """
-    Generate SQLAlchemy table schema for a task's parameters.
-
-    :param task:
-        The task to generate the table schema for.
-    
-    :param only_significant: (optional)
-        Only generate columns for parameters that are defined as significant (default: True).
-    """
-    jsonify = lambda _: json.dumps(_)
-    
-    mapping = {
-        # TODO: Including sanitizers if they are useful in future, but may not be needed.
-        luigi.parameter.Parameter: (sqlalchemy.String(length=max_string_length), None),
-        luigi.parameter.OptionalParameter: (sqlalchemy.String(length=max_string_length), None),
-        luigi.parameter.DateParameter: (sqlalchemy.Date(), None),
-        luigi.parameter.IntParameter: (sqlalchemy.Integer(), None),
-        luigi.parameter.FloatParameter: (sqlalchemy.Float(), None),
-        luigi.parameter.BoolParameter: (sqlalchemy.Boolean(), None),
-        luigi.parameter.DictParameter: (sqlalchemy.String(length=max_string_length), jsonify),
-        luigi.parameter.ListParameter: (sqlalchemy.String(length=max_string_length), jsonify),
-        luigi.parameter.TupleParameter: (sqlalchemy.String(length=max_string_length), jsonify)
-    }
-    parameters_schema = []
-    for parameter_name, parameter_type in task.get_params():
-        if only_significant and not parameter_type.significant:
-            continue
-        
-        try:
-            column_type, sanitize = mapping[parameter_type.__class__]
-        except KeyError:
-            raise ValueError(f"Cannot find mapping to parameter class {mapping_type.__class__}")
-        parameters_schema.append(
-            sqlalchemy.Column(
-                parameter_name,
-                column_type
-            )
-        )
-
-    return parameters_schema
 
 
 
@@ -802,42 +386,3 @@ class AstraSource(LocalTarget):
         # Check that the parent directory exists.
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         return image.writeto(self.path, **kwds)
-
-
-
-
-
-
-if __name__ == "__main__":
-
-    from astra.tasks.base import BaseTask
-    from sqlalchemy import Column, Integer
-
-    class MyTaskResultTarget(DatabaseTarget):
-        
-        a = Column("a", Integer)
-        b = Column("b", Integer)
-        c = Column("c", Integer)
-        
-
-
-    class MyTask(BaseTask):
-
-        param_1 = luigi.FloatParameter()
-        param_2 = luigi.IntParameter()
-        param_3 = luigi.Parameter()
-        
-        def output(self):
-            return MyTaskResultTarget(self)
-
-
-        def run(self):
-            self.output().write({"a": 5, "b": 3, "c": 2})
-            print("Done")
-
-
-    A = MyTask(param_1=3.5, param_2=4, param_3="what")
-
-    A.run()
-    print(A.output().read())
-    print(A.output().read(as_dict=True))

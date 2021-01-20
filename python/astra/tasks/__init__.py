@@ -411,18 +411,28 @@ def task_started(task):
 
     def trigger(t, parameter_pk):
             
-        instance, model, kwds = t.get_state_instance(full_output=True)
+        instance, model, state_kwds = t.get_state_instance(full_output=True)
 
-        update_kwds = dict(
+        kwds = dict(
             status_code=0,
             created=datetime.now(),
             modified=datetime.now(),
             completed=None,
             parameter_pk=parameter_pk
         )
+
         if instance is None:
+            if not t.is_batch_mode:
+                # Get any relations to data model products (apogee_star, boss_spec, etc).
+                try:
+                    data_model_kwds = t.get_or_create_data_model_relationships()
+                except AttributeError:
+                    None
+                else:
+                    kwds.update(data_model_kwds)
+
             # Create instance.
-            kwds.update(update_kwds)
+            kwds.update(state_kwds)
             instance = model(**kwds)
             with session.begin():
                 session.add(instance)
@@ -434,7 +444,7 @@ def task_started(task):
             
             else:
                 # Update instance.
-                t.update_state(**update_kwds)
+                t.update_state(**kwds)
 
         return instance
 

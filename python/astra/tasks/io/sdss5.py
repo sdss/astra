@@ -103,7 +103,8 @@ class ApStarFile(SDSS5DataModelTask):
 
 
     def get_or_create_data_model_relationships(self):
-
+        """ Return the keywords that reference the input data model for this task. """
+        
         keys = ("obj", "healpix", "apred", "telescope", "release")
         kwds = { k: getattr(self, k) for k in keys }
 
@@ -114,8 +115,7 @@ class ApStarFile(SDSS5DataModelTask):
             with session.begin():
                 session.add(instance)
         
-        return { "apogee_star_pk": instance.pk }
-
+        return { "apogee_star_pk": (instance.pk, ) }
 
 
     def writer(self, spectrum, path, **kwargs):

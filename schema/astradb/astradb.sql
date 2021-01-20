@@ -14,11 +14,20 @@ drop table if exists astra.thepayne cascade;
 drop table if exists astra.ferre cascade;
 drop table if exists astra.aspcap cascade;
 
+drop table if exists astra.sdss4_apogee_star cascade;
+drop table if exists astra.sdss4_apogee_visit cascade;
+
 create table astra.task_state (
     pk serial primary key not null,
     task_module text not null,
     task_id text not null,
     parameter_pk bigint,
+    apogee_star_pk bigint[],
+    apogee_visit_pk bigint[],
+    boss_spec_pk bigint[],
+    sdss4_apogee_star_pk bigint[],
+    sdss4_apogee_visit_pk bigint[],
+    sdss4_boss_spec_pk bigint[],
     status_code int default -1,
     created timestamp default now(),
     completed timestamp,
@@ -46,6 +55,18 @@ create table astra.apogee_visit (
     fiber int not null
 );
 
+create table astra.sdss4_apogee_visit (
+    pk serial primary key not null,
+    catalogid bigint,
+    release text not null,
+    prefix text not null,
+    apred text not null,
+    mjd int not null,
+    field text not null,
+    plate text not null,
+    fiber int not null
+);
+
 create table astra.apogee_star (
     pk serial primary key not null,
     catalog_id bigint,
@@ -54,6 +75,18 @@ create table astra.apogee_star (
     apred text not null,
     telescope text not null,
     healpix int not null,
+    obj text not null
+);
+
+create table astra.sdss4_apogee_star (
+    pk serial primary key not null,
+    catalog_id bigint,
+    sdss4_apogee_visit_pk bigint[],
+    release text not null,
+    apstar text not null default 'star',
+    apred text not null,
+    telescope text not null,
+    field text not null,
     obj text not null
 );
 

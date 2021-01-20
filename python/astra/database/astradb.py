@@ -75,6 +75,14 @@ class Aspcap(Base):
     __tablename__ = "aspcap"
 
 
+class SDSS4ApogeeStar(Base):
+    __tablename__ = "sdss4_apogee_star"
+
+
+class SDSS4ApogeeVisit(Base):
+    __tablename__ = "sdss4_apogee_visit"
+
+
 def define_relations():    
     #TaskState._parameter = relationship(TaskParameter, backref="task_state")
     #TaskState.parameters = association_proxy("_parameter", "parameters")
