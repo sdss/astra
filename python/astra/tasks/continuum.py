@@ -10,7 +10,7 @@ from astropy.nddata import InverseVariance
 from astra.tools.spectrum import Spectrum1D
 from astra.utils.continuum.sines_and_cosines import normalize
 
-from astra.tasks.base import BaseTask
+from astra.tasks import BaseTask
 
 
 class Sinusoidal(BaseTask):

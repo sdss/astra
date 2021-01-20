@@ -7,8 +7,9 @@ from tqdm import tqdm
 from astropy.io import fits
 from astropy.table import Table
 from astra.utils import log
-from astra.tasks.base import BaseTask
-from astra.tasks.io import (ApStarFile, LocalTargetTask)
+from astra.tasks import BaseTask
+from astra.tasks.io import LocalTargetTask
+from astra.tasks.io.sdss5 import ApStarFile
 from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
 from astra.tasks.continuum import Sinusoidal
 from astra.tools.spectrum import Spectrum1D

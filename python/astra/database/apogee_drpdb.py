@@ -2,7 +2,7 @@ from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.ext.declarative import AbstractConcreteBase, declared_attr
 from sqlalchemy.orm import relationship
 
-from astra.new_database import AstraBase, database
+from astra.database import AstraBase, database
 
 class Base(AbstractConcreteBase, AstraBase):
     __abstract__ = True

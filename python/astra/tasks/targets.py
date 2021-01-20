@@ -17,6 +17,81 @@ from luigi.event import Event
 from luigi.mock import MockTarget
 from sqlalchemy.sql import func        
 
+from astra.database import database
+
+session = database.Session()
+
+class NewDatabaseTarget(luigi.Target):
+
+    def __init__(self, model, task):
+
+        self.model = model
+        self.task = task
+        
+
+    def get_query(self, columns=None, full_output=False):
+        instance, created = self.task.get_or_create_state_instance()
+        q = session.query(columns or self.model).filter_by(task_pk=instance.pk)
+        return (q, instance.pk) if full_output else q
+        
+
+    def exists(self):
+        return self.get_query(self.model.pk).one_or_none() is not None
+
+
+    def read(self):
+        return self.get_query().one_or_none()
+
+
+    def write(self, data):
+        """
+        Write data to the database table for this task.
+
+        :param data:
+            A dictionary of data, where keys are table column names. This will
+            be supplemented with the relevant database relationships (task primary
+            key, parameter primary key, et cetera).
+        """
+
+        q, task_pk = self.get_query(full_output=True)
+        
+        instance = q.one_or_none() 
+        exists = instance is not None
+        if not exists:
+
+            # Reference the primary key of the task.
+            kwds = dict(task_pk=task_pk)
+            kwds.update(data)
+            """
+            kwds = {
+                "task_pk": task_pk,
+                "parameter_pk": self.task._database_parameter_pk,        
+            }
+
+            # Get any relationships for the input data models used.
+            try:
+                kwds.update(self.task.get_or_create_data_model_relationships())
+
+            except AttributeError:
+                # No data model used, apparently.
+                None
+
+            # Include the data.
+            kwds.update(data)
+            """
+
+            # Create the instance.
+            instance = self.model(**kwds)
+            with session.begin():
+                session.add(instance)
+            
+        else:
+            # Update with new data.
+            q.update(data)
+        
+        return instance
+
+
 
 class BaseDatabaseTarget(luigi.Target):
     

@@ -4,20 +4,24 @@ import os
 import torch
 import yaml
 from tqdm import tqdm
+from time import time
 from luigi.parameter import ParameterVisibility
 from sqlalchemy import (ARRAY as Array, Column, Float)
 
 import astra
 from astropy.table import Table
-from astra.tasks.base import BaseTask
+from astra.tasks import BaseTask
 from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
-from astra.tasks.io import ApStarFile
+from astra.tasks.io.sdss5 import ApStarFile
 from astra.tools.spectrum import Spectrum1D
 from astra.contrib.apogeenet.model import Net, predict
-from astra.utils import log
+from astra.utils import log, timer
 
 from astra.tasks.slurm import slurm_mixin_factory, slurmify
 
+
+from astra.database import astradb
+from astra.tasks.targets import NewDatabaseTarget
 
 SlurmMixin = slurm_mixin_factory("APOGEENet")
 
@@ -82,10 +86,6 @@ class EstimateStellarParameters(APOGEENetMixin):
         visibility=ParameterVisibility.HIDDEN,
     )
 
-    @property
-    def task_short_id(self):
-        return f"{self.task_namespace}-{self.task_id.split('_')[-1]}"
-
 
     def output(self):
         """ The output produced by this task. """
@@ -93,8 +93,7 @@ class EstimateStellarParameters(APOGEENetMixin):
             return [task.output() for task in self.get_batch_tasks()]
         
         return {
-            "database": APOGEENetResult(self),
-            #"AstraSource": AstraSource(self)
+            "database": NewDatabaseTarget(astradb.ApogeeNet, self)
         }
 
 
@@ -105,7 +104,7 @@ class EstimateStellarParameters(APOGEENetMixin):
         model = Net()
         model.load_state_dict(
             torch.load(
-                self.input()["model"].path,
+                self.get_input("model").path,
                 map_location=device
             ),
             strict=False
@@ -177,7 +176,7 @@ class EstimateStellarParameters(APOGEENetMixin):
 
         model = self.read_model()
 
-        for task in tqdm(self.get_batch_tasks(), total=self.get_batch_size()):
+        for init, task in tqdm(timer(self.get_batch_tasks()), total=self.get_batch_size()):
             if task.complete():
                 continue
         
@@ -185,6 +184,9 @@ class EstimateStellarParameters(APOGEENetMixin):
             results = task.estimate_stellar_parameters(model, spectrum)
 
             task.output()["database"].write(results)
+
+            # For this task, trigger the processing time event and the success event.
+            task.trigger_event_processing_time(time() - init, cascade=True)
 
         return None
 
@@ -194,7 +196,7 @@ class EstimateStellarParametersGivenApStarFile(EstimateStellarParameters, ApStar
     """
     Estimate stellar parameters of a young stellar object, given a trained APOGEENet model and an ApStar file.
 
-    This task also requires all parameters that `astra.tasks.io.ApStarFile` requires.
+    This task also requires all parameters that `astra.tasks.io.sdss5.ApStarFile` requires.
 
 
     :param model_path:
@@ -206,11 +208,11 @@ class EstimateStellarParametersGivenApStarFile(EstimateStellarParameters, ApStar
 
     """
 
-    def requires(self):
-        requirements = {
-            "model": TrainedAPOGEENetModel(**self.get_common_param_kwargs(TrainedAPOGEENetModel))
-        }
-        if not self.is_batch_mode:
-            requirements.update(observation=ApStarFile(**self.get_common_param_kwargs(ApStarFile)))
-        return requirements
+    max_batch_size = 10_000
 
+    def requires(self):
+        return {
+            "model": self.clone(TrainedAPOGEENetModel),
+            "observation": self.clone(ApStarFile)
+        }
+        

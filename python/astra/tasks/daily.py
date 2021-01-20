@@ -8,8 +8,8 @@ import sqlalchemy
 from luigi import Config
 from sqlalchemy import create_engine
 from luigi.task import flatten
-from astra.tasks.base import BaseTask
-from astra.tasks.io import (ApStarFile, ApVisitFile)
+from astra.tasks import BaseTask
+from astra.tasks.io.sdss5 import (ApStarFile, ApVisitFile)
 
 
 class DailyMixin(Config):

@@ -5,7 +5,7 @@ from tempfile import mkstemp
 from luigi import (Task, Parameter, IntParameter, BoolParameter, WrapperTask)
 from luigi.task_register import load_task
 from luigi.mock import MockTarget
-from astra.tasks.base import BaseTask
+from astra.tasks import BaseTask
 from astra.utils import log
 from time import (sleep, time)
 

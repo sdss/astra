@@ -4,6 +4,7 @@
 import json
 import os, tempfile
 from sdsstools.logger import get_logger
+from time import time
 
 import os
 import tempfile
@@ -18,6 +19,10 @@ def unique_dicts(list_of_dicts):
 def get_default(task_factory, parameter_name):
     return getattr(task_factory, parameter_name).task_value(task_factory, parameter_name)
 
+
+def timer(iterable):
+    for element in iterable:
+        yield (time(), element)
 
 
 def symlink(target, link_name, overwrite=False):
@@ -59,10 +64,37 @@ def symlink(target, link_name, overwrite=False):
         raise
 
 
-def batcher(iterable, task_factory=None, unique=False):
+from itertools import filterfalse
+
+def unique_everseen(iterable, key=None):
+    "List unique elements, preserving order. Remember all elements ever seen."
+    # unique_everseen('AAAABBBCCDAABBB') --> A B C D
+    # unique_everseen('ABBCcAD', str.lower) --> A B C D
+    seen = set()
+    seen_add = seen.add
+    if key is None:
+        for element in filterfalse(seen.__contains__, iterable):
+            seen_add(element)
+            yield element
+    else:
+        for element in iterable:
+            k = key(element)
+            if k not in seen:
+                seen_add(k)
+                yield element
+
+
+def batcher(iterable, task_factory=None, unique=False, ordered=True):
+
+
     all_kwds = {}
     if unique:
-        iterable = [dict(s) for s in set(frozenset(d.items()) for d in iterable)]
+        if ordered:
+            # Maintain an ordered set.
+            iterable = list(unique_everseen(iterable, key=lambda _: frozenset(_.items())))
+        else:
+            iterable = [dict(s) for s in set(frozenset(d.items()) for d in iterable)]
+
 
     for item in iterable:
         for k, v in item.items():

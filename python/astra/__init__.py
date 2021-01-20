@@ -7,7 +7,7 @@ import yaml
 from pkg_resources import parse_version
 
 
-__version__ = '0.1.11-dev'
+__version__ = '0.1.12-dev'
 
 try:
     from luigi import build

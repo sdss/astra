@@ -1,5 +1,5 @@
 import astra
-from astra.tasks.io.base import SDSSDataModelTask
+from astra.tasks.io import SDSSDataModelTask
 
 
 class SDSS4DataModelTask(SDSSDataModelTask):

@@ -9,7 +9,6 @@ drop table if exists astra.apogee_star cascade;
 drop table if exists astra.boss_spec cascade;
 drop table if exists astra.classification cascade;
 drop table if exists astra.classification_class cascade;
-drop table if exists astra.continuum_normalization cascade;
 drop table if exists astra.apogeenet cascade;
 drop table if exists astra.thepayne cascade;
 drop table if exists astra.ferre cascade;
@@ -19,20 +18,18 @@ create table astra.task_state (
     pk serial primary key not null,
     task_module text not null,
     task_id text not null,
-    batch_task_pk bigint,
     parameter_pk bigint,
-    duration real,
-    code int default -1,
-    batch_size int,
-    modified timestamp default now()
+    status_code int default -1,
+    created timestamp default now(),
+    completed timestamp,
+    modified timestamp default now(),
+    duration real
 );
 create unique index task_ref on astra.task_state (task_module, task_id);
 
 
 create table astra.task_parameter (
     pk bigint primary key not null,
-    astra_version_major int not null,
-    astra_version_minor int not null,
     parameters jsonb
 );
 
@@ -67,10 +64,6 @@ create table astra.boss_spec (
 create table astra.classification (
     pk serial primary key not null,
     task_pk bigint,
-    apogee_star_pk bigint,
-    apogee_visit_pk bigint,
-    boss_spec_pk bigint,
-    parameter_pk bigint,
     class_pk int[],
     log_prob real[]
 );
@@ -81,22 +74,9 @@ create table astra.classification_class (
 );
 
 
-create table astra.continuum_normalization (
-    pk serial primary key not null,
-    task_pk bigint,
-    apogee_star_pk bigint[],
-    apogee_visit_pk bigint[],
-    boss_spec_pk bigint[],
-    parameter_pk bigint
-);
-
 create table astra.thepayne (
     pk serial primary key not null,
     task_pk bigint,
-    apogee_star_pk bigint,
-    apogee_visit_pk bigint[],
-    boss_spec_pk bigint[],
-    parameter_pk bigint,
     snr real[],
     teff real[],
     u_teff real[],
@@ -155,10 +135,6 @@ create table astra.thepayne (
 create table astra.ferre (
     pk serial primary key not null,
     task_pk bigint,
-    apogee_star_pk bigint,
-    apogee_visit_pk bigint[],
-    boss_spec_pk bigint[],
-    parameter_pk bigint,
     snr real[],
     initial_teff real[],
     initial_logg real[],
@@ -200,8 +176,6 @@ create table astra.ferre (
 create table astra.apogeenet (
     pk serial primary key not null,
     task_pk bigint,
-    apogee_star_pk bigint,
-    parameter_pk bigint,
     snr real[],
     teff real[],
     u_teff real[],
@@ -217,9 +191,6 @@ create table astra.apogeenet (
 create table astra.aspcap (
     pk serial primary key not null,
     task_pk bigint,
-    apogee_star_pk bigint,
-    apgoee_visit_pk bigint[],
-    parameter_pk bigint,   
     ferre_pk bigint[],
     snr real[],
     teff real[],
@@ -287,100 +258,23 @@ alter table only astra.aspcap
     foreign key (task_pk) references astra.task_state(pk)
     on delete cascade;
 
-alter table only astra.aspcap
-    add constraint apogee_star_fk
-    foreign key (apogee_star_pk) references astra.apogee_star(pk)
-    on delete cascade;
-
-alter table only astra.aspcap
-    add constraint parameter_fk
-    foreign key (parameter_pk) references astra.task_parameter(pk)
-    on delete cascade deferrable initially deferred;
-
-
 alter table only astra.apogeenet
     add constraint task_fk
     foreign key (task_pk) references astra.task_state(pk)
     on delete cascade;
-
-alter table only astra.apogeenet
-    add constraint apogee_star_fk
-    foreign key (apogee_star_pk) references astra.apogee_star(pk)
-    on delete cascade;
-
-alter table only astra.apogeenet
-    add constraint parameter_fk
-    foreign key (parameter_pk) references astra.task_parameter(pk)
-    on delete cascade deferrable initially deferred;
-
-
-alter table only astra.ferre
-    add constraint parameter_fk
-    foreign key (parameter_pk) references astra.task_parameter(pk)
-    on delete cascade deferrable initially deferred;
 
 alter table only astra.ferre
     add constraint task_fk
     foreign key (task_pk) references astra.task_state(pk)
     on delete cascade;
 
-alter table only astra.ferre
-    add constraint apogee_star_fk
-    foreign key (apogee_star_pk) references astra.apogee_star(pk)
-    on delete cascade;
-
-
-alter table only astra.thepayne
-    add constraint apogee_star_fk
-    foreign key (apogee_star_pk) references astra.apogee_star(pk)
-    on delete cascade;
-
-
-alter table only astra.thepayne
-    add constraint parameter_fk
-    foreign key (parameter_pk) references astra.task_parameter(pk)
-    on delete cascade deferrable initially deferred;
-
 alter table only astra.thepayne
     add constraint task_fk
     foreign key (task_pk) references astra.task_state(pk)
     on delete cascade;
-
-
-
-
-
-
-alter table only astra.continuum_normalization
-    add constraint parameter_fk
-    foreign key (parameter_pk) references astra.task_parameter(pk)
-    on delete cascade deferrable initially deferred;
-
-alter table only astra.continuum_normalization
-    add constraint task_fk
-    foreign key (task_pk) references astra.task_state(pk)
-    on delete cascade;
-
-
-alter table only astra.classification
-    add constraint parameter_fk
-    foreign key (parameter_pk) references astra.task_parameter(pk)
-    on delete cascade deferrable initially deferred;
-
 
 alter table only astra.classification
     add constraint task_fk
     foreign key (task_pk) references astra.task_state(pk)
     on delete cascade;
-
-
-alter table only astra.task_state
-    add constraint parameter_fk
-    foreign key (parameter_pk) references astra.task_parameter(pk);
-    
-    
-
-alter table only astra.task_state
-    add constraint batch_task_fk
-    foreign key (batch_task_pk) references astra.task_state(pk);
     

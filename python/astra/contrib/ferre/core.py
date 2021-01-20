@@ -413,6 +413,13 @@ class Ferre(object):
         self.process.stdin.flush()
 
         # Get outputs.
+        #stdout, stderr = self.process.communicate()
+
+        #print(len(stdout), len(stderr))
+
+        #content = "\n".join(stderr.split("\n")[:-1])
+        #return stderr
+
         content = self._queue.get(timeout=timeout)
 
         try:

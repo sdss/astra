@@ -1,6 +1,9 @@
 
 import astra
-from astra.tasks.io.base import SDSSDataModelTask
+from astra.tasks.io import SDSSDataModelTask
+from astra.database import database, astradb
+
+session = database.Session()
 
 
 class SDSS5DataModelTask(SDSSDataModelTask):
@@ -23,12 +26,7 @@ class SDSS5DataModelTask(SDSSDataModelTask):
         parsing=astra.BoolParameter.IMPLICIT_PARSING
     )
 
-    def complete(self):
-        # TODO: Remove this in production.
-        if self.__class__.__name__ in ("ApVisitFile", "ApStarFile"):
-            return True
-        return super(SDSS5DataModelTask, self).complete()
-    
+
 
 class ApVisitFile(SDSS5DataModelTask):
 
@@ -102,6 +100,22 @@ class ApStarFile(SDSS5DataModelTask):
     apstar = astra.Parameter(default="star", batch_method=tuple)
     apred = astra.Parameter(batch_method=tuple) 
     telescope = astra.Parameter(batch_method=tuple)
+
+
+    def get_or_create_data_model_relationships(self):
+
+        keys = ("obj", "healpix", "apred", "telescope", "release")
+        kwds = { k: getattr(self, k) for k in keys }
+
+        q = session.query(astradb.ApogeeStar).filter_by(**kwds)
+        instance = q.one_or_none()
+        if instance is None:
+            instance = astradb.ApogeeStar(**kwds)
+            with session.begin():
+                session.add(instance)
+        
+        return { "apogee_star_pk": instance.pk }
+
 
 
     def writer(self, spectrum, path, **kwargs):

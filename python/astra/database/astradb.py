@@ -5,7 +5,7 @@ from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.ext.declarative import AbstractConcreteBase, declared_attr
 from sqlalchemy.orm import relationship
 
-from astra.new_database import AstraBase, database
+from astra.database import AstraBase, database
 
 class Base(AbstractConcreteBase, AstraBase):
     __abstract__ = True
@@ -23,8 +23,10 @@ class Base(AbstractConcreteBase, AstraBase):
 class TaskState(Base):
     __tablename__ = "task_state"
 
-    def __repr__(self):
-        return f"<TaskState (task_id={self.task_id}, code={self.code}, pk={self.pk})>"
+    print_keys = ["pk", "status_code", "task_id"]
+
+    #def __repr__(self):
+    #    return f"<TaskState (task_id={self.task_id}, code={self.status_code}, pk={self.pk})>"
 
 
 class TaskParameter(Base):
@@ -74,15 +76,9 @@ class Aspcap(Base):
 
 
 def define_relations():    
-    TaskState._parameter = relationship(TaskParameter, backref="task_state")
-    TaskState.parameters = association_proxy("_parameter", "parameters")
-
+    #TaskState._parameter = relationship(TaskParameter, backref="task_state")
+    #TaskState.parameters = association_proxy("_parameter", "parameters")
+    pass
 
 
 database.add_base(Base)
-
-# [ ] base task; when completed it triggers a database row to be created in task.
-#       -> for batch tasks it does not put in the parameters_hash,
-# [ ] 16-bit hex string, with task_pk as well
-# [ ] .complete() task checks database row instead of outputs.
-# [ ] 
