@@ -527,7 +527,7 @@ def task_processing_time(task, duration):
 
 
 def hashify(params, max_length=8):
-    param_str = json.dumps(params, separators=(',', ':'), sort_keys=True)
+    param_str = json.dumps(params, cls=_DictParamEncoder, separators=(',', ':'), sort_keys=True)
     param_hash = hashlib.md5(param_str.encode('utf-8')).hexdigest()
     return param_hash[:max_length]
 

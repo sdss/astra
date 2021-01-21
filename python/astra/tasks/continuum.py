@@ -1,34 +1,33 @@
 
 import luigi
 import numpy as np
-import os
 import pickle
 from tqdm import tqdm
 
-from astropy.nddata import InverseVariance
-
+from astra.tasks import BaseTask
 from astra.tools.spectrum import Spectrum1D
 from astra.utils.continuum.sines_and_cosines import normalize
-
-from astra.tasks import BaseTask
-
 
 class Sinusoidal(BaseTask):
 
     L = luigi.IntParameter(default=1400)
     continuum_order = luigi.IntParameter(default=3)
     continuum_regions_path = luigi.Parameter()
-    spectrum_kwds = luigi.DictParameter(default={})
+    spectrum_kwds = luigi.DictParameter(default=None)
 
     def run(self):
         continuum_regions = np.loadtxt(self.continuum_regions_path)
 
-        # This can be run in single star mode or batch mode.
-        for task in tqdm(self.get_batch_tasks(), desc="Continuum normalising", total=self.get_batch_size()):
-            if task.complete(): continue
-                
-            spectrum = Spectrum1D.read(task.input().path, **self.spectrum_kwds)
+        spectrum_kwds = self.spectrum_kwds or {}
 
+        # This can be run in single star mode or batch mode.
+        tqdm_kwds = dict(desc="Continuum normalising", total=self.get_batch_size())
+        for task in tqdm(self.get_batch_tasks(), **tqdm_kwds):
+            if task.complete(): 
+                continue
+                
+            spectrum = Spectrum1D.read(task.input().path, **spectrum_kwds)
+            
             normalized_flux, normalized_ivar, continuum, metadata = normalize(
                 spectrum.wavelength.value,
                 spectrum.flux.value,
@@ -39,34 +38,12 @@ class Sinusoidal(BaseTask):
                 full_output=True
             )
 
-            """
-            spectrum_kwds = dict(
-                flux=normalized_flux * spectrum.flux.unit, 
-                uncertainty=InverseVariance(normalized_ivar * spectrum.uncertainty.unit)
-            )
-
-            normalized_spectrum = Spectrum1D(
-                wcs=spectrum.wcs,
-                meta=spectrum.meta,
-                **spectrum_kwds
-            )
-
-            task.writer(
-                normalized_spectrum, 
-                task.output().path,
-                overwrite=True
-            )
-            """
-            
             with open(task.output()["continuum"].path, "wb") as fp:
                 pickle.dump(continuum, fp)
 
             N, P = spectrum.flux.shape
             nvisits = N if N < 2 else N - 2
-            task.output()["database"].write(dict(nvisits=nvisits))
-
-
+            
 
     def output(self):
         raise RuntimeError("this should be over-written by the parent classes")
-    
