@@ -1,18 +1,22 @@
+import os
+import numpy as np
 from astropy.table import Table
+import matplotlib.pyplot as plt
+
+
 import astra
 from astra.contrib.apogeenet.tasks import (
     TrainedAPOGEENetModel,
-    EstimateStellarParametersGivenApStarFile
+    EstimateStellarParametersGivenSDSS4ApStarFile
 )
 
-component_data_dir = "../astra-components/astra_apogeenet/data/"
+component_data_dir = os.path.expanduser("~/astra-component-data/APOGEENet/")
 
 # Common keywords for all analyses.
 kwds = dict(
     release="dr16",
     model_path=os.path.join(component_data_dir, "APOGEE_NET.pt"),
     # Download the file from the SDSS SAS if we don't have it.
-    use_remote=True
 )
 
 # Load the sources.
@@ -29,14 +33,14 @@ for source in sources:
     for key in source_keys:
         kwds[key].append(source[key])
 
-task = EstimateStellarParametersGivenApStarFile(**kwds)
+task = EstimateStellarParametersGivenSDSS4ApStarFile(**kwds)
+
 
 # Build the acyclic graph and execute tasks as required.
 astra.build(
     [task],
     local_scheduler=True
 )
-
 
 
 # Let's make a plot comparing the outputs to what we expected.
@@ -50,19 +54,21 @@ Y_err = np.empty(shape)
 
 for i, (source, output) in enumerate(zip(sources, task.output())):
 
-    X[i] = [source[f"apogeenet-mean_{pn}" for pn in param_names]
-    X_err[i] = [source[f"apogeenet-sd_{pn}" for pn in param_names]]
+    # I am not sure whether this is the right column to use or not...
+    # TODO: Check columns against original
+    X[i] = [source[f"APOGEE_Net_{pn}"] for pn in param_names]
+    X_err[i] = np.nan
+    
 
-    with open(output.path, "r") as fp:
-        result = yaml.load(fp, Loader=yaml.FullLoader)
+    result = output["database"].read()
 
-    Y[i] = [result[pn.lower()] for pn in ("teff", "logg", "fe_h")]
-    Y_err[i] = [result[f"u_{pn}"] for pn in ("teff", "logg", "fe_h")]
+    # Just return the first result for each source
+    # (the one from the highest S/N spectrum)
+    Y[i] = [result.teff[0], result.logg[0], result.fe_h[0]]
+    Y_err[i] = [result.u_teff[0], result.u_logg[0], result.u_fe_h[0]]
 
 
 # Plot the results.
-import matplotlib.pyplot as plt
-
 label_names = ("teff", "logg", "fe_h")
 fig, axes = plt.subplots(1, 3, figsize=(12, 4))
 for i, ax in enumerate(axes):
@@ -99,3 +105,5 @@ for i, ax in enumerate(axes):
     ax.set_ylim(limits)
 
 fig.tight_layout()
+
+fig.savefig(f"{__file__[:-3]}.png")
