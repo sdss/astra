@@ -96,20 +96,15 @@ create table astra.boss_spec (
 
 create table astra.classification (
     pk serial primary key not null,
-    task_pk bigint,
-    class_pk int[],
-    log_prob real[]
-);
-
-create table astra.classification_class (
-    pk serial primary key not null,
-    description text
+    task_pk bigint not null,
+    log_prob real[],
+    prob real[]
 );
 
 
 create table astra.thepayne (
     pk serial primary key not null,
-    task_pk bigint,
+    task_pk bigint not null,
     snr real[],
     teff real[],
     u_teff real[],

@@ -5,8 +5,8 @@ import torch
 import yaml
 
 from sdss_access import SDSSPath
+from time import time
 from tqdm import tqdm
-from sqlalchemy import (Column, Float, String)
 
 from luigi.util import (inherits, requires)
 from luigi.parameter import ParameterVisibility
@@ -14,17 +14,21 @@ from luigi.mock import MockTarget
 from luigi.task import flatten
 from torch.autograd import Variable
 from scipy.special import logsumexp
-from astra.tasks.io import (ApVisitFile, ApStarFile, SDSS4ApVisitFile, LocalTargetTask)
+from astra.tasks.io.sdss5 import (ApVisitFile, ApStarFile)
+from astra.tasks.io.sdss4 import (ApVisitFile as SDSS4ApVisitFile, ApStarFile as SDSS4ApStarFile)
 from astra.tools.spectrum import Spectrum1D
-from astra.utils import (batcher, log)
+from astra.utils import (batcher, log, timer)
 
-from astra.tasks.base import BaseTask
-from astra.tasks.targets import DatabaseTarget, BatchDatabaseTarget
+from astra.database import astradb
+from astra.tasks import BaseTask
+from astra.tasks.targets import DatabaseTarget
 from astra.contrib.classifier import networks, utils
 
 from astra.contrib.classifier.tasks.mixin import ClassifierMixin
 from astra.contrib.classifier.tasks.train import TrainNIRSpectrumClassifier
 from astra.tasks.slurm import slurmify
+
+
 
 class ClassifySource(ClassifierMixin):
 
@@ -57,77 +61,29 @@ class ClassifySource(ClassifierMixin):
         raise NotImplementedError("this should be over-written by sub-classes")
 
     
-    def prepare_result(self, log_probs):
+    
+    def prepare_result(self, log_prob):
         
-        class_names = list(map(str.lower, self.class_names))
+        # Make sure the log_probs are dtype float so that postgresql does not complain.
+        log_prob = np.array(log_prob, dtype=float)
 
-        # Unnormalised results.
-        result = dict(zip(
-            [f"lp_{class_name}" for class_name in class_names],
-            log_probs
-        ))
-
-        # Normalised probabilities
+        # Calculate normalized probabilities.
         with np.errstate(under="ignore"):
-            relative_log_probs = log_probs - logsumexp(log_probs)
+            relative_log_prob = log_prob - logsumexp(log_prob)
         
-        probs = np.exp(relative_log_probs)
-        result.update(dict(zip(
-            [f"prob_{class_name}" for class_name in class_names],
-            probs
-        )))
+        # Round for PostgreSQL 'real' type.
+        # https://www.postgresql.org/docs/9.1/datatype-numeric.html
+        # and
+        # https://stackoverflow.com/questions/9556586/floating-point-numbers-of-python-float-and-postgresql-double-precision
+        decimals = 36
+        prob = np.round(np.exp(relative_log_prob), decimals)
+        log_prob = np.round(log_prob, decimals)
         
-        # Most probable class.
-        result["most_probable_class"] = class_names[np.argmax(probs)]
-        if not np.any(np.isfinite(probs)):
-            result["most_probable_class"] = "unknown"
-        return result
-
-
-
-
-class ClassifyApVisitResult(DatabaseTarget):
-
-    """ A database target (row) indicating the result from the classifier. """
-
-    table_name = "classify_apvisit"
-
-    # Output (unnormalised) log probabilities.
-    lp_sb2 = Column("lp_sb2", Float)
-    lp_yso = Column("lp_yso", Float)
-    lp_fgkm = Column("lp_fgkm", Float)
-    lp_hotstar = Column("lp_hotstar", Float)
-    
-    # Normalised probabilities
-    prob_sb2 = Column("prob_sb2", Float)
-    prob_yso = Column("prob_yso", Float)
-    prob_fgkm = Column("prob_fgkm", Float)
-    prob_hotstar = Column("prob_hotstar", Float)
-
-    most_probable = Column("most_probable_class", String(10))
-
-
-
-class ClassifyApStarResult(DatabaseTarget):
-
-    """ A database target (row) indicating the result from the classifier. """
-
-    table_name = "classify_apstar"
-
-    # Output (unnormalised) log probabilities.
-    lp_sb2 = Column("lp_sb2", Float)
-    lp_yso = Column("lp_yso", Float)
-    lp_fgkm = Column("lp_fgkm", Float)
-    lp_hotstar = Column("lp_hotstar", Float)
-    
-    # Normalised probabilities
-    prob_sb2 = Column("prob_sb2", Float)
-    prob_yso = Column("prob_yso", Float)
-    prob_fgkm = Column("prob_fgkm", Float)
-    prob_hotstar = Column("prob_hotstar", Float)
-
-    most_probable = Column("most_probable_class", String(10))
-
+        return dict(
+            log_prob=log_prob,
+            prob=prob,
+        )
+        
 
 class ClassifySourceGivenApVisitFileBase(ClassifySource):
 
@@ -166,7 +122,7 @@ class ClassifySourceGivenApVisitFileBase(ClassifySource):
         network = self.read_network()
 
         # This can be run in batch mode.
-        for task in tqdm(**self.get_tqdm_kwds("Classifying ApVisitFiles")):
+        for init, task in timer(tqdm(**self.get_tqdm_kwds("Classifying ApVisitFiles"))):
             if task.complete():
                 continue
             
@@ -174,21 +130,18 @@ class ClassifySourceGivenApVisitFileBase(ClassifySource):
 
             with torch.no_grad():
                 pred = network.forward(Variable(torch.Tensor(batch)))
-                log_probs = pred.cpu().numpy().flatten()
+                log_prob = pred.cpu().numpy().flatten()
 
-            task.output().write(self.prepare_result(log_probs))
+            task.output()["database"].write(self.prepare_result(log_prob))
 
+            task.trigger_event_processing_time(time() - init, cascade=True)
 
-    def complete(self):
-        # Since this could be a batch task with lots of inputs, use a batch proxy.
-        return self.batch_complete()
-     
 
     def output(self):
         """ The output of the task. """
         if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
-        return ClassifyApVisitResult(self)
+            return (task.output() for task in self.get_batch_tasks())
+        return dict(database=DatabaseTarget(astradb.Classification, self))
 
 
 @requires(TrainNIRSpectrumClassifier, ApVisitFile)
@@ -201,8 +154,6 @@ class ClassifySourceGivenApVisitFile(ClassifySourceGivenApVisitFileBase):
     and those required by :py:mod:`astra.tasks.io.ApVisitFile`.
     """
     
-    max_batch_size = 10_000
-
     pass
 
 
@@ -215,15 +166,13 @@ class ClassifySourceGivenApStarFile(ClassifySource, ApStarFile):
     and those required by :py:mod:`astra.tasks.io.ApStarFile`.
     """
 
-    max_batch_size = 10_000
-
     def requires(self):
         """ We require the classifications from individual visits of this source. """        
 
         # TODO: This should go elsewhere.
         from astra.tasks.daily import get_visits_given_star
 
-        kwds = self.get_common_param_kwargs(ClassifySourceGivenApVisitFile)
+        kwds = {}
         for i, task in enumerate(tqdm(**self.get_tqdm_kwds("Matching stars to visits"))):
             for k, v in batcher(get_visits_given_star(task.obj, task.apred)).items():
                 if i == 0:
@@ -232,47 +181,45 @@ class ClassifySourceGivenApStarFile(ClassifySource, ApStarFile):
                     kwds[k] = []
                 kwds[k].extend(v)
 
-        return ClassifySourceGivenApVisitFile(**kwds)
+        return self.clone(ClassifySourceGivenApVisitFile, **kwds)
         
     
     def run(self):
         """ Execute the task. """
         
-        for task in tqdm(**self.get_tqdm_kwds("Classifying ApStarFiles")):
+        for init, task in timer(tqdm(**self.get_tqdm_kwds("Classifying ApStarFiles"))):
             if task.complete():
                 continue
 
-            # We probably don't need to use dictionaries here but it prevents any mis-ordering.
-            log_probs = { f"lp_{k}": 0 for k in task.class_names }
+            log_prob = []
             for output in flatten(task.input()):
                 try:
-                    classification = output.read(as_dict=True)
-                
+                    classification = output.read()
+                    
                 except TypeError:
                     log.exception(f"Exception occurred:")
                     continue
+
+                else:
+                    log_prob.append(classification.log_prob)
                 
-                for key in log_probs.keys():
-                    log_prob = classification[key] or np.nan # Sometimes we get nans / Nones.
-                    if np.isfinite(log_prob):
-                        log_probs[key] += log_prob
+            log_prob = np.array(log_prob)
+            finite_visit = np.all(np.isfinite(log_prob), axis=1)
+
+            log_prob = np.sum(log_prob[finite_visit], axis=0)
+
+            task.output()["database"].write(self.prepare_result(log_prob))
         
-            result = self.prepare_result([log_probs[f"lp_{k}"] for k in task.class_names])
-            task.output().write(result)
+            task.trigger_event_processing_time(time() - init, cascade=True)
 
         return None
 
 
-    def complete(self):
-        # Since this could be a batch task with lots of inputs, use a batch proxy.
-        return self.batch_complete()
-    
-
     def output(self):
         """ The output for these results. """
         if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
-        return ClassifyApStarResult(self)
+            return (task.output() for task in self.get_batch_tasks())
+        return dict(database=DatabaseTarget(astradb.Classification, self))
         
 
 @requires(TrainNIRSpectrumClassifier, SDSS4ApVisitFile)

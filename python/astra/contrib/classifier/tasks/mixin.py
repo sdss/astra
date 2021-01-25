@@ -1,5 +1,5 @@
 import astra
-from astra.tasks.base import BaseTask
+from astra.tasks import BaseTask
 from astra.tasks.slurm import slurm_mixin_factory
 
 SlurmMixin = slurm_mixin_factory("Classifier")
@@ -66,16 +66,17 @@ class ClassifierMixin(SlurmMixin, BaseTask):
         config_path=dict(section=task_namespace, name="test_labels_path")
     )
 
-    class_names = astra.ListParameter(
-        config_path=dict(section=task_namespace, name="class_names"),
-        significant=False
-    )
+    #class_names = astra.ListParameter(
+    #    config_path=dict(section=task_namespace, name="class_names"),
+    #    significant=False
+    #)
 
     n_epochs = astra.IntParameter(default=200)
     batch_size = astra.IntParameter(default=100)
     weight_decay = astra.FloatParameter(default=1e-5)
     learning_rate = astra.FloatParameter(default=1e-4)
 
+    max_batch_size = 10_000
 
     def get_tqdm_kwds(self, desc=None):
         kwds = dict(
@@ -85,3 +86,9 @@ class ClassifierMixin(SlurmMixin, BaseTask):
         )
         if kwds["total"] == 1: kwds.update(disable=True)
         return kwds
+
+    @property
+    def class_names(self):
+        """ Names of classes used in this classifier. """
+        # TODO: requires a thinko.
+        return ('fgkm', 'hotstar', 'sb2', 'yso')
