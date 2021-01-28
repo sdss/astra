@@ -4,6 +4,7 @@ from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.ext.declarative import AbstractConcreteBase, declared_attr
 from sqlalchemy.orm import relationship
+from sqlalchemy_utils import dependent_objects
 
 from astra.database import AstraBase, database
 
@@ -19,6 +20,42 @@ class Base(AbstractConcreteBase, AstraBase):
 
 
 
+class Task(Base):
+    __tablename__ = "task"
+
+    output_interface = relationship("OutputInterface", backref="task")
+
+    def _output_dependent_objects(self):
+        if self.output_interface is not None:
+            yield from dependent_objects(self.output_interface)
+
+
+    @property
+    def output(self):
+        # Tasks can only have one database target output. Sorry!
+        if self.output_interface is None:
+            return None
+        
+        for instance in dependent_objects(self.output_interface):
+            if not isinstance(instance, self.__class__):
+                return instance
+
+
+
+
+class OutputInterface(Base):
+    __tablename__ = "output_interface"
+
+
+    @property
+    def referenced_tasks(self):
+        """ A generator that yields tasks that point to this database output. """
+        for instance in dependent_objects(self):
+            if isinstance(instance, Task):
+                yield instance
+
+        
+
 
 class TaskState(Base):
     __tablename__ = "task_state"
@@ -28,12 +65,21 @@ class TaskState(Base):
     #def __repr__(self):
     #    return f"<TaskState (task_id={self.task_id}, code={self.status_code}, pk={self.pk})>"
 
+class TheCannon(Base):
+    __tablename__ = "thecannon"
+    
+
+
+class TaskOutput(Base):
+    __tablename__ = "task_output"
+
 
 class TaskParameter(Base):
     __tablename__ = "task_parameter"
     
     def __repr__(self):
         return f"<TaskParameter ({self.pk:x}, pk={self.pk})>"
+
 
 
 class ApogeeVisit(Base):
@@ -53,12 +99,12 @@ class Classification(Base):
     __tablename__ = "classification"
 
 
-class ClassificationClass(Base):
-    __tablename__ = "classification_class"
+#class ClassificationClass(Base):
+#    __tablename__ = "classification_class"
 
 
-class ContinuumNormalization(Base):
-    __tablename__ = "continuum_normalization"
+#class ContinuumNormalization(Base):
+#    __tablename__ = "continuum_normalization"
 
 
 class ApogeeNet(Base):
@@ -84,6 +130,8 @@ class SDSS4ApogeeVisit(Base):
 
 
 def define_relations():    
+    
+    #Output.result = relationship("", backref="output")
     #TaskState._parameter = relationship(TaskParameter, backref="task_state")
     #TaskState.parameters = association_proxy("_parameter", "parameters")
     pass

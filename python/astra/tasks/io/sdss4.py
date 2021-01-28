@@ -11,7 +11,7 @@ class SDSS4DataModelTask(SDSSDataModelTask):
     release = astra.Parameter(default="DR16")
 
 
-class ApVisitFile(SDSS4DataModelTask):
+class SDSS4ApVisitFile(SDSS4DataModelTask):
     """
     A task to represent an ApVisit SDSS/APOGEE data product.
 
@@ -40,7 +40,7 @@ class ApVisitFile(SDSS4DataModelTask):
     sdss_data_model_name = "apVisit"
 
     
-class ApStarFile(SDSS4DataModelTask):
+class SDSS4ApStarFile(SDSS4DataModelTask):
 
     """
     A task to represent an ApStar SDSS/APOGEE data product.
@@ -83,12 +83,29 @@ class ApStarFile(SDSS4DataModelTask):
         return { "sdss4_apogee_star_pk": (instance.pk, ) }
 
 
+    @classmethod
+    def get_data_model_keywords(self, task_state):
+        keys = ("release", "apstar", "apred", "telescope", "field", "obj")
+
+        pk = task_state.sdss4_apogee_star_pk
+
+        q = session.query(astradb.SDSS4ApogeeStar).filter_by(pk=pk[0])
+        instance = q.one_or_none()
+        if instance is None:
+            raise ValueError(f"no astradb.SDSS4ApogeeStar row found with pk = {pk}")
+        
+        return { k: getattr(instance, k) for k in keys }
+        
+
+
+
     def writer(self, spectrum, path, **kwargs):
         from astra.tools.spectrum.loaders import write_sdss_apstar
         return write_sdss_apstar(spectrum, path, **kwargs)
 
 
-class SpecFile(SDSS4DataModelTask):
+
+class SDSS4SpecFile(SDSS4DataModelTask):
 
     """
     A task to represent a Spec SDSS/BOSS data product.
@@ -112,7 +129,7 @@ class SpecFile(SDSS4DataModelTask):
     sdss_data_model_name = "spec"
 
 
-class AllStarFile(SDSS4DataModelTask):
+class SDSS4AllStarFile(SDSS4DataModelTask):
     
     """
     A task to represent an AllStar SDSS/APOGEE data product.
@@ -130,7 +147,7 @@ class AllStarFile(SDSS4DataModelTask):
     sdss_data_model_name = "allStar"
 
 
-class AllVisitSum(SDSS4DataModelTask):
+class SDSS4AllVisitSum(SDSS4DataModelTask):
 
     """
     A task to represent an AllVisitSum SDSS/APOGEE data product.
@@ -146,6 +163,6 @@ class AllVisitSum(SDSS4DataModelTask):
 
 
 # Add requisite parameters and make them batchable.
-for klass in (ApVisitFile, ApStarFile, AllStarFile, AllVisitSum, SpecFile):#, ApPlanFile)
+for klass in (SDSS4ApVisitFile, SDSS4ApStarFile, SDSS4AllStarFile, SDSS4AllVisitSum, SDSS4SpecFile):#, ApPlanFile)
     for lookup_key in klass().tree.lookup_keys(klass.sdss_data_model_name):
         setattr(klass, lookup_key, astra.Parameter(batch_method=tuple))

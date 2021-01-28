@@ -178,6 +178,7 @@ class BaseTask(luigi.Task, metaclass=Register):
                     except:
                         if isinstance(param_str, list) and not isinstance(param, luigi.ListParameter):
                             value = tuple(list(map(param.parse, param_str)))
+                        
                         else:
                             value = param.parse(param_str)
                     else:
@@ -250,7 +251,11 @@ class BaseTask(luigi.Task, metaclass=Register):
 
         except AttributeError:
             if self.is_batch_mode:
-                self._batch_size = max(len(getattr(self, pn)) for pn in self.batch_param_names())
+                self._batch_size = 0
+                for pn in self.batch_param_names():
+                    v = getattr(self, pn)
+                    if v is not None:
+                        self._batch_size = max(len(v), self._batch_size)
             else:
                 self._batch_size = 1
             
@@ -293,7 +298,7 @@ class BaseTask(luigi.Task, metaclass=Register):
 
 
     def complete(self):
-        if self.strict_output_checking:
+        if True or self.strict_output_checking:
             return super(BaseTask, self).complete()
 
         else:
@@ -482,12 +487,10 @@ def task_succeeded(task):
 @BaseTask.event_handler(luigi.Event.FAILURE)
 def task_failed(task, args):
     # TODO: trigger on sub-tasks too?
-    task.get_or_create_state_instance()
-    task.update_state(
-        status_code=30,
-        modified=datetime.now()
-    )
-
+    instance, model, state_kwds = task.get_state_instance(full_output=True)
+    parameter_pk = task.get_or_create_parameter_instance_pk()
+    task.update_state(parameter_pk=parameter_pk, status_code=30, modified=datetime.now())
+    
 
 @BaseTask.event_handler(luigi.Event.PROCESS_FAILURE)
 def task_process_failed(task):
@@ -511,11 +514,10 @@ def task_broken(task):
 @BaseTask.event_handler(luigi.Event.DEPENDENCY_MISSING)
 # TODO: trigger on sub-tasks too?
 def task_dependency_missing(task):
-    task.get_or_create_state_instance()
-    task.update_state(
-        status_code=40,
-        modified=datetime.now()
-    )
+    instance, model, state_kwds = task.get_state_instance(full_output=True)
+    parameter_pk = task.get_or_create_parameter_instance_pk()
+    task.update_state(parameter_pk=parameter_pk, status_code=40, modified=datetime.now())
+    
 
 @BaseTask.event_handler(luigi.Event.PROCESSING_TIME)
 def task_processing_time(task, duration):
@@ -544,4 +546,48 @@ def task_id_str(task_family, params):
     """
     param_hash = hashify(params)
     return f"{task_family}_{param_hash}"
+    
+
+
+def load_task_from_database(**kwargs):
+    q = session.query(TaskState).filter_by(**kwargs)
+    state = q.order_by(TaskState.modified.desc()).first()
+
+    # Load module
+    if state.task_module is not None:
+        __import__(state.task_module)
+
+    from luigi.task_register import Register
+    task_name = state.task_id.split("_")[0]
+    task_cls = Register.get_task_cls(task_name)
+
+    instance = session.query(TaskParameter).filter_by(pk=state.parameter_pk).first()    
+
+    
+
+    # Load data model keywords.
+    data_model_kwds = task_cls.get_data_model_keywords(state)
+
+    kwds = instance.parameters.copy()
+    kwds.update(data_model_kwds)
+    
+    #for pn in task_cls.get_param_names():
+    #    if pn not in kwds and hasattr()
+    task = task_cls(**kwds)
+
+    assert task.task_id == state.task_id
+    
+    raise a
+
+
+def get_last_broken_task(status_code=30):
+    state = session.query(TaskState)\
+                   .filter_by(status_code=status_code)\
+                   .order_by(TaskState.modified.desc()).first()
+    
+    parameters = session.query(TaskParameter).filter_by(pk=state.parameter_pk).first()
+
+    raise a
+                   
+
     

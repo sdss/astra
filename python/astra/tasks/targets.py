@@ -7,7 +7,7 @@ from shutil import copy2 as copyfile
 from time import gmtime, strftime
 
 from astra.utils import symlink_force
-from astra.database import database
+from astra.database import database, astradb
 
 session = database.Session()
 
@@ -42,6 +42,21 @@ class DatabaseTarget(Target):
     def read(self):
         """ Read the row from the database. """
         return self.get_query().one_or_none()
+
+
+    def get_task(self):
+        result = self.read()
+        # Get task state.
+        q = session.query(astradb.task_state).filter_by(task_pk=result.task_pk).one_or_none()
+        
+        if q is None or q.parameter_pk is None:
+            params = None
+        else:
+            p = session.query(astradb.task_parameter).filter_by(pk=q.parameter_pk).one_or_none()
+            params = p.parameters
+        
+        return (q, params)
+        
 
 
     def write(self, data):

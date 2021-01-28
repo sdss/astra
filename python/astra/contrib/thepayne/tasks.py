@@ -11,7 +11,7 @@ from astra.utils import (log, timer)
 from astra.tasks import BaseTask
 from astra.tasks.io import LocalTargetTask
 from astra.tasks.io.sdss5 import ApStarFile
-from astra.tasks.io.sdss4 import (ApStarFile as SDSS4ApStarFile)
+from astra.tasks.io.sdss4 import SDSS4ApStarFile
 from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
 from astra.tasks.continuum import Sinusoidal
 from astra.tools.spectrum import Spectrum1D

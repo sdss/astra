@@ -15,7 +15,7 @@ from luigi.task import flatten
 from torch.autograd import Variable
 from scipy.special import logsumexp
 from astra.tasks.io.sdss5 import (ApVisitFile, ApStarFile)
-from astra.tasks.io.sdss4 import (ApVisitFile as SDSS4ApVisitFile, ApStarFile as SDSS4ApStarFile)
+from astra.tasks.io.sdss4 import SDSS4ApVisitFile, SDSS4ApStarFile
 from astra.tools.spectrum import Spectrum1D
 from astra.utils import (batcher, log, timer)
 

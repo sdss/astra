@@ -10,7 +10,7 @@ from astra.contrib.apogeenet.model import Net, predict
 from astra.database import astradb
 from astra.tasks import BaseTask
 from astra.tasks.io.sdss5 import ApStarFile
-from astra.tasks.io.sdss4 import (ApStarFile as SDSS4ApStarFile)
+from astra.tasks.io.sdss4 import SDSS4ApStarFile
 from astra.tasks.slurm import slurm_mixin_factory, slurmify
 from astra.tasks.targets import (DatabaseTarget, LocalTarget, AstraSource)
 from astra.tools.spectrum import Spectrum1D
