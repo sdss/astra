@@ -1,9 +1,7 @@
 
 import astra
 from astra.tasks.io import SDSSDataModelTask
-from astra.database import database, astradb
-
-session = database.Session()
+from astra.database import session, astradb
 
 
 class SDSS5DataModelTask(SDSSDataModelTask):
@@ -126,10 +124,7 @@ class ApStarFile(SDSS5DataModelTask):
 class SpecFile(SDSS5DataModelTask):
 
     """
-    A task to represent a SDSS-V BHM Spec data product.
-
-    :param mjd:
-        The modified Julian date of observations.
+    A task to represent a (co-added) SDSS-V BHM Spec data product.
 
     :param catalogid:
         The catalog identifier of the object.
@@ -146,12 +141,10 @@ class SpecFile(SDSS5DataModelTask):
 
     sdss_data_model_name = "spec"
 
-    fiberid = astra.IntParameter(batch_method=tuple)
     catalogid = astra.IntParameter(batch_method=tuple)
     mjd = astra.IntParameter(batch_method=tuple)
     plate = astra.Parameter(batch_method=tuple)
     run2d = astra.Parameter(batch_method=tuple)
-
 
     @property
     def local_path(self):
@@ -159,9 +152,9 @@ class SpecFile(SDSS5DataModelTask):
         import os
         boss_spectro_redux = os.getenv("BOSS_SPECTRO_REDUX")
         
-        identifier = max(self.fiberid, self.catalogid)
-        return f"{boss_spectro_redux}/{self.run2d}/spectra/{self.plate}p/{self.mjd}/spec-{self.plate}-{self.mjd}-{identifier:0>11}.fits"
-            
+        #identifier = max(self.fiberid, self.catalogid)
+        #return f"{boss_spectro_redux}/{self.run2d}/spectra/{self.plate}p/{self.mjd}/spec-{self.plate}-{self.mjd}-{identifier:0>11}.fits"
+        return f"{boss_spectro_redux}/{self.run2d}/{self.plate}p/coadd/{self.mjd}/spSpec-{self.plate}-{self.mjd}-{self.catalogid:0>11}.fits"
 
 
 """

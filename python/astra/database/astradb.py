@@ -1,12 +1,14 @@
 import json
 import hashlib
+from luigi.task_register import Register
 from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.ext.declarative import AbstractConcreteBase, declared_attr
 from sqlalchemy.orm import relationship
 from sqlalchemy_utils import dependent_objects
 
-from astra.database import AstraBase, database
+from astra.database import AstraBase, database, session
+
 
 class Base(AbstractConcreteBase, AstraBase):
     __abstract__ = True
@@ -31,16 +33,62 @@ class Task(Base):
 
 
     @property
+    def batch_tasks(self):
+        pks = (bi.child_task_pk for bi in self.batch_interface)
+        return tuple(session.query(self.__class__).filter(self.__class__.pk.in_(pks)).all())
+
+
+    @property
+    def parameters(self):
+        if self.batch_interface:
+            # Assemble from individual tasks.
+            # We will need to know which parameters are batch parameters.
+            task_cls = self._get_task_class()
+            batch_param_names = task_cls.batch_param_names()
+
+            kwds = {}
+            for i, task in enumerate(self.batch_tasks):
+                if i == 0:
+                    kwds.update(task.parameters)
+                    kwds.update({ key: [] for key in batch_param_names })
+                
+                for key in batch_param_names:
+                    kwds[key].append(task.parameters[key])
+            
+            return kwds
+            
+        else:
+            q = session.query(Parameter).join(TaskParameter).filter(TaskParameter.task_pk==self.pk)
+            return dict(((p.parameter_name, p.parameter_value) for p in q.all()))
+
+
+    
+    @property
     def output(self):
         # Tasks can only have one database target output. Sorry!
-        if self.output_interface is None:
+        if self.output_pk is None:
             return None
         
         for instance in dependent_objects(self.output_interface):
             if not isinstance(instance, self.__class__):
+
                 return instance
 
+    def _get_task_class(self):
+        if self.task_module is not None:
+            __import__(self.task_module)
+        
+        task_name, task_hash = self.task_id.split("_")
+        return Register.get_task_cls(task_name)
 
+
+    def load_task(self):
+        """ Recreate the task instance from this database record. """
+
+        task = self._get_task_class().from_str_params(self.parameters)
+        assert task.task_id == self.task_id
+        return task
+        
 
 
 class OutputInterface(Base):
@@ -54,86 +102,46 @@ class OutputInterface(Base):
             if isinstance(instance, Task):
                 yield instance
 
-        
+
+class BatchInterface(Base):
+    __tablename__ = "batch_interface"
 
 
-class TaskState(Base):
-    __tablename__ = "task_state"
-
-    print_keys = ["pk", "status_code", "task_id"]
-
-    #def __repr__(self):
-    #    return f"<TaskState (task_id={self.task_id}, code={self.status_code}, pk={self.pk})>"
-
-class TheCannon(Base):
-    __tablename__ = "thecannon"
-    
-
-
-class TaskOutput(Base):
-    __tablename__ = "task_output"
 
 
 class TaskParameter(Base):
     __tablename__ = "task_parameter"
     
-    def __repr__(self):
-        return f"<TaskParameter ({self.pk:x}, pk={self.pk})>"
 
-
-
-class ApogeeVisit(Base):
-    __tablename__ = "apogee_visit"
-
+class Parameter(Base):
+    __tablename__ = "parameter"
     
 
-class ApogeeStar(Base):
-    __tablename__ = "apogee_star"
+class OutputMixin:
+
+    def get_tasks(self):
+        return session.query(Task).filter_by(output_pk=self.output_pk).all()
+        
+class Doppler(Base, OutputMixin):
+    __tablename__ = "doppler"
 
 
-class BossSpec(Base):
-    __tablename__ = "boss_spec"
+class TheCannon(Base, OutputMixin):
+    __tablename__ = "thecannon"
+    
 
-
-class Classification(Base):
-    __tablename__ = "classification"
-
-
-#class ClassificationClass(Base):
-#    __tablename__ = "classification_class"
-
-
-#class ContinuumNormalization(Base):
-#    __tablename__ = "continuum_normalization"
-
-
-class ApogeeNet(Base):
-    __tablename__ = "apogeenet"
-
-
-class ThePayne(Base):
-    __tablename__ = "thepayne"
-
-class Ferre(Base):
+class Ferre(Base, OutputMixin):
     __tablename__ = "ferre"
 
-class Aspcap(Base):
-    __tablename__ = "aspcap"
 
-
-class SDSS4ApogeeStar(Base):
-    __tablename__ = "sdss4_apogee_star"
-
-
-class SDSS4ApogeeVisit(Base):
-    __tablename__ = "sdss4_apogee_visit"
 
 
 def define_relations():    
     
-    #Output.result = relationship("", backref="output")
-    #TaskState._parameter = relationship(TaskParameter, backref="task_state")
-    #TaskState.parameters = association_proxy("_parameter", "parameters")
+    Task.batch_interface = relationship("BatchInterface", backref="task", foreign_keys="BatchInterface.parent_task_pk")
+    #Task.output_interface = relationship("OutputInterface", backref="task")
+
+
     pass
 
 

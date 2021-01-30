@@ -18,6 +18,10 @@ class SDSSDR16ApogeeStar(Base):
     __tablename__ = "sdss_dr16_apogeestar"
 
 
+class SDSSVBossSpall(Base):
+    __tablename__ = "sdssv_boss_spall"
+    
+
 def define_relations():
     pass
 

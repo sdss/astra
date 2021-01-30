@@ -57,3 +57,5 @@ database = AstraDatabaseConnection(autoconnect=True)
 
 database.set_profile("astra")
 
+
+session = database.Session()
