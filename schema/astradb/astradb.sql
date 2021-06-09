@@ -2,6 +2,144 @@ create schema astra;
 
 set search_path to astra;
 
+drop table if exists astra.task cascade;
+drop table if exists astra.parameter cascade;
+drop table if exists astra.task_parameter  cascade;
+drop table if exists astra.batch_interface cascade;
+drop table if exists astra.output_interface cascade;
+
+/* Contributed methods */
+drop table if exists astra.ferre cascade;
+drop table if exists astra.doppler cascade;
+drop table if exists astra.thecannon cascade;
+drop table if exists astra.apogeenet cascade;
+
+
+create table astra.output_interface (
+    pk serial primary key
+);
+
+create table astra.task (
+    pk serial primary key,
+    task_module text not null,
+    task_id text not null,
+    status_code int default 0,
+    output_pk bigint,
+    duration real,
+    created timestamp default now(),
+    modified timestamp default now(),
+    foreign key (output_pk) references astra.output_interface(pk) on delete cascade
+);
+create unique index on astra.task (task_module, task_id);
+
+create table astra.doppler (
+    output_pk int primary key,
+    vhelio real[],
+    vrel real[],
+    u_vrel real, /* Same as `vrelerr`, changed to be consistent with other astra tables */
+    teff real[],
+    u_teff real[], /* Same as `tefferr` */
+    logg real[],
+    u_logg real[],
+    fe_h real[],
+    u_fe_h real[],
+    chisq real[],
+    bc real[],
+    foreign key (output_pk) references astra.output_interface(pk) on delete restrict
+);
+
+create table astra.apogeenet (
+    output_pk int primary key,
+    snr real[],
+    teff real[],
+    u_teff real[],
+    logg real[],
+    u_logg real[],
+    fe_h real[],
+    u_fe_h real[],
+    bitmask_flag int[],
+    foreign key (output_pk) references astra.output_interface(pk) on delete restrict
+);
+
+
+create table astra.ferre (
+    output_pk int primary key,
+    snr real[],
+    frozen_teff boolean,
+    frozen_logg boolean,
+    frozen_metals boolean,
+    frozen_log10vdop boolean,
+    frozen_o_mg_si_s_ca_ti boolean,
+    frozen_lgvsini boolean,
+    frozen_c boolean,
+    frozen_n boolean,
+    initial_teff real[],
+    initial_logg real[],
+    initial_metals real[],
+    initial_log10vdop real[],
+    initial_o_mg_si_s_ca_ti real[],
+    initial_lgvsini real[],
+    initial_c real[],
+    initial_n real[],
+    teff real[],
+    u_teff real[],
+    logg real[],
+    u_logg real[],
+    metals real[],
+    u_metals real[],
+    log10vdop real[],
+    u_log10vdop real[],
+    o_mg_si_s_ca_ti real[],
+    u_o_mg_si_s_ca_ti real[],
+    lgvsini real[],
+    u_lgvsini real[],
+    c real[],
+    u_c real[],
+    n real[],
+    u_n real[],
+    log_chisq_fit real[],
+    log_snr_sq real[],
+    bitmask_flag int[],
+    foreign key (output_pk) references astra.output_interface(pk) on delete restrict
+);
+
+create table astra.thecannon (
+    output_pk int primary key,
+    teff real,
+    foreign key (output_pk) references astra.output_interface(pk) on delete restrict
+);
+
+/* Parameters */
+create table astra.parameter (
+    pk serial primary key,
+    parameter_name text,
+    parameter_value text
+);
+create unique index unique_parameter on astra.parameter (parameter_name, parameter_value);
+
+create table astra.task_parameter (
+    pk serial primary key,
+    task_pk bigint,
+    parameter_pk bigint,
+    foreign key (parameter_pk) references astra.parameter(pk) on delete restrict,
+    foreign key (task_pk) references astra.task(pk) on delete restrict
+);
+create unique index task_parameter_ref on astra.task_parameter (task_pk, parameter_pk);
+
+
+/* Batch things */
+create table astra.batch_interface (
+    pk serial primary key,
+    parent_task_pk bigint not null,
+    child_task_pk bigint not null,
+    foreign key (child_task_pk) references astra.task(pk) on delete restrict,
+    foreign key (parent_task_pk) references astra.task(pk) on delete restrict
+);
+create unique index on astra.batch_interface (parent_task_pk, child_task_pk);
+
+
+/*
+drop table if exists astra.task_output cascade;
 drop table if exists astra.task_state cascade;
 drop table if exists astra.task_parameter cascade;
 drop table if exists astra.apogee_visit cascade;
@@ -13,6 +151,7 @@ drop table if exists astra.apogeenet cascade;
 drop table if exists astra.thepayne cascade;
 drop table if exists astra.ferre cascade;
 drop table if exists astra.aspcap cascade;
+
 
 drop table if exists astra.sdss4_apogee_star cascade;
 drop table if exists astra.sdss4_apogee_visit cascade;
@@ -41,6 +180,13 @@ create table astra.task_parameter (
     pk bigint primary key not null,
     parameters jsonb
 );
+
+create table astra.task_output (
+    task_pk bigint not null,
+    ref_pk bigint not null,
+    constraint pk primary key (task_pk, ref_pk)
+);
+create unique index pk on astra.task_output 
 
 
 create table astra.apogee_visit (
@@ -162,8 +308,16 @@ create table astra.thepayne (
 
 create table astra.ferre (
     pk serial primary key not null,
-    task_pk bigint,
+    output_ref_pk bigint not null,
     snr real[],
+    frozen_teff boolean,
+    frozen_logg boolean,
+    frozen_metals boolean,
+    frozen_log10vdop boolean,
+    frozen_o_mg_si_s_ca_ti boolean,
+    frozen_lgvsini boolean,
+    frozen_c boolean,
+    frozen_n boolean,
     initial_teff real[],
     initial_logg real[],
     initial_metals real[],
@@ -172,14 +326,6 @@ create table astra.ferre (
     initial_lgvsini real[],
     initial_c real[],
     initial_n real[],
-    frozen_teff real[],
-    frozen_logg real[],
-    frozen_metals real[],
-    frozen_log10vdop real[],
-    frozen_o_mg_si_s_ca_ti real[],
-    frozen_lgvsini real[],
-    frozen_c real[],
-    frozen_n real[],
     teff real[],
     u_teff real[],
     logg real[],
@@ -196,8 +342,8 @@ create table astra.ferre (
     u_c real[],
     n real[],
     u_n real[],
-    chisq real[],
-    snr_fit real[],
+    log_chisq_fit real[],
+    log_snr_sq real[],
     bitmask_flag int[]
 );
 
@@ -291,10 +437,15 @@ alter table only astra.apogeenet
     foreign key (task_pk) references astra.task_state(pk)
     on delete cascade;
 
-alter table only astra.ferre
+alter table only astra.task_output
     add constraint task_fk
     foreign key (task_pk) references astra.task_state(pk)
-    on delete cascade;
+    on delete restrict;
+
+alter table only astra.ferre
+    add constraint output_ref_fk
+    foreign key (output_ref_pk) references astra.task_output(ref_pk)
+    on delete restrict;
 
 alter table only astra.thepayne
     add constraint task_fk
@@ -305,4 +456,14 @@ alter table only astra.classification
     add constraint task_fk
     foreign key (task_pk) references astra.task_state(pk)
     on delete cascade;
-    
+
+insert into astra.task_state (task_module, task_id) values ('test', 'foo');
+insert into astra.task_state (task_module, task_id) values ('test', 'foo2');
+insert into astra.task_output (task_pk, ref_pk) values (1, 1);
+insert into astra.task_output (task_pk, ref_pk) values (2, 1);
+insert into astra.task_output (task_pk, ref_pk) values (1, 5);
+insert into astra.ferre (output_ref_pk) values (1);
+
+select * from astra.task_state;
+select * from astra.ferre;
+*/

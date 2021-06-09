@@ -4,7 +4,15 @@ from pathlib import Path
 
 from sdss_access import SDSSPath, RsyncAccess, HttpAccess
 
-from astra.tasks import BaseTask, SDSSDataProduct
+from astra.tasks import BaseTask
+
+
+
+class SDSSDataProduct(luigi.LocalTarget):
+
+    """ A target to represent a SDSS data product. """
+    
+    pass
 
 
 class LocalTargetTask(BaseTask):
@@ -44,12 +52,6 @@ class SDSSDataModelTask(BaseTask):
         significant=False,
         parsing=luigi.BoolParameter.IMPLICIT_PARSING
     )
-
-
-    def __init__(self, *args, **kwargs):
-        super(SDSSDataModelTask, self).__init__(*args, **kwargs)
-        return None
-
 
     @property
     def tree(self):

@@ -4,12 +4,12 @@ from astropy.io import fits
 from astropy.table import Table
 from luigi import (LocalTarget, Target)
 from shutil import copy2 as copyfile
+from sqlalchemy import update
 from time import gmtime, strftime
 
 from astra.utils import symlink_force
-from astra.database import database, astradb
+from astra.database import session, astradb
 
-session = database.Session()
 
 class DatabaseTarget(Target):
 
@@ -28,35 +28,46 @@ class DatabaseTarget(Target):
         self.task = task
         
 
+    def copy_from(self, target):
+        """
+        Write a database output that points to the target given.
+
+        :param target:
+            An existing DatabaseTarget, or a SQLAlchemy ORM instance of a database result.
+        """
+        if isinstance(target, DatabaseTarget):
+            output_pk = target.read().output_pk
+        else:
+            output_pk = target.output_pk
+
+        state, created = self.task.get_or_create_state()
+        state.output_pk = output_pk
+        
+        session.flush()
+
+        
+        if self.task.get_or_create_state()[0].output_pk is None:
+            assert False
+
+            
+        return None
+
+
     def get_query(self, columns=None, full_output=False):
-        instance, created = self.task.get_or_create_state_instance()
-        q = session.query(columns or self.model).filter_by(task_pk=instance.pk)
-        return (q, instance.pk) if full_output else q
+
+        instance, created = self.task.get_or_create_state()
+        q = session.query(columns or self.model).filter_by(output_pk=instance.output_pk)
+        return (q, instance) if full_output else q
         
 
     def exists(self):
         """ Return a boolean whether the database row exists. """
-        return self.get_query(self.model.pk).one_or_none() is not None
+        return self.read() is not None
 
 
     def read(self):
         """ Read the row from the database. """
         return self.get_query().one_or_none()
-
-
-    def get_task(self):
-        result = self.read()
-        # Get task state.
-        q = session.query(astradb.task_state).filter_by(task_pk=result.task_pk).one_or_none()
-        
-        if q is None or q.parameter_pk is None:
-            params = None
-        else:
-            p = session.query(astradb.task_parameter).filter_by(pk=q.parameter_pk).one_or_none()
-            params = p.parameters
-        
-        return (q, params)
-        
 
 
     def write(self, data):
@@ -69,29 +80,37 @@ class DatabaseTarget(Target):
             key, parameter primary key, et cetera).
         """
 
-        q, task_pk = self.get_query(full_output=True)
-        
+        q, task_instance = self.get_query(full_output=True)
         instance = q.one_or_none() 
         exists = instance is not None
+
         if not exists:
+            # Create a new output key.
+            with session.begin():
+                output = astradb.OutputInterface()
+                session.add(output)
+            
+            assert output.pk is not None
 
             # Reference the primary key of the task.
-            kwds = dict(task_pk=task_pk)
+            kwds = dict(output_pk=output.pk)
             kwds.update(data)
 
             # Create the instance.
             instance = self.model(**kwds)
             with session.begin():
                 session.add(instance)
+
+            # Update the task.
+            task_instance.output_pk = output.pk
             
         else:
             # Update with new data.
             q.update(data)
+            
+        session.flush()
         
         return instance
-
-
-
 
 
 def create_image_hdu(data, header, name=None, dtype=None, bunit=None, **kwargs):

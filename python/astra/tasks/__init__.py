@@ -6,6 +6,7 @@ import os
 import traceback
 from datetime import datetime
 
+from luigi.task import flatten
 from luigi.task_register import Register
 from luigi.parameter import ParameterVisibility, _DictParamEncoder, FrozenOrderedDict
 from packaging.version import parse as parse_version
@@ -13,12 +14,26 @@ from astra.utils import log
 from astra import __version__
 from tqdm import tqdm
 
-from astra.database import database
-from astra.database.astradb import TaskState, TaskParameter
-
-session = database.Session()
+from astra.database import session, astradb
 
 astra_version = parse_version(__version__)
+
+
+
+def hashify(params, max_length=8):
+    param_str = json.dumps(params, cls=_DictParamEncoder, separators=(',', ':'), sort_keys=True)
+    param_hash = hashlib.md5(param_str.encode('utf-8')).hexdigest()
+    return param_hash[:max_length]
+
+
+def task_id_str(task_family, params):
+    """
+    Returns a canonical string used to identify a particular task
+    :param task_family: The task family (class name) of the task
+    :param params: a dict mapping parameter names to their serialized values
+    :return: A unique, shortened identifier corresponding to the family and params
+    """
+    return f"{task_family}_{hashify(params)}"   
 
 
 class BaseTask(luigi.Task, metaclass=Register):
@@ -59,7 +74,6 @@ class BaseTask(luigi.Task, metaclass=Register):
     def __init__(self, *args, **kwargs):
         super(BaseTask, self).__init__(*args, **kwargs)
         
-        strict = kwargs.pop("strict", False)
 
         params = self.get_params()
         param_values = self.get_param_values(params, args, kwargs)
@@ -70,31 +84,21 @@ class BaseTask(luigi.Task, metaclass=Register):
 
         # Register kwargs as an attribute on the class. Might be useful
         self.param_kwargs = dict(param_values)
-
-        self._database_parameter_kwargs = {}
-        # Here are some parameters that we know will exist.
-        # We only record parameters that are significant and not batchable.
-        #ignore = ("release", "astra_version_major", "astra_version_minor")
-        ignore = ()
-        for k, p in params:
-            if p.significant and not p._is_batchable() and k not in ignore:
-                self._database_parameter_kwargs[k] = self.param_kwargs[k]
-
-        self._database_parameter_pk = self.get_parameter_pk()
         
-        self._warn_on_wrong_param_types(strict)
+        self._warn_on_wrong_param_types()
 
         str_params = self.to_str_params(only_significant=True, only_public=False)
         self.task_id = task_id_str(
             self.get_task_family(), 
             str_params
         )
+
+        self.__str_params = str_params
         self.__hash = hash(self.task_id)
 
         self.set_tracking_url = None
         self.set_status_message = None
         self.set_progress_percentage = None
-
 
 
     def _warn_on_wrong_param_types(self, strict=False):
@@ -113,7 +117,21 @@ class BaseTask(luigi.Task, metaclass=Register):
         task_family, task_hash = self.task_id.split("_")
         batch_size = self.get_batch_size()
 
-        return f"<{task_family}({task_hash}, batch_size={batch_size})>"
+        if batch_size > 1:
+            return f"<{task_family}({task_hash}, batch_size={batch_size})>"
+        else:
+            return f"<{task_family}({task_hash})>"
+
+
+    def get_common_param_kwargs(self, klass, include_significant=True):
+        common = self.get_common_param_names(klass, include_significant=include_significant)
+        return dict([(k, getattr(self, k)) for k in common])
+
+
+    def get_common_param_names(self, klass, include_significant=True):
+        a = self.get_param_names(include_significant=include_significant)
+        b = klass.get_param_names(include_significant=include_significant)
+        return set(a).intersection(b)
 
 
     def get_hashed_params(self, only_significant=True, only_public=False):
@@ -130,7 +148,6 @@ class BaseTask(luigi.Task, metaclass=Register):
         return hashed_params
     
 
-
     def to_str_params(self, only_significant=True, only_public=False):
         """
         Convert all parameters to a str->str hash.
@@ -145,7 +162,7 @@ class BaseTask(luigi.Task, metaclass=Register):
 
         for k, v in hashed_params.items():
             if k in batch_param_names and is_batch_mode:
-                params_str[k] = json.dumps(v, cls=_DictParamEncoder)
+                params_str[k] = json.dumps(v, cls=_DictParamEncoder, separators=(',', ':'), sort_keys=True)
             else:
                 params_str[k] = params[k].serialize(v)
                 
@@ -196,6 +213,7 @@ class BaseTask(luigi.Task, metaclass=Register):
 
     @property
     def is_batch_mode(self):
+        """ A boolean property indicating whether the task is in batch mode or not. """
         try:
             return self._is_batch_mode
         except AttributeError:
@@ -236,6 +254,7 @@ class BaseTask(luigi.Task, metaclass=Register):
 
 
     def get_batch_tasks(self):
+        """ A generator that yields task(s) that are to be run. Works in single or batch mode. """
         # This task can be run in single mode or batch mode.
         if self.is_batch_mode:
             for kwds in self.get_batch_task_kwds():
@@ -251,11 +270,7 @@ class BaseTask(luigi.Task, metaclass=Register):
 
         except AttributeError:
             if self.is_batch_mode:
-                self._batch_size = 0
-                for pn in self.batch_param_names():
-                    v = getattr(self, pn)
-                    if v is not None:
-                        self._batch_size = max(len(v), self._batch_size)
+                self._batch_size = max(len(getattr(self, pn)) for pn in self.batch_param_names())
             else:
                 self._batch_size = 1
             
@@ -290,99 +305,167 @@ class BaseTask(luigi.Task, metaclass=Register):
         
 
     def requires(self):
+        """ The requirements of this task. """
         return []
 
 
     def output(self):
+        """ The outputs of this task. """
         return []
 
 
-    def complete(self):
-        if True or self.strict_output_checking:
-            return super(BaseTask, self).complete()
+    def query_state(self, full_output=False):
+        """ 
+        Query the database for this task and return the SQLAlchemy ORM Query.
 
-        else:
-            instance = self.get_state_instance()
-            return False if instance is None else (instance.status_code == 1)
-    
-
-
-    def get_state_query(self, full_output=False):
+        :param full_output: [optional]
+            Optionally return a three-length tuple containing the ORM query, database model, and 
+            keywords to filter by.
+        """
         kwds = dict(
             task_module=self.task_module,
             task_id=self.task_id
         )
-        model = TaskState
+        model = astradb.Task
         q = session.query(model).filter_by(**kwds)
         if full_output:
             return (q, model, kwds)
         return q
 
 
+    def get_or_create_state(self, defaults=None):
+        """
+        Get (or create) an entry in the database for this task. 
 
-    def get_state_instance(self, full_output=False):
-        q, model, kwds = self.get_state_query(full_output=True)
-        instance = q.one_or_none()
-        if full_output:
-            return (instance, model, kwds)
-        return instance
+        Note that this will only create an entry for the *task*, and not for the parameters of the
+        task. This is useful when creating many task entries, with the intent you will create the
+        parameter entries later, and you want to minimise overhead. If you want to create an entry
+        for this task *and* the parameters, use `create_state()`.
+
+        This function returns a two-length tuple containing the SQLAlchemy instance, and a boolean
+        flag indicating whether the entry was created (True) or just retrieved (False).
+
+        :param defaults: [optional]
+            A dictionary of default key, value pairs to provide if the entry needs to be created in
+            the database.
+        """
         
-
-    def get_or_create_state_instance(self, defaults=None):
-        instance, model, kwds = self.get_state_instance(full_output=True)
+        q, model, kwds = self.query_state(full_output=True)
+        instance = q.one_or_none()
         create = (instance is None)
         if create:
-            if defaults is not None:
-                kwds.update(defaults)
-
-            instance = model(**kwds)
+            defaults = defaults or {}
+            instance = model(**{**defaults, **kwds})
             with session.begin():
                 session.add(instance)
-            
+        
+        session.flush()
         return (instance, create)
 
 
-    def delete_state(self):
-        return self.get_state_query().delete()
-
-     
-    def update_state(self, **kwargs):
-        return self.get_state_query().update(kwargs)
+    def create_state(self):
+        """ Create an entry in the database for this task, and its parameters. """
         
+        # Create parameter instances first.
+        parameter_pks = {}
+        params = dict(self.get_params())
+        for key, values in self.param_kwargs.items():
+            if params[key].significant:
+                as_list = (self.is_batch_mode and params[key]._is_batchable())
+                if not as_list:
+                    values = (values, )
+                
+                pks = []
+                for value in values:
+                    kwds = dict(
+                        parameter_name=key,
+                        parameter_value=params[key].serialize(value)
+                    )
+                    parameter_instance, _ = get_or_create_parameter_instance(**kwds)
+                    pks.append(parameter_instance.pk)
+                
+                parameter_pks[key] = pks if as_list else pks[0]
+                
+                
+        # Create task instances.
+        task_pks = []
+        for i, task in enumerate(self.get_batch_tasks()):
+            instance, _ = task.get_or_create_state()
+            task_pks.append(instance.pk)
 
-    def get_parameter_pk(self):
-        parameters = self._database_parameter_kwargs
-        parameter_hash = hashify(parameters)
-        return int(parameter_hash, 16)
+            # Reference parameter keys.
+            for key, pks in parameter_pks.items():
+                pk = pks if isinstance(pks, int) else pks[i]
+                kwds = dict(task_pk=instance.pk, parameter_pk=pk)
+
+                q = session.query(astradb.TaskParameter).filter_by(**kwds)
+                if q.one_or_none() is None:
+                    with session.begin():
+                        session.add(astradb.TaskParameter(**kwds))
+
+        if self.is_batch_mode:
+            parent_task, _ = self.get_or_create_state()
+
+            # Reference batch identifiers.
+            for child_task_pk in task_pks:
+                kwds = dict(
+                    parent_task_pk=parent_task.pk,
+                    child_task_pk=child_task_pk
+                )                    
+                q = session.query(astradb.BatchInterface).filter_by(**kwds)
+                if q.one_or_none() is None:
+                    with session.begin():
+                        session.add(astradb.BatchInterface(**kwds))
+    
+        session.flush()
+        return None
 
 
-    def get_or_create_parameter_instance_pk(self):
+    def delete_state(self, cascade=False):
         """
-        Return the primary key of the task parameter row in the database for this task.
-        In the database we only store task parameters that are significant and not
-        batchable.
+        Delete this task entry in the database.
+
+        :param cascade: [optional]
+            Cascade this to any tasks in this batch.
         """
+        if not cascade:
+            return self.query_state().delete()
+        else:
+            for task in self.get_batch_tasks():
+                task.delete_state()
+        return None
+             
 
-        pk = self.get_parameter_pk()
-        parameters = self._database_parameter_kwargs
-        model = TaskParameter
+    def update_state(self, state, cascade=False):
+        """
+        Update the task entry in the database with the given state dictionary.
 
-        q = session.query(model.pk).filter_by(pk=pk)
-        if q.one_or_none() is None:
-            instance = model(pk=pk, parameters=parameters)
-            with session.begin():
-                session.add(instance)
+        :param cascade: [optional]
+            Cascade this to any tasks in this batch.
+        """
+        if not cascade:
+            return self.query_state().update(state)
+        else:
+            for task in self.get_batch_tasks():
+                task.query_state().update(state)
+        session.flush()
+        return None
 
-        return pk
-
-
+                
     def trigger_event_start(self):
+        """ Trigger an event signalling that the task has started. """
         return self.trigger_event(luigi.Event.START, self)
 
 
     def trigger_event_succeeded(self):
+        """ Trigger an event signalling that the task has succeeded. """
         return self.trigger_event(luigi.Event.SUCCESS, self)
-    
+
+
+    def trigger_event_failed(self):
+        """ Trigger an event signalling that the task has failed. """
+        return self.trigger_event(luigi.Event.FAILURE, self)
+
 
     def trigger_event_processing_time(self, duration, cascade=False):
         """
@@ -394,76 +477,47 @@ class BaseTask(luigi.Task, metaclass=Register):
         :param cascade: [optional]
             Also trigger the task succeeded event (default: False).
         """
-        self.trigger_event(luigi.Event.PROCESSING_TIME, self, duration)
+        triggered = self.trigger_event(luigi.Event.PROCESSING_TIME, self, duration)
         if cascade:
             self.trigger_event_succeeded()
+        return triggered
 
 
+def get_or_create_parameter_instance(parameter_name, parameter_value):
+    """
+    Get (or create) an instance in the database for this parameter name and value pair.
 
+    Returns a two-length tuple containing the `astradb.Parameter` instance, and a boolean flag
+    indicating whether the instance was created (True) or just retrieved (False).
 
+    :param parameter_name:
+        The name of the parameter in the task.
     
+    :param parameter_value:
+        The value given to that parameter name.
+    """
+    kwds = dict(parameter_name=parameter_name, parameter_value=parameter_value)
+    q = session.query(astradb.Parameter).filter_by(**kwds)
+    instance = q.one_or_none()
+    create = (instance is None)
+    if create:
+        instance = astradb.Parameter(**kwds)
+        with session.begin():
+            session.add(instance)
+    return (instance, create)
 
-
-
-class SDSSDataProduct(luigi.LocalTarget):
-    pass
-
-
-# TODO: Better alignment between event names and return codes needed.
 
 @BaseTask.event_handler(luigi.Event.START)
 def task_started(task):
-
-    def trigger(t, parameter_pk):
-            
-        instance, model, state_kwds = t.get_state_instance(full_output=True)
-
-        kwds = dict(
-            status_code=0,
-            created=datetime.now(),
-            modified=datetime.now(),
-            completed=None,
-            parameter_pk=parameter_pk
-        )
-
-        if instance is None:
-            if not t.is_batch_mode:
-                # Get any relations to data model products (apogee_star, boss_spec, etc).
-                try:
-                    data_model_kwds = t.get_or_create_data_model_relationships()
-                except AttributeError:
-                    None
-                else:
-                    kwds.update(data_model_kwds)
-
-            # Create instance.
-            kwds.update(state_kwds)
-            instance = model(**kwds)
-            with session.begin():
-                session.add(instance)
-
-        else:
-            # If this task is completed, then we should just update the modified time.
-            if instance.status_code == 1:
-                t.update_state(modified=datetime.now())
-            
-            else:
-                # Update instance.
-                t.update_state(**kwds)
-
-        return instance
-
-    # Store parameters.
-    parameter_pk = task.get_or_create_parameter_instance_pk()
-
-    trigger(task, parameter_pk)
-
-    # Create sub-tasks with the parameter pk from the primary.
-    if task.is_batch_mode:
-        for each in tqdm(task.get_batch_tasks(), total=task.get_batch_size(), desc="Trigger tasks (start)"):
-            trigger(each, parameter_pk)
+    """
+    Create entries in the database for this task and it's parameters. 
     
+    :param task:
+        The started task.
+    """
+    task.create_state()
 
+    
 @BaseTask.event_handler(luigi.Event.SUCCESS)
 def task_succeeded(task):
     """
@@ -472,122 +526,80 @@ def task_succeeded(task):
     :param task:
         The completed task.
     """
-    state_factory = lambda **_: dict(
-        status_code=1,
-        completed=datetime.now(),
-        modified=datetime.now()
+    task.update_state(
+        dict(status_code=1, modified=datetime.now()),
+        cascade=True
     )
-    if task.is_batch_mode:
-        for each in tqdm(task.get_batch_tasks(), total=task.get_batch_size(), desc="Trigger tasks (complete)"):
-            each.update_state(**state_factory())
-            
-    task.update_state(**state_factory())
     
 
 @BaseTask.event_handler(luigi.Event.FAILURE)
 def task_failed(task, args):
     # TODO: trigger on sub-tasks too?
-    instance, model, state_kwds = task.get_state_instance(full_output=True)
-    parameter_pk = task.get_or_create_parameter_instance_pk()
-    task.update_state(parameter_pk=parameter_pk, status_code=30, modified=datetime.now())
-    
+    """
+    Mark a task as failed in the database.
+
+    :param task:
+        The failed task.
+    """
+    task.update_state(
+        dict(status_code=30, modified=datetime.now())
+    )
+
 
 @BaseTask.event_handler(luigi.Event.PROCESS_FAILURE)
 def task_process_failed(task):
+    """
+    Mark a task process as failed in the database.
+
+    :param task:
+        The failed task.
+    """
     # TODO: trigger on sub-tasks too?
-    task.get_or_create_state_instance()
     task.update_state(
-        status_code=40,
-        modified=datetime.now()
+        dict(status_code=40, modified=datetime.now())
     )
 
 
 @BaseTask.event_handler(luigi.Event.BROKEN_TASK)
 def task_broken(task):
-    # TODO: trigger on sub-tasks too?
-    task.get_or_create_state_instance()
+    """
+    Mark a task as being broken in the database.
+
+    :param task:
+        The broken task.
+    """    
     task.update_state(
-        status_code=40,
-        modified=datetime.now()
+        dict(status_code=50, modified=datetime.now())
     )
 
+
 @BaseTask.event_handler(luigi.Event.DEPENDENCY_MISSING)
-# TODO: trigger on sub-tasks too?
 def task_dependency_missing(task):
-    instance, model, state_kwds = task.get_state_instance(full_output=True)
-    parameter_pk = task.get_or_create_parameter_instance_pk()
-    task.update_state(parameter_pk=parameter_pk, status_code=40, modified=datetime.now())
-    
+    """
+    Mark a task as having missing dependencies in the database.
+
+    :param task:
+        The task with missing dependencies.
+    """
+    # TODO: trigger on sub-tasks too?
+    task.update_state(
+        dict(status_code=60, modified=datetime.now())
+    )
+
 
 @BaseTask.event_handler(luigi.Event.PROCESSING_TIME)
 def task_processing_time(task, duration):
+    """
+    Record the processing duration of a task in the database.
+
+    :param task:
+        The completed task.
+
+    :param duration:
+        The duration of the task in seconds.
+    """
     # TODO: trigger on sub-tasks too?
-    task.update_state(
+    task.update_state(dict(
         duration=duration,
         modified=datetime.now()
-    )
-
-
-def hashify(params, max_length=8):
-    param_str = json.dumps(params, cls=_DictParamEncoder, separators=(',', ':'), sort_keys=True)
-    param_hash = hashlib.md5(param_str.encode('utf-8')).hexdigest()
-    return param_hash[:max_length]
-
-    
-
-
-
-def task_id_str(task_family, params):
-    """
-    Returns a canonical string used to identify a particular task
-    :param task_family: The task family (class name) of the task
-    :param params: a dict mapping parameter names to their serialized values
-    :return: A unique, shortened identifier corresponding to the family and params
-    """
-    param_hash = hashify(params)
-    return f"{task_family}_{param_hash}"
-    
-
-
-def load_task_from_database(**kwargs):
-    q = session.query(TaskState).filter_by(**kwargs)
-    state = q.order_by(TaskState.modified.desc()).first()
-
-    # Load module
-    if state.task_module is not None:
-        __import__(state.task_module)
-
-    from luigi.task_register import Register
-    task_name = state.task_id.split("_")[0]
-    task_cls = Register.get_task_cls(task_name)
-
-    instance = session.query(TaskParameter).filter_by(pk=state.parameter_pk).first()    
-
-    
-
-    # Load data model keywords.
-    data_model_kwds = task_cls.get_data_model_keywords(state)
-
-    kwds = instance.parameters.copy()
-    kwds.update(data_model_kwds)
-    
-    #for pn in task_cls.get_param_names():
-    #    if pn not in kwds and hasattr()
-    task = task_cls(**kwds)
-
-    assert task.task_id == state.task_id
-    
-    raise a
-
-
-def get_last_broken_task(status_code=30):
-    state = session.query(TaskState)\
-                   .filter_by(status_code=status_code)\
-                   .order_by(TaskState.modified.desc()).first()
-    
-    parameters = session.query(TaskParameter).filter_by(pk=state.parameter_pk).first()
-
-    raise a
-                   
-
-    
+    ))

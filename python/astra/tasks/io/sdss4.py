@@ -1,8 +1,7 @@
 import astra
 from astra.tasks.io import SDSSDataModelTask
-from astra.database import database, astradb
+from astra.database import session, astradb
 
-session = database.Session()
 
 class SDSS4DataModelTask(SDSSDataModelTask):
 

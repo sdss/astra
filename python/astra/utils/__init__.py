@@ -12,6 +12,8 @@ import tempfile
 log = get_logger(__name__.split(".")[0])
 log.propagate = False
 
+
+
 def unique_dicts(list_of_dicts):
     return [dict(y) for y in set(tuple(x.items()) for x in list_of_dicts)]
 
@@ -82,6 +84,10 @@ def unique_everseen(iterable, key=None):
             if k not in seen:
                 seen_add(k)
                 yield element
+
+
+def skip_incomplete(iterable, task_class):
+    return filter(lambda kwd: task_class(**kwd).complete(), iterable)
 
 
 def batcher(iterable, task_factory=None, unique=False, ordered=True):

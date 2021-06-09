@@ -121,7 +121,12 @@ class OutputMixin:
 
     def get_tasks(self):
         return session.query(Task).filter_by(output_pk=self.output_pk).all()
-        
+
+
+class ApogeeNet(Base, OutputMixin):
+    __tablename__ = "apogeenet"
+
+
 class Doppler(Base, OutputMixin):
     __tablename__ = "doppler"
 
