@@ -1,82 +1,38 @@
 
-.. title:: Database targets
+.. title:: Database
 
 .. role:: header_no_toc
   :class: class_header_no_toc
 
-.. title:: Database targets
+.. title:: Database
 
 :tocdepth: 1
 
-.. rubric:: :header_no_toc:`Database targets`
-
-Test doc update
-
-In Astra you can write the output of a task to a file, write the result to a database, or both.
-This page provides a primer or reference for how to define a database target row.
-
-Let's pretend we have some task that we want to write the output to a database.
-The way we do this in Astra is to define an *output* of a task to be a :py:mod:`astra.tasks.targets.DatabaseTarget` object.
-
-Here's what it might look like::
-
-    import astra
-    from astra.tasks.base import BaseTask
-    from astra.tasks.targets import DatabaseTarget
-    from sqlalchemy import Column, Float
-
-    # Let's first define a database target.
-    class MyTaskResultTarget(DatabaseTarget):
-        
-        # These are the expected outputs from the task.
-        foo = Column("foo", Float)
-        result = Column("result", Float)
+.. rubric:: :header_no_toc:`Database`
 
 
-    # Now define the task.
-    class MyTask(BaseTask):
+The primary Astra database is hosted with the existing SDSS-V PostgreSQL database server that is 
+hosted at Utah. We use the general utilities and functionality for connecting to SDSS databases 
+from `sdssdb` , which uses object-relational mapping (ORM)
 
-        # Define some parameters for the task.
-        a = astra.FloatParameter()
-        b = astra.IntParameter()
-        c = astra.FloatParameter()
+If you want to run Astra locally or direct the database connection to somewhere else, you can do so
+by changing the settings in your `astra` profile in your `sdssdb` configuration file.
+The database that Astra connects to will need to have the Astra database schema, which is stored in
+`schema/astradb/astradb.sql` and can be loaded into PostgreSQL with the terminal command ::
 
-        def run(self):
-            # Calculate or do something.
-            result = self.a + self.b * self.c
-            foo = max([self.a, self.b, self.c])
-            
-            # Write some outputs.
-            self.output().write(dict(result=result, foo=foo))
+    psql < schema/astradb/astradb.sql
 
+An overview on tasks
+--------------------
 
-        def output(self):
-            return MyTaskResultTarget(self)
+Analysis work in Astra is organised into individual tasks. Briefly, a task is uniquely defined by the name of the task (e.g., `EstimateSNR` for some ficticious task to estimate a signal-to-noise ratio) and the parameters given to that task. The parameters include information about what file(s) to use to estimate the signal-to-noise ratio. If we create two tasks with the same parameters and execute one task, then when you try to execute the second task Astra will realise that the task has already been executed because it has outputs produced from the first task we ran.
 
 
+Schema
+------
 
-Now if we wanted to run that task::
+The most relevant tables in the Astra database are:
+- `astra.task`: information about individual tasks
+- `astra.parameter`: a key-value table to record parameter-value pairs provided to tasks
+- `astra.task_parameter`: a junction table to allow many-to-many relationships between tasks and parameters
 
-    task = MyTask(a=3.5, b=4, c=6)
-
-    task.run()
-
-And access the results afterwards::
-
-    >>> # Has this task been executed?
-    >>> print(task.exists())
-    True
-    >>> # Let's look at the results.
-    >>> print(task.output().read())
-    ('MyTask_0c64e8f4c6', 0, 1, 3.5, 4, 6.0, 6.0, 27.5)
-    >>> # Let's look as if it was a dictionary:
-    >>> for key, value in task.output().read(as_dict=True).items():
-    >>>     print(f"{key}: {value}")
-    task_id: MyTask_0c64e8f4c6
-    astra_version_major: 0
-    astra_version_minor: 1
-    a: 3.5
-    b: 4
-    c: 6.0
-    foo: 6.0
-    result: 27.5
