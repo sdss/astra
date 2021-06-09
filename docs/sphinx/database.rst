@@ -10,6 +10,8 @@
 
 .. rubric:: :header_no_toc:`Database targets`
 
+Test doc update
+
 In Astra you can write the output of a task to a file, write the result to a database, or both.
 This page provides a primer or reference for how to define a database target row.
 
