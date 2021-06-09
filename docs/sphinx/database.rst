@@ -29,10 +29,22 @@ Analysis work in Astra is organised into individual tasks. Briefly, a task is un
 
 
 Schema
-------
+======
 
 The most relevant tables in the Astra database are:
 - `astra.task`: information about individual tasks
 - `astra.parameter`: a key-value table to record parameter-value pairs provided to tasks
 - `astra.task_parameter`: a junction table to allow many-to-many relationships between tasks and parameters
+
+
+The `task` table
+-----------------
+
++------------------------+------------+------------------------------------------------------------+
+| Column name            | Type       | Description                                                |
++========================+============+============================================================+
+| `pk`                   | serial primary key | Test |
++------------------------+------------+------------------------------------------------------------+
+| `task_module`          | text | test |
++------------------------+------------+------------------------------------------------------------+
 
