@@ -1,5 +1,6 @@
 import json
 import collections
+import warnings
 from functools import partial
 from luigi.parameter import _DictParamEncoder
 from sqlalchemy import MetaData, create_engine
@@ -55,7 +56,24 @@ database = AstraDatabaseConnection(autoconnect=True)
 # Ignore what the documentation says for sdssdb.
 # Create a file called ~/.config/sdssdb/sdssdb.yml and put your connection info there.
 
-database.set_profile("astra")
+try:
+    database.set_profile("astra")
 
+except AssertionError:
+    warnings.warn("""
+        No database profile named 'astra' found in ~/.config/sdssdb/sdssdb.yml -- 
+        it should look like this:
 
-session = database.Session()
+        astra:
+          user: [SDSSDB_USERNAME]
+          host: [SDSSDB_HOSTNAME]
+          port: 5432
+          domain: [SDSSDB_DOMAIN]
+  
+        See https://sdssdb.readthedocs.io/en/stable/intro.html#supported-profiles for more details. 
+        """
+    )
+    session = None
+
+else:
+    session = database.Session()
