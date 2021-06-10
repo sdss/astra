@@ -15,9 +15,12 @@ drop table if exists astra.thecannon cascade;
 drop table if exists astra.apogeenet cascade;
 
 
+
+
 create table astra.output_interface (
     pk serial primary key
 );
+
 
 create table astra.task (
     pk serial primary key,
@@ -136,6 +139,9 @@ create table astra.batch_interface (
     foreign key (parent_task_pk) references astra.task(pk) on delete restrict
 );
 create unique index on astra.batch_interface (parent_task_pk, child_task_pk);
+
+
+
 
 
 /*

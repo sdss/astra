@@ -140,7 +140,6 @@ class Ferre(Base, OutputMixin):
 
 
 
-
 def define_relations():    
     
     Task.batch_interface = relationship("BatchInterface", backref="task", foreign_keys="BatchInterface.parent_task_pk")
