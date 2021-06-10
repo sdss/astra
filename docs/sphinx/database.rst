@@ -34,6 +34,7 @@ The most relevant tables in the Astra database are:
 - `astra.parameter`: a key-value table to record parameter-value pairs provided to tasks
 - `astra.task_parameter`: a junction table to allow many-to-many relationships between tasks and parameters
 - `astra.output_interface`: a reference table storing keys of database outputs from all tasks
+- `astra.batch_interface`: a reference table linking batched tasks together
 
 There are many tables that store results from contributed analysis tasks (e.g., The Cannon). These include:
 
@@ -122,6 +123,51 @@ The schema of the `output_interface` table is simple, with just one column:
 | `pk`              | serial primary key  | A primary key that uniquely references this row.                  |
 +-------------------+---------------------+-------------------------------------------------------------------+
 
+
+
+The `batch_interface` table
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Some tasks can be batched together. For example, there is a lot of overhead to load the FERRE code, so it makes sense to analyse many stars at once in the same FERRE task. Astra manages this by letting you create tasks that will be run on their own (a single task) or in a batch (many at once). For deep technical reasons, if we group 5 tasks together into a batch, then the "batch task" will have it's own unique identifier that is different from any of the five tasks in that batch. 
+
+You can think of this like the identifier for a task being constructed from the parameters given to it. So if we had two tasks where we give some parameter `obj="2M14110564+5255080"` to Task A and `obj="2M00000000+000001"` to Task B, then the identifier of Tasks A and B will differ, because these parameters differ. To batch these into a single task, we would give `obj=("2M14110564+5255080", "2M00000000+000001")`, which is different again, so the batched task has it's own unique identifier.
+
+If we batch two tasks together then this will create three database entries: one for each task, and one for the batched task. The referencing of batch tasks in the database is done automatically by Astra using the `batch_interface` schema:
+
+
++-------------------+---------------------+-------------------------------------------------------------------------------+
+| Column name       | Type                | Description                                                                   |
++===================+=====================+===============================================================================+
+| `pk`              | serial primary key  | A primary key that uniquely references this row.                              |
++-------------------+---------------------+-------------------------------------------------------------------------------+
+| `parent_task_pk`  | bigint              | A foreign reference to the primary key of the parent task (`astra.task(pk)`). |
++-------------------+---------------------+-------------------------------------------------------------------------------+
+| `child_task_pk`   | bigint              | A foreign reference to the primary key of the child task (`astra.task(pk)`).  |
++-------------------+---------------------+-------------------------------------------------------------------------------+
+
+For reference: if you ever get the database state of a batched task, you can access the individual tasks. This is useful for comparing the duration of the parent task to the sum of durations for individual tasks, which gives an idea for the overhead on the batch. ::
+
+
+    In [3]: task
+    Out[3]: <APOGEENet.EstimateStellarParametersGivenApStarFile(2e0af759, batch_size=10)>
+
+    In [4]: task_state = task.query_state().one_or_none()
+
+    In [5]: task_state
+    Out[5]: <Task (pk=15)>
+
+    In [6]: task_state.batch_tasks
+    Out[6]: 
+    (<Task (pk=5)>,
+    <Task (pk=6)>,
+    <Task (pk=7)>,
+    <Task (pk=8)>,
+    <Task (pk=9)>,
+    <Task (pk=10)>,
+    <Task (pk=11)>,
+    <Task (pk=12)>,
+    <Task (pk=13)>,
+    <Task (pk=14)>)
 
 
 A code example
@@ -304,7 +350,7 @@ Thanks to the ORM database mapping, we can reference between tasks and outputs v
     some_earlier_task = RandomNumberGeneratorTask(seed=3, draws=2, delay_time=5)
 
     # This should be True.
-    print(some_earlier_task.complete())
+    print(f"Is the earlier task complete? {some_earlier_task.complete()}")
 
     # Let's read the database output from this task.
     output = some_earlier_task.output()["database"].read()
@@ -326,19 +372,19 @@ Thanks to the ORM database mapping, we can reference between tasks and outputs v
 
     print(f"Original: {some_earlier_task}")
     print(f"Reconstructed: {reconstructed_task}")
-    print(some_earlier_task == reconstructed_task)
+    print(f"Tasks are identical: {some_earlier_task == reconstructed_task}")
 
 
 And output ::
 
-    True
+    Is the earlier task complete? True
     Database ORM object: <RandomNumberGenerator (output_pk=7)>
     Print the samples: [1.7886285, 0.43650985]
     Task in database: <Task (pk=3)>, last modified 2021-06-09 18:50:45.005442
     That task took 5.0129633 seconds to run
     Original: <RNG.RandomNumberGeneratorTask(41bbabea)>
     Reconstructed: <RNG.RandomNumberGeneratorTask(41bbabea)>
-    True
+    Tasks are identical: True
 
 
 
