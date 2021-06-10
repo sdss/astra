@@ -107,9 +107,27 @@ Because two tasks can share the same parameter name and value, we use a junction
 +-------------------+---------------------+-------------------------------------------------------------------+
 
 
+The `output_interface` table
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Because there are many results from different analysis codes, we want a way to be able to uniquely reference a database output. We also want a way to reference the output row from the `task` table with a primary key without having to specify what table name actually contains the output. We achieve this by using a simple `output_interface` table. The `output_pk` column in the `task` table references the key `output_interface(pk)`, and the individual results tables also reference this table. That means from a row in the `task` table we can identify the outputs, without knowing what table name is storing those outputs, and even if the output column names are different for every code.
+
+In the future this `output_interface` table might be expanded to allow many-to-many relationships between tasks and outputs.
+
+The schema of the `output_interface` table is simple, with just one column:
+
++-------------------+---------------------+-------------------------------------------------------------------+
+| Column name       | Type                | Description                                                       |
++===================+=====================+===================================================================+
+| `pk`              | serial primary key  | A primary key that uniquely references this row.                  |
++-------------------+---------------------+-------------------------------------------------------------------+
+
+
 
 A code example
 --------------
+
+Now that we have defined the schema for tasks and their parameters, we can set up a code example that makes use of this schema. Here we will create a task that has some parameters, and it will generate random numbers and write these as outputs to the database.
 
 Let's define the schema for our table, which we will call `astra.random_number_generator` ::
 
@@ -132,10 +150,11 @@ Now we can write a Python class that will let us make ORM queries against the da
     # defined in python/astra/database/astradb.py  
 
     class RandomNumberGenerator(Base, OutputMixin):
-        __tablename_ = "random_number_generator"  
+        # This should match the name of the table we defined in SQL.
+        __tablename__ = "random_number_generator"  
 
 
-Now we can create some tasks. All of the contributed analysis methods to Astra live in the `python/astra/contrib/` folder, or in the `astra.contrib` Python namespace. Normally these contributed analysis packages have a lot of files, and the tasks will live in their own `tasks` sub-folder (e.g., `python/astra/contrib/rng/tasks`), but here we will just make a folder called `python/astra/contrib/rng/` and put the following code in a `__init__.py` file ::
+Now we can create a task. All of the contributed analysis methods to Astra live in the `python/astra/contrib/` folder, or in the `astra.contrib` Python namespace. Normally these contributed analysis packages have a lot of files, and the tasks will live in their own `tasks` sub-folder (e.g., `python/astra/contrib/rng/tasks`), but here we will just make a folder called `python/astra/contrib/rng/` and put the following code in a `__init__.py` file ::
 
     import astra
     import numpy as np
@@ -176,20 +195,17 @@ Now we can create some tasks. All of the contributed analysis methods to Astra l
             np.random.seed(self.seed)
 
             # Draw some samples and write them to the database.
-            self.output()["database"].write({
-                "samples": np.random.normal(size=self.draws)
-            })
+            self.output()["database"].write(dict(
+                samples=np.random.normal(size=self.draws)
+            ))
 
 
         def output(self):
             """ The output produced by this task. """
-            return {
-                "database": DatabaseTarget(astradb.RandomNumberGenerator, self)
-            }
-            
-            
+            return dict(database=DatabaseTarget(astradb.RandomNumberGenerator, self))
+                        
 
-Now we are ready to create and run some tasks. Let's run a simple example ::
+Now we are ready to create and run some tasks. Let's run a simple example, where we will create four tasks with different parameters ::
 
     import astra
     from astra.contrib.rng import RandomNumberGeneratorTask
@@ -201,6 +217,7 @@ Now we are ready to create and run some tasks. Let's run a simple example ::
         RandomNumberGeneratorTask(seed=5, draws=1, delay_time=3)
     ]
 
+    # Get astra to build the dependency graph and run the tasks.
     astra.build(tasks, local_scheduler=True)
 
 
@@ -239,7 +256,7 @@ This produces the following output ::
 
 You can see that the tasks each have different identifiers (like `36a542f0`, `ced8556d`) that are constructed from the parameters given to that task. Now let's query the database for the results ::
 
-    [u6020307@mwm:astra]$ psql -h operations.sdss.org -d sdss5db -U sdss
+    [u6020307@mwm:astra]$ psql
     psql (9.6.6, server 12.2)
     WARNING: psql major version 9.6, server major version 12.
             Some psql features might not work.
@@ -247,7 +264,7 @@ You can see that the tasks each have different identifiers (like `36a542f0`, `ce
 
     sdss5db=> select * from astra.random_number_generator;
     output_pk |                                                  samples                                                  
-    -----------+-----------------------------------------------------------------------------------------------------------
+    ----------+-----------------------------------------------------------------------------------------------------------
             5 | {1.7640524}
             6 | {1.7640524,0.4001572,0.978738,2.2408931,1.867558,-0.9772779,0.95008844,-0.1513572,-0.10321885,0.41059852}
             7 | {1.7886285,0.43650985}
@@ -256,7 +273,7 @@ You can see that the tasks each have different identifiers (like `36a542f0`, `ce
 
     sdss5db=> select t.pk, t.task_module, t.task_id, t.duration, rng.samples from astra.task as t, astra.random_number_generator as rng where t.output_pk = rng.output_pk;
     pk |    task_module    |                task_id                 |   duration   |                                                  samples                                                  
-    ----+-------------------+----------------------------------------+--------------+-----------------------------------------------------------------------------------------------------------
+    ---+-------------------+----------------------------------------+--------------+-----------------------------------------------------------------------------------------------------------
     1 | astra.contrib.rng | RNG.RandomNumberGeneratorTask_36a542f0 | 0.0099208355 | {1.7640524}
     2 | astra.contrib.rng | RNG.RandomNumberGeneratorTask_ced8556d | 0.0065267086 | {1.7640524,0.4001572,0.978738,2.2408931,1.867558,-0.9772779,0.95008844,-0.1513572,-0.10321885,0.41059852}
     3 | astra.contrib.rng | RNG.RandomNumberGeneratorTask_41bbabea |    5.0129633 | {1.7886285,0.43650985}
@@ -265,9 +282,15 @@ You can see that the tasks each have different identifiers (like `36a542f0`, `ce
 
 Here you can see that the first two tasks took almost no time at all, but the third and fourth tasks took longer because of the `time_delay` parameter we gave ::
 
+    [u6020307@mwm:astra]$ psql
+    psql (9.6.6, server 12.2)
+    WARNING: psql major version 9.6, server major version 12.
+            Some psql features might not work.
+    Type "help" for help.
+
     sdss5db=> select t.task_id, t.duration, p.parameter_name, p.parameter_value from astra.parameter as p, astra.task_parameter as tp, astra.task as t where t.pk = 3 and t.pk = tp.task_pk and tp.parameter_pk = p.pk;
                     task_id                 | duration  |   parameter_name    | parameter_value 
-    ----------------------------------------+-----------+---------------------+-----------------
+    ---------------------------------------+-----------+---------------------+-----------------
     RNG.RandomNumberGeneratorTask_41bbabea | 5.0129633 | astra_version_major | 0
     RNG.RandomNumberGeneratorTask_41bbabea | 5.0129633 | astra_version_minor | 1
     RNG.RandomNumberGeneratorTask_41bbabea | 5.0129633 | seed                | 3
@@ -275,6 +298,47 @@ Here you can see that the first two tasks took almost no time at all, but the th
     RNG.RandomNumberGeneratorTask_41bbabea | 5.0129633 | delay_time          | 5
 
 This shows how we can track the parameters given to every task, without having to write any additional code. All we need to do is to make a cross-match between the `task`, `parameter`, and `task_parameter` tables. And while we didn't specify `astra_version_major` and `astra_version_minor` as parameters to our `RandomNumberGeneratorTask` task class, these parameters are inherited for every Astra task so we can track any changes in results with time.
+
+Thanks to the ORM database mapping, we can reference between tasks and outputs very easily. Here is some example code ::
+
+    some_earlier_task = RandomNumberGeneratorTask(seed=3, draws=2, delay_time=5)
+
+    # This should be True.
+    print(some_earlier_task.complete())
+
+    # Let's read the database output from this task.
+    output = some_earlier_task.output()["database"].read()
+    print(f"Database ORM object: {output}")
+
+    # Print the samples.
+    print(f"Print the samples: {output.samples}")
+
+    # We can reference back to the actual task details.
+    task_in_database, = output.get_tasks()
+
+    print(f"Task in database: {task_in_database}, last modified {task_in_database.modified}")
+    print(f"  That task took {task_in_database.duration} seconds to run")
+
+    # If we didn't already have the original task, and all we had
+    # was the output from the database, we could use this to 
+    # reconstruct the original task.
+    reconstructed_task = task_in_database.load_task()
+
+    print(f"Original: {some_earlier_task}")
+    print(f"Reconstructed: {reconstructed_task}")
+    print(some_earlier_task == reconstructed_task)
+
+
+And output ::
+
+    True
+    Database ORM object: <RandomNumberGenerator (output_pk=7)>
+    Print the samples: [1.7886285, 0.43650985]
+    Task in database: <Task (pk=3)>, last modified 2021-06-09 18:50:45.005442
+    That task took 5.0129633 seconds to run
+    Original: <RNG.RandomNumberGeneratorTask(41bbabea)>
+    Reconstructed: <RNG.RandomNumberGeneratorTask(41bbabea)>
+    True
 
 
 
@@ -288,14 +352,7 @@ Batching tasks
 - What do we do about output_pk for batched tasks, etc?
 
 
-Recreating tasks from the database
-----------------------------------
-
-
 Unexpected behaviour
 --------------------
 
 -> If you use `task.run()` then the database will not be propagated with information about the task parameters. This is because the task parameters are populated when an event is triggered that the event has started. That event does not get triggered by `task.run()`. Instead, you should use `astra.build([task])` to run the task, which will also build up the dependency graph and make sure all requirements are fulfilled. When the task starts running, the task parameters will be populated to the database.
-
-
--> The output interface.
