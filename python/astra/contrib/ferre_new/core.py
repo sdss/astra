@@ -53,7 +53,7 @@ class Ferre(object):
             input_lsf_path=None,
             debug=False,
             ferre_kwds=None,
-            slurm_kwds=None,
+            #slurm_kwds=None,
             **kwargs
         ):        
 
@@ -116,7 +116,7 @@ class Ferre(object):
 
         self.debug = debug
 
-        self.slurm_kwds = kwds.pop("slurm_kwds", {})
+        #self.slurm_kwds = kwds.pop("slurm_kwds", {})
         return None
 
 
@@ -483,6 +483,7 @@ class Ferre(object):
             self._monitor_progress(total=total)
                 
             return None
+
 
     def _check_progress(self, output_flux_path, interval):
         if self.process is not None:

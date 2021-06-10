@@ -3,7 +3,8 @@ import os
 import numpy as np
 from time import time
 from astra.utils import log
-from astra.contrib.ferre_new.core import (Ferre as FerreNoQueue, FerreSlurmQueue)
+from astra.tasks.slurm import slurmify
+from astra.contrib.ferre_new.core import Ferre
 from astra.contrib.ferre_new.tasks.mixin import (FerreMixin, SourceMixin)
 from astra.contrib.ferre_new.utils import sanitise_parameter_names
 from astropy.table import Table
@@ -23,30 +24,6 @@ class FerreBase(FerreMixin, SourceMixin):
         """ Get the keywords for creating a directory for FERRE to run in. """
         return dict(dir=os.path.join(self.output_base_dir, "scratch", self.task_id.split("_")[1]))
         
-
-    def get_ferre_model(self):
-        """ Get the model class to run FERRE, depending on whether you are running through Slurm or not. """
-
-        kwds = self.get_ferre_kwds()
-
-        if not self.use_slurm:
-            Ferre = FerreNoQueue
-        else:
-            Ferre = FerreSlurmQueue
-
-            # Include task identifier as label.
-            slurm_kwds = dict(
-                label=self.task_id,
-                alloc=self.slurm_alloc,
-                nodes=self.slurm_nodes,
-                ppn=self.slurm_ppn,
-                walltime=self.slurm_walltime
-            )
-            kwds.update(slurm_kwds=slurm_kwds)
-
-        print(f"Using {Ferre} with {kwds}")
-        return Ferre(**kwds)
-            
     
     def get_ferre_kwds(self):
         """ Return human-readable keywords that will be used with FERRE. """
@@ -125,7 +102,7 @@ class FerreBase(FerreMixin, SourceMixin):
 
         spectra = self.read_input_observations()
     
-        model = self.get_ferre_model()
+        model = Ferre(**self.get_ferre_kwds())
         
         results = model.fit(
             spectra,
@@ -173,12 +150,9 @@ class FerreBase(FerreMixin, SourceMixin):
             si += N
 
 
+    @slurmify
     def run(self):
         """ Run this task. """
-
-        #if all(task.complete() for task in self.get_batch_tasks()):
-        #    self.trigger_event_succeeded()
-        #    return None
 
         t_init = time()
         model, all_spectra, (p_opt, p_err, meta) = self.execute()
@@ -186,12 +160,8 @@ class FerreBase(FerreMixin, SourceMixin):
         # Get processing times.
         times = model.get_processing_times()
 
-        print(f"Running, now ready for {self.get_batch_size()} with {len(all_spectra)}")
-
         for task, spectra, results, sliced in self.prepare_results(model, all_spectra, p_opt, p_err, meta):
             
-            print(f"  {task}: getting ready")
-            print(f"    {task.param_kwargs}")
             # Write to database as required.
             if "database" in task.output():
                 task.output()["database"].write(results)
@@ -218,10 +188,7 @@ class FerreBase(FerreMixin, SourceMixin):
                 cascade=True
             )
         
-        print("done")
-
         model.teardown()
-
         self.trigger_event_processing_time(time() - t_init, cascade=True)
         
         return None

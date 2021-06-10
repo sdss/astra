@@ -91,7 +91,7 @@ class FerreMixin(BaseTask):
         config_path=dict(section=task_namespace, name="input_lsf_path")
     )
     ferre_kwds = astra.DictParameter(
-        default=None,
+        default={},
         config_path=dict(section=task_namespace, name="ferre_kwds")
     )
 
@@ -153,7 +153,8 @@ class SourceMixin(BaseTask):
     initial_metals = astra.FloatParameter(batch_method=tuple)
     initial_log10vdop = astra.FloatParameter(batch_method=tuple)
     initial_o_mg_si_s_ca_ti = astra.FloatParameter(batch_method=tuple)
-    initial_lgvsini = astra.FloatParameter(batch_method=tuple)
+    # LGVSINI is not always a parameter, so let's give a dummy default value.
+    initial_lgvsini = astra.FloatParameter(default=np.nan, batch_method=tuple)
     initial_c = astra.FloatParameter(batch_method=tuple)
     initial_n = astra.FloatParameter(batch_method=tuple)
 

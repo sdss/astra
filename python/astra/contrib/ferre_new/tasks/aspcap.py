@@ -20,6 +20,8 @@ from tqdm import tqdm
 
 import astra
 from astra.database import astradb
+from astra.tasks import hashify
+from astra.tasks.utils import batch_tasks_together
 from astra.tasks.targets import (AstraSource, DatabaseTarget, LocalTarget)
 from astra.tools.spectrum import Spectrum1D
 from astra.utils import log, symlink_force, get_default
@@ -170,23 +172,18 @@ class InitialEstimateOfStellarParametersGivenApStarFileBase(FerreMixin):
             if log_chisq_fit < best_tasks[key][0]:
                 best_tasks[key] = (log_chisq_fit, result)
 
-        # The output for this task is a proxy database row that points to the FERRE result.
-        outputs = [self.output()] if not self.is_batch_mode else self.output()
-        for output in outputs:
+        # We don't actually want to create a new database row here.
+        # Instead we want to update the task state to point to this existing result.
+        for task in self.get_batch_tasks():
             try:
-                log_chisq_fit, result = best_tasks[uid(output["database"].task)]
-
+                log_chisq_fit, result = best_tasks[uid(task)]
             except KeyError:
-                log.exception(f"No FERRE runs found for {output['database'].task}. Are the initial parameters within any grid?")
+                log.exception(f"No FERRE runs found for {task}. Are the initial parameters within any grid?")
                 raise
-
-            # It's amazingly convoluted to convert a SQLAlchemy ORM instance into a dict!
-            # (Yes, you can think that you might be able to just use instance.__dict__, but
-            # *trust me*, you will have a bad time!)
-            data = { key: getattr(result, key) for key in inspect(result).mapper.column_attrs.keys() }
-            data.pop("task_pk")
             
-            output["database"].write(data)
+            else:
+                # This will have the same effect as if we had written a new database row.
+                task.query_state().update(dict(output_pk=result.output_pk))
 
         return None
 
@@ -221,13 +218,14 @@ class CreateMedianFilteredApStarFileBase(FerreMixin):
         
         for task in self.get_batch_tasks():
 
-            # Resolve the proxy FERRE result to get the original initial estimate
-            # (and to be able to access all of its inputs and outputs)
-            proxy = task.input()["initial_estimate"]
+            initial_estimate_result = task.input()["initial_estimate"]["database"].read()
 
-            raise a
-            initial_estimate = proxy["database"].resolve().task
-
+            # Get the FERRE task so we can extract the grid header path.
+            for task_state in initial_estimate_result.get_tasks():
+                if task_state.task_id != task.requires()["initial_estimate"].task_id:
+                    break
+            initial_estimate = task_state.load_task()   
+            
             # Re-normalize the spectrum using the previous estimate.
             image = fits.open(initial_estimate.output()["AstraSource"].path)
 
@@ -300,21 +298,26 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
         for task in self.get_batch_tasks():
             # From the initial estimate we need the grid_header_path, and the previous stellar parameters
             # (which we will use for the initial guess here.)
-            output = task.input()["initial_estimate"]["database"].read()
-            raise a
-            headers = utils.read_ferre_headers(output["grid_header_path"])
-
+            initial_estimate_result = task.input()["initial_estimate"]["database"].read()
+            for task_state in initial_estimate_result.get_tasks():
+                if task_state.task_id != task.requires()["initial_estimate"].task_id:
+                    break
+                
+            grid_header_path = task_state.parameters["grid_header_path"]
+            headers = utils.read_ferre_headers(grid_header_path)
             parameter_names = list(map(utils.sanitise_parameter_names, headers[0]["LABEL"]))
-
-            execute_tasks.append(task.clone(
-                self.ferre_task_factory,
-                grid_header_path=output["grid_header_path"],
-                # We want to analyse all spectra at this point.
+            
+            kwds = dict(
+                grid_header_path=grid_header_path,
+                # We want to analyse all spctra at this point.
                 analyse_individual_visits=True,
-                # Take the first parameter value for each.
-                initial_parameters={ k: v[0] for k, v in output.items() if k in parameter_names }
-            ))
-        
+            )
+            for parameter_name in parameter_names:
+                # Take the first result (of perhaps many spectra; i.e. the stacked one) from initial estimate.
+                kwds[f"initial_{parameter_name}"] = getattr(initial_estimate_result, parameter_name)[0]
+
+            execute_tasks.append(task.clone(self.ferre_task_factory, **kwds))
+            
         outputs = yield execute_tasks
         
         # Copy outputs from the executed tasks.
@@ -358,67 +361,67 @@ class EstimateChemicalAbundanceGivenApStarFileBase(FerreMixin):
 
     def run(self):
 
-        execute_tasks = []
+        analyse_individual_visits = False
+
         headers = {}
+        executable_tasks = []
         
         for task in self.get_batch_tasks():
 
-            # We need the grid_header_path and the previously determined stellar parameters.
-            output = task.input()["stellar_parameters"]["database"].read(as_dict=True, include_parameters=True)
-            grid_header_path = output["grid_header_path"]
+            # Get the previous stellar parameters, and the grid header path used.
+            output = task.input()["stellar_parameters"]["database"].read()
+
+            for task_state in output.get_tasks():
+                if task_state.task_id != task.requires()["stellar_parameters"].task_id:
+                    break
+            
+            grid_header_path = task_state.parameters["grid_header_path"]
 
             try:
                 header = headers[grid_header_path]
             except KeyError:
                 header = headers[grid_header_path] = utils.read_ferre_headers(grid_header_path)
 
-            parameter_search_indices_one_indexed, ferre_kwds = get_abundance_keywords(task.element)
-            
-            frozen_parameters = { 
-                label_name: None for i, label_name in enumerate(header[0]["LABEL"], start=1) \
-                if i not in parameter_search_indices_one_indexed
-            }
             sanitised_parameter_names = list(map(utils.sanitise_parameter_names, header[0]["LABEL"]))    
-            
-            execute_tasks.append(task.clone(
-                self.ferre_task_factory,
-                # TODO: Need to put all the speclib contents in a nicer way together.
-                input_weights_path=f"/uufs/chpc.utah.edu/common/home/u6020307/astra-component-data/FERRE/masks/{task.element}.mask",
-                grid_header_path=output["grid_header_path"],
-                initial_parameters={ k: v for k, v in output.items() if k in sanitised_parameter_names },
-                frozen_parameters=frozen_parameters,
-                # 
+
+            parameter_search_indices_one_indexed, ferre_kwds = get_abundance_keywords(self.element)
+
+            # Since these are dynamic dependencies, we cannot build up the dependency graph at this time.
+            # So we need to batch together our own tasks, and to only execute tasks that are incomplete.
+            kwds = dict(
                 ferre_kwds=ferre_kwds,
-                # Don't write AstraSource objects for chemical abundances.
-                write_source_output=False
-            ))
-        
+                grid_header_path=grid_header_path,
+                # TODO: Need to put all the speclib contents in a nicer way together.
+                input_weights_path=f"/uufs/chpc.utah.edu/common/home/u6020307/astra-component-data/FERRE/masks/{self.element}.mask",
+                analyse_individual_visits=analyse_individual_visits,
+                # Don't write source output files for chemical abundances.
+                write_source_output=False,
+            )
+
+            # Set parameters.
+            for index, parameter in enumerate(sanitised_parameter_names, start=1):
+                # If you set analyse_individual_visits to False then you will need to take the zero-th index below.
+                initial_parameter = getattr(output, parameter)
+                if not analyse_individual_visits:
+                    initial_parameter = initial_parameter[0]
+
+                kwds[f"initial_{parameter}"] = initial_parameter
+                kwds[f"frozen_{parameter}"] = index not in parameter_search_indices_one_indexed
+            
+            executable_tasks.append(task.clone(task.ferre_task_factory, **kwds))
+
+        # Since we are running things in a batch, it is possible that Star A and Star C can be run together in FERRE.
+        # So we batch together what we can, and skip tasks that are already complete, since dynamically running tasks
+        # at runtime using "yield <tasks>" does not check whether things are complete o not.
+        execute_tasks = batch_tasks_together(executable_tasks, skip_complete=True)
         outputs = yield execute_tasks
 
-        # Copy outputs from the executed tasks.
-        for task, output in zip(self.get_batch_tasks(), outputs):
-            for key, target in output.items():
+        # Copy outputs from the executable tasks.
+        for task, execute_task in zip(self.get_batch_tasks(), executable_tasks):
+            for key, target in execute_task.output().items():
                 task.output()[key].copy_from(target)
 
         return None
-
-        
-    @property
-    def output_abundances(self):
-        """ A convenience function to return the output abundance given the FERRE result. """
-        if self.is_batch_mode:
-            return [task.output_abundances for task in self.get_batch_tasks()]
-
-        raise NotImplementedError
-        output_target = self.output()["database"].resolve()
-        task = output_target.task
-
-        # Use the frozen parameters to figure out which label we should be returning.
-        label_names = tuple(set(task.initial_parameters).difference(task.frozen_parameters))
-        output = output_target.read(as_dict=True)
-
-        # TODO: Return uncertainty as well.
-        return { label_name: output[label_name] for label_name in label_names }
 
 
     def output(self):
@@ -451,12 +454,34 @@ class CheckRequirementsForChemicalAbundancesGivenApStarFileBase(FerreMixin):
 
 class EstimateChemicalAbundancesGivenApStarFileBase(FerreMixin):
 
-
-    @property
-    def async_run_ferre_function(self):
-        raise RuntimeError("this should be defined by the sub-class")
-
+    elements = astra.ListParameter(default=[
+        "Al", "Ca", "Ce", "C", "CN", "Co", "Cr", "Cu", "Mg", "Mn", "Na", 
+        "Nd", "Ni", "N",  "O", "P",  "Rb", "Si", "S",  "Ti", "V",  "Yb"
+    ])
     
+    def requires(self):
+        return dict([
+            (element, self.clone(self.chemical_abundance_task_factory, element=element)) for element in self.elements
+        ])
+    
+    def run(self):
+            
+        # Create an ASPCAP table for 'final' results.
+        with self.output().open("w") as fp:
+            fp.write("")        
+
+        print("done")
+
+
+    def output(self):
+        return MockTarget(self.task_id)
+        
+
+
+'''
+class EstimateChemicalAbundancesGivenApStarFileBase(FerreMixin):
+
+
     max_asynchronous_slurm_jobs = astra.IntParameter(default=10, significant=False)
     elements = astra.ListParameter(default=[
         "Al", "Ca", "Ce", "C", "CN", "Co", "Cr", "Cu", "Mg", "Mn", "Na", 
@@ -465,101 +490,69 @@ class EstimateChemicalAbundancesGivenApStarFileBase(FerreMixin):
     
     def requires(self):
         raise RuntimeError("defined by the sub-class")
-        #return self.clone(CheckRequirementsForChemicalAbundancesGivenApStarFile)
     
-
+    
     def run(self):
 
-        max_hash_length = 10
-
         headers = {}
-        batched_kwds = {}
-        all_task_kwds = []
+        execute_tasks = []
 
         total = self.requires().get_batch_size() * len(self.elements)
         with tqdm(desc="Batching abundance tasks", total=total) as pbar:
 
             for task in self.requires().get_batch_tasks():
 
-                output = task.input()["stellar_parameters"]["database"].read(
-                    as_dict=True, 
-                    include_parameters=True
-                )
-                grid_header_path = output["grid_header_path"]
+                # Get the previous stellar parameters, and the grid header path used.
+                output = task.input()["stellar_parameters"]["database"].read()
+
+                for task_state in output.get_tasks():
+                    if task_state.task_id != task.requires()["stellar_parameters"].task_id:
+                        break
+                
+                grid_header_path = task_state.parameters["grid_header_path"]
 
                 try:
                     header = headers[grid_header_path]
                 except KeyError:
                     header = headers[grid_header_path] = utils.read_ferre_headers(grid_header_path)
 
-                label_names = header[0]["LABEL"]
+                sanitised_parameter_names = list(map(utils.sanitise_parameter_names, header[0]["LABEL"]))    
 
                 for element in self.elements:
                     parameter_search_indices_one_indexed, ferre_kwds = get_abundance_keywords(element)
-                    
-                    frozen_parameters = { 
-                        label_name: None for i, label_name in enumerate(label_names, start=1) \
-                        if i not in parameter_search_indices_one_indexed
-                    }
-                    sanitised_parameter_names = list(map(utils.sanitise_parameter_names, label_names))    
-                    
+
                     # Since these are dynamic dependencies, we cannot build up the dependency graph at this time.
                     # So we need to batch together our own tasks, and to only execute tasks that are incomplete.
-                    non_batch_params = {
+                    kwds = dict(
+                        ferre_kwds=ferre_kwds,
+                        grid_header_path=grid_header_path,
                         # TODO: Need to put all the speclib contents in a nicer way together.
-                        "input_weights_path": f"/uufs/chpc.utah.edu/common/home/u6020307/astra-component-data/FERRE/masks/{element}.mask",
-                        "grid_header_path": output["grid_header_path"],
-                        "frozen_parameters": frozen_parameters,
-                        "ferre_kwds": ferre_kwds,
-                        "write_source_output": False,                        
-                    }
-
-                    param_str = json.dumps(non_batch_params, separators=(',', ':'), sort_keys=True)
-                    batch_hash = hashlib.md5(param_str.encode("utf-8")).hexdigest()[:max_hash_length]
-
-                    batched_kwds.setdefault(batch_hash, non_batch_params)
-                    for param_name in task.batch_param_names():
-                        batched_kwds[batch_hash].setdefault(param_name, [])
-                        batched_kwds[batch_hash][param_name].append(getattr(task, param_name))
-
-                    # Here we are taking the stellar parameters for the zero-th index (the stacked S/N spectrum)
-                    # and estimating the abundances conditioned on those stellar parameters!
-                    initial_parameters = { k: flatten(output[utils.sanitise_parameter_names(k)])[0] for k in label_names }
-
-                    # In reality we want to use the stellar parameters found for each visit, like this.
-                    initial_parameters = { k: flatten(output[utils.sanitise_parameter_names(k)]) for k in label_names }
-                    batched_kwds[batch_hash].update(analyse_individual_visits=True)
-                    batched_kwds[batch_hash].setdefault("initial_parameters", [])
-                    batched_kwds[batch_hash]["initial_parameters"].append(initial_parameters)
-                    
-                    # Store all kwds.
-                    task_kwds = non_batch_params.copy()
-                    task_kwds.update(
-                        initial_parameters=initial_parameters,
-                        frozen_parameters=frozen_parameters,
+                        input_weights_path=f"/uufs/chpc.utah.edu/common/home/u6020307/astra-component-data/FERRE/masks/{element}.mask",
+                        # If you set analyse_individual_visits to False then you will need to change the initial parameters below.
+                        analyse_individual_visits=True,
+                        # Don't write source output files for chemical abundances.
+                        write_source_output=False,
                     )
-                    task_kwds.update(**{
-                        pn: getattr(task, pn) for pn in task.batch_param_names()
-                    })
 
-                    all_task_kwds.append(task_kwds)
+                    # Set parameters.
+                    for index, parameter in enumerate(sanitised_parameter_names, start=1):
+                        # If you set analyse_individual_visits to False then you will need to take the zero-th index below.
+                        kwds[f"initial_{parameter}"] = getattr(output, parameter)
+                        kwds[f"frozen_{parameter}"] = index not in parameter_search_indices_one_indexed
 
+                    execute_tasks.append(task.clone(task.ferre_task_factory, **kwds))
+                    
                     pbar.update(1)
         
-        
-        common_kwds = self.get_common_param_kwargs(self.observation_task_factory)
-        submit_kwds = [{**common_kwds, **kwds} for k, kwds in batched_kwds.items()]
+        # Either submit the batched jobs to Slurm on asynchronous threads, or execute in series.
+        self.submit_jobs([task.param_kwargs for task in batch_tasks_together(execute_tasks)])
 
-        # Submit many jobs at once.
-        self.submit_jobs(submit_kwds)
-        
         # Write tasks outputs.
         E = len(self.elements)
         for i, task in enumerate(self.get_batch_tasks()):
             for j, element in enumerate(self.elements):
-                aux_task = self.ferre_task_factory(**{ **common_kwds, **all_task_kwds[i * E + j] })
-                task.output()[element].write({ "proxy_task_id": aux_task.task_id })
-
+                output = execute_tasks[i * E + j].output()["database"]
+                task.output()[element].copy_from(output)
         return None
 
 
@@ -575,31 +568,33 @@ class EstimateChemicalAbundancesGivenApStarFileBase(FerreMixin):
             for element in self.elements
         }
 
+'''
 
- 
-    def output_abundances(self):
-        """ A convenience function to return the output abundance given the FERRE result. """
-        if self.is_batch_mode:
-            return [task.output_abundances() for task in self.get_batch_tasks()]
 
-        abundances = {}
-        for element in self.elements:
-            output = self.output()[element].resolve()
-            aux_task = output.task
+'''
+def output_abundances(self):
+    """ A convenience function to return the output abundance given the FERRE result. """
+    if self.is_batch_mode:
+        return [task.output_abundances() for task in self.get_batch_tasks()]
 
-            label_names = tuple(set(aux_task.initial_parameters).difference(aux_task.frozen_parameters))
-            sanitised_label_names = list(map(utils.sanitise_parameter_names, label_names))
+    abundances = {}
+    for element in self.elements:
+        output = self.output()[element].resolve()
+        aux_task = output.task
 
-            result = output.read(as_dict=True)
+        label_names = tuple(set(aux_task.initial_parameters).difference(aux_task.frozen_parameters))
+        sanitised_label_names = list(map(utils.sanitise_parameter_names, label_names))
 
-            abundances[element] = {
-                "value": np.array([result[ln] for ln in sanitised_label_names]),
-                "uncertainty": np.array([result[f"u_{ln}"] for ln in sanitised_label_names]),
-                "label_names": label_names
-            }
+        result = output.read(as_dict=True)
 
-        return abundances
+        abundances[element] = {
+            "value": np.array([result[ln] for ln in sanitised_label_names]),
+            "uncertainty": np.array([result[f"u_{ln}"] for ln in sanitised_label_names]),
+            "label_names": label_names
+        }
 
+    return abundances
+'''
 
 
 

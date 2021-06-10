@@ -1,5 +1,6 @@
 
 import multiprocessing as mp
+from astra.utils import log
 from astra.tasks.io.sdss5 import ApStarFile
 from astra.contrib.ferre_new.tasks.aspcap import (
     ApStarMixinBase, 
@@ -109,7 +110,10 @@ class EstimateChemicalAbundancesGivenSDSS5ApStarFile(EstimateChemicalAbundancesG
     def observation_task_factory(self):
         return CreateMedianFilteredSDSS5ApStarFile
 
+    #def requires(self):
+    #    parent_requirements = super(EstimateChemicalAbundancesGivenSDSS5ApStarFile, self).requires()
 
+    '''
     def requires(self):
         return self.clone(CheckRequirementsForChemicalAbundancesGivenSDSS5ApStarFile)
 
@@ -120,3 +124,4 @@ class EstimateChemicalAbundancesGivenSDSS5ApStarFile(EstimateChemicalAbundancesG
                 p.map(_async_run_ferre_given_apstar_file, submit_kwds)
         else:
             _ = list(map(_async_run_ferre_given_apstar_file, submit_kwds))
+    '''

@@ -1,5 +1,6 @@
 
 import multiprocessing as mp
+from astra.utils import log
 from astra.tasks.io.sdss4 import SDSS4ApStarFile
 from astra.contrib.ferre_new.tasks.aspcap import (
     ApStarMixinBase, 
