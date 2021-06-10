@@ -394,16 +394,7 @@ And output ::
 
 
 
-
-Batching tasks
---------------
-
-- Show an example of a batched task, and explain the duration.
-
-- What do we do about output_pk for batched tasks, etc?
-
-
 Unexpected behaviour
 --------------------
 
--> If you use `task.run()` then the database will not be propagated with information about the task parameters. This is because the task parameters are populated when an event is triggered that the event has started. That event does not get triggered by `task.run()`. Instead, you should use `astra.build([task])` to run the task, which will also build up the dependency graph and make sure all requirements are fulfilled. When the task starts running, the task parameters will be populated to the database.
+- If you use `task.run()` then the database will not be propagated with information about the task parameters. This is because the task parameters are populated when an event is triggered that the event has started. That event does not get triggered by `task.run()`. Instead, you should use `astra.build([task])` to run the task, which will also build up the dependency graph and make sure all requirements are fulfilled. When the task starts running, the task parameters will be populated to the database.
