@@ -15,25 +15,9 @@ from astra import __version__
 from tqdm import tqdm
 
 from astra.database import session, astradb
+from astra.tasks.utils import (hashify, task_id_str)
 
 astra_version = parse_version(__version__)
-
-
-
-def hashify(params, max_length=8):
-    param_str = json.dumps(params, cls=_DictParamEncoder, separators=(',', ':'), sort_keys=True)
-    param_hash = hashlib.md5(param_str.encode('utf-8')).hexdigest()
-    return param_hash[:max_length]
-
-
-def task_id_str(task_family, params):
-    """
-    Returns a canonical string used to identify a particular task
-    :param task_family: The task family (class name) of the task
-    :param params: a dict mapping parameter names to their serialized values
-    :return: A unique, shortened identifier corresponding to the family and params
-    """
-    return f"{task_family}_{hashify(params)}"   
 
 
 class BaseTask(luigi.Task, metaclass=Register):

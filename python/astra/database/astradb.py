@@ -135,9 +135,20 @@ class TheCannon(Base, OutputMixin):
     __tablename__ = "thecannon"
     
 
+class ThePayne(Base, OutputMixin):
+    __tablename__ = "thepayne"
+    
+
 class Ferre(Base, OutputMixin):
     __tablename__ = "ferre"
 
+
+class Classification(Base, OutputMixin):
+    __tablename__ = "classification"
+
+
+class WDClassification(Base, OutputMixin):
+    __tablename__ = "wd_classification"
 
 
 def define_relations():    

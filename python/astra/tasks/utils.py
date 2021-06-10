@@ -1,6 +1,33 @@
+import hashlib
+import json
+from luigi.parameter import _DictParamEncoder
+
+def hashify(params, max_length=8):
+    """
+    Create a short hashed string of the given parameters.
+
+    :param params:
+        A dictionary of key, value pairs for parameters.
+    
+    :param max_length: [optional]
+        The maximum length of the hashed string.
+    """
+    param_str = json.dumps(params, cls=_DictParamEncoder, separators=(',', ':'), sort_keys=True)
+    param_hash = hashlib.md5(param_str.encode('utf-8')).hexdigest()
+    return param_hash[:max_length]
 
 
-def batch_tasks_together(tasks):
+def task_id_str(task_family, params):
+    """
+    Returns a canonical string used to identify a particular task
+    :param task_family: The task family (class name) of the task
+    :param params: a dict mapping parameter names to their serialized values
+    :return: A unique, shortened identifier corresponding to the family and params
+    """
+    return f"{task_family}_{hashify(params)}"   
+
+
+def batch_tasks_together(tasks, skip_complete=False):
     """
     Return a list of tasks that can be batched together.
 
@@ -16,12 +43,19 @@ def batch_tasks_together(tasks):
     
     batch_tasks = []
     for task_family, indices in task_families.items():
-        batch_tasks.extend(_batch_tasks_from_same_family([tasks[index] for index in indices]))
+        batch_tasks.extend(
+            _batch_tasks_from_same_family(
+                [tasks[index] for index in indices if not (skip_complete and tasks[index].complete())]
+            )
+        )
     
     return batch_tasks
 
 
 def _batch_tasks_from_same_family(tasks):
+    if not tasks: 
+        return tasks
+
     task = tasks[0]
     batch_param_names = task.batch_param_names()
     unbatched_param_names = set(task.param_kwargs).difference(task.batch_param_names())

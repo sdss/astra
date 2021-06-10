@@ -1,5 +1,5 @@
 
-import luigi
+import astra
 import numpy as np
 import pickle
 from tqdm import tqdm
@@ -10,10 +10,12 @@ from astra.utils.continuum.sines_and_cosines import normalize
 
 class Sinusoidal(BaseTask):
 
-    L = luigi.IntParameter(default=1400)
-    continuum_order = luigi.IntParameter(default=3)
-    continuum_regions_path = luigi.Parameter()
-    spectrum_kwds = luigi.DictParameter(default=None)
+    task_namespace = "ContinuumNormalize"
+
+    L = astra.IntParameter(default=1400)
+    continuum_order = astra.IntParameter(default=3)
+    continuum_regions_path = astra.Parameter()
+    spectrum_kwds = astra.DictParameter(default=None)
 
     def run(self):
         continuum_regions = np.loadtxt(self.continuum_regions_path)

@@ -13,8 +13,9 @@ drop table if exists astra.ferre cascade;
 drop table if exists astra.doppler cascade;
 drop table if exists astra.thecannon cascade;
 drop table if exists astra.apogeenet cascade;
-
-
+drop table if exists astra.classification cascade;
+drop table if exists astra.thepayne cascade;
+drop table if exists astra.wd_classification cascade;
 
 
 create table astra.output_interface (
@@ -109,6 +110,82 @@ create table astra.ferre (
 create table astra.thecannon (
     output_pk int primary key,
     teff real,
+    foreign key (output_pk) references astra.output_interface(pk) on delete restrict
+);
+
+/* 
+If the label names ever change between models of The Payne, then we will either need versioned tables
+(like thepayne_v1) or we will need to re-think this schema.
+*/
+create table astra.thepayne (
+    output_pk int primary key,
+    snr real[],
+    teff real[],
+    u_teff real[],
+    logg real[],
+    u_logg real[],
+    v_turb real[],
+    u_v_turb real[],
+    c_h real[],
+    u_c_h real[],
+    n_h real[],
+    u_n_h real[],
+    o_h real[],
+    u_o_h real[],
+    na_h real[],
+    u_na_h real[],
+    mg_h real[],
+    u_mg_h real[],
+    al_h real[],
+    u_al_h real[],
+    si_h real[],
+    u_si_h real[],
+    p_h real[],
+    u_p_h real[],
+    s_h real[],
+    u_s_h real[],
+    k_h real[],
+    u_k_h real[],
+    ca_h real[],
+    u_ca_h real[],
+    ti_h real[],
+    u_ti_h real[],
+    v_h real[],
+    u_v_h real[],
+    cr_h real[],
+    u_cr_h real[],
+    mn_h real[],
+    u_mn_h real[],
+    fe_h real[],
+    u_fe_h real[],
+    co_h real[],
+    u_co_h real[],
+    ni_h real[],
+    u_ni_h real[],
+    cu_h real[],
+    u_cu_h real[],
+    ge_h real[],
+    u_ge_h real[],
+    c12_c13 real[],
+    u_c12_c13 real[],
+    v_macro real[],
+    u_v_macro real[],
+    bitmask_flag int[],
+    foreign key (output_pk) references astra.output_interface(pk) on delete restrict
+);
+
+
+create table astra.classification (
+    output_pk int primary key,
+    log_prob real[],
+    prob real[],
+    foreign key (output_pk) references astra.output_interface(pk) on delete restrict
+);
+
+create table astra.wd_classification (
+    output_pk int primary key,
+    wd_class char(2),
+    flag boolean,
     foreign key (output_pk) references astra.output_interface(pk) on delete restrict
 );
 
