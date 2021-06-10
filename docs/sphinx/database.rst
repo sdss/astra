@@ -26,7 +26,7 @@ Analysis work in Astra is organised into individual tasks. Briefly, a task is un
 
 
 Schema
-======
+------
 
 The most relevant tables in the Astra database are:
 
@@ -168,6 +168,11 @@ For reference: if you ever get the database state of a batched task, you can acc
     <Task (pk=12)>,
     <Task (pk=13)>,
     <Task (pk=14)>)
+
+    In [7]: task_state.output_pk
+    Out[7]: None
+
+You may notice that the parent task has no corresponding output row (`output_pk` is null), but the child tasks will have non-null `output_pk` entries.
 
 
 A code example
