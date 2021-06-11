@@ -3,14 +3,16 @@
 
 import json
 import os, tempfile
-from sdsstools.logger import get_logger
+import logging
+#from sdsstools.logger import get_logger
 from time import time
 
 import os
 import tempfile
 
-log = get_logger(__name__.split(".")[0])
-log.propagate = False
+#log = get_logger(__name__.split(".")[0])
+log = logging.getLogger(__name__.split(".")[0])
+#log.propagate = False
 
 
 
