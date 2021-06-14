@@ -126,8 +126,9 @@ class FerreBase(FerreMixin, SourceMixin):
 
             # Prepare results dictionary.
             snr = spectra.meta["snr"]
-            if not task.analyse_individual_visits:
-                snr = [snr[0]]
+            if task.spectrum_data_slice_args is not None:
+                snr = snr[slice(*task.spectrum_data_slice_args)]
+                
 
             results = dict(
                 snr=snr,

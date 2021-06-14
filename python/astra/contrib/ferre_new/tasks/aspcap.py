@@ -50,10 +50,14 @@ class ApStarMixinBase(object):
         """ Read the input observations. """
         
         kwds = kwargs.copy()
-        if not self.analyse_individual_visits:
+
+        if self.spectrum_data_slice_args is not None:
             # Since ApStar files contain the combined spectrum and all individual visits, we are going
-            # to supply a data_slice parameter to only return the first spectrum.            
-            kwds.update(data_slice=(slice(0, 1), slice(None)))
+            # to supply a data_slice parameter to only return the first spectrum.
+            #kwds.update(data_slice=(slice(0, 1), slice(None)))
+            kwds.update(
+                data_slice=slice(*self.spectrum_data_slice_args)
+            )
         
         spectra = []
         for task in self.get_batch_tasks():
@@ -79,7 +83,7 @@ class ApStarMixinBase(object):
     def output(self):
         """ Outputs of this task. """
         if self.is_batch_mode:
-            return (task.output() for task in self.get_batch_tasks())
+            return [task.output() for task in self.get_batch_tasks()]
         
         requirements = {
             "database": DatabaseTarget(astradb.Ferre, self),
@@ -95,8 +99,7 @@ class FerreGivenApStarFileBase(FerreBase):
     """ Execute FERRE given an ApStar file. """
 
     grid_header_path = astra.Parameter()
-    analyse_individual_visits = astra.BoolParameter(default=False)
-
+    spectrum_data_slice_args = astra.ListParameter(default=None)
 
 
 
@@ -106,6 +109,7 @@ class InitialEstimateOfStellarParametersGivenApStarFileBase(FerreMixin):
     grid_header_list_path = astra.Parameter(
         config_path=dict(section="FERRE", name="grid_header_list_path")
     )
+    analyze_individual_visits = astra.BoolParameter(default=False)
 
     def requires(self):
         """ 
@@ -117,16 +121,25 @@ class InitialEstimateOfStellarParametersGivenApStarFileBase(FerreMixin):
             return self._requirements
 
         except AttributeError:
+            common_kwds = {
+                "spectrum_data_slice_args": None if self.analyze_individual_visits else [0, 1] 
+            }
             self._requirements = []
             total = self.get_batch_size()
             if total > 1:
                 with tqdm(desc="Dispatching", total=total) as pbar:
                     for iteration, source_kwds, kwds in self.dispatcher():
                         pbar.update(iteration - pbar.n)
-                        self._requirements.append(self.clone(self.ferre_task_factory, **kwds))
+                        self._requirements.append(self.clone(
+                            self.ferre_task_factory, 
+                            **{**common_kwds, **kwds}
+                        ))
             else:
                 for iteration, source_kwds, kwds in self.dispatcher():
-                    self._requirements.append(self.clone(self.ferre_task_factory, **kwds))
+                    self._requirements.append(self.clone(
+                        self.ferre_task_factory,
+                        **{**common_kwds, **kwds}    
+                    ))
                 
             return self._requirements
             
@@ -193,7 +206,7 @@ class InitialEstimateOfStellarParametersGivenApStarFileBase(FerreMixin):
 
         # I think the above hack has been fixed by just never sending these kinds of stars to the pipeline.
         if self.is_batch_mode:
-            return (task.output() for task in self.get_batch_tasks())
+            return [task.output() for task in self.get_batch_tasks()]
         
         return dict(database=DatabaseTarget(astradb.Ferre, self))
         
@@ -269,7 +282,7 @@ class CreateMedianFilteredApStarFileBase(FerreMixin):
 
     def output(self):
         if self.is_batch_mode:
-            return (task.output() for task in self.get_batch_tasks())
+            return [task.output() for task in self.get_batch_tasks()]
         
         # TODO: To be defined by SDSS5/SDSS4 mixin
         new_path = AstraSource(self).path.replace("/AstraSource", "/ApStar")
@@ -278,6 +291,8 @@ class CreateMedianFilteredApStarFileBase(FerreMixin):
 
 
 class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
+
+    analyze_individual_visits = astra.BoolParameter(default=False)
 
     def requires(self):
         """
@@ -309,9 +324,9 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
             
             kwds = dict(
                 grid_header_path=grid_header_path,
-                # We want to analyse all spctra at this point.
-                analyse_individual_visits=True,
+                spectrum_data_slice_args=None if task.analyze_individual_visits else [0, 1] 
             )
+
             for parameter_name in parameter_names:
                 # Take the first result (of perhaps many spectra; i.e. the stacked one) from initial estimate.
                 kwds[f"initial_{parameter_name}"] = getattr(initial_estimate_result, parameter_name)[0]
@@ -331,7 +346,7 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
     def output(self):
         """ Outputs of this task. """
         if self.is_batch_mode:
-            return (task.output() for task in self.get_batch_tasks())
+            return [task.output() for task in self.get_batch_tasks()]
         
         requirements = {
             "database": DatabaseTarget(astradb.Ferre, self),
@@ -347,7 +362,8 @@ class EstimateChemicalAbundanceGivenApStarFileBase(FerreMixin):
 
     # Element is not a batch parameter: we run one element for many stars.
     element = astra.Parameter()
-    
+    analyze_individual_visits = astra.BoolParameter(default=False)
+
     def requires(self):
         """
         This task requires a median-filtered ApStar file, and the previously 
@@ -359,10 +375,9 @@ class EstimateChemicalAbundanceGivenApStarFileBase(FerreMixin):
         }
 
 
-    def run(self):
-
-        analyse_individual_visits = False
-
+    def get_executable_tasks(self):
+        """ Return a list of FERRE tasks that need to be completed. """
+        
         headers = {}
         executable_tasks = []
         
@@ -382,37 +397,49 @@ class EstimateChemicalAbundanceGivenApStarFileBase(FerreMixin):
             except KeyError:
                 header = headers[grid_header_path] = utils.read_ferre_headers(grid_header_path)
 
-            sanitised_parameter_names = list(map(utils.sanitise_parameter_names, header[0]["LABEL"]))    
+            grid_label_names = header[0]["LABEL"]
 
-            parameter_search_indices_one_indexed, ferre_kwds = get_abundance_keywords(self.element)
+            indv_labels, ferre_kwds = get_abundance_keywords(self.element, grid_label_names)
 
             # Since these are dynamic dependencies, we cannot build up the dependency graph at this time.
             # So we need to batch together our own tasks, and to only execute tasks that are incomplete.
+            spectrum_data_slice_args = None if task.analyze_individual_visits else [0, 1]
+
             kwds = dict(
                 ferre_kwds=ferre_kwds,
                 grid_header_path=grid_header_path,
                 # TODO: Need to put all the speclib contents in a nicer way together.
                 input_weights_path=f"/uufs/chpc.utah.edu/common/home/u6020307/astra-component-data/FERRE/masks/{self.element}.mask",
-                analyse_individual_visits=analyse_individual_visits,
+                # Do we want to analyze individual visits or just the stacked spectrum?
+                spectrum_data_slice_args=spectrum_data_slice_args,
                 # Don't write source output files for chemical abundances.
                 write_source_output=False,
             )
 
             # Set parameters.
-            for index, parameter in enumerate(sanitised_parameter_names, start=1):
-                # If you set analyse_individual_visits to False then you will need to take the zero-th index below.
-                initial_parameter = getattr(output, parameter)
-                if not analyse_individual_visits:
-                    initial_parameter = initial_parameter[0]
+            for grid_label_name in grid_label_names:
+                parameter_name = utils.sanitise_parameter_names(grid_label_name)
+                initial_parameter = getattr(output, parameter_name)
+                # If we are doing chemical abundances only on the stacked spectrum, but we determined
+                # stellar parameters for the individual visits, then we will just need to take the
+                # first entry from the parameter array.
+                if spectrum_data_slice_args is not None:
+                    initial_parameter = initial_parameter[slice(*spectrum_data_slice_args)]
 
-                kwds[f"initial_{parameter}"] = initial_parameter
-                kwds[f"frozen_{parameter}"] = index not in parameter_search_indices_one_indexed
+                kwds[f"initial_{parameter_name}"] = initial_parameter
+                kwds[f"frozen_{parameter_name}"] = grid_label_name not in indv_labels
             
             executable_tasks.append(task.clone(task.ferre_task_factory, **kwds))
 
+        return executable_tasks
+
+
+    def run(self):
+  
         # Since we are running things in a batch, it is possible that Star A and Star C can be run together in FERRE.
         # So we batch together what we can, and skip tasks that are already complete, since dynamically running tasks
         # at runtime using "yield <tasks>" does not check whether things are complete o not.
+        executable_tasks = self.get_executable_tasks()
         execute_tasks = batch_tasks_together(executable_tasks, skip_complete=True)
         outputs = yield execute_tasks
 
@@ -426,31 +453,12 @@ class EstimateChemicalAbundanceGivenApStarFileBase(FerreMixin):
 
     def output(self):
         if self.is_batch_mode:
-            return (task.output() for task in self.get_batch_tasks())
+            return [task.output() for task in self.get_batch_tasks()]
         return dict(database=DatabaseTarget(astradb.Ferre, self))
         
 
         
 
-class CheckRequirementsForChemicalAbundancesGivenApStarFileBase(FerreMixin):
-
-    priority = 1
-
-    def requires(self):
-        return {
-            "observation": self.clone(self.observation_task_factory),
-            "stellar_parameters": self.clone(self.stellar_parameters_task_factory)
-        }
-
-    def run(self):
-        with self.output().open("w") as fp:
-            fp.write("")
-        
-    def output(self):
-        return MockTarget(self.task_id)
-
-
-
 
 class EstimateChemicalAbundancesGivenApStarFileBase(FerreMixin):
 
@@ -458,143 +466,61 @@ class EstimateChemicalAbundancesGivenApStarFileBase(FerreMixin):
         "Al", "Ca", "Ce", "C", "CN", "Co", "Cr", "Cu", "Mg", "Mn", "Na", 
         "Nd", "Ni", "N",  "O", "P",  "Rb", "Si", "S",  "Ti", "V",  "Yb"
     ])
-    
+    analyze_individual_visits = astra.BoolParameter(default=False)
+
+
     def requires(self):
+        """ This task requires the abundances to be measured of individual elements. """
         return dict([
-            (element, self.clone(self.chemical_abundance_task_factory, element=element)) for element in self.elements
+            (element, self.clone(self.chemical_abundance_task_factory, element=element)) \
+            for element in self.elements
         ])
     
     def run(self):
+        
+        ignore_names = ("pk", "output_pk")
+
+        for task in self.get_batch_tasks():
+
+            # Get the stellar parameters from the parent requirements.
+            element, *_ = self.elements
+
+            stellar_parameters_task = task.requires()[element].requires()["stellar_parameters"]
+            stellar_parameters = stellar_parameters_task.output()["database"].read()
+
+            sp_col_names = [col.name for col in stellar_parameters.__table__.columns]
+            output_col_names = [col.name for col in task.output()["database"].model.__table__.columns]
+            col_names = [col for col in sp_col_names if col in output_col_names and col not in ignore_names]
+
+            # Create the result dictionary to write to database.
+            result = { col_name: getattr(stellar_parameters, col_name) for col_name in col_names }
             
-        # Create an ASPCAP table for 'final' results.
-        with self.output().open("w") as fp:
-            fp.write("")        
+            for element, requirement in task.requires().items():
 
-        print("done")
+                output = requirement.output()["database"].read()
 
-
-    def output(self):
-        return MockTarget(self.task_id)
-        
-
-
-'''
-class EstimateChemicalAbundancesGivenApStarFileBase(FerreMixin):
-
-
-    max_asynchronous_slurm_jobs = astra.IntParameter(default=10, significant=False)
-    elements = astra.ListParameter(default=[
-        "Al", "Ca", "Ce", "C", "CN", "Co", "Cr", "Cu", "Mg", "Mn", "Na", 
-        "Nd", "Ni", "N",  "O", "P",  "Rb", "Si", "S",  "Ti", "V",  "Yb"
-    ])
-    
-    def requires(self):
-        raise RuntimeError("defined by the sub-class")
-    
-    
-    def run(self):
-
-        headers = {}
-        execute_tasks = []
-
-        total = self.requires().get_batch_size() * len(self.elements)
-        with tqdm(desc="Batching abundance tasks", total=total) as pbar:
-
-            for task in self.requires().get_batch_tasks():
-
-                # Get the previous stellar parameters, and the grid header path used.
-                output = task.input()["stellar_parameters"]["database"].read()
-
-                for task_state in output.get_tasks():
-                    if task_state.task_id != task.requires()["stellar_parameters"].task_id:
-                        break
+                # In most cases the chemical abundance is measured from the metals dimension, but
+                # not always. Let's find the free dimension.
+                # TODO: This could be an issue with CN. Maybe we should be more careful about this.
+                thawed_key, *_ = [
+                    col_name for col_name in sp_col_names \
+                    if col_name.startswith("frozen_") and not getattr(output, col_name)
+                ]
+                thawed_key = thawed_key[len("frozen_"):]
                 
-                grid_header_path = task_state.parameters["grid_header_path"]
-
-                try:
-                    header = headers[grid_header_path]
-                except KeyError:
-                    header = headers[grid_header_path] = utils.read_ferre_headers(grid_header_path)
-
-                sanitised_parameter_names = list(map(utils.sanitise_parameter_names, header[0]["LABEL"]))    
-
-                for element in self.elements:
-                    parameter_search_indices_one_indexed, ferre_kwds = get_abundance_keywords(element)
-
-                    # Since these are dynamic dependencies, we cannot build up the dependency graph at this time.
-                    # So we need to batch together our own tasks, and to only execute tasks that are incomplete.
-                    kwds = dict(
-                        ferre_kwds=ferre_kwds,
-                        grid_header_path=grid_header_path,
-                        # TODO: Need to put all the speclib contents in a nicer way together.
-                        input_weights_path=f"/uufs/chpc.utah.edu/common/home/u6020307/astra-component-data/FERRE/masks/{element}.mask",
-                        # If you set analyse_individual_visits to False then you will need to change the initial parameters below.
-                        analyse_individual_visits=True,
-                        # Don't write source output files for chemical abundances.
-                        write_source_output=False,
-                    )
-
-                    # Set parameters.
-                    for index, parameter in enumerate(sanitised_parameter_names, start=1):
-                        # If you set analyse_individual_visits to False then you will need to take the zero-th index below.
-                        kwds[f"initial_{parameter}"] = getattr(output, parameter)
-                        kwds[f"frozen_{parameter}"] = index not in parameter_search_indices_one_indexed
-
-                    execute_tasks.append(task.clone(task.ferre_task_factory, **kwds))
-                    
-                    pbar.update(1)
+                result.update({
+                    f"{element.lower()}_h": getattr(output, thawed_key),
+                    f"u_{element.lower()}_h": getattr(output, f"u_{thawed_key}")
+                })
+                
+            task.output()["database"].write(result)
         
-        # Either submit the batched jobs to Slurm on asynchronous threads, or execute in series.
-        self.submit_jobs([task.param_kwargs for task in batch_tasks_together(execute_tasks)])
-
-        # Write tasks outputs.
-        E = len(self.elements)
-        for i, task in enumerate(self.get_batch_tasks()):
-            for j, element in enumerate(self.elements):
-                output = execute_tasks[i * E + j].output()["database"]
-                task.output()[element].copy_from(output)
-        return None
-
 
     def output(self):
         if self.is_batch_mode:
-            return (task.output() for task in self.get_batch_tasks())
-
-        return { 
-            element: DatabaseTarget(
-                astradb.Ferre, 
-                self.clone(self.chemical_abundance_task_factory, element=element)
-            ) \
-            for element in self.elements
-        }
-
-'''
-
-
-'''
-def output_abundances(self):
-    """ A convenience function to return the output abundance given the FERRE result. """
-    if self.is_batch_mode:
-        return [task.output_abundances() for task in self.get_batch_tasks()]
-
-    abundances = {}
-    for element in self.elements:
-        output = self.output()[element].resolve()
-        aux_task = output.task
-
-        label_names = tuple(set(aux_task.initial_parameters).difference(aux_task.frozen_parameters))
-        sanitised_label_names = list(map(utils.sanitise_parameter_names, label_names))
-
-        result = output.read(as_dict=True)
-
-        abundances[element] = {
-            "value": np.array([result[ln] for ln in sanitised_label_names]),
-            "uncertainty": np.array([result[f"u_{ln}"] for ln in sanitised_label_names]),
-            "label_names": label_names
-        }
-
-    return abundances
-'''
+            return [task.output() for task in self.get_batch_tasks()]
+        return dict(database=DatabaseTarget(astradb.Aspcap, self))
+        
 
 
 
@@ -682,7 +608,31 @@ def dispatch_apstars_for_analysis(sources, grid_header_list_path, release=None, 
                 
 
 
-def doppler_estimate_in_bounds_factory(release, public, mirror, grid_header_list_path=None):
+def doppler_estimate_in_bounds_factory(
+        release, 
+        public, 
+        mirror, 
+        grid_header_list_path=None
+    ):
+    """
+    Returns a function that will take in source keywords for an ApStar file
+    and return only sources where the radial velocity estimate from the 'Doppler'
+    code is within the boundaries of available FERRE grids.
+
+    :param release:
+        The SDSS release.
+
+    :param public:
+        Whether the data to be accessed is publicly available or not.
+    
+    :param mirror:
+        Use a SDSS mirror or not.
+    
+    :param grid_header_list_path: [optional]
+        An optional list of paths of FERRE grid files. If None is given then this will
+        default to the option for the `InitialEstimateOfStellarParametersGivenApStarFileBase`
+        task.
+    """
 
     if grid_header_list_path is None:
         grid_header_list_path = get_default(
@@ -735,93 +685,202 @@ def doppler_estimate_in_bounds_factory(release, public, mirror, grid_header_list
 
 
 
-def get_abundance_keywords(element):
+def get_abundance_keywords(element, header_label_names):
     """
     Return a dictionary of task parameters given a chemical element. These are adopted from DR16.
 
     :param element:
         The chemical element to measure.
+
+    :param header_label_names:
+        The list of label names in the FERRE header file.
     """
 
     # These can be inferred from running the following command on the SAS:
     # cd /uufs/chpc.utah.edu/common/home/sdss50/dr16/apogee/spectro/aspcap/r12/l33/apo25m/cal_all_apo25m007/ferre
     # egrep 'INDV|TIE|FILTERFILE' */input.nml
-
-    #kwds = dict(input_weights_path=f"{element}.mask")
-
-    indv = {
-        "Al": (6, ),
-        "Ca": (4, ),
-        "Ce": (6, ),
-        "CI": (2, ),
-        "C": (2, ),
-        "CN": (2, 3),
-        "Co": (6, ),
-        "Cr": (6, ),
-        "Cu": (6, ),
-        "Fe": (6, ),
-        "Ge": (6, ),
-        "K": (6, ),
-        "Mg": (4, ),
-        "Mn": (6, ),
-        "Na": (6, ),
-        "Nd": (6, ),
-        "Ni": (6, ),
-        "N": (3, ),
-        "O": (4, ),
-        "P": (6, ),
-        "Rb": (6, ),
-        "Si": (4, ),
-        "S": (4, ),
-        "TiII": (4, ),
-        "Ti": (4, ),
-        "V": (6, ),
-        "Yb": (6, ),
+    
+    controls = {
+        "Al": {
+            "INDV_LABEL": ('METALS', ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]
+        },
+        "Ca": {
+            "INDV_LABEL": ('O Mg Si S Ca Ti', ),
+        },
+        "Ce": {
+            "INDV_LABEL": ('METALS', ),
+        },
+        "CI": {
+            "INDV_LABEL": ('C', ),
+        },
+        "C": {
+            "INDV_LABEL": ('C', ),
+        },
+        "CN": {
+            "INDV_LABEL": ('C', 'O Mg Si S Ca Ti', ),
+        },
+        "Co": {
+            "INDV_LABEL": ('METALS', ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]    
+        },
+        "Cr": {
+            "INDV_LABEL": ('METALS', ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]
+        },
+        "Cu": {
+            "INDV_LABEL": ('METALS', ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]
+        },
+        "Fe": {
+            "INDV_LABEL": ('METALS', ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]
+        },
+        "Ge": {
+            "INDV_LABEL": ('METALS', ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]
+        },
+        "K": {
+            "INDV_LABEL": ('METALS', ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]
+        },
+        "Mg": {
+            "INDV_LABEL": ('O Mg Si S Ca Ti', ),
+        },
+        "Mn": {
+            "INDV_LABEL": ('METALS', ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]
+        },
+        "Na": {
+            "INDV_LABEL": ('METALS', ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]
+        },
+        "Nd": {
+            "INDV_LABEL": ('METALS', ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]
+        },
+        "Ni": {
+            "INDV_LABEL": ('METALS', ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]
+        },
+        "N": {
+            "INDV_LABEL": ('N', ),
+        },
+        "O": {
+            "INDV_LABEL": ('O Mg Si S Ca Ti', ),
+        },
+        "P": {
+            "INDV_LABEL": ('METALS', ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]
+        },
+        "Rb": {
+            "INDV_LABEL": ('METALS', ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]
+        },
+        "Si": {
+            "INDV_LABEL": ('O Mg Si S Ca Ti', ),
+        },
+        "S": {
+            "INDV_LABEL": ('O Mg Si S Ca Ti', ),
+        },
+        "TiII": {
+            "INDV_LABEL": ('O Mg Si S Ca Ti', ),
+        },
+        "Ti": {
+            "INDV_LABEL": ('O Mg Si S Ca Ti', ),
+        },
+        "V": {
+            "INDV_LABEL": ('METALS', ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]
+        },
+        "Yb": {
+            "INDV_LABEL": ('METALS'        , ),
+            "TIES": [
+                ('C', 0, -1),
+                ('N', 0, -1),
+                ('O Mg Si S Ca Ti', 0, -1)
+            ]
+        }
     }
 
-    ntie = {
-        "Al": 3,
-        "Ca": 0,
-        "Ce": 3,
-        "CI": 0,
-        "C": 0,
-        "CN": 0,
-        "Co": 3,
-        "Cr": 3,
-        "Cu": 3,
-        "Fe": 3,
-        "Ge": 3,
-        "K": 3,
-        "Mg": 0,
-        "Mn": 3,
-        "Na": 3,
-        "Nd": 3,
-        "Ni": 3,
-        "N": 0,
-        "O": 0,
-        "P": 3,
-        "Rb": 3,
-        "Si": 0,
-        "S": 0,
-        "TiII": 0,
-        "Ti": 0,
-        "V": 3,
-        "Yb": 3,
-    }
+    def get_header_index(label):
+        # FERRE uses 1-indexing and Python uses 0-indexing.
+        return 1 + header_label_names.index(label)
+
+    c = controls[element]
+    indv = [get_header_index(label) for label in c["INDV_LABEL"]]
+    ties = c.get("TIES", [])
 
     ferre_kwds = {
-        #"INDV": indv[element],
-        "NTIE": ntie[element],
+        # We don't pass INDV here because this will be determined from the
+        # 'frozen_<param>' arguments to the FerreGivenSDSSApStarFile tasks
+        #"INDV": [get_header_index(label) for label in c["INDV_LABEL"]],
+        "NTIE": len(ties),
         "TYPETIE": 1
     }
-    nties = range(1, 1 + ferre_kwds["NTIE"])
-    indices = (2, 3, 4)
-    for i, j in zip(nties, indices):
+    for i, (tie_label, ttie0, ttie) in enumerate(ties, start=1):
         ferre_kwds.update({
-            f"INDTIE({i})": j,
-            f"TTIE0({i})": 0,
-            f"TTIE({i},6)": -1
+            f"INDTIE({i:.0f})": get_header_index(tie_label),
+            f"TTIE0({i:.0f})": ttie0,
+            # TODO: What if we don't want to tie it back to first INDV element?
+            f"TTIE({i:.0f},{indv[0]:.0f})": ttie
         })
-
-    return (indv[element], ferre_kwds)
     
+    return (c["INDV_LABEL"], ferre_kwds)
+

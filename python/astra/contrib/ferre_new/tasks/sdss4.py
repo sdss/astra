@@ -1,6 +1,4 @@
 
-import multiprocessing as mp
-from astra.utils import log
 from astra.tasks.io.sdss4 import SDSS4ApStarFile
 from astra.contrib.ferre_new.tasks.aspcap import (
     ApStarMixinBase, 
@@ -9,7 +7,6 @@ from astra.contrib.ferre_new.tasks.aspcap import (
     CreateMedianFilteredApStarFileBase, 
     EstimateStellarParametersGivenApStarFileBase,
     EstimateChemicalAbundanceGivenApStarFileBase, 
-    CheckRequirementsForChemicalAbundancesGivenApStarFileBase,
     EstimateChemicalAbundancesGivenApStarFileBase
 )
 
@@ -81,28 +78,7 @@ class EstimateChemicalAbundanceGivenSDSS4ApStarFile(EstimateChemicalAbundanceGiv
     def observation_task_factory(self):
         return CreateMedianFilteredSDSS4ApStarFile
 
-
-class CheckRequirementsForChemicalAbundancesGivenSDSS4ApStarFile(CheckRequirementsForChemicalAbundancesGivenApStarFileBase, SDSS4ApStarMixin):
-
-    """ Check requirements for estimating chemical abundances given an  ApStar file. """
-
-    @property
-    def observation_task_factory(self):
-        return CreateMedianFilteredSDSS4ApStarFile
-
      
-
-def _async_run_ferre_given_apstar_file(kwds):
-    try:
-        t = FerreGivenSDSS4ApStarFile(**kwds)
-        if not t.complete():
-            t.run()
-    
-    except:
-        log.exception(f"Exception failed when trying to run {t}: {kwds}")
-        raise
-
-
 class EstimateChemicalAbundancesGivenSDSS4ApStarFile(EstimateChemicalAbundancesGivenApStarFileBase, SDSS4ApStarMixin):
 
     """ Estimate chemical abundances given ApStar file. """
@@ -112,15 +88,3 @@ class EstimateChemicalAbundancesGivenSDSS4ApStarFile(EstimateChemicalAbundancesG
     @property
     def observation_task_factory(self):
         return CreateMedianFilteredSDSS4ApStarFile
-
-
-    def requires(self):
-        return self.clone(CheckRequirementsForChemicalAbundancesGivenSDSS4ApStarFile)
-    
-
-    def submit_jobs(self, submit_kwds):
-        if self.use_slurm:
-            with mp.Pool(self.max_asynchronous_slurm_jobs) as p:
-                p.map(_async_run_ferre_given_apstar_file, submit_kwds)
-        else:
-            _ = list(map(_async_run_ferre_given_apstar_file, submit_kwds))

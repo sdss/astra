@@ -1,6 +1,4 @@
 
-import multiprocessing as mp
-from astra.utils import log
 from astra.tasks.io.sdss5 import ApStarFile
 from astra.contrib.ferre_new.tasks.aspcap import (
     ApStarMixinBase, 
@@ -9,7 +7,6 @@ from astra.contrib.ferre_new.tasks.aspcap import (
     CreateMedianFilteredApStarFileBase, 
     EstimateStellarParametersGivenApStarFileBase,
     EstimateChemicalAbundanceGivenApStarFileBase, 
-    CheckRequirementsForChemicalAbundancesGivenApStarFileBase,
     EstimateChemicalAbundancesGivenApStarFileBase
 )
 
@@ -80,26 +77,6 @@ class EstimateChemicalAbundanceGivenSDSS5ApStarFile(EstimateChemicalAbundanceGiv
         return CreateMedianFilteredSDSS5ApStarFile
 
 
-class CheckRequirementsForChemicalAbundancesGivenSDSS5ApStarFile(CheckRequirementsForChemicalAbundancesGivenApStarFileBase, SDSS5ApStarMixin):
-
-    """ Check requirements for estimating chemical abundances given an  ApStar file. """
-
-    @property
-    def observation_task_factory(self):
-        return CreateMedianFilteredSDSS5ApStarFile
-
-
-def _async_run_ferre_given_apstar_file(kwds):
-    try:
-        t = FerreGivenSDSS5ApStarFile(**kwds)
-        if not t.complete():
-            t.run()
-    
-    except:
-        log.exception(f"Exception failed when trying to run {t}: {kwds}")
-        raise
-
-
 class EstimateChemicalAbundancesGivenSDSS5ApStarFile(EstimateChemicalAbundancesGivenApStarFileBase, SDSS5ApStarMixin):
 
     """ Estimate chemical abundances given ApStar file. """
@@ -109,19 +86,3 @@ class EstimateChemicalAbundancesGivenSDSS5ApStarFile(EstimateChemicalAbundancesG
     @property
     def observation_task_factory(self):
         return CreateMedianFilteredSDSS5ApStarFile
-
-    #def requires(self):
-    #    parent_requirements = super(EstimateChemicalAbundancesGivenSDSS5ApStarFile, self).requires()
-
-    '''
-    def requires(self):
-        return self.clone(CheckRequirementsForChemicalAbundancesGivenSDSS5ApStarFile)
-
-
-    def submit_jobs(self, submit_kwds):
-        if self.use_slurm:
-            with mp.Pool(self.max_asynchronous_slurm_jobs) as p:
-                p.map(_async_run_ferre_given_apstar_file, submit_kwds)
-        else:
-            _ = list(map(_async_run_ferre_given_apstar_file, submit_kwds))
-    '''

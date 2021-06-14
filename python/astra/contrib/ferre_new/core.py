@@ -512,27 +512,30 @@ class Ferre(object):
         output_flux_path = os.path.join(self.directory, self.kwds["output_flux_path"])
 
         if use_tqdm:
-            done = 0
+            total_done, total_errors = (0, 0)
             with tqdm(total=total, desc="FERRE", unit="star") as pbar:
-                while total > done:
-                    n_done, errors = self._check_progress(output_flux_path, interval)
-                    pbar.update(n_done - done)
-                    done = n_done
+                while total > total_done:
+                    n_done, n_errors = self._check_progress(output_flux_path, interval)
+                    pbar.update(n_done - total_done)
+                    total_done = n_done
+                    total_errors = n_errors
 
-                    if errors > 0:
-                        pbar.set_description(f"FERRE ({error_count:.0f} errors)")
+                    if n_errors > 0:
+                        pbar.set_description(f"FERRE ({total_errors:.0f} errors)")
                     pbar.refresh()
 
         else:
-            done = 0
-            while total > done:
-                done, errors = self._check_progress(output_flux_path, interval)
+            total_done, total_errors = (0, 0)
+            while total > total_done:
+                n_done, n_errors = self._check_progress(output_flux_path, interval)
 
-                log.info(f"FERRE in {self.directory} has completed {done} / {total}")
+                log.info(f"FERRE in {self.directory} has completed {total_done} / {total}")
 
-                if errors > 0:
-                    log.error(f"FERRE in {self.directory} has {errors} errors")
-            
+                if n_errors > 0:
+                    log.error(f"FERRE in {self.directory} has {total_errors} errors")
+
+                total_errors += n_errors
+                total_done = n_done
         
         # Do a final I/O communicate because we are done.
         if self.process is not None:
