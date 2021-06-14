@@ -142,6 +142,8 @@ class ThePayne(Base, OutputMixin):
 class Ferre(Base, OutputMixin):
     __tablename__ = "ferre"
 
+class Aspcap(Base, OutputMixin):
+    __tablename__ = "aspcap"
 
 class Classification(Base, OutputMixin):
     __tablename__ = "classification"

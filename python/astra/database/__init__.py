@@ -4,6 +4,7 @@ import warnings
 from functools import partial
 from luigi.parameter import _DictParamEncoder
 from sqlalchemy import MetaData, create_engine
+from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base, DeferredReflection
 from sdssdb.connection import SQLADatabaseConnection
@@ -16,8 +17,14 @@ class AstraDatabaseConnection(SQLADatabaseConnection):
     dbname = "sdss5db"
     base = AstraBase
 
-    def create_engine(self, db_connection_string=None, echo=False, pool_size=10,
-                      pool_recycle=1800, expire_on_commit=True):
+    def create_engine(
+            self, 
+            db_connection_string=None, 
+            echo=False, 
+            use_pooling=False,
+            expire_on_commit=True,
+            **kwargs
+        ):
         '''
         Create a new database engine
 
@@ -32,15 +39,23 @@ class AstraDatabaseConnection(SQLADatabaseConnection):
             db_connection_string = self._make_connection_string(dbname,
                                                                 **self.connection_params)
 
+        if use_pooling:
+            # Some defaults for pooling:
+            kwds = dict(pool_size=5, pool_recycle=1800)
+            kwds.update(kwargs)
+        else:
+            # No pooling. Necessary when using multiple workers.
+            # See https://docs.sqlalchemy.org/en/14/core/pooling.html#pooling-multiprocessing
+            kwds = dict(poolclass=NullPool)
+
         self.engine = create_engine(
             db_connection_string, 
             echo=echo, 
-            pool_size=pool_size,
-            pool_recycle=pool_recycle,
             json_serializer=partial(
                 json.dumps,
                 cls=_DictParamEncoder
             ),
+            **kwds
             # Unclear whether we need this deserializer or not.
             #json_deserializer=partial(
             #    json.loads, 
