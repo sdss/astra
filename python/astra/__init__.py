@@ -117,13 +117,11 @@ def _setup_astra_logging():
     return astra_log
 
 _log = _setup_astra_logging()
-
 luigi_interface = logging.getLogger("luigi-interface")
 luigi_interface.setLevel(_log.getEffectiveLevel())    
 if not luigi_interface.handlers:
     luigi_interface.addHandler(_log.handlers[0])
 luigi_interface.propagate = False
-
 
 def build(
         tasks,
@@ -139,7 +137,8 @@ def build(
         override_defaults["no_lock"] = True
 
     env_params = core(**override_defaults)
-        
+    
+    #InterfaceLogging.setup(env_params)
 
     if worker_scheduler_factory is None:
         worker_scheduler_factory = _WorkerSchedulerFactory()
@@ -176,8 +175,6 @@ def build(
         logger.info('Done scheduling tasks')
         success &= worker.run()
     luigi_run_result = LuigiRunResult(worker, success)
-    logger.info(luigi_run_result.summary_text)
+    logger.info(f"Execution summary:\n{luigi_run_result.summary_text[38:-38]}")
 
     return luigi_run_result if detailed_summary else luigi_run_result.scheduling_succeeded
-
-#redirect_luigi_interface_logging()
