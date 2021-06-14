@@ -3,6 +3,8 @@ import itertools # dat feel
 import json
 import luigi
 import os
+import sys
+
 import traceback
 from datetime import datetime
 
@@ -13,12 +15,14 @@ from packaging.version import parse as parse_version
 from astra.utils import log
 from astra import __version__
 from tqdm import tqdm
+from sdsstools.logger import get_exception_formatted
 
 from astra.database import session, astradb
 from astra.tasks.utils import (hashify, task_id_str)
 
 astra_version = parse_version(__version__)
 
+last_task_exception = None
 
 class BaseTask(luigi.Task, metaclass=Register):
 
@@ -181,7 +185,13 @@ class BaseTask(luigi.Task, metaclass=Register):
                             value = tuple(list(map(param.parse, param_str)))
                         
                         else:
-                            value = param.parse(param_str)
+                            try:
+                                value = param.parse(param_str)
+                            except:
+                                # We also have to remove commas from the right hand side, as
+                                # (324.,) is a valid way to represent a tuple, but [324.,]
+                                # is not a valid way to load a list through JSON.
+                                value = tuple(json.loads(f"[{param_str[1:-1].rstrip(',')}]"))
                     else:
                         if isinstance(value, list) and not isinstance(param, luigi.ListParameter):
                             value = tuple(value)
@@ -402,7 +412,7 @@ class BaseTask(luigi.Task, metaclass=Register):
                         session.add(astradb.BatchInterface(**kwds))
     
         session.flush()
-        return None
+        return (parameter_pks, task_pks)
 
 
     def delete_state(self, cascade=False):
@@ -500,8 +510,8 @@ def task_started(task):
         The started task.
     """
     task.create_state()
-
     
+
 @BaseTask.event_handler(luigi.Event.SUCCESS)
 def task_succeeded(task):
     """
@@ -517,7 +527,7 @@ def task_succeeded(task):
     
 
 @BaseTask.event_handler(luigi.Event.FAILURE)
-def task_failed(task, args):
+def task_failed(task, exception):
     # TODO: trigger on sub-tasks too?
     """
     Mark a task as failed in the database.
@@ -525,9 +535,20 @@ def task_failed(task, args):
     :param task:
         The failed task.
     """
+    parameter_pks, task_pks = task.create_state()
     task.update_state(
         dict(status_code=30, modified=datetime.now())
     )
+    log.error(get_exception_formatted(*sys.exc_info()))
+
+    # Store this as the last exception raised by a task,
+    # in case we want to dive into the code with:
+    #
+    #   raise astra.tasks.last_task_exception
+
+    global last_task_exception
+    last_task_exception = exception
+
 
 
 @BaseTask.event_handler(luigi.Event.PROCESS_FAILURE)
@@ -539,6 +560,7 @@ def task_process_failed(task):
         The failed task.
     """
     # TODO: trigger on sub-tasks too?
+    task.create_state()
     task.update_state(
         dict(status_code=40, modified=datetime.now())
     )
@@ -552,6 +574,7 @@ def task_broken(task):
     :param task:
         The broken task.
     """    
+    task.create_state()
     task.update_state(
         dict(status_code=50, modified=datetime.now())
     )
@@ -566,6 +589,7 @@ def task_dependency_missing(task):
         The task with missing dependencies.
     """
     # TODO: trigger on sub-tasks too?
+    task.create_state()
     task.update_state(
         dict(status_code=60, modified=datetime.now())
     )
