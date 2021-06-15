@@ -3,7 +3,6 @@ import itertools # dat feel
 import json
 import luigi
 import os
-import sys
 
 import traceback
 from datetime import datetime
@@ -509,7 +508,10 @@ def task_started(task):
     :param task:
         The started task.
     """
-    task.create_state()
+    # We used to create entries in the database for this task and its parameters
+    # here, but luigi didn't like that when we used multiple workers.
+    # Put it to 'complete/failed' events
+    None
     
 
 @BaseTask.event_handler(luigi.Event.SUCCESS)
@@ -520,6 +522,8 @@ def task_succeeded(task):
     :param task:
         The completed task.
     """
+    task.create_state()
+
     task.update_state(
         dict(status_code=1, modified=datetime.now()),
         cascade=True
@@ -535,20 +539,27 @@ def task_failed(task, exception):
     :param task:
         The failed task.
     """
-    parameter_pks, task_pks = task.create_state()
-    task.update_state(
-        dict(status_code=30, modified=datetime.now())
-    )
-    log.error(get_exception_formatted(*sys.exc_info()))
-
     # Store this as the last exception raised by a task,
     # in case we want to dive into the code with:
     #
     #   raise astra.tasks.last_task_exception
-
+ 
     global last_task_exception
     last_task_exception = exception
 
+    # Log the exception.
+    log.error(get_exception_formatted(
+        type(exception),
+        exception,
+        exception.__traceback__
+    ))
+
+    # Update the state in the database.
+    parameter_pks, task_pks = task.create_state()
+    task.update_state(
+        dict(status_code=30, modified=datetime.now())
+    )
+    return None
 
 
 @BaseTask.event_handler(luigi.Event.PROCESS_FAILURE)
