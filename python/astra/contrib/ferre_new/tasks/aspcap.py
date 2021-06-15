@@ -36,7 +36,9 @@ from astra.contrib.ferre_new import utils
 class ApStarMixinBase(object):
 
     """ A base mix-in class for SDSS-IV or SDSS-V ApStarFile objects. """
-    
+
+    #max_batch_size = 1000
+
     def requires(self):
         """ Requirements for this task. """
         # If we require this check in batch mode then it means it will check all ApStar files multiple times.
@@ -83,7 +85,7 @@ class ApStarMixinBase(object):
     def output(self):
         """ Outputs of this task. """
         if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
+            return (task.output() for task in self.get_batch_tasks())
         
         requirements = {
             "database": DatabaseTarget(astradb.Ferre, self),
@@ -100,7 +102,6 @@ class FerreGivenApStarFileBase(FerreBase):
 
     grid_header_path = astra.Parameter()
     spectrum_data_slice_args = astra.ListParameter(default=None)
-
 
 
 
@@ -121,9 +122,9 @@ class InitialEstimateOfStellarParametersGivenApStarFileBase(FerreMixin):
             return self._requirements
 
         except AttributeError:
-            common_kwds = {
-                "spectrum_data_slice_args": None if self.analyze_individual_visits else [0, 1] 
-            }
+
+            spectrum_data_slice_args = None if self.analyze_individual_visits else [0, 1] 
+
             self._requirements = []
             total = self.get_batch_size()
             if total > 1:
@@ -132,13 +133,15 @@ class InitialEstimateOfStellarParametersGivenApStarFileBase(FerreMixin):
                         pbar.update(iteration - pbar.n)
                         self._requirements.append(self.clone(
                             self.ferre_task_factory, 
-                            **{**common_kwds, **kwds}
+                            spectrum_data_slice_args=spectrum_data_slice_args,
+                            **kwds
                         ))
             else:
                 for iteration, source_kwds, kwds in self.dispatcher():
                     self._requirements.append(self.clone(
                         self.ferre_task_factory,
-                        **{**common_kwds, **kwds}    
+                        spectrum_data_slice_args=spectrum_data_slice_args,
+                        **kwds
                     ))
                 
             return self._requirements
@@ -163,8 +166,10 @@ class InitialEstimateOfStellarParametersGivenApStarFileBase(FerreMixin):
         """ Execute the task. """
         uid = lambda task: "_".join([f"{getattr(task, pn)}" for pn in self.batch_param_names()])
 
+        total = len(self.requires())
+
         best_tasks = {}
-        for task, output in zip(self.requires(), self.input()):
+        for task, output in tqdm(zip(self.requires(), self.input()), total=total, desc="Initial estimate"):
             
             key = uid(task)
             best_tasks.setdefault(key, (np.inf, None))
@@ -206,7 +211,7 @@ class InitialEstimateOfStellarParametersGivenApStarFileBase(FerreMixin):
 
         # I think the above hack has been fixed by just never sending these kinds of stars to the pipeline.
         if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
+            return (task.output() for task in self.get_batch_tasks())
         
         return dict(database=DatabaseTarget(astradb.Ferre, self))
         
@@ -231,6 +236,7 @@ class CreateMedianFilteredApStarFileBase(FerreMixin):
         
         for task in self.get_batch_tasks():
 
+            '''
             initial_estimate_result = task.input()["initial_estimate"]["database"].read()
 
             # Get the FERRE task so we can extract the grid header path.
@@ -247,7 +253,20 @@ class CreateMedianFilteredApStarFileBase(FerreMixin):
 
             with open(initial_estimate.input_wavelength_mask_path, "rb") as fp:
                 mask = pickle.load(fp)
+            '''
 
+            ferre_task = task.get_related_task("initial_estimate")
+            
+            # Get segments for each chip based on the model.
+            n_pixels = [header["NPIX"] for header in utils.read_ferre_headers(ferre_task.grid_header_path)][1:]
+    
+            # Re-normalize the spectrum using the previous estimate.
+            image = fits.open(ferre_task.output()["AstraSource"].path)
+
+            # Load the wavelength mask.
+            with open(ferre_task.input_wavelength_mask_path, "rb") as fp:
+                mask = pickle.load(fp)            
+            
             indices = 1 + np.cumsum(mask).searchsorted(np.cumsum(n_pixels))
             # These indices will be for each chip, but will need to be left-trimmed.
             segment_indices = np.sort(np.hstack([
@@ -282,7 +301,7 @@ class CreateMedianFilteredApStarFileBase(FerreMixin):
 
     def output(self):
         if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
+            return (task.output() for task in self.get_batch_tasks())
         
         # TODO: To be defined by SDSS5/SDSS4 mixin
         new_path = AstraSource(self).path.replace("/AstraSource", "/ApStar")
@@ -311,19 +330,15 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
         execute_tasks = []
         
         for task in self.get_batch_tasks():
-            # From the initial estimate we need the grid_header_path, and the previous stellar parameters
-            # (which we will use for the initial guess here.)
-            initial_estimate_result = task.input()["initial_estimate"]["database"].read()
-            for task_state in initial_estimate_result.get_tasks():
-                if task_state.task_id != task.requires()["initial_estimate"].task_id:
-                    break
-                
-            grid_header_path = task_state.parameters["grid_header_path"]
-            headers = utils.read_ferre_headers(grid_header_path)
+
+            initial_estimate_task = task.get_related_task("initial_estimate")
+            initial_estimate_result = initial_estimate_task.output()["database"].read()
+            
+            headers = utils.read_ferre_headers(initial_estimate_task.grid_header_path)
             parameter_names = list(map(utils.sanitise_parameter_names, headers[0]["LABEL"]))
             
             kwds = dict(
-                grid_header_path=grid_header_path,
+                grid_header_path=initial_estimate_task.grid_header_path,
                 spectrum_data_slice_args=None if task.analyze_individual_visits else [0, 1] 
             )
 
@@ -346,7 +361,7 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
     def output(self):
         """ Outputs of this task. """
         if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
+            return (task.output() for task in self.get_batch_tasks())
         
         requirements = {
             "database": DatabaseTarget(astradb.Ferre, self),
@@ -385,13 +400,8 @@ class EstimateChemicalAbundanceGivenApStarFileBase(FerreMixin):
 
             # Get the previous stellar parameters, and the grid header path used.
             output = task.input()["stellar_parameters"]["database"].read()
-
-            for task_state in output.get_tasks():
-                if task_state.task_id != task.requires()["stellar_parameters"].task_id:
-                    break
+            grid_header_path = task.requires()["stellar_parameters"].get_related_task().grid_header_path
             
-            grid_header_path = task_state.parameters["grid_header_path"]
-
             try:
                 header = headers[grid_header_path]
             except KeyError:
@@ -453,11 +463,8 @@ class EstimateChemicalAbundanceGivenApStarFileBase(FerreMixin):
 
     def output(self):
         if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
+            return (task.output() for task in self.get_batch_tasks())
         return dict(database=DatabaseTarget(astradb.Ferre, self))
-        
-
-        
 
 
 class EstimateChemicalAbundancesGivenApStarFileBase(FerreMixin):
@@ -518,7 +525,7 @@ class EstimateChemicalAbundancesGivenApStarFileBase(FerreMixin):
 
     def output(self):
         if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
+            return (task.output() for task in self.get_batch_tasks())
         return dict(database=DatabaseTarget(astradb.Aspcap, self))
         
 

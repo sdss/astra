@@ -136,6 +136,26 @@ class FerreMixin(BaseTask):
     )
 
 
+    def get_related_task(self, key="initial_estimate"):
+        # TODO: This should probably go elsewhere.
+
+        # This method to get the metadata we need is more resilient against database
+        # transaction errors (which shouldn't happen, but anyways..)
+        related_task = self.requires()[key]
+
+        output_pk = related_task.output()["database"].read().output_pk
+        # Get the original FERRE task so we know the grid header path.
+        for ferre_task in related_task.requires():
+            if ferre_task.output()["database"].read().output_pk == output_pk:
+                break
+
+        else:
+            raise RuntimeError(f"Cannot find completed initial estimate for {task}")
+            
+        return ferre_task
+
+
+
 class SourceMixin(BaseTask):
 
     """ Mixin class for dealing with multiple objects in FERRE. """
