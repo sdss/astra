@@ -92,10 +92,8 @@ def skip_incomplete(iterable, task_class):
     return filter(lambda kwd: task_class(**kwd).complete(), iterable)
 
 
-def batcher(iterable, task_factory=None, unique=False, ordered=True):
+def batcher(iterable, max_batch_size=None, task_factory=None, unique=False, ordered=True):
 
-
-    all_kwds = {}
     if unique:
         if ordered:
             # Maintain an ordered set.
@@ -103,31 +101,35 @@ def batcher(iterable, task_factory=None, unique=False, ordered=True):
         else:
             iterable = [dict(s) for s in set(frozenset(d.items()) for d in iterable)]
 
+    total = len(iterable)
+    all_kwds = None
+    for i, item in enumerate(iterable):
+        if i == 0 or (max_batch_size is not None and (i % max_batch_size) == 0):
 
-    for item in iterable:
+            all_kwds = {}
+            for k in item.keys():
+                all_kwds.setdefault(k, [])
+
         for k, v in item.items():
-            all_kwds.setdefault(k, [])
             all_kwds[k].append(v)
-
-    if task_factory is None:
-        return { k: (tuple(v) if isinstance(v, list) else v) for k, v in all_kwds.items() }
-    
-    else:
-        batch_kwds = {}
-        batch_param_names = task_factory.batch_param_names()
-
-        for param_name, values in all_kwds.items():
-            if param_name in batch_param_names:
-                batch_kwds[param_name] = values
+        
+        if ((i + 1) == total) \
+        or (max_batch_size is not None and i > 0 and ((i + 1) % max_batch_size) == 0):
+            if task_factory is None:
+                yield { k: (tuple(v) if isinstance(v, list) else v) for k, v in all_kwds.items() }
             else:
-                unique_values = list(set(values))
-                assert len(unique_values) == 1
-                batch_kwds[param_name] = unique_values[0]
+                batch_kwds = {}
+                batch_param_names = task_factory.batch_param_names()
 
-        return { k: (tuple(v) if k in batch_param_names else v) for k, v in batch_kwds.items() }
+                for param_name, values in all_kwds.items():
+                    if param_name in batch_param_names:
+                        batch_kwds[param_name] = values
+                    else:
+                        unique_values = list(set(values))
+                        assert len(unique_values) == 1
+                        batch_kwds[param_name] = unique_values[0]
 
-
-
+                yield { k: (tuple(v) if k in batch_param_names else v) for k, v in batch_kwds.items() }
 
 
 def symlink_force(source, destination):
