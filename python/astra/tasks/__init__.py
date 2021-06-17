@@ -521,7 +521,8 @@ def task_started(task):
             #daemon=True
     )
     thread.start()
-    thread.join()
+    # See https://stackoverflow.com/questions/49134260/what-happens-to-threads-in-python-when-there-is-no-join
+    #thread.join()
     
     
 

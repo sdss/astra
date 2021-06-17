@@ -104,13 +104,13 @@ def _colored_formatter(record):
 
 
 def _setup_astra_logging():
-
     # Only set up logging ONCE.
     astra_log = get_logger("astra")
     # Remove excessive handlers.
     for handler in astra_log.handlers[1:]:
         astra_log.removeHandler(handler)
     
+    astra_log.handlers[0].setLevel(astra_log.getEffectiveLevel())
     astra_log.handlers[0].emit = _colored_formatter
     astra_log.propagate = False
 
