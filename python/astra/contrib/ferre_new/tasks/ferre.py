@@ -101,10 +101,13 @@ class FerreBase(FerreMixin, SourceMixin):
         N = self.get_batch_size()
         log.info(f"Running {N} task{('s in batch mode' if N > 1 else '')}: {self}")
 
+        log.debug(f"Reading in input observations for {self}")
         spectra = self.read_input_observations()
     
+        log.debug(f"Creating FERRE model for {self}")
         model = Ferre(**self.get_ferre_kwds())
         
+        log.debug(f"Running inference on {self}")
         results = model.fit(
             spectra,
             initial_parameters=self.initial_parameters,

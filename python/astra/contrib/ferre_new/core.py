@@ -223,6 +223,7 @@ class Ferre(object):
         N, P = flux.shape
         assert flux.shape == uncertainties.shape
         
+        log.debug(f"Parsing initial parameters in {self.directory}")
         parsed_initial_parameters = self.parse_initial_parameters(initial_parameters, Ns)
 
         # Make sure we are not sending nans etc.
@@ -249,18 +250,21 @@ class Ferre(object):
             )
 
         # Write flux.
+        log.debug(f"Writing input fluxes in {self.directory}")
         utils.write_data_file(
             flux[:, mask],
             os.path.join(self.directory, self.kwds["input_flux_path"])
         )
 
         # Write uncertainties.
+        log.debug(f"Writing input uncertainties in {self.directory}")
         utils.write_data_file(
             uncertainties[:, mask],
             os.path.join(self.directory, self.kwds["input_uncertainties_path"])
         )
 
         # Write initial parameters to disk.
+        log.debug(f"Writing input names and parameters in {self.directory}")
         if names is None:
             names = [f"idx_{i:.0f}" for i in range(len(parsed_initial_parameters))]
         
@@ -280,6 +284,7 @@ class Ferre(object):
                 fp.write(utils.format_ferre_input_parameters(*ip, star_name=star_name))
 
         # Execute.
+        log.debug(f"Loading up FERRE for {self.directory}")
         self._execute(total=N, **kwargs)
         
         erroneous_output = -999.999
@@ -624,7 +629,6 @@ class Ferre(object):
                 # TODO: Check that we have all the unsorted outputs we need before killing.
                 # Kill the process.
                 log.error(f"FERRE is taking too long to sort and clean-up. Killing process.")
-                sleep(10)
                 self.process.terminate()
                 self.process.wait()
                 self._communicate(timeout=0)
