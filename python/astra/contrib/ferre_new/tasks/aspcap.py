@@ -234,26 +234,7 @@ class CreateMedianFilteredApStarFileBase(FerreMixin):
 
     def run(self):
         
-        for task in self.get_batch_tasks():
-
-            '''
-            initial_estimate_result = task.input()["initial_estimate"]["database"].read()
-
-            # Get the FERRE task so we can extract the grid header path.
-            for task_state in initial_estimate_result.get_tasks():
-                if task_state.task_id != task.requires()["initial_estimate"].task_id:
-                    break
-            initial_estimate = task_state.load_task()   
-            
-            # Re-normalize the spectrum using the previous estimate.
-            image = fits.open(initial_estimate.output()["AstraSource"].path)
-
-            # Get segments for each chip based on the model.
-            n_pixels = [header["NPIX"] for header in utils.read_ferre_headers(initial_estimate.grid_header_path)][1:]
-
-            with open(initial_estimate.input_wavelength_mask_path, "rb") as fp:
-                mask = pickle.load(fp)
-            '''
+        for task in tqdm(self.get_batch_tasks(), desc=f"Running {self}", total=self.get_batch_size()):
 
             ferre_task = task.get_related_task("initial_estimate")
             
@@ -327,9 +308,9 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
     def run(self):
         """ Execute this task. """
 
-        execute_tasks = []
+        executable_tasks = []
         
-        for task in self.get_batch_tasks():
+        for task in tqdm(self.get_batch_tasks(), desc=f"Creating tasks {self}", total=self.get_batch_size()):
 
             initial_estimate_task = task.get_related_task("initial_estimate")
             initial_estimate_result = initial_estimate_task.output()["database"].read()
@@ -346,13 +327,17 @@ class EstimateStellarParametersGivenApStarFileBase(FerreMixin):
                 # Take the first result (of perhaps many spectra; i.e. the stacked one) from initial estimate.
                 kwds[f"initial_{parameter_name}"] = getattr(initial_estimate_result, parameter_name)[0]
 
-            execute_tasks.append(task.clone(self.ferre_task_factory, **kwds))
+            executable_tasks.append(task.clone(self.ferre_task_factory, **kwds))
             
+        log.info(f"Batching together {len(executable_tasks)} from {self}")
+        execute_tasks = batch_tasks_together(executable_tasks, skip_complete=True)
+        log.info(f"Yielding {len(execute_tasks)} tasks")
         outputs = yield execute_tasks
         
+        log.info("Copying outputs from executed tasks")
         # Copy outputs from the executed tasks.
-        for task, output in zip(self.get_batch_tasks(), outputs):
-            for key, target in output.items():
+        for task, from_task in zip(self.get_batch_tasks(), executable_tasks):
+            for key, target in from_task.output().items():
                 task.output()[key].copy_from(target)
         
         return None

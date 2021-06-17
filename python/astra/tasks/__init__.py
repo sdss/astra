@@ -3,6 +3,7 @@ import itertools # dat feel
 import json
 import luigi
 import os
+import threading
 
 import traceback
 from datetime import datetime
@@ -500,6 +501,12 @@ def get_or_create_parameter_instance(parameter_name, parameter_value):
     return (instance, create)
 
 
+def _create_and_announce_state(task):
+    log.debug(f"Creating state for {task}")
+    task.create_state()
+    log.debug(f"Created state for {task}")
+
+
 @BaseTask.event_handler(luigi.Event.START)
 def task_started(task):
     """
@@ -508,10 +515,14 @@ def task_started(task):
     :param task:
         The started task.
     """
-    # We used to create entries in the database for this task and its parameters
-    # here, but luigi didn't like that when we used multiple workers.
-    # Put it to 'complete/failed' events
-    None
+    thread = threading.Thread(
+            target=_create_and_announce_state,
+            args=(task, ),
+            #daemon=True
+    )
+    thread.start()
+    thread.join()
+    
     
 
 @BaseTask.event_handler(luigi.Event.SUCCESS)
@@ -522,8 +533,6 @@ def task_succeeded(task):
     :param task:
         The completed task.
     """
-    task.create_state()
-
     task.update_state(
         dict(status_code=1, modified=datetime.now()),
         cascade=True
@@ -555,7 +564,7 @@ def task_failed(task, exception):
     ))
 
     # Update the state in the database.
-    parameter_pks, task_pks = task.create_state()
+    #parameter_pks, task_pks = task.create_state()
     task.update_state(
         dict(status_code=30, modified=datetime.now())
     )
@@ -571,7 +580,6 @@ def task_process_failed(task):
         The failed task.
     """
     # TODO: trigger on sub-tasks too?
-    task.create_state()
     task.update_state(
         dict(status_code=40, modified=datetime.now())
     )
@@ -585,7 +593,6 @@ def task_broken(task):
     :param task:
         The broken task.
     """    
-    task.create_state()
     task.update_state(
         dict(status_code=50, modified=datetime.now())
     )
@@ -600,7 +607,6 @@ def task_dependency_missing(task):
         The task with missing dependencies.
     """
     # TODO: trigger on sub-tasks too?
-    task.create_state()
     task.update_state(
         dict(status_code=60, modified=datetime.now())
     )

@@ -8,6 +8,7 @@ from astra.contrib.ferre_new.core import Ferre
 from astra.contrib.ferre_new.tasks.mixin import (FerreMixin, SourceMixin)
 from astra.contrib.ferre_new.utils import sanitise_parameter_names
 from astropy.table import Table
+from tqdm import tqdm
 
 
 class FerreBase(FerreMixin, SourceMixin):
@@ -160,8 +161,15 @@ class FerreBase(FerreMixin, SourceMixin):
 
         # Get processing times.
         times = model.get_processing_times()
+        if times is None:
+            log.warning("No processing time statistics parsed from FERRE")
 
-        for task, spectra, results, sliced in self.prepare_results(model, all_spectra, p_opt, p_err, meta):
+        for task, spectra, results, sliced \
+        in tqdm(
+                self.prepare_results(model, all_spectra, p_opt, p_err, meta), 
+                desc="Writing FERRE outputs",
+                total=p_opt.shape[0]
+            ):
             
             # Write to database as required.
             if "database" in task.output():
@@ -184,14 +192,15 @@ class FerreBase(FerreMixin, SourceMixin):
                 )
             
             # Trigger the task as complete.
-            task.trigger_event_processing_time(
-                sum(times["time_per_ordered_spectrum"][sliced]),
-                cascade=True
-            )
+            if times is not None:
+                task.trigger_event_processing_time(
+                    sum(times["time_per_ordered_spectrum"][sliced]),
+                    cascade=True
+                )
         
         model.teardown()
-        self.trigger_event_processing_time(time() - t_init, cascade=True)
-        
+        self.trigger_event_processing_time(time() - t_init, cascade=False)
+
         return None
 
 

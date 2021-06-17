@@ -7,7 +7,6 @@ import re
 import subprocess
 import sys
 import threading
-import time
 
 from collections import OrderedDict
 from glob import glob
@@ -15,14 +14,14 @@ from io import StringIO, BytesIO
 from inspect import getfullargspec
 from shutil import copyfile, rmtree
 from tempfile import mkdtemp
-from time import sleep
+from time import sleep, time
 from tqdm import tqdm
 
 from astra.utils import log
 from astra.tools.spectrum import Spectrum1D
 from astropy import units as u
 
-from astra.contrib.ferre import utils
+from astra.contrib.ferre_new import utils
 from collections import OrderedDict
 from luigi.freezing import FrozenOrderedDict
 
@@ -212,7 +211,7 @@ class Ferre(object):
         if isinstance(spectra, Spectrum1D):
             spectra = [spectra]
 
-        
+        log.debug(f"Preparing inputs for FERRE in {self.directory}")
         flux = np.vstack([spectrum.flux.value for spectrum in spectra])
         uncertainties = np.vstack([spectrum.uncertainty.array**-0.5 for spectrum in spectra])
         Ns = np.array([spectrum.flux.shape[0] for spectrum in spectra])
@@ -237,26 +236,27 @@ class Ferre(object):
         mask = self.wavelength_mask(wavelengths[0])
 
         # TODO: Should we be doing this if we are using wavelength_interpolation_flag > 0?
-        wavelengths = wavelengths[:, mask]
-        flux = flux[:, mask]
-        uncertainties = uncertainties[:, mask]
+        #wavelengths = wavelengths[:, mask]
+        #flux = flux[:, mask]
+        #uncertainties = uncertainties[:, mask]
 
         # Write wavelengths?
+        log.debug(f"Writing input files for FERRE in {self.directory}")
         if self.kwds["wavelength_interpolation_flag"] > 0:            
             utils.write_data_file(
-                wavelengths,
+                wavelengths[:, mask],
                 os.path.join(self.directory, self.kwds["input_wavelength_path"])
             )
 
         # Write flux.
         utils.write_data_file(
-            flux,
+            flux[:, mask],
             os.path.join(self.directory, self.kwds["input_flux_path"])
         )
 
         # Write uncertainties.
         utils.write_data_file(
-            uncertainties,
+            uncertainties[:, mask],
             os.path.join(self.directory, self.kwds["input_uncertainties_path"])
         )
 
@@ -284,33 +284,59 @@ class Ferre(object):
         
         erroneous_output = -999.999
 
-        # Parse outputs.
+        # Parse parameters.
         try:
-            # Parse parameters.
             output_parameter_path = os.path.join(self.directory, self.kwds["output_parameter_path"])
-            param, param_errs, meta = utils.read_output_parameter_file(
+            output_names, output_param, output_param_errs, output_meta = utils.read_output_parameter_file(
                 output_parameter_path,
                 n_dimensions=self.n_dimensions
             )
 
-            any_bad = False
-            for j, (p, e) in enumerate(zip(param, param_errs)):
-                if np.all(p == erroneous_output) and np.all(e == erroneous_output):
-                    log.warn(f"Error in output for index {j} of {output_parameter_path}")
+        except:
+            log.info("Something went wrong. Could have been in FERRE.")
+            log.info(self.stdout)
+            log.error(self.stderr)
+            raise 
+
+        else:
+            sort_indices = np.array([names.index(name) for name in output_names])
             
-            if any_bad:
-                log.warn(f"FERRE STDOUT:\n{self.stdout}")
+            N_returned, D = output_param.shape
+            if N_returned < N or np.any(np.diff(sort_indices) != 1):
+                if N_returned < N:
+                    log.warning(f"File {output_parameter_path} contained {N_returned} parameter entries"
+                                f" but we expected {N} ({N - N_returned:.0f} missing).")
 
+                log.error(f"FERRE outputs do not look sorted correctly. FERRE may have crashed.")
+                log.warning(f"FERRE STDOUT:\n{self.stdout}")
+                log.warning(f"FERRE STDERR:\n{self.stderr}")
+                log.info("Sorting FERRE outputs based on input names.")
+                
+                param = erroneous_output * np.ones((N, self.n_dimensions))
+                param_errs = erroneous_output * np.ones((N, self.n_dimensions))
+
+                param[sort_indices] = output_param
+                param_errs[sort_indices] = output_param_errs
+
+                meta = {}
+                for key in output_meta:
+                    meta[key] = np.nan * np.ones(N)
+                    meta[key][sort_indices] = output_meta[key]
+                
+            else:
+                # All spectra accounted for. 
+                param = output_param
+                param_errs = output_param_errs
+                meta = output_meta
+            
             if full_output:
-
-                # Include parsed initial parameters
 
                 # Return the mask.
                 meta["mask"] = mask
 
                 # De-mask the model flux.
                 model_flux = np.nan * np.ones((N, P))
-                model_flux[:, mask] = np.atleast_2d(
+                model_flux[:, mask][sort_indices] = np.atleast_2d(
                     np.loadtxt(
                         os.path.join(self.directory, self.kwds["output_flux_path"])
                     )
@@ -324,16 +350,18 @@ class Ferre(object):
                     continuum = 1
                 
                 else:
-                    normalized_flux = np.atleast_2d(
+                    normalized_flux = np.nan * np.ones((N, P))
+                    normalized_flux[sort_indices][:, mask] = np.atleast_2d(
                         np.loadtxt(
                             os.path.join(self.directory, self.kwds["output_normalized_input_flux_path"])
                         )
                     )
 
                     # Infer continuum.
-                    masked_continuum = flux / normalized_flux
-                    continuum = np.nan * np.ones((N, P))
-                    continuum[:, mask] = masked_continuum
+                    # Note: both flux and normalized_flux are indexed correctly.
+                    continuum = flux / normalized_flux
+                    #continuum = np.nan * np.ones((N, P))
+                    #continuum[:, mask] = masked_continuum
                     
                 meta["continuum"] = continuum
 
@@ -344,12 +372,7 @@ class Ferre(object):
 
             return (param, param_errs)
         
-        except:
-            log.info("Something went wrong. Could have been in FERRE.")
-            log.info(self.stdout)
-            log.error(self.stderr)
-            raise 
-        
+
 
     def __call__(self, x, timeout=30):
 
@@ -460,9 +483,14 @@ class Ferre(object):
 
         self._write_ferre_input_file()
 
+        args = [self.executable]
+        
+        t_0 = time()
+            
+        log.debug(f"Calling {args[0]} in {self.directory}")
         try:
             self.process = subprocess.Popen(
-                [self.executable],
+                args,
                 cwd=self.directory,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -481,7 +509,9 @@ class Ferre(object):
                 return self.process
 
             self._monitor_progress(total=total)
-                
+            
+            t_elapsed = time() - t_0
+            log.info(f"FERRE sub-process and monitoring in {self.directory} took {t_elapsed:.0f} s.")
             return None
 
 
@@ -501,7 +531,15 @@ class Ferre(object):
         return (n_done, n_errors)
         
 
-    def _monitor_progress(self, total=None, interval=1, use_tqdm=True):
+    def _monitor_progress(
+            self,
+            total=None,
+            interval=1,
+            use_tqdm=True,
+            timeout=3600,
+            timeout_cleanup=10,
+            max_wait_time_per_result=60
+        ):
         # TODO: Monitor the Slurm job completeness instead?
     
         self.stdout, self.stderr = ("", "")
@@ -511,12 +549,32 @@ class Ferre(object):
         # monitor progress.
         output_flux_path = os.path.join(self.directory, self.kwds["output_flux_path"])
 
+        if timeout is None:
+            t_timeout = np.inf
+        else:
+            t_timeout = time() + timeout
+        
+        last_new_result_time = None
         if use_tqdm:
             total_done, total_errors = (0, 0)
             with tqdm(total=total, desc="FERRE", unit="star") as pbar:
-                while total > total_done:
+                while total > total_done and time() < t_timeout:
                     n_done, n_errors = self._check_progress(output_flux_path, interval)
-                    pbar.update(n_done - total_done)
+                    n_updated = n_done - total_done
+
+                    pbar.update(n_updated)
+                    if n_updated > 0:
+                        last_new_result_time = time()
+                    else:
+                        # No new updates.
+                        if last_new_result_time is not None \
+                        and (time() - last_new_result_time) > max_wait_time_per_result:
+                            log.error(f"Waited {max_wait_time_per_result} seconds since last FERRE output!")
+                            log.error(f"Assuming FERRE in {self.directory} has crashed.")
+                            if self.process is not None:
+                                self.process.kill()
+                            break
+
                     total_done = n_done
                     total_errors = n_errors
 
@@ -526,8 +584,21 @@ class Ferre(object):
 
         else:
             total_done, total_errors = (0, 0)
-            while total > total_done:
+            while total > total_done and time() < t_timeout:
                 n_done, n_errors = self._check_progress(output_flux_path, interval)
+                n_updated = n_done - total_done
+
+                if n_updated > 0:
+                    last_new_result_time = time()
+                else:
+                    # No new updates.
+                    if last_new_result_time is not None \
+                    and (time() - last_new_result_time) > max_wait_time_per_result:
+                        log.error(f"Waited {max_wait_time_per_result} seconds since last FERRE output!")
+                        log.error(f"Assuming FERRE in {self.directory} has crashed.")
+                        if self.process is not None:
+                            self.process.kill()
+                        break
 
                 log.info(f"FERRE in {self.directory} has completed {total_done} / {total}")
 
@@ -537,10 +608,27 @@ class Ferre(object):
                 total_errors += n_errors
                 total_done = n_done
         
+        if time() > t_timeout:
+            if self.process is not None:
+                log.error(f"FERRE may have crashed in {self.directory}. Killing process..")
+                self.process.kill()
+            else:
+                log.error(f"FERRE may have crashed in {self.directory} but there is nothing we can do.")
+
         # Do a final I/O communicate because we are done.
         if self.process is not None:
-            self._communicate()
+            log.info(f"Waiting for FERRE to clean up in {self.directory}")
             
+            done = self._communicate(timeout=10)
+            if done is not None and not done and self.process is not None:
+                # TODO: Check that we have all the unsorted outputs we need before killing.
+                # Kill the process.
+                log.error(f"FERRE is taking too long to sort and clean-up. Killing process.")
+                sleep(10)
+                self.process.terminate()
+                self.process.wait()
+                self._communicate(timeout=0)
+                
         return None
 
 
@@ -551,9 +639,12 @@ class Ferre(object):
         :param stdout: (optional)
             The standard output from FERRE.
         """
+        if stdout is None and self.process is not None:
+            self._communicate(timeout=0)
+
         stdout = stdout or self.stdout
 
-        if stdout is None:
+        if stdout is None or stdout == "":
             return None
 
         matches = re.findall('ellapsed time:\s+[{0-9}|.]+', stdout)
@@ -590,17 +681,17 @@ class Ferre(object):
             stdout, stderr = self.process.communicate(timeout=timeout)
 
         except subprocess.TimeoutExpired:
-            None
+            return False
 
         except ValueError:
             # See https://bugs.python.org/issue35182
             # Child has finished.
-            None
+            return None
             
         else:
             self.stdout += stdout
             self.stderr += stderr
-        return None
+        return True
 
 
     def _setup(self):
@@ -706,7 +797,7 @@ class FerreSlurmQueue(Ferre):
         self.process = None
 
         # Monitor progress through length of output files.
-        self._monitor_progress(total=total, interval=30, use_tqdm=False)
+        self._monitor_progress(total=total, interval=30, use_tqdm=False, timeout=timeout)
         # TODO: Monitor the Slurm job completeness instead?
         return None
     
