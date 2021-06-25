@@ -1,63 +1,30 @@
 
 import os
+import numpy as np
+from time import time
 from astra.utils import log
-from astra.contrib.ferre.core import (Ferre as FerreNoQueue, FerreSlurmQueue)
+from astra.tasks.slurm import slurmify
+from astra.contrib.ferre.core import Ferre
 from astra.contrib.ferre.tasks.mixin import (FerreMixin, SourceMixin)
-#from astra.contrib.ferre.tasks.targets import GridHeaderTarget
+from astra.contrib.ferre.utils import sanitise_parameter_names
 from astropy.table import Table
-
-
-def sanitise_parameter_names(parameter_name):
-    return parameter_name.lower().strip().replace(" ", "_")
+from tqdm import tqdm
 
 
 class FerreBase(FerreMixin, SourceMixin):
 
-
     def output(self):
         raise NotImplementedError("this should be over-written by sub-classes")
 
+
     def requires(self):
-        """ The requirements of this task. """
         raise NotImplementedError("this should be over-written by sub-classes")
     
 
     def get_directory_kwds(self):
         """ Get the keywords for creating a directory for FERRE to run in. """
-        directory_kwds = dict(self.directory_kwds or {})
-        directory_kwds.setdefault(
-            "dir",
-            os.path.join(self.output_base_dir, "scratch", self.task_id.split("_")[1])
-        )
-        return directory_kwds
-
-
-    def get_ferre_model(self):
-        """ Get the model class to run FERRE, depending on whether you are running through Slurm or not. """
-
-        kwds = self.get_ferre_kwds()
-
-        if False and not self.use_slurm:
-            Ferre = FerreNoQueue
-        else:
-            Ferre = FerreSlurmQueue
-
-            # Include task identifier as label.
-            slurm_kwds = dict(
-                label=self.task_id,
-                alloc=self.slurm_alloc,
-                nodes=self.slurm_nodes,
-                ppn=self.slurm_ppn,
-                walltime=self.slurm_walltime,
-                #partition=self.slurm_partition,
-                #mem=self.slurm_mem,
-                #gres=self.slurm_gres
-            )
-            kwds.update(slurm_kwds=slurm_kwds)
-
-        print(f"Using {Ferre} with {kwds}")
-        return Ferre(**kwds)
-            
+        return dict(dir=os.path.join(self.output_base_dir, "scratch", self.task_id.split("_")[1]))
+        
     
     def get_ferre_kwds(self):
         """ Return human-readable keywords that will be used with FERRE. """
@@ -83,9 +50,39 @@ class FerreBase(FerreMixin, SourceMixin):
             "n_threads": self.n_threads,
             "debug": self.debug,
             "directory_kwds": self.get_directory_kwds(),
-            "executable": self.ferre_executable,
             "ferre_kwds": self.ferre_kwds
         }
+
+
+    @property
+    def frozen_parameters(self):
+        frozen_parameters = []
+        for key, is_frozen, value in self._ferre_parameters:
+            if is_frozen:
+                frozen_parameters.append(key)
+        return tuple(frozen_parameters)
+    
+
+    @property
+    def initial_parameters(self):
+        initial_parameters = {}
+        for key, is_frozen, value in self._ferre_parameters:
+            initial_parameters[key] = value
+        return initial_parameters
+
+
+    @property
+    def _ferre_parameters(self):
+        return [
+            ("TEFF", self.frozen_teff, self.initial_teff),
+            ("LOGG", self.frozen_logg, self.initial_logg),
+            ("METALS", self.frozen_metals, self.initial_metals),
+            ("LOG10VDOP", self.frozen_log10vdop, self.initial_log10vdop),
+            ("O Mg Si S Ca Ti", self.frozen_o_mg_si_s_ca_ti, self.initial_o_mg_si_s_ca_ti),
+            ("LGVSINI", self.frozen_lgvsini, self.initial_lgvsini),
+            ("C", self.frozen_c, self.initial_c),
+            ("N", self.frozen_n, self.initial_n)
+        ]
 
 
     def get_source_names(self, spectra):
@@ -104,10 +101,13 @@ class FerreBase(FerreMixin, SourceMixin):
         N = self.get_batch_size()
         log.info(f"Running {N} task{('s in batch mode' if N > 1 else '')}: {self}")
 
+        log.debug(f"Reading in input observations for {self}")
         spectra = self.read_input_observations()
     
-        model = self.get_ferre_model()
+        log.debug(f"Creating FERRE model for {self}")
+        model = Ferre(**self.get_ferre_kwds())
         
+        log.debug(f"Running inference on {self}")
         results = model.fit(
             spectra,
             initial_parameters=self.initial_parameters,
@@ -118,31 +118,62 @@ class FerreBase(FerreMixin, SourceMixin):
         return (model, spectra, results)
 
 
-    def run(self):
-        """ Run this task. """
-        
-        model, all_spectra, (p_opt, p_err, meta) = self.execute()
+    def prepare_results(self, model, all_spectra, p_opt, p_err, meta):
+
+        spn = list(map(sanitise_parameter_names, model.parameter_names))
+        frozen_kwds = dict([(f"frozen_{pn}", getattr(self, f"frozen_{pn}")) for pn in spn])
 
         si = 0
-        for i, (task, spectra, N) in enumerate(zip(self.get_batch_tasks(), all_spectra, meta["n_spectra_per_source"])):
-
+        for (task, spectra, N) in zip(self.get_batch_tasks(), all_spectra, meta["n_spectra_per_source"]):
             # One 'task' and one 'spectrum' actually can include many visits.
             sliced = slice(si, si + N)
 
-            # Write result(s) to database.
-            results = dict(zip(
-                map(sanitise_parameter_names, model.parameter_names), 
-                p_opt[sliced].T
-            ))
-            results.update(dict(zip(
-                [f"u_{sanitise_parameter_names(pn)}" for pn in model.parameter_names],
-                p_err[sliced].T
-            )))
-            results.update(
+            # Prepare results dictionary.
+            snr = spectra.meta["snr"]
+            if task.spectrum_data_slice_args is not None:
+                snr = snr[slice(*task.spectrum_data_slice_args)]
+                
+
+            results = dict(
+                snr=snr,
                 log_snr_sq=meta["log_snr_sq"][sliced],
                 log_chisq_fit=meta["log_chisq_fit"][sliced]
             )
+            # Initial values.
+            results.update(
+                dict([(f"initial_{pn}", [getattr(task, f"initial_{pn}")] * N) for pn in spn])
+            )
+            # Optimized values.
+            results.update(dict(zip(spn, p_opt[sliced].T)))
+            # Errors.
+            results.update(dict(zip([f"u_{pn}" for pn in spn], p_err[sliced].T)))
+            # Frozen values.
+            results.update(frozen_kwds)
 
+            yield (task, spectra, results, sliced)
+
+            si += N
+
+
+    @slurmify
+    def run(self):
+        """ Run this task. """
+
+        t_init = time()
+        model, all_spectra, (p_opt, p_err, meta) = self.execute()
+
+        # Get processing times.
+        times = model.get_processing_times()
+        if times is None:
+            log.warning("No processing time statistics parsed from FERRE")
+
+        for task, spectra, results, sliced \
+        in tqdm(
+                self.prepare_results(model, all_spectra, p_opt, p_err, meta), 
+                desc="Writing FERRE outputs",
+                total=p_opt.shape[0]
+            ):
+            
             # Write to database as required.
             if "database" in task.output():
                 task.output()["database"].write(results)
@@ -158,12 +189,20 @@ class FerreBase(FerreMixin, SourceMixin):
                     continuum=continuum,
                     model_flux=meta["model_flux"][sliced],
                     model_ivar=None,
-                    results_table=Table(data=results)
+                    results_table=Table(
+                        data={ k: v for k, v in results.items() if not k.startswith("frozen_") }
+                    )
                 )
             
-            si += N
-
+            # Trigger the task as complete.
+            if times is not None:
+                task.trigger_event_processing_time(
+                    sum(times["time_per_ordered_spectrum"][sliced]),
+                    cascade=True
+                )
+        
         model.teardown()
+        self.trigger_event_processing_time(time() - t_init, cascade=False)
 
         return None
 

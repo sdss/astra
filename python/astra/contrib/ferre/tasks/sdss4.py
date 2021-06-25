@@ -1,90 +1,90 @@
 
-import os
-from astra.tasks.io.sdss4 import ApStarFile
-from astra.tasks.targets import (LocalTarget, AstraSource)
+from astra.tasks.io.sdss4 import SDSS4ApStarFile
 from astra.contrib.ferre.tasks.aspcap import (
-    ApStarMixinBase,
-    FerreGivenApStarFileBase,
+    ApStarMixinBase, 
+    FerreGivenApStarFileBase, 
     InitialEstimateOfStellarParametersGivenApStarFileBase,
-    EstimateStellarParametersGivenApStarFileBase
+    CreateMedianFilteredApStarFileBase, 
+    EstimateStellarParametersGivenApStarFileBase,
+    EstimateChemicalAbundanceGivenApStarFileBase, 
+    EstimateChemicalAbundancesGivenApStarFileBase
 )
-from astra.contrib.ferre.tasks.targets import SDSS4FerreResult as FerreResult
 
 
+class SDSS4ApStarMixin(ApStarMixinBase, SDSS4ApStarFile):
 
-
-
-class ApStarMixin(ApStarMixinBase, ApStarFile):
-
-    def requires(self):
-        """ The requirements for this task. """
-        # If we are running in batch mode then the ApStar keywords will all be tuples, and we would have to
-        # add the requirement for every single ApStarFile. That adds overhead, and we don't need to do it:
-        # Astra will manage the batches to be expanded into individual tasks.
-        if self.is_batch_mode:
-            return []
-        return dict(observation=self.clone(ApStarFile))
-
-
-    def output(self):
-        """ Outputs of this task. """
-        if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
-        
-        requirements = {
-            "database": FerreResult(self),
-            "AstraSource": AstraSource(self)
-        }
-        if not self.write_source_output:
-            requirements.pop("AstraSource")
-        return requirements
-
+    """ A mix-in class for SDSS-V ApStar file. """
     
-class FerreGivenApStarFile(ApStarMixin, FerreGivenApStarFileBase):
+    @property
+    def ferre_task_factory(self):
+        return FerreGivenSDSS4ApStarFile
+    
+    @property
+    def observation_task_factory(self):
+        return SDSS4ApStarFile
+    
+    @property
+    def initial_estimate_task_factory(self):
+        return InitialEstimateOfStellarParametersGivenSDSS4ApStarFile
+    
+    @property
+    def stellar_parameters_task_factory(self):
+        return EstimateStellarParametersGivenSDSS4ApStarFile
 
-    """ A task to execute FERRE on a SDSS-IV ApStar file. """
+    @property
+    def chemical_abundance_task_factory(self):
+        return EstimateChemicalAbundanceGivenSDSS4ApStarFile
+
+
+
+class FerreGivenSDSS4ApStarFile(SDSS4ApStarMixin, FerreGivenApStarFileBase):
+
+    """ Execute FERRE given an SDSS-V ApStar file. """
 
     pass
 
 
-class InitialEstimateOfStellarParametersGivenApStarFile(ApStarMixin, InitialEstimateOfStellarParametersGivenApStarFileBase):
+class InitialEstimateOfStellarParametersGivenSDSS4ApStarFile(InitialEstimateOfStellarParametersGivenApStarFileBase, SDSS4ApStarMixin):
 
-    """ Estimate the stellar parameters of a source given an SDSS-IV ApStar file. """
+    """ Get an initial estimate of stellar parameters given an SDSS-IV ApStar file. """
 
     pass
 
 
 
+class CreateMedianFilteredSDSS4ApStarFile(CreateMedianFilteredApStarFileBase, SDSS4ApStarMixin):
 
-class CreateMedianFilteredApStarFile(CreateMedianFilteredApStarFileBase, ApStarMixin):
+    """ Create a median-filtered continuum-normalized spectrum for an SDSS-V ApStar file. """
 
-
-    def requires(self):
-        return {
-            "observation": self.clone(ApStarFile),
-            "initial_estimate": self.clone(InitialEstimateOfStellarParametersGivenApStarFile)
-        }
+    pass
 
 
-    def output(self):
-        if self.is_batch_mode:
-            return [task.output() for task in self.get_batch_tasks()]
-        
-        # TODO: To be defined by SDSS5/SDSS4 mixin
-        new_path = AstraSource(self).path.replace("/AstraSource", "/ApStar")
-        return LocalTarget(new_path)
+class EstimateStellarParametersGivenSDSS4ApStarFile(EstimateStellarParametersGivenApStarFileBase, SDSS4ApStarMixin):
+
+    """ Estimate stellar parameters given a SDSS-V ApStar file. """
+
+    # Here we overwrite the observation_task_factory (from ApStarFile) so that
+    # we use the median-filtered ApStarFile for stellar parameter determination.
+    @property
+    def observation_task_factory(self):
+        return CreateMedianFilteredSDSS4ApStarFile
 
 
-class EstimateStellarParametersGivenApStarFile(ApStarMixin, EstimateStellarParametersGivenApStarFileBase):
+class EstimateChemicalAbundanceGivenSDSS4ApStarFile(EstimateChemicalAbundanceGivenApStarFileBase, SDSS4ApStarMixin):
 
-    def requires(self):
-        """
-        The requirements of this task include a median-filtered ApStar file, and an initial
-        estimate of the stellar parameters (based on a series of previous FERRE executions).
-        """
-        return {
-            "observation": self.clone(CreateMedianFilteredApStarFile),
-            "initial_estimate": self.clone(InitialEstimateOfStellarParametersGivenApStarFile)
-        }
+    # Here we overwrite the observation_task_factory (from ApStarFile) so that
+    # we use the median-filtered  ApStarFile for chemical abundance determination.
+    @property
+    def observation_task_factory(self):
+        return CreateMedianFilteredSDSS4ApStarFile
 
-    
+     
+class EstimateChemicalAbundancesGivenSDSS4ApStarFile(EstimateChemicalAbundancesGivenApStarFileBase, SDSS4ApStarMixin):
+
+    """ Estimate chemical abundances given ApStar file. """
+
+    # Here we overwrite the observation_task_factory (from ApStarFile) so that
+    # we use the median-filtered  ApStarFile for chemical abundance determination.
+    @property
+    def observation_task_factory(self):
+        return CreateMedianFilteredSDSS4ApStarFile

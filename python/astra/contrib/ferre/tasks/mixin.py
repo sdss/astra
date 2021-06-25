@@ -1,62 +1,8 @@
 
 import astra
 import datetime
-from luigi import Config
-from astra.tasks.base import BaseTask
-from astra.tasks.slurm import slurm_mixin_factory
-
-
-
-class FERRE(Config):
-    interpolation_order = astra.IntParameter(default=3)
-    init_algorithm_flag = astra.IntParameter(default=1)
-    error_algorithm_flag = astra.IntParameter(default=1)
-    full_covariance = astra.BoolParameter(default=False)
-
-    continuum_flag = astra.IntParameter(default=1)
-    continuum_order = astra.IntParameter(default=4)
-    continuum_reject = astra.FloatParameter(default=0.1)
-    continuum_observations_flag = astra.IntParameter(default=1)
-    
-    optimization_algorithm_flag = astra.IntParameter(default=3)
-    wavelength_interpolation_flag = astra.IntParameter(default=0)
-
-    pca_project = astra.BoolParameter(default=False)
-    pca_chi = astra.BoolParameter(default=False)
-
-    lsf_shape_flag = astra.IntParameter(default=0)
-    use_direct_access = astra.BoolParameter(default=False, significant=False)
-    n_threads = astra.IntParameter(default=64, significant=False)
-
-    input_weights_path = astra.OptionalParameter(default="")
-    input_wavelength_mask_path = astra.OptionalParameter(default="")
-    input_lsf_path = astra.OptionalParameter(default="")
-    debug = astra.BoolParameter(default=False, significant=False)
-
-    directory_kwds = astra.DictParameter(default=None, significant=False)
-
-
-    # TODO: Put elsewhere?
-    
-    speclib_dir = astra.Parameter()
-
-    ferre_executable = astra.Parameter(default="ferre.x")
-
-    ferre_kwds = astra.DictParameter(default=None)
-
-    # Optionally disable generating AstraSource objects.
-    write_source_output = astra.BoolParameter(default=True, significant=False)
-
-    use_slurm = astra.BoolParameter(default=True, significant=False)
-    slurm_nodes = astra.IntParameter(default=1, significant=False)
-    slurm_ppn = astra.IntParameter(default=64, significant=False)
-    slurm_walltime = astra.Parameter(default="24:00:00", significant=False)
-    slurm_alloc = astra.Parameter(significant=False, default="sdss-np")
-    slurm_partition = astra.Parameter(significant=False, default="sdss-np")
-    slurm_mem = astra.Parameter(significant=False, default=64000)
-    slurm_gres = astra.Parameter(significant=False, default="")
-
-
+import numpy as np
+from astra.tasks import BaseTask
 
 
 class FerreMixin(BaseTask):
@@ -128,7 +74,7 @@ class FerreMixin(BaseTask):
         config_path=dict(section=task_namespace, name="use_direct_access")
     )
     n_threads = astra.IntParameter(
-        default=64, significant=False,
+        default=128, significant=False,
         config_path=dict(section=task_namespace, name="n_threads")
     )
 
@@ -144,69 +90,101 @@ class FerreMixin(BaseTask):
         default="",
         config_path=dict(section=task_namespace, name="input_lsf_path")
     )
+    ferre_kwds = astra.DictParameter(
+        default={},
+        config_path=dict(section=task_namespace, name="ferre_kwds")
+    )
+
+    # Optionally disable generating AstraSource objects.
+    write_source_output = astra.BoolParameter(default=True, significant=False)
+    
     debug = astra.BoolParameter(
         default=False, significant=False,
         config_path=dict(section=task_namespace, name="debug")
     )
-
-    directory_kwds = astra.DictParameter(
-        default=None, significant=False,
-        config_path=dict(section=task_namespace, name="directory_kwds")
-    )
-
-
-    # TODO: Put elsewhere?
-    speclib_dir = astra.Parameter(
-        config_path=dict(section="FERRE", name="speclib_dir")
-    )
-
-    ferre_executable = astra.Parameter(
-        default="ferre.x",
-        config_path=dict(section=task_namespace, name="ferre_executable")
-    )
-
-    ferre_kwds = astra.DictParameter(default=None)
-
-    # Optionally disable generating AstraSource objects.
-    write_source_output = astra.BoolParameter(default=True, significant=False)
-
     use_slurm = astra.BoolParameter(
         default=True, significant=False,
-        #config_path=dict(section="FERRE", name="use_slurm")
+        config_path=dict(section=task_namespace, name="use_slurm")
     )
     slurm_nodes = astra.IntParameter(
         default=1, significant=False,
-        #config_path=dict(section="FERRE", name="slurm_nodes")
+        config_path=dict(section=task_namespace, name="slurm_nodes")
     )
     slurm_ppn = astra.IntParameter(
-        default=64, significant=False,
-        #config_path=dict(section="FERRE", name="slurm_ppn")
+        default=8, significant=False,
+        config_path=dict(section=task_namespace, name="slurm_ppn")
     )
     slurm_walltime = astra.Parameter(
-        default="24:00:00", significant=False,
-        #config_path=dict(section="FERRE", name="slurm_walltime")        
+        default="01:00:00", significant=False,
+        config_path=dict(section=task_namespace, name="slurm_walltime")        
     )
     slurm_alloc = astra.Parameter(
         significant=False, default="sdss-np", # The SDSS-V cluster.
-        #config_path=dict(section="FERRE", name="slurm_alloc")
+        config_path=dict(section=task_namespace, name="slurm_alloc")
     )
     slurm_partition = astra.Parameter(
         significant=False, default="sdss-np",
-        #config_path=dict(section="FERRE", name="slurm_partition")
+        config_path=dict(section=task_namespace, name="slurm_partition")
     )
-    slurm_mem = astra.Parameter(
+    slurm_mem = astra.IntParameter(
         significant=False, default=64000,
-        #config_path=dict(section="FERRE", name="slurm_mem")
+        config_path=dict(section=task_namespace, name="slurm_mem")
     )
     slurm_gres = astra.Parameter(
         significant=False, default="",
-        #config_path=dict(section="FERRE", name="slurm_gres")
+        config_path=dict(section=task_namespace, name="slurm_gres")
     )
+
+
+    def get_related_task(self, key="initial_estimate"):
+        # TODO: This should probably go elsewhere.
+
+        # This method to get the metadata we need is more resilient against database
+        # transaction errors (which shouldn't happen, but anyways..)
+        related_task = self.requires()[key]
+
+        output_pk = related_task.output()["database"].read().output_pk
+        # Get the original FERRE task so we know the grid header path.
+        for ferre_task in related_task.requires():
+            if ferre_task.output()["database"].read().output_pk == output_pk:
+                break
+
+        else:
+            raise RuntimeError(f"Cannot find completed initial estimate for {task}")
+            
+        return ferre_task
+
+
 
 class SourceMixin(BaseTask):
 
     """ Mixin class for dealing with multiple objects in FERRE. """
 
-    initial_parameters = astra.DictParameter(default=None, batch_method=tuple)
-    frozen_parameters = astra.DictParameter(default=None)
+    # It may not be a great idea hard-coding these parameter names because FERRE
+    # can -- in principle -- be run on grids with any set of parameter names.
+    # But in practice these parameter names have not changed in 10 years, and there
+    # are no forseeable plans to change them.
 
+    # Encoding them like this (instead of a dictionary) means we can better see performance
+    # with respect to frozen and initial parameters.
+
+    initial_teff = astra.FloatParameter(batch_method=tuple)
+    initial_logg = astra.FloatParameter(batch_method=tuple)
+    initial_metals = astra.FloatParameter(batch_method=tuple)
+    initial_log10vdop = astra.FloatParameter(batch_method=tuple)
+    initial_o_mg_si_s_ca_ti = astra.FloatParameter(batch_method=tuple)
+    # LGVSINI is not always a parameter, so let's give a dummy default value.
+    initial_lgvsini = astra.FloatParameter(default=np.nan, batch_method=tuple)
+    initial_c = astra.FloatParameter(batch_method=tuple)
+    initial_n = astra.FloatParameter(batch_method=tuple)
+
+    # If a parameter is frozen then it is set through the INDINI/INDIV flags, and we
+    # cannot change this behaviour on a per-object basis.
+    frozen_teff = astra.BoolParameter(default=False)
+    frozen_logg = astra.BoolParameter(default=False)
+    frozen_metals = astra.BoolParameter(default=False)
+    frozen_log10vdop = astra.BoolParameter(default=False)
+    frozen_o_mg_si_s_ca_ti = astra.BoolParameter(default=False)
+    frozen_lgvsini = astra.BoolParameter(default=False)
+    frozen_c = astra.BoolParameter(default=False)
+    frozen_n = astra.BoolParameter(default=False)

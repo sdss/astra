@@ -8,6 +8,10 @@ from collections import OrderedDict
 from inspect import getfullargspec
 
 
+def sanitise_parameter_names(parameter_name):
+    return parameter_name.lower().strip().replace(" ", "_")
+
+
 def line_count(filename):
     return int(subprocess.check_output(['wc', '-l', filename]).split()[0])
 
@@ -292,6 +296,8 @@ def read_output_parameter_file(path, n_dimensions):
     keyword COVPRINT.
     """
 
+    names = np.loadtxt(path, usecols=(0, ), dtype=str)
+    
     results = np.atleast_2d(np.loadtxt(path, usecols=1 + np.arange(2 * n_dimensions + 3)))
 
     param = results[:, 0:n_dimensions]
@@ -302,7 +308,7 @@ def read_output_parameter_file(path, n_dimensions):
         log_snr_sq=results[:, -2],
         log_chisq_fit=results[:, -1]
     )
-    return (param, param_err, meta)
+    return (names, param, param_err, meta)
 
 
 
