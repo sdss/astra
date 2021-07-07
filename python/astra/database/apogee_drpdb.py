@@ -21,6 +21,11 @@ class Visit(Base):
 
 
 
+class Star(Base):
+    __tablename__ = "star"
+
+
+
 def define_relations():
     pass
 

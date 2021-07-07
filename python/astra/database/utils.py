@@ -18,9 +18,13 @@ def create_task_instance_in_database(task_id, parameters=None):
     # Get or create the parameter rows first.
     parameter_pks = []
     for name, value in parameters.items():
+
+        if not isinstance(value, str):
+            value = json.dumps(value)
+
         kwds = dict(
             parameter_name=name, 
-            parameter_value=json.dumps(value)
+            parameter_value=value
         )
         q = session.query(astradb.Parameter).filter_by(**kwds)
         instance = q.one_or_none()

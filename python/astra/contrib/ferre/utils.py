@@ -8,6 +8,7 @@ import subprocess
 from collections import OrderedDict
 from inspect import getfullargspec
 
+from astra.utils import log
 
 def sanitise_parameter_names(parameter_name):
     return parameter_name.lower().strip().replace(" ", "_")
@@ -184,8 +185,8 @@ def parse_grid_information(header_paths):
 
         except:
             # TODO: switch to log
-            print(f"Unable to parse FERRE headers for {full_header_path}")
-            continue
+            log.exception(f"Unable to parse FERRE headers for {full_header_path}")
+            raise
     
         else:
             # Get grid limits.
@@ -196,7 +197,7 @@ def parse_grid_information(header_paths):
         
 
 
-def yield_suitable_grids(grid_info, mean_fiber, teff, logg, fe_h, telescope, **kwargs):
+def yield_suitable_grids(grid_info, mean_fiber, teff, logg, metals, telescope, **kwargs):
     """
     Yield suitable FERRE grids given header information from an observation and a dictionary of grid limits.
     
@@ -213,7 +214,7 @@ def yield_suitable_grids(grid_info, mean_fiber, teff, logg, fe_h, telescope, **k
     :param logg:
         An initial guess of the surface gravity.
     
-    :param fe_h:
+    :param metals:
         An initial guess of the metallicity.
     
     :returns:
@@ -223,7 +224,7 @@ def yield_suitable_grids(grid_info, mean_fiber, teff, logg, fe_h, telescope, **k
     # Figure out which grids are suitable.
     lsf_grid = get_lsf_grid_name(int(np.round(mean_fiber)))
 
-    point = np.array([fe_h, logg, teff])
+    point = np.array([metals, logg, teff])
     P = point.size
     
     for header_path, (meta, lower_limits, upper_limits) in grid_info.items():

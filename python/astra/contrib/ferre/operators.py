@@ -8,7 +8,10 @@ from airflow.exceptions import AirflowSkipException
 from airflow.hooks.subprocess import SubprocessHook
 from airflow.models import BaseOperator
 from airflow.utils.operator_helpers import context_to_airflow_vars
-from sdss_access.path import SDSSPath
+from sdss_access import SDSSPath
+
+from sqlalchemy import or_
+
 
 from astropy.time import Time
 from astropy.io.fits import getheader
@@ -39,8 +42,12 @@ def get_sdss5_apstar_daily_observations(mjd, min_ngoodrvs=1):
     rows = q.all()
     keys = [column.name for column in columns]
 
-    data_model_kwds = [dict(zip(keys, values)) for values in rows]
-
+    data_model_kwds = []
+    for values in rows:
+        d = dict(zip(keys, values))
+        d.update(apstar="stars") # TODO: Raise with Nidever
+        data_model_kwds.append(d)
+        
     return (release, data_model_name, data_model_kwds)
 
 
@@ -127,7 +134,7 @@ def yield_initial_guess_from_doppler_headers(
 def _create_partial_ferre_task_instances_from_observations(
         release,
         data_model_name,
-        data_model_kwds,
+        all_data_model_kwds,
         task,
         params,
         **kwargs
@@ -148,6 +155,7 @@ def _create_partial_ferre_task_instances_from_observations(
     for data_model_kwds, initial_guess in initial_guesses:
         for header_path, ferre_headers in yield_suitable_grids(grid_info, **initial_guess):
             instance_meta.append(dict(
+                release=release,
                 data_model_name=data_model_name,
                 header_path=header_path,
                 # Add the initial guess information.
@@ -167,7 +175,7 @@ def _create_partial_ferre_task_instances_from_observations(
     pks = []
     for meta in instance_meta:
         # The task ID is temporary, and will be over-written when the next operator uses it.
-        instance = create_task_instance_in_database(task.task_id, **meta)
+        instance = create_task_instance_in_database(task.task_id, meta)
         pks.append(instance.pk)
     
     # Return the primary keys, which will be passed on to the next task.
@@ -196,7 +204,7 @@ def create_partial_ferre_task_instances_from_sdss4_apstar_observations(ds, task,
     return _create_partial_ferre_task_instances_from_observations(
         release, 
         data_model_name,
-        data_model_kwds, 
+        all_data_model_kwds, 
         task,
         params,
         **kwargs
@@ -223,6 +231,9 @@ def create_partial_ferre_task_instances_from_sdss5_apstar_observations(ds, task,
     # TODO: Here we are assuming a "@daily" interval schedule. We should consider how to incorporate
     #       the schedule interval.
     mjd = Time(ds).mjd
+    print(f"Cheating and taking the most recent MJD.")
+    q = session.query(apogee_drpdb.Star.mjdend).order_by(apogee_drpdb.Star.mjdend.desc())
+    mjd, = q.limit(1).one_or_none()
 
     # Get the identifiers for the APOGEE observations taken on this MJD.
     release, data_model_name, all_data_model_kwds = get_sdss5_apstar_daily_observations(mjd)
@@ -231,7 +242,7 @@ def create_partial_ferre_task_instances_from_sdss5_apstar_observations(ds, task,
     return _create_partial_ferre_task_instances_from_observations(
         release, 
         data_model_name,
-        data_model_kwds, 
+        all_data_model_kwds, 
         task,
         params,
         **kwargs
