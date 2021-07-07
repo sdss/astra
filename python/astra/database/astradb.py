@@ -23,9 +23,9 @@ class Base(AbstractConcreteBase, AstraBase):
 
 
 class TaskInstance(Base):
-    __tablename__ = "task_interface"
+    __tablename__ = "ti"
 
-    output_interface = relationship("OutputInterface", backref="task_interface")
+    output_interface = relationship("OutputInterface", backref="ti")
 
     def _output_dependent_objects(self):
         if self.output_interface is not None:
