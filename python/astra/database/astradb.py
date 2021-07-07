@@ -12,7 +12,7 @@ from astra.database import AstraBase, database, session
 
 class Base(AbstractConcreteBase, AstraBase):
     __abstract__ = True
-    _schema = "astra"
+    _schema = "astra_v02"
     _relations = "define_relations"
 
 
@@ -22,44 +22,19 @@ class Base(AbstractConcreteBase, AstraBase):
 
 
 
-class Task(Base):
-    __tablename__ = "task"
+class TaskInstance(Base):
+    __tablename__ = "task_interface"
 
-    output_interface = relationship("OutputInterface", backref="task")
+    output_interface = relationship("OutputInterface", backref="task_interface")
 
     def _output_dependent_objects(self):
         if self.output_interface is not None:
             yield from dependent_objects(self.output_interface)
 
-
-    @property
-    def batch_tasks(self):
-        pks = (bi.child_task_pk for bi in self.batch_interface)
-        return tuple(session.query(self.__class__).filter(self.__class__.pk.in_(pks)).all())
-
-
     @property
     def parameters(self):
-        if self.batch_interface:
-            # Assemble from individual tasks.
-            # We will need to know which parameters are batch parameters.
-            task_cls = self._get_task_class()
-            batch_param_names = task_cls.batch_param_names()
-
-            kwds = {}
-            for i, task in enumerate(self.batch_tasks):
-                if i == 0:
-                    kwds.update(task.parameters)
-                    kwds.update({ key: [] for key in batch_param_names })
-                
-                for key in batch_param_names:
-                    kwds[key].append(task.parameters[key])
-            
-            return kwds
-            
-        else:
-            q = session.query(Parameter).join(TaskParameter).filter(TaskParameter.task_pk==self.pk)
-            return dict(((p.parameter_name, p.parameter_value) for p in q.all()))
+        q = session.query(Parameter).join(TaskInstanceParameter).filter(TaskInstanceParameter.ti_pk==self.pk)
+        return dict(((p.parameter_name, p.parameter_value) for p in q.all()))
 
 
     
@@ -74,21 +49,6 @@ class Task(Base):
 
                 return instance
 
-    def _get_task_class(self):
-        if self.task_module is not None:
-            __import__(self.task_module)
-        
-        task_name, task_hash = self.task_id.split("_")
-        return Register.get_task_cls(task_name)
-
-
-    def load_task(self):
-        """ Recreate the task instance from this database record. """
-
-        task = self._get_task_class().from_str_params(self.parameters)
-        assert task.task_id == self.task_id
-        return task
-        
 
 
 class OutputInterface(Base):
@@ -96,21 +56,16 @@ class OutputInterface(Base):
 
 
     @property
-    def referenced_tasks(self):
+    def referenced_task_instances(self):
         """ A generator that yields tasks that point to this database output. """
         for instance in dependent_objects(self):
-            if isinstance(instance, Task):
+            if isinstance(instance, TaskInstance):
                 yield instance
 
 
-class BatchInterface(Base):
-    __tablename__ = "batch_interface"
 
-
-
-
-class TaskParameter(Base):
-    __tablename__ = "task_parameter"
+class TaskInstanceParameter(Base):
+    __tablename__ = "ti_parameter"
     
 
 class Parameter(Base):
@@ -119,8 +74,8 @@ class Parameter(Base):
 
 class OutputMixin:
 
-    def get_tasks(self):
-        return session.query(Task).filter_by(output_pk=self.output_pk).all()
+    def get_task_instances(self):
+        return session.query(TaskInstance).filter_by(output_pk=self.output_pk).all()
 
 
 class ApogeeNet(Base, OutputMixin):
@@ -155,7 +110,7 @@ class WDClassification(Base, OutputMixin):
 
 def define_relations():    
     
-    Task.batch_interface = relationship("BatchInterface", backref="task", foreign_keys="BatchInterface.parent_task_pk")
+    #Task.batch_interface = relationship("BatchInterface", backref="task", foreign_keys="BatchInterface.parent_task_pk")
     #Task.output_interface = relationship("OutputInterface", backref="task")
 
 

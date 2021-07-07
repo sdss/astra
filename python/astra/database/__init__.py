@@ -1,7 +1,5 @@
 import json
-import collections
 import os
-import warnings
 from functools import partial
 from luigi.parameter import _DictParamEncoder
 from sqlalchemy import MetaData, create_engine
@@ -119,11 +117,6 @@ class AstraDatabaseConnection(SQLADatabaseConnection):
                 cls=_DictParamEncoder
             ),
             **kwds
-            # Unclear whether we need this deserializer or not.
-            #json_deserializer=partial(
-            #    json.loads, 
-            #    object_pairs_hook=collections.OrderedDict
-            #)
         )
         self.metadata = MetaData(bind=self.engine)
         self.Session = scoped_session(sessionmaker(bind=self.engine, autocommit=True,
@@ -138,16 +131,15 @@ try:
     database.set_profile("astra")
 
 except AssertionError:
-    warnings.warn("""
-        No database profile named 'astra' found in ~/.config/sdssdb/sdssdb.yml -- 
-        it should look like this:
+    from astra.utils import log
+    log.warning(""" No database profile named 'astra' found in ~/.config/sdssdb/sdssdb.yml -- it should look like:
 
         astra:
           user: [SDSSDB_USERNAME]
           host: [SDSSDB_HOSTNAME]
           port: 5432
           domain: [SDSSDB_DOMAIN]
-  
+
         See https://sdssdb.readthedocs.io/en/stable/intro.html#supported-profiles for more details. 
         """
     )

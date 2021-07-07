@@ -2,8 +2,6 @@
 #
 # setup.py
 #
-
-
 from __future__ import division
 from __future__ import print_function
 from __future__ import absolute_import
@@ -14,12 +12,15 @@ import os
 import argparse
 import sys
 
-from python.astra import __version__ as VERSION
+root_dir = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(root_dir, 'VERSION')) as version_file:
+    VERSION = version_file.read().strip()
 
 # The NAME variable should be of the format "sdss-astra".
 # Please check your NAME adheres to that format.
 NAME = 'astra'
 RELEASE = 'dev' in VERSION
+
 
 
 def run(packages, install_requires):

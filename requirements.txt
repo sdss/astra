@@ -14,5 +14,6 @@ matplotlib
 tqdm>=4.46.0
 sdssdb
 specutils
+sdsstools
 ipython
 passlib

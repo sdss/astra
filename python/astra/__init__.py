@@ -12,7 +12,7 @@ import yaml
 from pkg_resources import parse_version
 from sdsstools.logger import (color_text, get_logger)
 
-__version__ = '0.1.12-dev'
+__version__ = '0.2.0-dev'
 
 try:
     from luigi import build as luigi_build
