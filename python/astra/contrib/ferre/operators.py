@@ -10,7 +10,7 @@ from airflow.models import BaseOperator
 from airflow.utils.operator_helpers import context_to_airflow_vars
 from sdss_access import SDSSPath
 
-from sqlalchemy import or_
+from sqlalchemy import or_, and_
 
 
 from astropy.time import Time
@@ -159,10 +159,10 @@ def _create_partial_ferre_task_instances_from_observations(
                 data_model_name=data_model_name,
                 header_path=header_path,
                 # Add the initial guess information.
-                initial_teff=initial_guess["teff"],
-                initial_logg=initial_guess["logg"],
-                initial_metals=initial_guess["metals"],
-                initial_log10vdop=approximate_log10_microturbulence(initial_guess["logg"]),
+                initial_teff=np.round(initial_guess["teff"], 0),
+                initial_logg=np.round(initial_guess["logg"], 2),
+                initial_metals=np.round(initial_guess["metals"], 2),
+                initial_log10vdop=np.round(approximate_log10_microturbulence(initial_guess["logg"]), 2),
                 initial_o_mg_si_s_ca_ti=0.0,
                 initial_lgvsini=0.0,
                 initial_c=0.0,
@@ -268,6 +268,9 @@ def choose_which_ferre_tasks_to_execute(func_task_name_from_path, task, **kwargs
     q = q.filter(or_(*(astradb.TaskInstance.pk == pk for pk in pks)))
     q = q.filter(astradb.Parameter.parameter_name == "header_path")
     
+
+    raise NotImplementedError("check this querY!)")
+
     rows = q.all()
     print(f"Retrieved {rows}")
 
@@ -324,21 +327,19 @@ class FerreOperator(BaseOperator):
         return None
     
 
-    def get_partial_task_instance_in_database(self, context):
+    def get_partial_task_instances_in_database(self, context):
         task, ti, params = (context["task"], context["ti"], context["params"])
 
         pks = ti.xcom_pull(task_ids="create_partial_ferre_task_instances")
 
-        q = session.query(astradb.TaskInstance).filter(or_(*(
-            astradb.TaskInstance.pk == pk for pk in pks
-        )))
-
-        for instance in q.all():
-            if instance.parameters["header_path"] == self.header_path:
-                return instance
-        else:
-            raise ValueError(f"no partial instance found matching header path {self.header_path} from pks ({pks})")
-
+        q = session.query(astradb.TaskInstance).join(astradb.TaskInstanceParameter).join(astradb.Parameter)
+        q = q.filter(astradb.TaskInstance.pk.in_(pks))
+        q = q.filter(and_(
+            astradb.Parameter.parameter_name == "header_path",
+            astradb.Parameter.parameter_value == self.header_path
+        ))
+        
+        return q.all()
         
 
 
@@ -347,7 +348,7 @@ class FerreOperator(BaseOperator):
         # The upstream task has created an instance in the database for this FERRE task, 
         # which includes the observation source parameters, etc.
 
-        instance = self.get_partial_task_instance_in_database()
+        instances = self.get_partial_task_instances_in_database()
 
         print(f"Got instance {instance}")
 
