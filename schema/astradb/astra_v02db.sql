@@ -273,8 +273,8 @@ create unique index unique_parameter on astra_v02.parameter (parameter_name, par
 /* Create the junction table between tasks and parameters */
 create table astra_v02.ti_parameter (
     pk serial primary key,
-    ti_pk bigint,
-    parameter_pk bigint,
+    ti_pk bigint not null,
+    parameter_pk bigint not null,
     foreign key (parameter_pk) references astra_v02.parameter(pk) on delete restrict,
     foreign key (ti_pk) references astra_v02.ti(pk) on delete restrict
 );

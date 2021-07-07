@@ -1,5 +1,6 @@
 
 import datetime
+import os
 import numpy as np
 import re
 import subprocess
@@ -130,6 +131,36 @@ def read_ferre_headers(path):
         return headers
 
 
+def get_grid_boundaries(ferre_grid_header_files, **kwargs):
+    """
+    Get the grid boundaries for the given FERRE grid header files.
+
+    :param ferre_grid_header_files:
+        A list of FERRE grid paths.
+    
+    :returns:
+        A dictionary with FERRE grid paths as keys, and each value contains
+        a dictionary of label names as keys and a tuple of (lower, upper)
+        boundary values.
+    """
+    boundaries = {}
+
+    for path in ferre_grid_header_files:
+        expanded_path = os.path.expandvars(path)
+        primary_header, *headers = read_ferre_headers(expanded_path)
+
+        args = (
+            primary_header["LABEL"],
+            primary_header["LLIMITS"],
+            primary_header["ULIMITS"]
+        )
+        boundaries[expanded_path] = {
+            label_name: (lower, upper) for label_name, lower, upper in zip(*args)
+        }
+
+    return boundaries
+    
+
 def parse_grid_information(header_paths):
     """
     Parse the parameter limits of a pre-computed grid (e.g., in effective temperature) from grid header paths provided,
@@ -144,24 +175,28 @@ def parse_grid_information(header_paths):
 
     grids = {}
     for header_path in header_paths:
+        
+        full_header_path = os.path.expandvars(header_path)
+
         try:
-            headers = read_ferre_headers(header_path)
-            meta = parse_header_path(header_path)
+            headers = read_ferre_headers(full_header_path)
+            meta = parse_header_path(full_header_path)
 
         except:
             # TODO: switch to log
-            print(f"Unable to parse FERRE headers for {header_path}")
+            print(f"Unable to parse FERRE headers for {full_header_path}")
             continue
     
         else:
             # Get grid limits.
-            grids[header_path] = (meta, headers[0]["LLIMITS"], headers[0]["ULIMITS"])
+            grids[header_path] = (meta, list(headers[0]["LLIMITS"]), list(headers[0]["ULIMITS"]))
 
+    print(f"GRIDS {grids}")
     return grids
         
 
 
-def yield_suitable_grids(grid_info, mean_fiber, teff, logg, fe_h, telescope):
+def yield_suitable_grids(grid_info, mean_fiber, teff, logg, fe_h, telescope, **kwargs):
     """
     Yield suitable FERRE grids given header information from an observation and a dictionary of grid limits.
     

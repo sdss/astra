@@ -57,7 +57,7 @@ class Ferre(object):
         ):        
 
         # Parse headers.
-        self.headers = utils.read_ferre_headers(grid_header_path)
+        self.headers = utils.read_ferre_headers(os.path.expandvars(grid_header_path))
 
         defaults = [
             ("synthfile_format_flag", 1),
@@ -115,7 +115,6 @@ class Ferre(object):
 
         self.debug = debug
 
-        #self.slurm_kwds = kwds.pop("slurm_kwds", {})
         return None
 
 
