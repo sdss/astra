@@ -38,6 +38,14 @@ class SlurmPythonOperator(PythonOperator):
     :type slurm_kwargs: dict
     """
 
+    ui_color = "#BDCC94"
+
+    shallow_copy_attrs = (
+        'python_callable',
+        'op_kwargs',
+        'slurm_kwargs'
+    )
+
     def __init__(
         self,
         *,
