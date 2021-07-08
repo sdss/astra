@@ -40,6 +40,14 @@ class SlurmPythonOperator(PythonOperator):
 
     ui_color = "#BDCC94"
 
+    template_fields = ('templates_dict', 'op_args', 'op_kwargs', 'slurm_kwargs')
+    template_fields_renderers = {
+        "templates_dict": "json", 
+        "op_args": "py", 
+        "op_kwargs": "py",
+        "slurm_kwargs": "py"
+    }
+
     shallow_copy_attrs = (
         'python_callable',
         'op_kwargs',
