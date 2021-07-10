@@ -26,6 +26,7 @@ create table astra_v02.output_interface (
 /* Create the primary task instance table */
 create table astra_v02.ti (
     pk serial primary key,
+    dag_id text,
     task_id text not null,
     output_pk bigint,
     created timestamp default now(),
