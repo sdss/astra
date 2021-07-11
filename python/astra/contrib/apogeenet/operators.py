@@ -4,6 +4,7 @@ import torch
 
 from tqdm import tqdm
 
+from sdss_access import SDSSPath
 from astra.utils import log
 from astra.contrib.apogeenet.model import (Net, predict, create_flux_tensor)
 from astra.database import astradb, session
@@ -14,7 +15,7 @@ from astra.database.utils import (
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def estimate_stellar_parameters(
+def estimate_stellar_labels(
         pks,
         model_path,
         analyze_individual_visits=True,

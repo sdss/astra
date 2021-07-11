@@ -59,11 +59,20 @@ def load_state(path):
     )
 
 
-def test(wavelength,
-         flux,
-         ivar,
-         neural_network_coefficients, scales, model_wavelength, label_names, initial_labels=None, 
-         radial_velocity_tolerance=None, **kwargs):
+
+
+def test(
+        wavelength,
+        flux,
+        ivar,
+        neural_network_coefficients, 
+        scales, 
+        model_wavelength, 
+        label_names, 
+        initial_labels=None, 
+        radial_velocity_tolerance=None, 
+        **kwargs
+    ):
     r"""
     Use a pre-trained neural network to estimate the stellar labels for the given spectrum.
 
@@ -120,7 +129,6 @@ def test(wavelength,
 
         else:
             bounds[:, -1] = radial_velocity_tolerance
-
     
     N, P = flux.shape
 
@@ -131,34 +139,32 @@ def test(wavelength,
 
     x_min, x_max = scales
 
+    # Define objective function.
+    def objective_function(x, *labels):
+        y_pred = _predict_stellar_spectrum(labels[:K], weights, biases)
+        if fit_radial_velocity:
+            # Here we are shifting the *observed* spectra. That's not the Right Thing to do, but it
+            # probably doesn't matter here.
+            y_pred = _redshift(x, y_pred, labels[-1])
+        return y_pred
+
     for i in range(N):
-            
         y_original = flux[i].reshape(wavelength.shape)
         # TODO: Assuming an inverse variance array (likely true).
         y_err_original = ivar[i].reshape(wavelength.shape)**-0.5
 
         # Interpolate data onto model -- not The Right Thing to do!
-        interp_kwds = dict()
-        y = np.interp(model_wavelength, wavelength, y_original, **interp_kwds) 
-        y_err = np.interp(model_wavelength, wavelength, y_err_original, **interp_kwds)
-        x = model_wavelength.copy()
+        y = np.interp(model_wavelength, wavelength, y_original) 
+        y_err = np.interp(model_wavelength, wavelength, y_err_original)
 
         # Fix non-finite pixels and error values.
         non_finite = ~np.isfinite(y * y_err)
         y[non_finite] = 1
         y_err[non_finite] = LARGE
 
-        def objective_function(x, *labels):
-            y_pred = _predict_stellar_spectrum(labels[:K], weights, biases)
-            if fit_radial_velocity:
-                # Here we are shifting the *observed* spectra. That's not the Right Thing to do, but it
-                # probably doesn't matter here.
-                y_pred = _redshift(x, y_pred, labels[-1])
-            return y_pred
-
         kwds = kwargs.copy()
         kwds.update(
-            xdata=x, 
+            xdata=model_wavelength, 
             ydata=y, 
             sigma=y_err, 
             p0=initial_labels, 
@@ -172,14 +178,13 @@ def test(wavelength,
 
         except ValueError:
             log.exception(f"Error occurred fitting spectrum {i}:")
-            
             meta.append(dict(
                 chi_sq=np.nan,
                 r_chi_sq=np.nan
             ))
 
         else:
-            y_pred = objective_function(x, *p_opt)
+            y_pred = objective_function(model_wavelength, *p_opt)
             
             # Calculate summary statistics.
             chi_sq, r_chi_sq = get_chi_sq(y_pred, y, y_err, L)
@@ -191,7 +196,6 @@ def test(wavelength,
                 wavelength,
                 model_wavelength,
                 y_pred,
-                **interp_kwds
             )
 
             meta.append(dict(

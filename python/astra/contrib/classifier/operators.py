@@ -10,7 +10,7 @@ from astra.contrib.classifier import networks, model, plot_utils, utils
 from astra.database import astradb, session
 from astra.database.utils import create_task_output, deserialize_pks
 from astra.tools.spectrum import Spectrum1D
-from astra.utils import log
+from astra.utils import log, hashify
 
 from sdss_access import SDSSPath
 
