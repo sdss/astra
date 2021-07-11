@@ -94,7 +94,7 @@ def classify(
         if tree is None:
             trees[parameters["release"]] = tree = SDSSPath(release=parameters["release"])
         
-        path = tree.full(parameters["data_model_name"], **parameters)
+        path = tree.full(**parameters)
 
         # Load the spectrum.
         try:

@@ -51,13 +51,13 @@ def get_sdss5_apstar_kwds(
     :returns:
         a list of dictionaries containing the identifying keywords for SDSS-V
         APOGEE stars observed on the given MJD, including the `release` and
-        `data_model_name` keys necessary to identify the path
+        `filetype` keys necessary to identify the path
     """
     mjd = parse_mjd(mjd)
 
-    # TODO: Consider switching to 'filetype' instead of 'data_model_name' to be
+    # TODO: Consider switching to 'filetype' instead of 'filetype' to be
     #       consistent with SDSSPath.full() argument names.
-    release, data_model_name = ("sdss5", "apStar")
+    release, filetype = ("sdss5", "apStar")
     columns = (
         apogee_drpdb.Star.apred_vers.label("apred"), # TODO: Raise with Nidever
         apogee_drpdb.Star.healpix,
@@ -77,7 +77,7 @@ def get_sdss5_apstar_kwds(
         d = dict(zip(keys, values))
         d.update(
             release=release,
-            data_model_name=data_model_name,
+            filetype=filetype,
             apstar="stars", # TODO: Raise with Nidever
         )
         kwds.append(d)
@@ -97,11 +97,11 @@ def get_sdss5_apvisit_kwds(
     :returns:
         a list of dictionaries containing the identifying keywords for SDSS-V
         APOGEE visits observed on the given MJD, including the `release` and
-        `data_model_name` keys necessary to identify the path
+        `filetype` keys necessary to identify the path
     """
 
     mjd = parse_mjd(mjd)
-    release, data_model_name = ("sdss5", "apVisit")
+    release, filetype = ("sdss5", "apVisit")
     columns = (
         apogee_drpdb.Visit.fiberid.label("fiber"), # TODO: Raise with Nidever
         apogee_drpdb.Visit.plate,
@@ -116,7 +116,7 @@ def get_sdss5_apvisit_kwds(
     for fiber, plate, field, mjd, apred, filename in q.all():
         kwds.append(dict(
             release=release,
-            data_model_name=data_model_name,
+            filetype=filetype,
             fiber=fiber,
             plate=plate,
             field=field,
@@ -153,6 +153,47 @@ def create_task_instances_for_sdss5_apvisits(
     """
 
     all_kwds = get_sdss5_apvisit_kwds(mjd)
+
+    instances = []
+    for kwds in all_kwds:
+        instances.append(
+            get_or_create_task_instance(
+                dag_id,
+                task_id,
+                **kwds,
+                **parameters
+        ))
+
+    if full_output:
+        return instances
+    return [instance.pk for instance in instances]
+
+
+def create_task_instances_for_sdss5_apstars(
+        dag_id,
+        task_id,
+        mjd,
+        full_output=False,
+        **parameters
+    ):
+    """
+    Create task instances for SDSS5 APOGEE stars taken on a Modified Julian Date,
+    with the given identifiers for the directed acyclic graph and the task.
+
+    :param dag_id:
+        the identifier string of the directed acyclic graph
+
+    :param task_id:
+        the task identifier
+
+    :param mjd:
+        the Modified Julian Date of the observations
+    
+    :param \**parameters: [optional]
+        additional parameters to be assigned to the task instances
+    """
+
+    all_kwds = get_sdss5_apstar_kwds(mjd)
 
     instances = []
     for kwds in all_kwds:
@@ -231,7 +272,7 @@ def create_task_instances_for_sdss5_apstars_from_apvisits(
         kwds = dict(
             apstar="stars", # TODO: Raise with Nidever
             release="sdss5",
-            data_model_name="apStar",
+            filetype="apStar",
             healpix=healpix,
             apred=apred,
             telescope=telescope,
