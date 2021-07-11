@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-
 class Net(nn.Module):
 
     """
@@ -98,3 +97,63 @@ def predict(model, eval_inputs):
     ))
 
     return result
+
+
+
+def create_flux_tensor(
+        flux,
+        error,
+        device,
+        num_uncertainty_draws=100,
+        dtype=np.float32,
+        large_error=1e10
+    ):
+    """
+    Create the requried flux tensor given the spectrum flux and error values,
+    and cast it to the given device.
+
+    :param flux:
+        The spectrum flux array.
+    
+    :param error:
+        The spectrum error array. This should be the same shape as `flux`.
+    
+    :param device:
+        The name of the torch device to use.
+    
+    :param num_uncertainty_draws: [optional]
+        The number of draws to make of the flux values to propagate the parameter
+        uncertainties (default: 100).
+    
+    :param dtype: [optional]
+        The parameter type (default: np.float32).
+    
+    :param large_error: [optional]
+        An arbitrarily large value to assign to 'bad' pixels.
+    """
+    
+    flux = np.atleast_2d(flux)
+    error = np.atleast_2d(error)
+
+    N, P = flux.shape
+
+    bad = ~np.isfinite(flux) + ~np.isfinite(error)
+    flux[bad] = np.nanmedian(flux)
+    error[bad] = large_error
+
+    flux = torch.from_numpy(flux).to(device)
+    error = torch.from_numpy(error).to(device)
+
+    flux_tensor = torch.randn(num_uncertainty_draws, 1, P).to(device)
+    median_error = torch.median(error).item()
+
+    error = torch.where(error == large_error, flux, error)
+    error_t = torch.tensor(np.array([5 * median_error], dtype=dtype)).to(device)
+
+    error = torch.where(error >= 5 * median_error, error_t, error)
+
+    flux_tensor = flux_tensor * error + flux
+    flux_tensor[0][0] = flux
+
+    return flux_tensor
+
