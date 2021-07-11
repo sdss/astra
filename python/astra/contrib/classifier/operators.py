@@ -8,17 +8,12 @@ from tqdm import tqdm
 
 from astra.contrib.classifier import networks, model, plot_utils, utils
 from astra.database import astradb, session
-from astra.database.utils import create_task_output
+from astra.database.utils import create_task_output, deserialize_pks
 from astra.tools.spectrum import Spectrum1D
 from astra.utils import log
 
 from sdss_access import SDSSPath
 
-# TODO: Put elsewhere
-def deserialize_pks(pks):
-    if isinstance(pks, str):
-        return json.loads(pks)
-    return pks
 
 def get_model_path(
         network_factory: str,
@@ -150,18 +145,24 @@ def classify(
             prob=prob
         )
 
-'''
-def classify_sdss5_apstar(
-        pks
-    ):
 
-    # The pks will give us information about the *visits*, but we need to use that to:
-    # 1. Create instances of per star basis
-    # 2. Get all the visit classifications for each star.
-    # 3. Create outputs for each star.
+def classify_sdss5_apstar(pks):
+    """
+    Classify observations of SDSS5 APOGEE (ApStar) sources, given the existing classifications of the
+    individual visits.
+
+    :param pks:
+        The primary keys of task instances where visits have been classified. These primary keys will
+        be used to work out which stars need classifying, before tasks
+    """
+
+    print(pks)
+    print(deserialize_pks(pks))
+    # Match stars to visits, for the same dag_id.
     q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk.in_(deserialize_pks(pks)))
-'''
     
+    raise NotImplementedError
+
 
 
 

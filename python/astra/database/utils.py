@@ -5,7 +5,12 @@ from typing import Dict
 from sqlalchemy import (or_, and_, func, distinct)
 
 
-def parse_mjd(mjd):
+deserialize_pks = lambda pks: json.loads(pks) if isinstance(pks, str) else pks
+
+
+def parse_mjd(
+        mjd
+    ):
     """
     Parse Modified Julian Date, which might be in the form of an execution date
     from Apache Airflow (e.g., YYYY-MM-DD), or as a MJD integer. The order of
@@ -30,7 +35,10 @@ def parse_mjd(mjd):
     return mjd
 
 
-def get_sdss5_apstar_kwds(mjd, min_ngoodrvs=1):
+def get_sdss5_apstar_kwds(
+        mjd, 
+        min_ngoodrvs=1
+    ):
     """
     Get identifying keywords for SDSS-V APOGEE stars observed on the given MJD.
 
@@ -77,7 +85,9 @@ def get_sdss5_apstar_kwds(mjd, min_ngoodrvs=1):
     return kwds
 
 
-def get_sdss5_apvisit_kwds(mjd):
+def get_sdss5_apvisit_kwds(
+        mjd
+    ):
     """
     Get identifying keywords for SDSS-V APOGEE visits taken on the given MJD.
 
@@ -118,7 +128,13 @@ def get_sdss5_apvisit_kwds(mjd):
     return kwds
     
 
-def create_task_instances_for_sdss5_apvisits(dag_id, task_id, mjd, **parameters):
+def create_task_instances_for_sdss5_apvisits(
+        dag_id,
+        task_id,
+        mjd,
+        full_output=False,
+        **parameters
+    ):
     """
     Create task instances for SDSS5 APOGEE visits taken on a Modified Julian Date,
     with the given identifiers for the directed acyclic graph and the task.
@@ -146,9 +162,95 @@ def create_task_instances_for_sdss5_apvisits(dag_id, task_id, mjd, **parameters)
                 task_id,
                 **kwds,
                 **parameters
+        ))
+
+    if full_output:
+        return instances
+    return [instance.pk for instance in instances]
+
+
+def create_task_instances_for_sdss5_apstars_from_apvisits(
+        dag_id,
+        task_id,
+        apvisit_pks,
+        full_output=False,
+        **parameters
+    ):
+    """
+    Create task instances for SDSS-V ApStar objects, given some primary keys for task instances 
+    that reference SDSS-V ApVisit objects.
+
+    :param dag_id:
+        the identifier string of the directed acyclic graph
+
+    :param task_id:
+        the task identifier
+
+    :param apvisit_pks:
+        primary keys of task instances that refer to SDSS-V ApVisit objects
+    
+    :param full_output: [optional]
+        If true, return the instances created. Otherwise just return the primary keys of the instances.
+    
+    :param \**parameters: [optional]
+        additional parameters to be assigned to the task instances
+    """
+
+    # Get the unique stars from the primary keys.
+    q = session.join(astradb.TaskInstance)\
+               .filter(astradb.TaskInstance.pk._in(deserialize_pks(apvisit_pks)))
+
+    # Match stars to visits by:
+    keys = ("telescope", "obj", "apred")
+    
+    star_keywords = set([[ti.parameters[k] for k in keys] for ti in q.all()])
+
+    # Match these to the apogee_drp.Star table.
+    columns = (
+        apogee_drpdb.Star.apred_vers.label("apred"), # TODO: Raise with Nidever
+        apogee_drpdb.Star.healpix,
+        apogee_drpdb.Star.telescope,
+        apogee_drpdb.Star.apogee_id.label("obj"), # TODO: Raise with Nidever
+    )
+    common_kwds = dict(apstar="stars") # TODO: Raise with Nidever
+
+    instances = []
+    for telescope, obj, apred in star_keywords:
+        q = session.query(apogee_drpdb.Star.healpix)\
+                   .distinct(apogee_drpdb.Star.healpix)\
+                   .filter(
+                       apogee_drpdb.Star.apred_vers == apred,
+                       apogee_drpdb.Star.telescope == telescope,
+                       apogee_drpdb.Star.apogee_id == obj
+                    )
+        r = q.one_or_none()
+        if r is None: 
+            continue
+        healpix, = r
+
+        kwds = dict(
+            apstar="stars", # TODO: Raise with Nidever
+            release="sdss5",
+            data_model_name="apStar",
+            healpix=healpix,
+            apred=apred,
+            telescope=telescope,
+            obj=obj,
         )
 
-    return instances
+        instances.append(
+            get_or_create_task_instance(
+                dag_id,
+                task_id,
+                **kwds,
+                **parameters
+            )
+        )
+
+    if full_output:
+        return instances
+    return [instance.pk for instance in instances]
+
 
 
 def get_task_instance(
@@ -206,7 +308,10 @@ def get_task_instance(
     return q.one_or_none()
 
 
-def get_or_create_parameter_pk(name, value):
+def get_or_create_parameter_pk(
+        name, 
+        value
+    ):
     """
     Get or create the primary key for a parameter key/value pair in the database.
 
@@ -236,8 +341,11 @@ def get_or_create_parameter_pk(name, value):
     return (instance.pk, create)
 
 
-
-def create_task_instance(dag_id, task_id, parameters=None):
+def create_task_instance(
+        dag_id, 
+        task_id, 
+        parameters=None
+    ):
     """
     Create a task instance in the database with the given identifiers and parameters.
 
@@ -274,7 +382,11 @@ def create_task_instance(dag_id, task_id, parameters=None):
     return ti
 
 
-def get_or_create_task_instance(dag_id, task_id, parameters=None):
+def get_or_create_task_instance(
+        dag_id, 
+        task_id, 
+        parameters=None
+    ):
     """
     Get or create a task instance given the identifiers of the directed acyclic graph, the task,
     and the parameters of the task instance.
@@ -296,7 +408,11 @@ def get_or_create_task_instance(dag_id, task_id, parameters=None):
         return create_task_instance(dag_id, task_id, parameters)
 
 
-def create_task_output(task_instance_or_pk, model, **kwargs):
+def create_task_output(
+        task_instance_or_pk, 
+        model, 
+        **kwargs
+    ):
     """
     Create a new entry in the database for the output of a task.
 
