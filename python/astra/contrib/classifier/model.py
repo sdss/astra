@@ -245,12 +245,7 @@ def train(
         status_message.append("="*15)
 
         print("\n".join(status_message))
-        if task is not None:
-            try:
-                task.set_progress_percentage(100 * epoch / n_epochs)
-                task.set_status_message("\n".join(status_message))
-            except:
-                None
+
 
 
     state = dict(

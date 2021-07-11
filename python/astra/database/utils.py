@@ -5,22 +5,50 @@ from typing import Dict
 from sqlalchemy import (or_, and_, func, distinct)
 
 
+def parse_mjd(mjd):
+    """
+    Parse Modified Julian Date, which might be in the form of an execution date
+    from Apache Airflow (e.g., YYYY-MM-DD), or as a MJD integer. The order of
+    checks here is:
+
+        1. if it is not a string, just return the input
+        2. if it is a string, try to parse the input as an integer
+        3. if it is a string and cannot be parsed as an integer, parse it as
+           a date time string
+
+    :param mjd:
+        the Modified Julian Date, in various possible forms.
+    
+    :returns:
+        the parsed Modified Julian Date
+    """
+    if isinstance(mjd, str):
+        try:
+            mjd = int(mjd)
+        except:
+            return Time(mjd).mjd
+    return mjd
+
 
 def get_sdss5_apstar_kwds(mjd, min_ngoodrvs=1):
     """
     Get identifying keywords for SDSS-V APOGEE stars observed on the given MJD.
 
     :param mjd:
-        The Modified Julian Date of the observations.
+        the Modified Julian Date of the observations
     
     :param min_ngoodrvs: [optional]
-        The minimum number of good radial velocity measurements (default: 1).
+        the minimum number of good radial velocity measurements (default: 1)
     
     :returns:
-        A three length tuple containing the data release name, the data model name,
-        and a list of dictionaries containing the identifying keywords for SDSS-V
-        APOGEE stars observed on the given MJD.
+        a list of dictionaries containing the identifying keywords for SDSS-V
+        APOGEE stars observed on the given MJD, including the `release` and
+        `data_model_name` keys necessary to identify the path
     """
+    mjd = parse_mjd(mjd)
+
+    # TODO: Consider switching to 'filetype' instead of 'data_model_name' to be
+    #       consistent with SDSSPath.full() argument names.
     release, data_model_name = ("sdss5", "apStar")
     columns = (
         apogee_drpdb.Star.apred_vers.label("apred"), # TODO: Raise with Nidever
@@ -36,13 +64,17 @@ def get_sdss5_apstar_kwds(mjd, min_ngoodrvs=1):
     rows = q.all()
     keys = [column.name for column in columns]
 
-    data_model_kwds = []
+    kwds = []
     for values in rows:
         d = dict(zip(keys, values))
-        d.update(apstar="stars") # TODO: Raise with Nidever
-        data_model_kwds.append(d)
+        d.update(
+            release=release,
+            data_model_name=data_model_name,
+            apstar="stars", # TODO: Raise with Nidever
+        )
+        kwds.append(d)
         
-    return (release, data_model_name, data_model_kwds)
+    return kwds
 
 
 def get_sdss5_apvisit_kwds(mjd):
@@ -53,11 +85,12 @@ def get_sdss5_apvisit_kwds(mjd):
         The Modified Julian Date of the observations.
     
     :returns:
-        A three length tuple containing the data release name, the data model name,
-        and a list of dictionaries containing the identifying keywords for SDSS-V
-        APOGEE visits taken on the given MJD.
+        a list of dictionaries containing the identifying keywords for SDSS-V
+        APOGEE visits observed on the given MJD, including the `release` and
+        `data_model_name` keys necessary to identify the path
     """
 
+    mjd = parse_mjd(mjd)
     release, data_model_name = ("sdss5", "apVisit")
     columns = (
         apogee_drpdb.Visit.fiberid.label("fiber"), # TODO: Raise with Nidever
@@ -69,9 +102,11 @@ def get_sdss5_apvisit_kwds(mjd):
     )
     q = session.query(*columns).distinct(*columns).q.filter(apogee_drpdb.Visit.mjd == mjd)
 
-    data_model_kwds = []
+    kwds = []
     for fiber, plate, field, mjd, apred, filename in q.all():
-        data_model_kwds.append(dict(
+        kwds.append(dict(
+            release=release,
+            data_model_name=data_model_name,
             fiber=fiber,
             plate=plate,
             field=field,
@@ -80,13 +115,40 @@ def get_sdss5_apvisit_kwds(mjd):
             prefix=filename[:2]
         ))
 
-    return (release, data_model_name, data_model_kwds)
+    return kwds
+    
 
+def create_task_instances_for_sdss5_apvisits(dag_id, task_id, mjd, **parameters):
+    """
+    Create task instances for SDSS5 APOGEE visits taken on a Modified Julian Date,
+    with the given identifiers for the directed acyclic graph and the task.
 
-def create_task_instances_for_sdss5_apstars(dag_id, task_id, mjd, **kwargs):
-    raise a
+    :param dag_id:
+        the identifier string of the directed acyclic graph
 
+    :param task_id:
+        the task identifier
 
+    :param mjd:
+        the Modified Julian Date of the observations
+    
+    :param \**parameters: [optional]
+        additional parameters to be assigned to the task instances
+    """
+
+    all_kwds = get_sdss5_apvisit_kwds(mjd)
+
+    instances = []
+    for kwds in all_kwds:
+        instances.append(
+            get_or_create_task_instance(
+                dag_id,
+                task_id,
+                **kwds,
+                **parameters
+        )
+
+    return instances
 
 
 def get_task_instance(
@@ -232,3 +294,54 @@ def get_or_create_task_instance(dag_id, task_id, parameters=None):
     instance = get_task_instance(dag_id, task_id, parameters)
     if instance is None:
         return create_task_instance(dag_id, task_id, parameters)
+
+
+def create_task_output(task_instance_or_pk, model, **kwargs):
+    """
+    Create a new entry in the database for the output of a task.
+
+    :param task_instance_or_pk:
+        the task instance (or its primary key) to reference this output to
+        
+    :param model:
+        the database model to store the result (e.g., `astra.database.astradb.Ferre`)
+    
+    :param \**kwargs:
+        the keyword arguments that will be stored in the database
+    
+    :returns:
+        A two-length tuple containing the task instance, and the output instance
+    """
+
+    # Get the task instance.
+    if not isinstance(task_instance_or_pk, astradb.TaskInstance):
+        task_instance = session.query(astradb.TaskInstance)\
+                            .filter(astradb.TaskInstance.pk == task_instance_pk)\
+                            .one_or_none()
+                            
+        if task_instance is None:
+            raise ValueError(f"no task instance found matching primary key {task_instance_pk}")
+    else:
+        task_instance = task_instance_or_pk
+
+    # Create a new output interface entry.
+    with session.begin():
+        output = astradb.OutputInterface()
+        session.add(output)
+
+    assert output.pk is not None
+
+    kwds = dict(output_pk=output.pk)
+    kwds.update(kwargs)
+
+    # Create the instance of the result.
+    instance = model(**kwds)
+    with session.begin():
+        session.add(instance)
+    
+    # Reference the output to the task instance.
+    task_instance.output_pk = output.pk
+
+    session.flush()
+    
+    return (task_instance, instance)

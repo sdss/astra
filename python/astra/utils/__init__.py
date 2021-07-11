@@ -7,6 +7,11 @@ import logging
 #from sdsstools.logger import get_logger
 from time import time
 
+
+
+import hashlib
+import json
+
 import os
 import tempfile
 
@@ -90,6 +95,21 @@ def unique_everseen(iterable, key=None):
 
 def skip_incomplete(iterable, task_class):
     return filter(lambda kwd: task_class(**kwd).complete(), iterable)
+
+
+def hashify(params, max_length=8):
+    """
+    Create a short hashed string of the given parameters.
+
+    :param params:
+        A dictionary of key, value pairs for parameters.
+    
+    :param max_length: [optional]
+        The maximum length of the hashed string.
+    """
+    param_str = json.dumps(params, separators=(',', ':'), sort_keys=True)
+    param_hash = hashlib.md5(param_str.encode('utf-8')).hexdigest()
+    return param_hash[:max_length]
 
 
 def batcher(iterable, max_batch_size=None, task_factory=None, unique=False, ordered=True):

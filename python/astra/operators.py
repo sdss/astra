@@ -135,3 +135,4 @@ class SlurmPythonOperator(PythonOperator):
             log.info(f"Job {q.key} in {q.job_dir} is complete after {(time() - t_init)/60:.0f} minutes.")
             return None
             
+
