@@ -80,7 +80,8 @@ def get_sdss4_apstar_kwds(limit=None, **kwargs):
 
 def get_sdss5_apstar_kwds(
         mjd, 
-        min_ngoodrvs=1
+        min_ngoodrvs=1,
+        limit=None,
     ):
     """
     Get identifying keywords for SDSS-V APOGEE stars observed on the given MJD.
@@ -111,6 +112,8 @@ def get_sdss5_apstar_kwds(
     q = session.query(*columns).distinct(*columns)
     q = q.filter(apogee_drpdb.Star.mjdend == mjd)\
          .filter(apogee_drpdb.Star.ngoodrvs >= min_ngoodrvs)
+    if limit is not None:
+        q = q.limit(limit)
 
     rows = q.all()
     keys = [column.name for column in columns]
@@ -216,6 +219,7 @@ def create_task_instances_for_sdss5_apstars(
         dag_id,
         task_id,
         mjd,
+        limit=None,
         full_output=False,
         **parameters
     ):
@@ -236,10 +240,7 @@ def create_task_instances_for_sdss5_apstars(
         additional parameters to be assigned to the task instances
     """
 
-    all_kwds = get_sdss5_apstar_kwds(mjd)
-
-    print(f"DAG IDENTIFIER IS {dag_id}")
-    print(f"TASK IDENTIFIER IS {task_id}")
+    all_kwds = get_sdss5_apstar_kwds(mjd, limit=limit)
 
     instances = []
     for kwds in all_kwds:
@@ -540,8 +541,9 @@ def create_task_output(
         session.add(instance)
 
     # Reference the output to the task instance.
-    task_instance.output_pk = output.pk
+    with session.begin():
+        task_instance.output_pk = output.pk
 
-    session.commit()
-    
+    assert task_instance.output_pk is not None
+
     return (task_instance, instance)

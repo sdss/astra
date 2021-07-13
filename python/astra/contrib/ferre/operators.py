@@ -18,17 +18,18 @@ from astra.tools.spectrum import Spectrum1D
 from astra.contrib.ferre.core import Ferre
 from astra.contrib.ferre.utils import (
     parse_header_path, parse_grid_information, safe_read_header, approximate_log10_microturbulence, yield_suitable_grids,
-    write_data_file, format_ferre_input_parameters
+    write_data_file, format_ferre_input_parameters, read_output_parameter_file,
+    sanitise_parameter_name
 )
-from astra.utils import log
+from astra.utils import log, flatten
 from astra.database import astradb, apogee_drpdb, catalogdb, session
 from astra.database.utils import (
+    create_task_output,
     deserialize_pks,
     get_or_create_task_instance, 
     get_sdss4_apstar_kwds,
     get_sdss5_apstar_kwds,
 )
-
 
 
 def yield_initial_guess_from_doppler_headers(data_model_kwds):
@@ -153,7 +154,14 @@ def create_task_instances_for_sdss4_apstars(dag_id, task_id_function, ferre_head
         **kwargs
     )
 
-def create_task_instances_for_sdss5_apstars(mjd, dag_id, task_id_function, ferre_header_paths, **kwargs):
+def create_task_instances_for_sdss5_apstars(
+        mjd,
+        dag_id,
+        task_id_function,
+        ferre_header_paths,
+        limit=None,
+        **kwargs
+    ):
     """
     Query the database for SDSS-V ApStar observations taken on the date start, and create
     partial task instances with their observation keywords, initial guesses, and other FERRE
@@ -184,11 +192,8 @@ def create_task_instances_for_sdss5_apstars(mjd, dag_id, task_id_function, ferre
     mjd, = q.limit(1).one_or_none()
     '''
 
-    print(f"DAG IDENTIFIER IS {dag_id}")
-
-
     # Get the identifiers for the APOGEE observations taken on this MJD.
-    data_model_kwds = get_sdss5_apstar_kwds(mjd)
+    data_model_kwds = get_sdss5_apstar_kwds(mjd, limit=limit)
 
     log.info(f"There are {len(data_model_kwds)} keywords for MJD {mjd}")
 
@@ -200,6 +205,84 @@ def create_task_instances_for_sdss5_apstars(mjd, dag_id, task_id_function, ferre
         ferre_header_paths=ferre_header_paths,
         **kwargs
     )
+
+
+def create_task_instances_for_next_iteration(pks, task_id_function, full_output=False):
+    """
+    Create task instances for a subsequent iteration of FERRE execution, based on
+    some FERRE task instances that have already been executed. An example might be
+    running FERRE with some dimensions fixed to get a poor estimate of parameters,
+    and then running FERRE again without those parameters fixed. This function 
+    could be used to create the task instances for the second FERRE execution.
+
+    :param pks:
+        The primary keys of the existing task instances.
+
+    :param task_id_function:
+        A callable function that returns the task ID to use, given the existing
+        task ID:
+
+        task_id_function(existing_task_id) -> new_task_id
+    """
+
+    pks = flatten(deserialize_pks(pks))
+
+    # Get the existing task instances.
+    q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk.in_(pks))
+
+    first_or_none = lambda item: None if item is None else item[0]
+
+    # For each one, create a new task instance but set the initial_teff/ etc
+    # as the output from the previous task instance.
+    keys = [
+        ("initial_teff", lambda i: first_or_none(i.output.teff)),
+        ("initial_logg", lambda i: first_or_none(i.output.logg)),
+        ("initial_metals", lambda i: first_or_none(i.output.metals)),
+        ("initial_log10vdop", lambda i: first_or_none(i.output.log10vdop)),
+        ("initial_o_mg_si_s_ca_ti", lambda i: first_or_none(i.output.o_mg_si_s_ca_ti)),
+        ("initial_lgvsini", lambda i: first_or_none(i.output.lgvsini)),
+        ("initial_c", lambda i: first_or_none(i.output.c)),
+        ("initial_n", lambda i: first_or_none(i.output.n)),
+    ]
+    
+    trees = {}
+
+    new_instances = []
+    for instance in q.all():
+
+        # Initial parameters.
+        parameters = { k: f(instance) for k, f in keys }
+
+        # Data keywords
+        release = instance.parameters["release"]
+        filetype = instance.parameters["filetype"]
+        header_path = instance.parameters["header_path"]
+        parameters.update(
+            release=release,
+            filetype=filetype,
+            header_path=header_path
+        )
+
+        tree = trees.get(release, None)
+        if tree is None:
+            tree = trees[release] = SDSSPath(release=release)
+        
+        for key in tree.lookup_keys(filetype):
+            parameters[key] = instance.parameters[key]
+
+        new_instances.append(get_or_create_task_instance(
+            dag_id=instance.dag_id,
+            task_id=task_id_function(instance.task_id),
+            parameters=parameters
+        ))
+    
+    if full_output:
+        return new_instances
+
+    return [instance.pk for instance in new_instances]
+
+
+
 
 
 def choose_which_ferre_tasks_to_execute(pks, task_id_function, **kwargs):
@@ -215,7 +298,7 @@ def choose_which_ferre_tasks_to_execute(pks, task_id_function, **kwargs):
         task identifier.
     """
     # Get primary keys from immediate upstream task.
-    pks = deserialize_pks(pks)
+    pks = flatten(deserialize_pks(pks))
 
     # Get the header paths for those task instances.
     q = session.query(astradb.Parameter.parameter_value)\
@@ -247,26 +330,25 @@ def get_best_initial_guess(pks, **kwargs):
         q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk==pk)
         instance = q.one_or_none()
 
+        if instance.output is None:
+            log.warn(f"No output found for task instance {instance}")
+            continue
+
+
         p = instance.parameters
         try:
             tree = trees[p["release"]]                
         except KeyError:
             tree = trees[p["release"]] = SDSSPath(release=p["release"])
         
-        keys = tree.lookup_keys(p['filetype'])
-        print(p["release"], p["filetype"], keys, p)
         key = "_".join([
             p['release'],
             p['filetype'],
-            *[p[k] for k in keys]
+            *[p[k] for k in tree.lookup_keys(p['filetype'])]
         ])
-
+        
         best_tasks.setdefault(key, (np.inf, None))
-        
-        if instance.output is None:
-            log.warn(f"No output found for task instance {instance}")
-            continue
-        
+
         log_chisq_fit, *_ = instance.output.log_chisq_fit
         previous_teff, *_ = instance.output.teff
 
@@ -282,6 +364,7 @@ def get_best_initial_guess(pks, **kwargs):
         if log_chisq_fit < best_tasks[key][0]:
             best_tasks[key] = (log_chisq_fit, pk)
     
+    print(f"best tasks {best_tasks}")
     if best_tasks:
         return [pk for (log_chisq_fit, pk) in best_tasks.values()]
     else:
@@ -375,6 +458,80 @@ class FerreOperator(BaseOperator):
 
         return r
         
+    def prepare_observations(
+            self,
+            instances,
+            parameter_names,
+            grid_mid_point,
+            analyze_individual_visits,
+            wavelength_interpolation_flag
+        ):
+        
+        # Load the observations from the database instances.
+        trees = {}
+        wavelength, flux, sigma, initial_parameters, names, snrs = ([], [], [], [], [], [])
+        
+        Ns = np.zeros(len(instances), dtype=int)
+
+        data_slice = slice(None) if analyze_individual_visits else slice(0, 1)
+
+        for i, instance in enumerate(instances):
+            release = instance.parameters["release"]
+            try:
+                tree = trees[release]                
+            except KeyError:
+                tree = trees[release] = SDSSPath(release=release)
+            
+            path = tree.full(**instance.parameters)
+
+            try:
+                # TODO: Profile this.
+                spectrum = Spectrum1D.read(path, data_slice=data_slice)
+
+                N, P = spectrum.flux.shape
+                flux.append(spectrum.flux.value)
+                sigma.append(spectrum.uncertainty.array**-0.5)
+                if wavelength_interpolation_flag > 0:
+                    wavelength.append(
+                        np.tile(spectrum.wavelength.value, N).reshape((N, -1))
+                    )
+
+                point = np.tile(grid_mid_point, N).reshape((N, -1))
+
+                for j, parameter_name in enumerate(parameter_names):
+                    v = instance.parameters.get(f"initial_{parameter_name.lower().replace(' ', '_')}", None)
+                    if v is not None:
+                        point[:, j] = float(v)
+
+                names.extend([f"{i}_{instance.parameters['telescope']}_{instance.parameters['obj']}_{j}" for j in range(N)])
+                initial_parameters.append(point)
+
+                snrs.append(spectrum.meta["snr"][data_slice])
+
+            except:
+                log.exception(f"Exception in trying to load data product associated with {instance}")
+                raise 
+
+            else:
+                Ns[i] = N
+        
+        if wavelength_interpolation_flag > 0:
+            wavelength = np.vstack(wavelength)
+        else:
+            wavelength = spectrum.wavelength.value.copy()
+
+        snrs = np.vstack(snrs).flatten()
+        flux = np.vstack(flux)
+        sigma = np.vstack(sigma)
+        initial_parameters = np.vstack(initial_parameters)
+
+        bad = ~np.isfinite(flux) + ~np.isfinite(sigma) + (sigma == 0)
+        flux[bad] = 1.0
+        sigma[bad] = 1e6
+
+        return (wavelength, flux, sigma, initial_parameters, names, snrs, Ns)
+
+    
 
     def execute(self, context, instances=None):
         
@@ -387,7 +544,7 @@ class FerreOperator(BaseOperator):
 
         # Create all the files.
         ferre = Ferre(
-            self.header_path,
+            os.path.expandvars(self.header_path),
             frozen_parameters=self.frozen_parameters,
             interpolation_order=self.interpolation_order,
             init_flag=self.init_flag,
@@ -413,95 +570,64 @@ class FerreOperator(BaseOperator):
         ferre._setup()
         ferre._write_ferre_input_file()
 
-        # Load the observations from the database instances.
-        trees = {}
-        wavelength, flux, sigma, initial_parameters, names = ([], [], [], [], [])
+        wavelength, flux, sigma, initial_parameters, names, snr, Ns = self.prepare_observations(
+            instances=instances,
+            parameter_names=ferre.parameter_names,
+            grid_mid_point=ferre.grid_mid_point,
+            analyze_individual_visits=self.analyze_individual_visits,
+            wavelength_interpolation_flag=self.wavelength_interpolation_flag
+        )
+
+        ferre.write_inputs(wavelength, flux, sigma, initial_parameters, names)
         
-        Ns = np.zeros(len(instances))
-
-        for i, instance in enumerate(instances):
-            release = instance.parameters["release"]
-            try:
-                tree = trees[release]                
-            except KeyError:
-                tree = trees[release] = SDSSPath(release=release)
-            
-            path = tree.full(**instance.parameters)
-
-            try:
-                # TODO: Profile this.
-                spectrum = Spectrum1D.read(path)
-
-                N, P = spectrum.flux.shape
-                flux.append(spectrum.flux.value)
-                sigma.append(spectrum.uncertainty.array**-0.5)
-                if self.wavelength_interpolation_flag > 0:
-                    wavelength.append(
-                        np.tile(spectrum.wavelength.value, N).reshape((N, -1))
-                    )
-
-                point = np.tile(ferre.grid_mid_point, N).reshape((N, -1))
-
-                for j, parameter_name in enumerate(ferre.parameter_names):
-                    v = instance.parameters.get(f"initial_{parameter_name.lower().replace(' ', '_')}", None)
-                    if v is not None:
-                        point[:, j] = float(v)
-
-                names.extend([f"{i}_{instance.parameters['telescope']}_{instance.parameters['obj']}_{j}" for j in range(N)])
-                initial_parameters.append(point)
-
-            except:
-                log.exception(f"Exception in trying to load data product associated with {instance}")
-                raise 
-
-            else:
-                Ns[i] = N
-    
-        flux = np.vstack(flux)
-        sigma = np.vstack(sigma)
-        initial_parameters = np.vstack(initial_parameters)
-
-        bad = ~np.isfinite(flux) + ~np.isfinite(sigma) + (sigma == 0)
-        flux[bad] = 1.0
-        sigma[bad] = 1e6
-
-        # TODO: Assuming all have the same wavelength grid.
-        mask = ferre.wavelength_mask(spectrum.wavelength.value)
-
-        # Write wavelengths
-        log.debug(f"Writing input files for FERRE in {ferre.directory}")
-        if self.wavelength_interpolation_flag > 0:
-            wavelength = np.vstack(wavelength)
-            write_data_file(
-                wavelength[:, mask],
-                os.path.join(ferre.directory, ferre.kwds["input_wavelength_path"])
-            )
-
-        # Write flux.
-        log.debug(f"Writing input fluxes in {ferre.directory}")
-        write_data_file(
-            flux[:, mask],
-            os.path.join(ferre.directory, ferre.kwds["input_flux_path"])
-        )
-
-        # Write uncertainties.
-        log.debug(f"Writing input uncertainties in {ferre.directory}")
-        write_data_file(
-            sigma[:, mask],
-            os.path.join(ferre.directory, ferre.kwds["input_uncertainties_path"])
-        )
-
-        # Write initial values.
-        with open(os.path.join(ferre.directory, ferre.kwds["input_parameter_path"]), "w") as fp:
-            for star_name, point in zip(names, initial_parameters):
-                fp.write(format_ferre_input_parameters(*point, star_name=star_name))
-
         # Execute FERRE.
+        # TODO: Slurm it and/or batch it
+        ferre._execute(total=int(sum(Ns)))
+
+        # Parse outputs.
+        output_names, p_opt, p_opt_err, meta = ferre.parse_outputs(full_output=True)
+
+        # TODO: Update tasks to include other relevant FERRE keywords.
 
         # Write FERRE outputs to database.
+        _parameter_names = []
+        common_kwds = {}
+        frozen_parameters = self.frozen_parameters or dict()
+        for parameter_name in ferre.parameter_names:
+            sanitised_parameter_name = sanitise_parameter_name(parameter_name)
+            common_kwds[f"frozen_{sanitised_parameter_name}"] = frozen_parameters.get(parameter_name, False)
+            _parameter_names.append(sanitised_parameter_name)
 
+        # TODO: Assuming FERRE outputs are ordered the same as inputs.
+        si = 0
+        for i, (instance, N) in enumerate(zip(instances, Ns)):
+            if N == 0: continue
 
+            sliced = slice(si, si + N)
 
+            results = dict(
+                snr=list(snr[sliced]),
+                log_snr_sq=list(meta["log_snr_sq"][sliced]),
+                log_chisq_fit=list(meta["log_chisq_fit"][sliced])
+            )
+            # Initial values.
+            for j, pn in enumerate(_parameter_names):
+                results[f"initial_{pn}"] = list(initial_parameters[sliced][:, j]) # Initial.
+                results[pn] = list(p_opt[sliced][:, j]) # Optimized
+                results[f"u_{pn}"] = list(p_opt_err[sliced][:, j]) # errors.
+
+            results.update(common_kwds) # Add frozen parameters.
+
+            # Create result.
+            _instance, output = create_task_output(
+                instance,
+                astradb.Ferre,
+                **results
+            )
+            si += N
+
+            log.info(f"Created output {output} for instance {_instance}")
+        
         # Teardown
         ferre.teardown()
 

@@ -10,7 +10,7 @@ from inspect import getfullargspec
 
 from astra.utils import log
 
-def sanitise_parameter_names(parameter_name):
+def sanitise_parameter_name(parameter_name):
     return parameter_name.lower().strip().replace(" ", "_")
 
 

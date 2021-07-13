@@ -205,6 +205,51 @@ class Ferre(object):
         return parsed_initial_parameters
 
 
+    def write_inputs(self, wavelength, flux, sigma, initial_parameters, names):
+
+        # TODO: Assuming all have the same wavelength grid.
+        mask = self.wavelength_mask(wavelength)
+
+        # Write wavelengths
+        log.debug(f"Writing input files for FERRE in {self.directory}")
+        if self.kwds["wavelength_interpolation_flag"] > 0:
+            wavelength = np.vstack(wavelength)
+            utils.write_data_file(
+                wavelength[:, mask],
+                os.path.join(self.directory, self.kwds["input_wavelength_path"])
+            )
+
+        # Write flux.
+        log.debug(f"Writing input fluxes in {self.directory}")
+        utils.write_data_file(
+            flux[:, mask],
+            os.path.join(self.directory, self.kwds["input_flux_path"])
+        )
+
+        # Write uncertainties.
+        log.debug(f"Writing input uncertainties in {self.directory}")
+        utils.write_data_file(
+            sigma[:, mask],
+            os.path.join(self.directory, self.kwds["input_uncertainties_path"])
+        )
+
+        # Write initial values.
+        with open(os.path.join(self.directory, self.kwds["input_parameter_path"]), "w") as fp:
+            for star_name, point in zip(names, initial_parameters):
+                fp.write(utils.format_ferre_input_parameters(*point, star_name=star_name))
+                
+        return True
+
+    def parse_outputs(self, full_output=False):
+        output_parameter_path = os.path.join(self.directory, self.kwds["output_parameter_path"])
+        output_names, p_opt, p_opt_err, meta = utils.read_output_parameter_file(
+            output_parameter_path,
+            n_dimensions=self.n_dimensions
+        )    
+
+        return (output_names, p_opt, p_opt_err, meta)
+        
+
     def fit(self, spectra, initial_parameters=None, full_output=False, names=None, **kwargs):
 
         if isinstance(spectra, Spectrum1D):
@@ -289,6 +334,11 @@ class Ferre(object):
         erroneous_output = -999.999
 
         # Parse parameters.
+        return self.parse_outputs(full_output=full_output)
+
+    '''
+    def parse_outputs(self, full_output=False):
+
         try:
             output_parameter_path = os.path.join(self.directory, self.kwds["output_parameter_path"])
             output_names, output_param, output_param_errs, output_meta = utils.read_output_parameter_file(
@@ -375,7 +425,7 @@ class Ferre(object):
                 return (param, param_errs, meta)
 
             return (param, param_errs)
-        
+    '''
 
 
     def __call__(self, x, timeout=30):
@@ -716,6 +766,7 @@ class Ferre(object):
 
     def teardown(self):
         if not self.debug:
+            log.info(f"Removing directory at {self.directory}")
             rmtree(self.directory)
             return True
             
