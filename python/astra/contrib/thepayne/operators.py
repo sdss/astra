@@ -6,7 +6,7 @@ from sdss_access import SDSSPath
 from astra.database import astradb, session
 from astra.tools.spectrum import Spectrum1D
 from astra.database.utils import create_task_output
-from astra.contrib.thepayne import training, testing
+from astra.contrib.thepayne import training, test
 from astra.utils import hashify, log
 
 def get_model_path(
@@ -129,7 +129,7 @@ def estimate_stellar_labels(
         data product, which is usually the stacked spectrum.
     """
     log.info(f"Loading model from {model_path}")
-    state = testing.load_state(model_path)
+    state = test.load_state(model_path)
 
     label_names = state["label_names"]
     L = len(label_names)
@@ -166,7 +166,7 @@ def estimate_stellar_labels(
             continue
         
         # Run optimization.
-        p_opt, p_cov, model_flux, meta = testing.test(
+        p_opt, p_cov, model_flux, meta = test.test(
             spectrum.wavelength.value,
             spectrum.flux.value[sliced],
             spectrum.uncertainty.array[sliced],
