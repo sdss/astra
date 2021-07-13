@@ -35,6 +35,47 @@ def parse_mjd(
     return mjd
 
 
+def get_sdss4_apstar_kwds(limit=None, **kwargs):
+    """
+    Get identifying keywords for SDSS-IV APOGEE stars observed.
+    """
+
+    # We need; 'apstar', 'apred', 'obj', 'telescope', 'field', 'prefix'
+    release, filetype = ("DR16", "apStar")
+    columns = (
+        catalogdb.SDSSDR16ApogeeStar.apogee_id.label("obj"),
+        catalogdb.SDSSDR16ApogeeStar.field,
+        catalogdb.SDSSDR16ApogeeStar.telescope,
+        catalogdb.SDSSDR16ApogeeStar.apstar_version.label("apstar"),
+        catalogdb.SDSSDR16ApogeeStar.file, # for prefix and apred
+    )
+    q = session.query(*columns).distinct(*columns)
+    if kwargs:
+        q = q.filter(**kwargs)
+
+    if limit is not None:
+        q = q.limit(limit)
+
+    data_model_kwds = []
+    for obj, field, telescope, apstar, filename in q.all():
+
+        prefix = filename[:2]
+        apred = filename.split("-")[1]
+
+        data_model_kwds.append(dict(
+            release=release,
+            filetype=filetype,
+            obj=obj,
+            field=field,
+            telescope=telescope,
+            apstar=apstar,
+            prefix=prefix,
+            apred=apred
+        ))
+
+    return data_model_kwds
+    
+
 def get_sdss5_apstar_kwds(
         mjd, 
         min_ngoodrvs=1
