@@ -28,6 +28,7 @@ create table astra_v02.ti (
     pk serial primary key,
     dag_id text,
     task_id text not null,
+    run_id text,
     output_pk bigint,
     created timestamp default now(),
     foreign key (output_pk) references astra_v02.output_interface(pk) on delete cascade

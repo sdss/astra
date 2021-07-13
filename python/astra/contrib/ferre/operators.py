@@ -1,10 +1,9 @@
-from airflow.models.baseoperator import BaseOperator
-
+import numpy as np
 import os
 from typing import Dict, Optional
 
-
 from airflow.exceptions import AirflowSkipException
+from airflow.models.baseoperator import BaseOperator
 from airflow.hooks.subprocess import SubprocessHook
 from airflow.models import BaseOperator
 from airflow.utils.operator_helpers import context_to_airflow_vars
@@ -12,17 +11,19 @@ from sdss_access import SDSSPath
 
 from sqlalchemy import or_, and_
 
-
 from astropy.time import Time
 from astropy.io.fits import getheader
 
+from astra.tools.spectrum import Spectrum1D
 from astra.contrib.ferre.core import Ferre
 from astra.contrib.ferre.utils import (
-    parse_grid_information, safe_read_header, approximate_log10_microturbulence, yield_suitable_grids
+    parse_header_path, parse_grid_information, safe_read_header, approximate_log10_microturbulence, yield_suitable_grids,
+    write_data_file, format_ferre_input_parameters
 )
 from astra.utils import log
 from astra.database import astradb, apogee_drpdb, catalogdb, session
 from astra.database.utils import (
+    deserialize_pks,
     get_or_create_task_instance, 
     get_sdss4_apstar_kwds,
     get_sdss5_apstar_kwds,
@@ -110,12 +111,13 @@ def _create_partial_ferre_task_instances_from_observations(
     # Create task instances.
     pks = []
     for meta in instance_meta:
-        # The task ID is temporary, and will be over-written when the next operator uses it.
+        task_id = task_id_function(**meta)
         instance = get_or_create_task_instance(
-            dag_id,
-            task_id_function(**meta),
-            **meta
+            dag_id=dag_id,
+            task_id=task_id,
+            parameters=meta
         )
+        log.info(f"Created or retrieved task instance {instance} for {dag_id} {task_id} with {meta}")
         pks.append(instance.pk)
     
     # Return the primary keys, which will be passed on to the next task.
@@ -180,11 +182,16 @@ def create_task_instances_for_sdss5_apstars(mjd, dag_id, task_id_function, ferre
     print(f"Cheating and taking the most recent MJD.")
     q = session.query(apogee_drpdb.Star.mjdend).order_by(apogee_drpdb.Star.mjdend.desc())
     mjd, = q.limit(1).one_or_none()
-    ''''
+    '''
+
+    print(f"DAG IDENTIFIER IS {dag_id}")
+
 
     # Get the identifiers for the APOGEE observations taken on this MJD.
-    data_model_kwds = get_sdss5_apstar_kwds(ds)
-    
+    data_model_kwds = get_sdss5_apstar_kwds(mjd)
+
+    log.info(f"There are {len(data_model_kwds)} keywords for MJD {mjd}")
+
     # Create the task instances.
     return _create_partial_ferre_task_instances_from_observations(
         dag_id=dag_id,
@@ -235,7 +242,7 @@ def get_best_initial_guess(pks, **kwargs):
 
     # Need to uniquely identify observations.
     trees = {}
-    best_results = {}
+    best_tasks = {}
     for pk in pks:
         q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk==pk)
         instance = q.one_or_none()
@@ -246,18 +253,24 @@ def get_best_initial_guess(pks, **kwargs):
         except KeyError:
             tree = trees[p["release"]] = SDSSPath(release=p["release"])
         
+        keys = tree.lookup_keys(p['filetype'])
+        print(p["release"], p["filetype"], keys, p)
         key = "_".join([
             p['release'],
             p['filetype'],
-            *[getattr(p, k) for k in tree.lookup_keys(p['filetype'])]
+            *[p[k] for k in keys]
         ])
 
         best_tasks.setdefault(key, (np.inf, None))
         
+        if instance.output is None:
+            log.warn(f"No output found for task instance {instance}")
+            continue
+        
         log_chisq_fit, *_ = instance.output.log_chisq_fit
         previous_teff, *_ = instance.output.teff
 
-        parsed_header = utils.parse_header_path(p["header_path"])
+        parsed_header = parse_header_path(p["header_path"])
     
         # Penalise chi-sq in the same way they did for DR16.
         # See github.com/sdss/apogee/python/apogee/aspcap/aspcap.py#L492
@@ -269,14 +282,23 @@ def get_best_initial_guess(pks, **kwargs):
         if log_chisq_fit < best_tasks[key][0]:
             best_tasks[key] = (log_chisq_fit, pk)
     
-    return [pk for (log_chisq_fit, pk) in best_tasks.values()]
+    if best_tasks:
+        return [pk for (log_chisq_fit, pk) in best_tasks.values()]
+    else:
+        raise ValueError(f"no task outputs found from {len(pks)} primary keys")
 
 
 
 class FerreOperator(BaseOperator):
 
+    template_fields = ("pks", )
+    template_fields_renderers = {
+        "pks": "py"
+    }
+
     def __init__(
         self,
+        pks,
         *,
         header_path: str,
         frozen_parameters: Optional[Dict] = None,
@@ -296,10 +318,12 @@ class FerreOperator(BaseOperator):
         input_weights_path: Optional[str] = None,
         input_lsf_path: Optional[str] = None,
         ferre_kwds: Optional[Dict[str, str]] = None,
-        slurm_kwargs: Optional[Dict] = None,
+        slurm_kwds: Optional[Dict] = None,
+        analyze_individual_visits: bool = False,
         **kwargs
     ):
         super().__init__(**kwargs)
+        self.pks = pks
         self.header_path = header_path
         self.frozen_parameters = frozen_parameters
         self.interpolation_order = interpolation_order
@@ -318,7 +342,8 @@ class FerreOperator(BaseOperator):
         self.input_weights_path = input_weights_path
         self.input_lsf_path = input_lsf_path
         self.ferre_kwds = ferre_kwds
-        self.slurm_kwargs = slurm_kwargs
+        self.slurm_kwds = slurm_kwds
+        self.analyze_individual_visits = analyze_individual_visits
         return None
     
 
@@ -332,8 +357,10 @@ class FerreOperator(BaseOperator):
         """
         task, ti, params = (context["task"], context["ti"], context["params"])
 
-        pks = ti.xcom_pull(task_ids="create_partial_ferre_task_instances")
+        pks = deserialize_pks(self.pks)
 
+        log.info(f"In {task} {ti} and there are {len(pks)} upstream primary keys")
+        
         q = session.query(astradb.TaskInstance)\
                    .join(astradb.TaskInstanceParameter)\
                    .join(astradb.Parameter)
@@ -343,7 +370,10 @@ class FerreOperator(BaseOperator):
             astradb.Parameter.parameter_value == self.header_path
         ))
         
-        return q.all()
+        r = q.all()
+        log.info(f"In {task} {ti} and there are now {len(r)} relevant primary keys")
+
+        return r
         
 
     def execute(self, context, instances=None):
@@ -351,7 +381,7 @@ class FerreOperator(BaseOperator):
         # The upstream task has created an instance in the database for this FERRE task, 
         # which includes the observation source parameters, etc.
         if instances is None:
-            instances = self.get_partial_task_instances_in_database()
+            instances = self.get_partial_task_instances_in_database(context)
 
         log.info(f"Got instances {instances}")
 
@@ -396,10 +426,7 @@ class FerreOperator(BaseOperator):
             except KeyError:
                 tree = trees[release] = SDSSPath(release=release)
             
-            path = tree.full(
-                instance.parameters["data_model_name"],
-                **instance.parameters
-            )
+            path = tree.full(**instance.parameters)
 
             try:
                 # TODO: Profile this.
@@ -413,26 +440,25 @@ class FerreOperator(BaseOperator):
                         np.tile(spectrum.wavelength.value, N).reshape((N, -1))
                     )
 
-    
-                point = np.tile(ferre.grid_mid_point, N)
+                point = np.tile(ferre.grid_mid_point, N).reshape((N, -1))
+
                 for j, parameter_name in enumerate(ferre.parameter_names):
                     v = instance.parameters.get(f"initial_{parameter_name.lower().replace(' ', '_')}", None)
                     if v is not None:
                         point[:, j] = float(v)
 
-                names.extend([f"{i}_{instance.parameters['obj']}_{j}" for j in range(N)])
+                names.extend([f"{i}_{instance.parameters['telescope']}_{instance.parameters['obj']}_{j}" for j in range(N)])
                 initial_parameters.append(point)
 
             except:
                 log.exception(f"Exception in trying to load data product associated with {instance}")
-            
+                raise 
+
             else:
                 Ns[i] = N
     
-    
         flux = np.vstack(flux)
         sigma = np.vstack(sigma)
-        wavelength = np.vstack(wavelength)
         initial_parameters = np.vstack(initial_parameters)
 
         bad = ~np.isfinite(flux) + ~np.isfinite(sigma) + (sigma == 0)
@@ -445,39 +471,39 @@ class FerreOperator(BaseOperator):
         # Write wavelengths
         log.debug(f"Writing input files for FERRE in {ferre.directory}")
         if self.wavelength_interpolation_flag > 0:
-            utils.write_data_file(
-                wavelengths[:, mask],
+            wavelength = np.vstack(wavelength)
+            write_data_file(
+                wavelength[:, mask],
                 os.path.join(ferre.directory, ferre.kwds["input_wavelength_path"])
             )
 
         # Write flux.
         log.debug(f"Writing input fluxes in {ferre.directory}")
-        utils.write_data_file(
+        write_data_file(
             flux[:, mask],
             os.path.join(ferre.directory, ferre.kwds["input_flux_path"])
         )
 
         # Write uncertainties.
         log.debug(f"Writing input uncertainties in {ferre.directory}")
-        utils.write_data_file(
+        write_data_file(
             sigma[:, mask],
             os.path.join(ferre.directory, ferre.kwds["input_uncertainties_path"])
         )
 
         # Write initial values.
         with open(os.path.join(ferre.directory, ferre.kwds["input_parameter_path"]), "w") as fp:
-            for name, point in zip(names, initial_parameters):
-                fp.write(utils.format_ferre_input_parameters(*point, star_name=star_name))
+            for star_name, point in zip(names, initial_parameters):
+                fp.write(format_ferre_input_parameters(*point, star_name=star_name))
 
         # Execute FERRE.
 
-        # Take ownership of the instance names.
         # Write FERRE outputs to database.
 
 
 
         # Teardown
-        #ferre.teardown()
+        ferre.teardown()
 
 
 

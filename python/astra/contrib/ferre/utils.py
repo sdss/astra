@@ -192,7 +192,6 @@ def parse_grid_information(header_paths):
             # Get grid limits.
             grids[header_path] = (meta, list(headers[0]["LLIMITS"]), list(headers[0]["ULIMITS"]))
 
-    print(f"GRIDS {grids}")
     return grids
         
 

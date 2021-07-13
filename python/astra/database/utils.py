@@ -1,12 +1,14 @@
 import json
-
-from astra.database import astradb, session
 from typing import Dict
 from sqlalchemy import (or_, and_, func, distinct)
+from astropy.time import Time
+
+
+from astra.database import (astradb, apogee_drpdb, session)
 
 
 deserialize_pks = lambda pks: json.loads(pks) if isinstance(pks, str) else pks
-
+serialize = lambda v: json.dumps(v) if not isinstance(v, str) else v
 
 def parse_mjd(
         mjd
@@ -236,6 +238,9 @@ def create_task_instances_for_sdss5_apstars(
 
     all_kwds = get_sdss5_apstar_kwds(mjd)
 
+    print(f"DAG IDENTIFIER IS {dag_id}")
+    print(f"TASK IDENTIFIER IS {task_id}")
+
     instances = []
     for kwds in all_kwds:
         instances.append(
@@ -365,7 +370,10 @@ def get_task_instance(
 
     # Get primary keys of the individual parameters, and then check by task.
     q_p = session.query(astradb.Parameter.pk).filter(
-        or_(*(and_(astradb.Parameter.parameter_name == k, astradb.Parameter.parameter_value == v) for k, v in parameters.items()))
+        or_(*(and_(
+            astradb.Parameter.parameter_name == k, 
+            astradb.Parameter.parameter_value == serialize(v)
+        ) for k, v in parameters.items()))
     )
     N_p = q_p.count()
     if N_p < len(parameters):
@@ -382,10 +390,8 @@ def get_task_instance(
         sq,
         astradb.TaskInstance.pk == sq.c.ti_pk
     )
-    if dag_id is not None:
-        q = q.filter(astradb.TaskInstance.dag_id == dag_id)
-    if task_id is not None:
-        q = q.filter(astradb.TaskInstance.task_id == task_id)
+    q = q.filter(astradb.TaskInstance.dag_id == dag_id)\
+         .filter(astradb.TaskInstance.task_id == task_id)
 
     return q.one_or_none()
 
@@ -408,16 +414,13 @@ def get_or_create_parameter_pk(
         indicating whether the entry in the database was created by this function call.
     """
 
-    if not isinstance(value, str):
-        value = json.dumps(value)
-
-    kwds = dict(parameter_name=parameter_name, parameter_value=value)
+    kwds = dict(parameter_name=name, parameter_value=serialize(value))
     q = session.query(astradb.Parameter).filter_by(**kwds)
     instance = q.one_or_none()
     create = (instance is None)
     if create:
         instance = astradb.Parameter(**kwds)
-        with session.begin():
+        with session.begin(subtransactions=True):
             session.add(instance)
     
     return (instance.pk, create)
@@ -447,7 +450,7 @@ def create_task_instance(
     parameter_pks = (pk for pk, created in (get_or_create_parameter_pk(k, v) for k, v in parameters.items()))
     
     # Create task instance.
-    ti = astradb.TaskInstance(task_id=task_id)
+    ti = astradb.TaskInstance(dag_id=dag_id, task_id=task_id)
     with session.begin():
         session.add(ti)
     
@@ -458,8 +461,6 @@ def create_task_instance(
                 ti_pk=ti.pk,
                 parameter_pk=parameter_pk
             ))
-
-    session.flush()
 
     return ti
 
@@ -488,6 +489,7 @@ def get_or_create_task_instance(
     instance = get_task_instance(dag_id, task_id, parameters)
     if instance is None:
         return create_task_instance(dag_id, task_id, parameters)
+    return instance
 
 
 def create_task_output(
@@ -526,7 +528,7 @@ def create_task_output(
     with session.begin():
         output = astradb.OutputInterface()
         session.add(output)
-
+    
     assert output.pk is not None
 
     kwds = dict(output_pk=output.pk)
@@ -536,10 +538,10 @@ def create_task_output(
     instance = model(**kwds)
     with session.begin():
         session.add(instance)
-    
+
     # Reference the output to the task instance.
     task_instance.output_pk = output.pk
 
-    session.flush()
+    session.commit()
     
     return (task_instance, instance)
