@@ -146,7 +146,10 @@ except AssertionError:
     session = None
 
 else:
-    session = database.Session()
+    try:
+        session = database.Session()
+    except:
+        print(f"Cannot load database session")
 
 
 def init_process(database):

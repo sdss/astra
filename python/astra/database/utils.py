@@ -527,23 +527,25 @@ def create_task_output(
 
     # Create a new output interface entry.
     with session.begin():
-        output = astradb.OutputInterface()
-        session.add(output)
+        output_interface = astradb.OutputInterface()
+        session.add(output_interface)
     
-    assert output.pk is not None
+    assert output_interface.pk is not None
 
-    kwds = dict(output_pk=output.pk)
+    # Include the task instance PK so that if the output for that task instance is
+    # later updated, then we can still find historical outputs.
+    kwds = dict(ti_pk=task_instance.pk, output_pk=output_interface.pk)
     kwds.update(kwargs)
 
     # Create the instance of the result.
-    instance = model(**kwds)
+    output_result = model(**kwds)
     with session.begin():
-        session.add(instance)
+        session.add(output_result)
 
     # Reference the output to the task instance.
     with session.begin():
-        task_instance.output_pk = output.pk
+        task_instance.output_pk = output_interface.pk
 
     assert task_instance.output_pk is not None
-
-    return (task_instance, instance)
+    log.info(f"Created output {output_result} for task instance {task_instance}")
+    return output_result

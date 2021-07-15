@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import json
 from typing import Dict, Optional
 
 from airflow.exceptions import AirflowSkipException
@@ -15,12 +16,12 @@ from astropy.time import Time
 from astropy.io.fits import getheader
 
 from astra.tools.spectrum import Spectrum1D
-from astra.contrib.ferre.core import Ferre
-from astra.contrib.ferre.utils import (
-    parse_header_path, parse_grid_information, safe_read_header, approximate_log10_microturbulence, yield_suitable_grids,
-    write_data_file, format_ferre_input_parameters, read_output_parameter_file,
-    sanitise_parameter_name
-)
+
+#from astra.contrib.ferre.utils import (
+#    parse_header_path, parse_grid_information, safe_read_header, approximate_log10_microturbulence, yield_suitable_grids,
+#    write_data_file, format_ferre_input_parameters, read_output_parameter_file,
+#    sanitise_parameter_name
+#)
 from astra.utils import log, flatten
 from astra.database import astradb, apogee_drpdb, catalogdb, session
 from astra.database.utils import (
@@ -30,6 +31,368 @@ from astra.database.utils import (
     get_sdss4_apstar_kwds,
     get_sdss5_apstar_kwds,
 )
+
+from astra.contrib.ferre.core import ferre
+from astra.contrib.ferre import utils
+
+
+
+
+
+def estimate_stellar_parameters(
+        pks,
+        header_path,
+        spectrum_kwds=None,
+        continuum_path_format=None,
+        **kwargs
+    ):
+    """    
+    Estimate the stellar parameters with the task instances given.
+
+    :param pks:
+        The primary keys of the task instances to estimate stellar parameters for.
+
+    :param header_path:
+        The path of the FERRE header file.
+
+    :param spectrum_kwds: [optional]
+        An optional dictionary of keyword arguments to supply to `astra.tools.spectrum.Spectrum1D`
+        when loading spectra. For example, `spectrum_kwds=dict(data_slice=slice(0, 1))` will
+        only return the first (stacked?) spectrum for analysis.
+
+    :param continuum_path_format: [optional]
+        A string representing the path to continuum files to use for the observations
+        before supplying the data to FERRE. This is useful for making median-filtered
+        corrections on the data before FERRE handles it. This should have a format like:
+
+        '{telescope}/{obj}-continuum-{pk}.pkl'
+
+        where the values will be formatted by Python in the usual way. The parameters
+        available for string formatting include:
+
+        - `pk`: the primary key of this task instance
+        - `release`: the name of the SDSS data release
+        - `filetype`: the SDSS data model name
+        
+        and all other keywords associated with that `filetype`. 
+
+    :param \**kwargs:
+        Keyword arguments to provide directly to `astra.contrib.ferre.ferre`.
+    """
+
+    # Get the task instances.
+    instances = get_instances_with_this_header_path(pks, header_path)
+
+    # Load the spectra.
+    spectrum_kwds = (spectrum_kwds or dict())
+    wavelength, flux, sigma, Ns = load_spectra(instances, **spectrum_kwds)
+    
+    # Apply any continuum corrections.
+    if continuum_path_format is not None:
+        raise NotImplementedError
+
+    # Create names for easy debugging in FERRE outputs.
+    names = create_names(instances, Ns, "{star_index}_{telescope}_{obj}_{spectrum_index}")
+
+    # Load the initial parameters from the task instances.
+    initial_parameters = create_initial_parameters(instances, Ns)
+
+    # Run FERRE.
+    param, param_err, meta = ferre(
+        wavelength=wavelength,
+        flux=flux,
+        sigma=sigma,
+        header_path=header_path,
+        names=names,
+        initial_parameters=initial_parameters,
+        **kwargs
+    )
+    
+    # Group results by instance.
+    results = group_results_by_instance(param, param_err, meta, Ns)
+
+    # Write FERRE outputs to database and to disk
+    for instance, result in zip(instances, results):
+        if result is None: continue
+        create_task_output(
+            instance,
+            astradb.Ferre,
+            **result
+        )
+
+    return None
+
+
+
+def estimate_chemical_abundances(
+        pks,
+        header_path,
+        element,
+        spectrum_kwds=None,
+        continuum_path_format=None,
+        **kwargs
+    ):
+    """    
+    Estimate the abundance of a chemical element with the task instances given.
+
+    :param pks:
+        The primary keys of the task instances to estimate stellar parameters for.
+
+    :param header_path:
+        The path of the FERRE header file.
+
+    :param element:
+        The name of the element to measure (e.g., 'Al'). This is used to govern the `TTIE`
+        keywords for FERRE.
+
+    :param spectrum_kwds: [optional]
+        An optional dictionary of keyword arguments to supply to `astra.tools.spectrum.Spectrum1D`
+        when loading spectra. For example, `spectrum_kwds=dict(data_slice=slice(0, 1))` will
+        only return the first (stacked?) spectrum for analysis.
+
+    :param continuum_path_format: [optional]
+        A string representing the path to continuum files to use for the observations
+        before supplying the data to FERRE. This is useful for making median-filtered
+        corrections on the data before FERRE handles it. This should have a format like:
+
+        '{telescope}/{obj}-continuum-{pk}.pkl'
+
+        where the values will be formatted by Python in the usual way. The parameters
+        available for string formatting include:
+
+        - `pk`: the primary key of this task instance
+        - `release`: the name of the SDSS data release
+        - `filetype`: the SDSS data model name
+        
+        and all other keywords associated with that `filetype`. 
+
+    :param \**kwargs:
+        Keyword arguments to provide directly to `astra.contrib.ferre.ferre`.
+    """
+
+    # Get FERRE keywords for this element.
+    headers, *segment_headers = utils.read_ferre_headers(utils.expand_path(header_path))
+    frozen_parameters, ferre_kwds = utils.get_abundance_keywords(element, headers["LABEL"])
+
+    # Overwrite frozen_parameters and ferre_kwds
+    kwds = kwargs.copy()
+    kwds.setdefault(ferre_kwds, {})
+    kwds["ferre_kwds"].update(ferre_kwds)
+    kwds["frozen_parameters"] = frozen_parameters
+
+    return estimate_stellar_parameters(
+        pks, 
+        header_path, 
+        spectrum_kwds=spectrum_kwds,
+        continuum_path_format=continuum_path_format,
+        **kwds
+    )
+
+
+def get_instances_with_this_header_path(pks, header_path):
+    """
+    Get the task instances that have a primary key in the list of primary keys given,
+    and have a matching header path.
+    
+    :param pks:
+        A list of primary keys of task instances.
+    
+    :param header_path:
+        The header path of the FERRE grid file.
+    
+    :returns:
+        A list of `astra.database.astradb.TaskInstance` objects.
+    """
+    pks = deserialize_pks(pks)
+    q = session.query(astradb.TaskInstance).join(astradb.TaskInstanceParameter).join(astradb.Parameter)
+    q = q.filter(and_(
+        astradb.TaskInstance.pk.in_(pks),
+        astradb.Parameter.parameter_name == "header_path",
+        astradb.Parameter.parameter_value == header_path
+    ))
+    
+    instances = q.all()
+    log.info(f"There are {len(instances)} relevant primary keys")
+    return instances
+
+
+def group_results_by_instance(
+        param, 
+        param_err, 
+        meta, 
+        Ns
+    ):
+    """
+    Group FERRE results together into a list of dictionaries where the size of the outputs
+    matches the size of the input spectra loaded for each task instance.
+    
+    :param param:
+        The array of output parameters from FERRE.
+
+    :param param_err:
+        The estimated errors on the output parameters from FERRE.
+    
+    :param meta:
+        A metadata dictionary output by FERRE.
+    
+    :param Ns:
+        A list of integers indicating the number of spectra that were loaded with each
+        instance (e.g., `sum(Ns)` should equal `param.shape[0]`).
+    
+    :returns:
+        A list of dictionaries that contain results for each instance.
+    """
+    
+    common_results = dict(frozen_parameters=meta["frozen_parameters"])
+    
+    si, results = (0, [])
+    parameter_names = tuple(map(utils.sanitise_parameter_name, meta["parameter_names"]))
+    for i, N in enumerate(Ns):
+        if N == 0: 
+            results.append(None)
+            continue
+        
+        sliced = slice(si, si + N)
+
+        result = dict(
+            log_snr_sq=meta["log_snr_sq"][sliced],
+            log_chisq_fit=meta["log_chisq_fit"][sliced]
+        )
+        for j, parameter_name in enumerate(parameter_names):
+            result[f"{parameter_name}"] = param[sliced][:, j]
+            result[f"u_{parameter_name}"] = param_err[sliced][:, j]
+            result[f"initial_{parameter_name}"] = meta["initial_parameters"][sliced][:, j]
+
+        results.append(result)
+    
+    return results
+
+
+
+def create_initial_parameters(instances, Ns):
+    """
+    Create a list of initial parameters for spectra loaded from task instances.
+
+    :param instances:
+        A list of task instances where spectra were loaded. This should
+        be length `N` long.
+    
+    :param Ns:
+        A list containing the number of spectra loaded from each task instance.
+        This should have the same length as `instances`.
+    
+    :returns:
+        A dictionary of initial values.
+    """
+    initial_parameters = {}
+    for i, (instance, N) in enumerate(zip(instances, Ns)):
+        if i == 0:
+            for key in instance.parameters.keys():
+                if key.startswith("initial_"):
+                    initial_parameters[utils.desanitise_parameter_name(key[8:])] = []
+        
+        for key, value in instance.parameters.items():
+            if key.startswith("initial_"):
+                ferre_label = utils.desanitise_parameter_name(key[8:])
+                value = json.loads(value)
+                if isinstance(value, (float, int)):
+                    value = [value] * N
+                elif isinstance(value, (list, tuple)):
+                    assert len(value) == N
+                initial_parameters[ferre_label].extend(value)
+
+    return initial_parameters
+
+
+def create_names(instances, Ns, str_format):
+    """
+    Create a list of names for spectra loaded from task instances.
+
+    :param instances:
+        A list of task instances where spectra were loaded. This should
+        be length `N` long.
+    
+    :param Ns:
+        A list containing the number of spectra loaded from each task instance.
+        This should have the same length as `instances`.
+    
+    :param str_format:
+        A string formatting for the names. The available keywords include
+        all parameters associated with the task, as well as the `star_index`
+        and the `spectrum_index`.
+    
+    :returns:
+        A list with length `sum(Ns)` that contains the given names for all 
+        the spectra loaded.
+    """
+    names = []
+    for star_index, (instance, N) in enumerate(zip(instances, Ns)):
+        kwds = instance.parameters.copy()
+        kwds.update(star_index=star_index)
+        for index in range(N):
+            kwds["spectrum_index"] = index
+            names.append(str_format.format(**kwds))
+    return names
+
+
+# TODO: This is a sufficiently common function that it should probably go elsewhere.
+# TODO: We should also consider returning metadata.
+def load_spectra(instances, **kwargs):
+    """
+    Load spectra from the given task instances.
+
+    :param instances:
+        A list of task instances to load associated spectra for.
+    
+    All other kwargs are passed directly to `astra.tools.spectrum.Spectrum1D`.
+
+    :returns:
+        A four length tuple that contains:
+        
+        1. A wavelength array of shape (N, P), where N is the number of spectra
+           (not instances!) and P is the number of pixels.
+        2. A flux array of shape (N, P).
+        3. A flux uncertainty array of shape (N, P).
+        4. A `T` length array, where `T` is the number of task instances provided,
+           where each value in the array indicates the number of spectra loaded
+           from that task instance.
+    """
+
+    # Load the observations from the database instances.
+    trees = {}
+    wavelength, flux, sigma = ([], [], [])
+    
+    Ns = np.zeros(len(instances), dtype=int)
+
+    for i, instance in enumerate(instances):
+        release = instance.parameters["release"]
+        try:
+            tree = trees[release]                
+        except KeyError:
+            tree = trees[release] = SDSSPath(release=release)
+        
+        path = tree.full(**instance.parameters)
+
+        try:
+            # TODO: Profile this.
+            spectrum = Spectrum1D.read(path, **kwargs)
+            
+            N, P = spectrum.flux.shape
+            flux.append(spectrum.flux.value)
+            sigma.append(spectrum.uncertainty.array**-0.5)
+            wavelength.append(
+                np.tile(spectrum.wavelength.value, N).reshape((N, -1))
+            )
+        except:
+            log.exception(f"Exception in trying to load data product associated with {instance} from {path} with {kwargs}")
+            raise 
+
+        else:
+            Ns[i] = N
+    
+    wavelength, flux, sigma = tuple(map(np.vstack, (wavelength, flux, sigma)))
+    
+    return (wavelength, flux, sigma, Ns)
 
 
 def yield_initial_guess_from_doppler_headers(data_model_kwds):
@@ -54,9 +417,9 @@ def yield_initial_guess_from_doppler_headers(data_model_kwds):
 
             header = getheader(path)
 
-            teff = safe_read_header(header, ("RV_TEFF", "RVTEFF"))
-            logg = safe_read_header(header, ("RV_LOGG", "RVLOGG"))
-            fe_h = safe_read_header(header, ("RV_FEH", "RVFEH"))
+            teff = utils.safe_read_header(header, ("RV_TEFF", "RVTEFF"))
+            logg = utils.safe_read_header(header, ("RV_LOGG", "RVLOGG"))
+            fe_h = utils.safe_read_header(header, ("RV_FEH", "RVFEH"))
 
             # Get information relevant for matching initial guess and grids.
             initial_guess = dict(
@@ -85,7 +448,7 @@ def _create_partial_ferre_task_instances_from_observations(
     ):
 
     # Get grid information.
-    grid_info = parse_grid_information(ferre_header_paths)
+    grid_info = utils.parse_grid_information(ferre_header_paths)
 
     # Get initial guesses.
     initial_guesses = yield_initial_guess_from_doppler_headers(data_model_kwds)
@@ -93,14 +456,14 @@ def _create_partial_ferre_task_instances_from_observations(
     # Match observations, initial guesses, and FERRE header files.
     instance_meta = []
     for kwds, initial_guess in initial_guesses:
-        for header_path, ferre_headers in yield_suitable_grids(grid_info, **initial_guess):
+        for header_path, ferre_headers in utils.yield_suitable_grids(grid_info, **initial_guess):
             instance_meta.append(dict(
                 header_path=header_path,
                 # Add the initial guess information.
                 initial_teff=np.round(initial_guess["teff"], 0),
                 initial_logg=np.round(initial_guess["logg"], 2),
                 initial_metals=np.round(initial_guess["metals"], 2),
-                initial_log10vdop=np.round(approximate_log10_microturbulence(initial_guess["logg"]), 2),
+                initial_log10vdop=np.round(utils.approximate_log10_microturbulence(initial_guess["logg"]), 2),
                 initial_o_mg_si_s_ca_ti=0.0,
                 initial_lgvsini=0.0,
                 initial_c=0.0,
@@ -219,10 +582,7 @@ def create_task_instances_for_next_iteration(pks, task_id_function, full_output=
         The primary keys of the existing task instances.
 
     :param task_id_function:
-        A callable function that returns the task ID to use, given the existing
-        task ID:
-
-        task_id_function(existing_task_id) -> new_task_id
+        A callable function that returns the task ID to use, given the parameters.
     """
 
     pks = flatten(deserialize_pks(pks))
@@ -272,7 +632,7 @@ def create_task_instances_for_next_iteration(pks, task_id_function, full_output=
 
         new_instances.append(get_or_create_task_instance(
             dag_id=instance.dag_id,
-            task_id=task_id_function(instance.task_id),
+            task_id=task_id_function(**parameters),
             parameters=parameters
         ))
     
@@ -309,7 +669,7 @@ def choose_which_ferre_tasks_to_execute(pks, task_id_function, **kwargs):
                 .filter(astradb.Parameter.parameter_name == "header_path")
 
     rows = q.all()
-    print(f"Retrieved {rows}")
+
     return [task_id_function(header_path=header_path) for header_path, in rows]
 
 
@@ -352,7 +712,7 @@ def get_best_initial_guess(pks, **kwargs):
         log_chisq_fit, *_ = instance.output.log_chisq_fit
         previous_teff, *_ = instance.output.teff
 
-        parsed_header = parse_header_path(p["header_path"])
+        parsed_header = utils.parse_header_path(p["header_path"])
     
         # Penalise chi-sq in the same way they did for DR16.
         # See github.com/sdss/apogee/python/apogee/aspcap/aspcap.py#L492
@@ -364,7 +724,6 @@ def get_best_initial_guess(pks, **kwargs):
         if log_chisq_fit < best_tasks[key][0]:
             best_tasks[key] = (log_chisq_fit, pk)
     
-    print(f"best tasks {best_tasks}")
     if best_tasks:
         return [pk for (log_chisq_fit, pk) in best_tasks.values()]
     else:
@@ -372,7 +731,7 @@ def get_best_initial_guess(pks, **kwargs):
 
 
 
-class FerreOperator(BaseOperator):
+class FerreOperator2222(BaseOperator):
 
     template_fields = ("pks", )
     template_fields_renderers = {
@@ -603,6 +962,9 @@ class FerreOperator(BaseOperator):
         for i, (instance, N) in enumerate(zip(instances, Ns)):
             if N == 0: continue
 
+            if N > 1:
+                print(f"MULTIPLE OBSERVATIONS {instance} {N}")
+
             sliced = slice(si, si + N)
 
             results = dict(
@@ -630,6 +992,8 @@ class FerreOperator(BaseOperator):
         
         # Teardown
         ferre.teardown()
+
+        return [instance.pk for instance in instances]
 
 
 

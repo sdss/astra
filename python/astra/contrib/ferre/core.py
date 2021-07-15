@@ -1,5 +1,3 @@
-
-
 import numpy as np
 import multiprocessing as mp
 import os
@@ -9,1297 +7,336 @@ import sys
 import threading
 
 from collections import OrderedDict
-from glob import glob
 from io import StringIO, BytesIO
 from inspect import getfullargspec
-from shutil import copyfile, rmtree
 from tempfile import mkdtemp
 from time import sleep, time
 from tqdm import tqdm
 
 from astra.utils import log
-from astra.tools.spectrum import Spectrum1D
-from astropy import units as u
-
 from astra.contrib.ferre import utils
-from collections import OrderedDict
-from luigi.freezing import FrozenOrderedDict
 
-class Ferre(object):
-
-    # TODO: No hard coding!
-    executable = "/uufs/chpc.utah.edu/common/home/sdss09/software/apogee/Linux/apogee/trunk/bin/ferre.x"
-
-    def __init__(
-            self, 
-            grid_header_path,
-            frozen_parameters=None,
-            interpolation_order=1,
-            init_flag=1,
-            init_algorithm_flag=1,
-            error_algorithm_flag=0,
-            continuum_flag=None,
-            continuum_order=None,
-            continuum_reject=None,
-            continuum_observations_flag=0,
-            optimization_algorithm_flag=3,
-            wavelength_interpolation_flag=0,
-            lsf_shape_flag=0,
-            use_direct_access=True,
-            n_threads=1,
-            directory_kwds=None,        
-            input_weights_path=None,
-            input_lsf_path=None,
-            debug=False,
-            ferre_kwds=None,
-            #slurm_kwds=None,
-            **kwargs
-        ):        
-
-        # Parse headers.
-        self.headers = utils.read_ferre_headers(os.path.expandvars(grid_header_path))
-
-        defaults = [
-            ("synthfile_format_flag", 1),
-            ("input_parameter_path", "params.input"),
-            ("input_wavelength_path", "wavelength.input"),
-            ("input_flux_path", "flux.input"),
-            ("input_uncertainties_path", "uncertainties.input"),
-            ("output_parameter_path", "params.output"),
-            ("output_flux_path", "flux.output"),
-            ("output_normalized_input_flux_path", "normalized_flux.output"),
-            #("input_weights_path", "weights.input"),
-            #("input_lsf_path", "lsf.input"),
-            ("n_dimensions", self.headers[0]["N_OF_DIM"])
-            # n_pixels,
-            # n_runs
-        ]
-
-        kwds = dict()
-        for key, default_value in defaults:
-            kwds[key] = kwargs.get(key, default_value)
-
-        # These parameters do not go to FERRE.
-        ignore = ("self", "frozen_parameters", "debug", "directory_kwds")
-        for keyword in getfullargspec(Ferre.__init__).args:
-            if keyword not in ignore:
-                kwds[keyword] = eval(keyword)
-
-        self.frozen_parameters = frozen_parameters or None
-        # We assume a parameter will be fit, unless it is frozen.
-        if self.frozen_parameters is not None:
-            unknown_parameters = set(self.frozen_parameters).difference(self.parameter_names)
-            if unknown_parameters:
-                raise ValueError(f"unknown parameter(s): {unknown_parameters} (available: {self.parameter_names})")
-            
-            indices = [i for i, pn in enumerate(self.parameter_names, start=1) if pn not in self.frozen_parameters]
-            indices = sorted(indices)
-            kwds["n_parameters"] = len(indices)
-            kwds["parameter_search_indices"] = indices
-
-        else:
-            kwds["n_parameters"] = kwds["n_dimensions"]
-            kwds["parameter_search_indices"] = 1 + np.arange(kwds["n_parameters"])
-
-        # Things for context manager.
-        self.context_manager = False
-        # By default if we use a context manager, we want the input stream path to go to the 
-        # input_parameter_path so that we can use the context manager as an interpolator.
-        self._input_stream_path = kwargs.get("input_stream_path", "input_parameter_path")
-        self._output_stream_path = kwargs.get("output_stream_path", "output_flux_path")
-
-        # Directory.
-        self._directory_kwds = directory_kwds
-
-        self.kwds = kwds
-
-        self.debug = debug
-
-        return None
-
-
-    @property
-    def parameter_names(self):
-        return self.headers[0]["LABEL"]
-
-    @property
-    def wavelength(self):
-        return tuple([
-            utils.wavelength_array_from_ferre_header(header) * u.Angstrom \
-            for header in self.headers[1:]
-        ])
-
-
-    @property
-    def directory(self):
-        try:
-            self._directory
-        except AttributeError:
-            kwds = self._directory_kwds or dict()
-            # Make the parent directory if we need to.
-            if kwds.get("dir", None) is not None:
-                os.makedirs(kwds["dir"], exist_ok=True)
-            self._directory = mkdtemp(**kwds)
-            log.info(f"Created temporary directory {self._directory}")
-        
-        return self._directory
-
-
-    @property
-    def grid_mid_point(self):
-        return self.headers[0]["LLIMITS"] + 0.5 * self.headers[0]["STEPS"] * self.headers[0]["N_P"]
-
-
-    @property
-    def grid_limits(self):
-        return (
-            self.headers[0]["LLIMITS"],
-            self.headers[0]["LLIMITS"] + self.headers[0]["STEPS"] * self.headers[0]["N_P"]
-        )
-
-    @property
-    def n_dimensions(self):
-        return self.headers[0]["N_OF_DIM"]
-
-    def wavelength_mask(self, wavelength):
-
-        try:
-            wl = wavelength.value
-        except:
-            wl = wavelength
-
-        P = 0
-        mask = np.zeros(wavelength.size, dtype=bool)
-        for model_wavelength in self.wavelength:
-            s_index, e_index = wl.searchsorted(model_wavelength[[0, -1]].value)
-            mask[s_index:e_index + 1] = True
-            P += model_wavelength.size
-        
-        assert np.sum(mask) == P
-        return mask
-
-
-    def in_grid_limits(self, points):
-        lower, upper = self.grid_limits
-        return (upper >= points) * (points >= lower)
-
-
-    def parse_initial_parameters(self, initial_parameters, Ns):
-
-        parsed_initial_parameters = np.tile(self.grid_mid_point, sum(Ns))
-        parsed_initial_parameters = parsed_initial_parameters.reshape((sum(Ns), -1))
-        
-        if initial_parameters is not None and len(initial_parameters) > 0:
-            self.kwds["init_algorithm_flag"] = 0
-
-            # Parse the initial parameters.
-            si = 0
-            for i, N in enumerate(Ns):
-                for j, pn in enumerate(self.parameter_names):
-                    value = initial_parameters[pn]
-                    if not isinstance(value, (float, int)):
-                        value = value[i]
-                    parsed_initial_parameters[si:si + N, j] = value
-                si += N
-
-        return parsed_initial_parameters
-
-
-    def write_inputs(self, wavelength, flux, sigma, initial_parameters, names):
-
-        # TODO: Assuming all have the same wavelength grid.
-        mask = self.wavelength_mask(wavelength)
-
-        # Write wavelengths
-        log.debug(f"Writing input files for FERRE in {self.directory}")
-        if self.kwds["wavelength_interpolation_flag"] > 0:
-            wavelength = np.vstack(wavelength)
-            utils.write_data_file(
-                wavelength[:, mask],
-                os.path.join(self.directory, self.kwds["input_wavelength_path"])
-            )
-
-        # Write flux.
-        log.debug(f"Writing input fluxes in {self.directory}")
-        utils.write_data_file(
-            flux[:, mask],
-            os.path.join(self.directory, self.kwds["input_flux_path"])
-        )
-
-        # Write uncertainties.
-        log.debug(f"Writing input uncertainties in {self.directory}")
-        utils.write_data_file(
-            sigma[:, mask],
-            os.path.join(self.directory, self.kwds["input_uncertainties_path"])
-        )
-
-        # Write initial values.
-        with open(os.path.join(self.directory, self.kwds["input_parameter_path"]), "w") as fp:
-            for star_name, point in zip(names, initial_parameters):
-                fp.write(utils.format_ferre_input_parameters(*point, star_name=star_name))
-                
-        return True
-
-    def parse_outputs(self, full_output=False):
-        output_parameter_path = os.path.join(self.directory, self.kwds["output_parameter_path"])
-        output_names, p_opt, p_opt_err, meta = utils.read_output_parameter_file(
-            output_parameter_path,
-            n_dimensions=self.n_dimensions
-        )    
-
-        return (output_names, p_opt, p_opt_err, meta)
-        
-
-    def fit(self, spectra, initial_parameters=None, full_output=False, names=None, **kwargs):
-
-        if isinstance(spectra, Spectrum1D):
-            spectra = [spectra]
-
-        log.debug(f"Preparing inputs for FERRE in {self.directory}")
-        flux = np.vstack([spectrum.flux.value for spectrum in spectra])
-        uncertainties = np.vstack([spectrum.uncertainty.array**-0.5 for spectrum in spectra])
-        Ns = np.array([spectrum.flux.shape[0] for spectrum in spectra])
-        wavelengths = np.vstack([
-            np.tile(spectrum.wavelength.value, n).reshape((n, -1)) \
-            for (spectrum, n) in zip(spectra, Ns)
-        ])
-        
-        N, P = flux.shape
-        assert flux.shape == uncertainties.shape
-        
-        log.debug(f"Parsing initial parameters in {self.directory}")
-        parsed_initial_parameters = self.parse_initial_parameters(initial_parameters, Ns)
-
-        # Make sure we are not sending nans etc.
-        bad = ~np.isfinite(flux) \
-            + ~np.isfinite(uncertainties) \
-            + (uncertainties == 0)
-        flux[bad] = 1.0
-        uncertainties[bad] = 1e6
-
-        # We only send specific set of pixels to FERRE.
-        mask = self.wavelength_mask(wavelengths[0])
-
-        # TODO: Should we be doing this if we are using wavelength_interpolation_flag > 0?
-        #wavelengths = wavelengths[:, mask]
-        #flux = flux[:, mask]
-        #uncertainties = uncertainties[:, mask]
-
-        # Write wavelengths?
-        log.debug(f"Writing input files for FERRE in {self.directory}")
-        if self.kwds["wavelength_interpolation_flag"] > 0:            
-            utils.write_data_file(
-                wavelengths[:, mask],
-                os.path.join(self.directory, self.kwds["input_wavelength_path"])
-            )
-
-        # Write flux.
-        log.debug(f"Writing input fluxes in {self.directory}")
-        utils.write_data_file(
-            flux[:, mask],
-            os.path.join(self.directory, self.kwds["input_flux_path"])
-        )
-
-        # Write uncertainties.
-        log.debug(f"Writing input uncertainties in {self.directory}")
-        utils.write_data_file(
-            uncertainties[:, mask],
-            os.path.join(self.directory, self.kwds["input_uncertainties_path"])
-        )
-
-        # Write initial parameters to disk.
-        log.debug(f"Writing input names and parameters in {self.directory}")
-        if names is None:
-            names = [f"idx_{i:.0f}" for i in range(len(parsed_initial_parameters))]
-        
-        else:
-            # Expand out names if needed.
-            if len(names) == len(spectra) and sum(Ns) > len(spectra):
-                expanded_names = []
-                for i, (name, n) in enumerate(zip(names, Ns)):
-                    for j in range(n):
-                        expanded_names.append(f"{name}_{j}")
-                names = expanded_names
-
-        with open(os.path.join(self.directory, self.kwds["input_parameter_path"]), "w") as fp:            
-            #for i, each in enumerate(parsed_initial_parameters):
-            #    fp.write(utils.format_ferre_input_parameters(*each, star_name=f"idx_{i:.0f}"))
-            for star_name, ip in zip(names, parsed_initial_parameters):
-                fp.write(utils.format_ferre_input_parameters(*ip, star_name=star_name))
-
-        # Execute.
-        log.debug(f"Loading up FERRE for {self.directory}")
-        self._execute(total=N, **kwargs)
-        
-        erroneous_output = -999.999
-
-        # Parse parameters.
-        return self.parse_outputs(full_output=full_output)
-
-    '''
-    def parse_outputs(self, full_output=False):
-
-        try:
-            output_parameter_path = os.path.join(self.directory, self.kwds["output_parameter_path"])
-            output_names, output_param, output_param_errs, output_meta = utils.read_output_parameter_file(
-                output_parameter_path,
-                n_dimensions=self.n_dimensions
-            )
-
-        except:
-            log.info("Something went wrong. Could have been in FERRE.")
-            log.info(self.stdout)
-            log.error(self.stderr)
-            raise 
-
-        else:
-            sort_indices = np.array([names.index(name) for name in output_names])
-            
-            N_returned, D = output_param.shape
-            if N_returned < N or np.any(np.diff(sort_indices) != 1):
-                if N_returned < N:
-                    log.warning(f"File {output_parameter_path} contained {N_returned} parameter entries"
-                                f" but we expected {N} ({N - N_returned:.0f} missing).")
-
-                log.error(f"FERRE outputs do not look sorted correctly. FERRE may have crashed.")
-                log.warning(f"FERRE STDOUT:\n{self.stdout}")
-                log.warning(f"FERRE STDERR:\n{self.stderr}")
-                log.info("Sorting FERRE outputs based on input names.")
-                
-                param = erroneous_output * np.ones((N, self.n_dimensions))
-                param_errs = erroneous_output * np.ones((N, self.n_dimensions))
-
-                param[sort_indices] = output_param
-                param_errs[sort_indices] = output_param_errs
-
-                meta = {}
-                for key in output_meta:
-                    meta[key] = np.nan * np.ones(N)
-                    meta[key][sort_indices] = output_meta[key]
-                
-            else:
-                # All spectra accounted for. 
-                param = output_param
-                param_errs = output_param_errs
-                meta = output_meta
-            
-            if full_output:
-
-                # Return the mask.
-                meta["mask"] = mask
-
-                # De-mask the model flux.
-                model_flux = np.nan * np.ones((N, P))
-                model_flux[:, mask][sort_indices] = np.atleast_2d(
-                    np.loadtxt(
-                        os.path.join(self.directory, self.kwds["output_flux_path"])
-                    )
-                )
-
-                meta["model_flux"] = model_flux
-
-                # Continuum could be done before FERRE, or done by FERRE. 
-                # For consistency we should return something about continuum.
-                if self.kwds.get("continuum_flag", None) is None:
-                    continuum = 1
-                
-                else:
-                    normalized_flux = np.nan * np.ones((N, P))
-                    normalized_flux[sort_indices][:, mask] = np.atleast_2d(
-                        np.loadtxt(
-                            os.path.join(self.directory, self.kwds["output_normalized_input_flux_path"])
-                        )
-                    )
-
-                    # Infer continuum.
-                    # Note: both flux and normalized_flux are indexed correctly.
-                    continuum = flux / normalized_flux
-                    #continuum = np.nan * np.ones((N, P))
-                    #continuum[:, mask] = masked_continuum
-                    
-                meta["continuum"] = continuum
-
-                # Add n_spectra_per_source
-                meta["n_spectra_per_source"] = tuple(Ns)
-
-                return (param, param_errs, meta)
-
-            return (param, param_errs)
-    '''
-
-
-    def __call__(self, x, timeout=30):
-
-        try:
-            self.process
-        
-        except AttributeError:
-            raise RuntimeError("this function can only be called when used as a context manager")
-        
-
-        if isinstance(x, dict):
-            x = self.parse_initial_parameters([x], [1])[0]
-        else:
-            if len(x) < len(self.parameter_names) and self.frozen_parameters is not None:
-                pns = [pn for pn in self.parameter_names if pn not in self.frozen_parameters]
-
-                x_ = np.nan * np.ones(len(self.parameter_names))
-                for i, pn in enumerate(pns):
-                    index = self.parameter_names.index(pn)
-                    x_[index] = x[i]
-                
-                for pn, v in self.frozen_parameters.items():
-                    index = self.parameter_names.index(pn)
-                    x_[index] = v
-                
-                x = x_
-        
-        lower, upper = self.grid_limits
-        if not np.all(upper >= x) or not np.all(x >= lower):
-            limits = np.array([upper >= x, x >= lower])
-            # Generate a mini-report.
-            indices = ~np.all(limits, axis=0)
-            report = " and ".join([
-                f"{upper[i]} >= {x[i]} >= {lower[i]} for {self.parameter_names[i]}" for i in np.where(indices)[0]
-            ])
-
-            msg = f"x is not within grid boundaries: {report}"
-            raise ValueError(msg)
-
-
-        # Write the parameters to the process stdin.
-        inputs = utils.format_ferre_input_parameters(*x)
-        with open(os.path.join(self.directory, "params.input"), "w") as fp:
-            fp.write(inputs)
-
-        self.process.stdin.write(inputs)
-        self.process.stdin.flush()
-
-        # Get outputs.
-        #stdout, stderr = self.process.communicate()
-
-        #print(len(stdout), len(stderr))
-
-        #content = "\n".join(stderr.split("\n")[:-1])
-        #return stderr
-
-        content = self._queue.get(timeout=timeout)
-
-        try:
-            # TODO: What if output is params path.
-            if self._output_stream_path == "output_flux_path":
-                # Parse as flux.
-                output = np.loadtxt(StringIO(content))
-
-            elif self._output_stream_path == "output_parameter_path":
-                # Parse as parameters.
-                raise NotImplementedError
-
-            else:
-                raise ValueError("unknown")
-
-        except ValueError:
-            # An error probably occurred.
-            # Check that there is no other output.
-            while True:
-                try:
-                    content += self._queue.get_nowait()
-                
-                except mp.Empty:
-                    break
-                
-            log.exception(f"FERRE returned the error:\n{content}")
-            raise RuntimeError(f"Ferre failed to interpolate spectrum at {params}")
-        
-        return output
-
-
-    def _write_ferre_input_file(self):
-        """
-        Write a FERRE input file.
-        """
-        
-        ferre_kwds = utils.prepare_ferre_input_keywords(**self.kwds)
-
-        input_path = os.path.join(self.directory, "input.nml")
-        with open(input_path, "w") as fp:
-            fp.write(utils.format_ferre_control_keywords(ferre_kwds))
-
-        return input_path
-    
-
-    def _execute(self, bufsize=1, encoding="utf-8", interactive=False, total=None, **kwargs):
-        """
-        Write an input file and execute FERRE.
-        """
-
-        self._setup()
-
-        self._write_ferre_input_file()
-
-        args = [self.executable]
-        
-        t_0 = time()
-            
-        log.debug(f"Calling {args[0]} in {self.directory}")
-        try:
-            self.process = subprocess.Popen(
-                args,
-                cwd=self.directory,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=bufsize,
-                encoding=encoding,
-                close_fds="posix" in sys.builtin_module_names
-            )
-
-        except subprocess.CalledProcessError:
-            log.exception(f"Exception when calling {self.executable} in {self.directory}")
-            raise
-
-        else:
-            if interactive:
-                return self.process
-
-            self._monitor_progress(total=total)
-            
-            t_elapsed = time() - t_0
-            log.info(f"FERRE sub-process and monitoring in {self.directory} took {t_elapsed:.0f} s.")
-            return None
-
-
-    def _check_progress(self, output_flux_path, interval):
-        if self.process is not None:
-            self._communicate(timeout=interval)
-        else:
-            sleep(interval)
-
-        if os.path.exists(output_flux_path):
-            n_done = utils.line_count(output_flux_path)
-        else:
-            n_done = 0
-
-        n_errors = self.stderr.lower().count("error")
-        
-        return (n_done, n_errors)
-        
-
-    def _monitor_progress(
-            self,
-            total=None,
-            interval=1,
-            use_tqdm=True,
-            timeout=3600,
-            timeout_cleanup=10,
-            max_wait_time_per_result=60
-        ):
-        # TODO: Monitor the Slurm job completeness instead?
-    
-        self.stdout, self.stderr = ("", "")
-
-        # Monitor progress.
-        # Note: FERRE normally writes fluxes before parameters, so we will use the flux path to
-        # monitor progress.
-        output_flux_path = os.path.join(self.directory, self.kwds["output_flux_path"])
-
-        if timeout is None:
-            t_timeout = np.inf
-        else:
-            t_timeout = time() + timeout
-        
-        last_new_result_time = None
-        if use_tqdm:
-            total_done, total_errors = (0, 0)
-            with tqdm(total=total, desc="FERRE", unit="star") as pbar:
-                while total > total_done and time() < t_timeout:
-                    n_done, n_errors = self._check_progress(output_flux_path, interval)
-                    n_updated = n_done - total_done
-
-                    pbar.update(n_updated)
-                    if n_updated > 0:
-                        last_new_result_time = time()
-                    else:
-                        # No new updates.
-                        if last_new_result_time is not None \
-                        and (time() - last_new_result_time) > max_wait_time_per_result:
-                            log.error(f"Waited {max_wait_time_per_result} seconds since last FERRE output!")
-                            log.error(f"Assuming FERRE in {self.directory} has crashed.")
-                            if self.process is not None:
-                                self.process.kill()
-                            break
-
-                    total_done = n_done
-                    total_errors = n_errors
-
-                    if n_errors > 0:
-                        pbar.set_description(f"FERRE ({total_errors:.0f} errors)")
-                    pbar.refresh()
-
-        else:
-            total_done, total_errors = (0, 0)
-            while total > total_done and time() < t_timeout:
-                n_done, n_errors = self._check_progress(output_flux_path, interval)
-                n_updated = n_done - total_done
-
-                if n_updated > 0:
-                    last_new_result_time = time()
-                else:
-                    # No new updates.
-                    if last_new_result_time is not None \
-                    and (time() - last_new_result_time) > max_wait_time_per_result:
-                        log.error(f"Waited {max_wait_time_per_result} seconds since last FERRE output!")
-                        log.error(f"Assuming FERRE in {self.directory} has crashed.")
-                        if self.process is not None:
-                            self.process.kill()
-                        break
-
-                log.info(f"FERRE in {self.directory} has completed {total_done} / {total}")
-
-                if n_errors > 0:
-                    log.error(f"FERRE in {self.directory} has {total_errors} errors")
-
-                total_errors += n_errors
-                total_done = n_done
-        
-        if time() > t_timeout:
-            if self.process is not None:
-                log.error(f"FERRE may have crashed in {self.directory}. Killing process..")
-                self.process.kill()
-            else:
-                log.error(f"FERRE may have crashed in {self.directory} but there is nothing we can do.")
-
-        # Do a final I/O communicate because we are done.
-        if self.process is not None:
-            log.info(f"Waiting for FERRE to clean up in {self.directory}")
-            
-            done = self._communicate(timeout=10)
-            if done is not None and not done and self.process is not None:
-                # TODO: Check that we have all the unsorted outputs we need before killing.
-                # Kill the process.
-                log.error(f"FERRE is taking too long to sort and clean-up. Killing process.")
-                self.process.terminate()
-                self.process.wait()
-                self._communicate(timeout=0)
-                
-        return None
-
-
-    def get_processing_times(self, stdout=None):
-        """
-        Get the time taken to analyse spectra and estimate the initial load time.
-
-        :param stdout: (optional)
-            The standard output from FERRE.
-        """
-        if stdout is None and self.process is not None:
-            self._communicate(timeout=0)
-
-        stdout = stdout or self.stdout
-
-        if stdout is None or stdout == "":
-            return None
-
-        matches = re.findall('ellapsed time:\s+[{0-9}|.]+', stdout)
-        load_time, *elapsed_time = [float(match.split()[-1]) for match in matches]
-
-        # Offset load time.
-        elapsed_time = np.array(elapsed_time) - load_time
-
-        # Account for number of threads.
-        n_threads = self.kwds.get("n_threads", 1)
-        O = n_threads - (elapsed_time.size % n_threads)
-        A = np.hstack([elapsed_time, np.zeros(O)]).reshape((-1, n_threads))
-        time_per_spectrum = np.hstack([elapsed_time[:n_threads], np.diff(A, axis=0).flatten()[:-O]])
-
-        object_indices = [int(index.split()[-1]) for index in re.findall('next object #\s+[{0-9}]+', stdout)]
-    
-        # Sort.
-        idx = np.argsort(object_indices)
-        time_per_spectrum = time_per_spectrum[idx]
-        
-        return dict(
-            load_time=load_time,
-            elapsed_time=elapsed_time,
-            indices=idx,
-            time_per_ordered_spectrum=time_per_spectrum
-        )
-
-
-
-
-
-    def _communicate(self, timeout=None):
-        try:
-            stdout, stderr = self.process.communicate(timeout=timeout)
-
-        except subprocess.TimeoutExpired:
-            return False
-
-        except ValueError:
-            # See https://bugs.python.org/issue35182
-            # Child has finished.
-            return None
-            
-        else:
-            self.stdout += stdout
-            self.stderr += stderr
-        return True
-
-
-    def _setup(self):
-        # Set up temporary directory.
-        assert os.path.exists(self.directory)
-
-        # Copy input weights file.
-        if self.kwds["input_weights_path"] is not None:
-            basename = os.path.basename(self.kwds["input_weights_path"])
-            copyfile(
-                self.kwds["input_weights_path"],
-                os.path.join(self.directory, basename)
-            )
-            # Replace with relative path.
-            self.kwds["input_weights_path"] = basename
-
-        return None
-
-
-    def teardown(self):
-        if not self.debug:
-            log.info(f"Removing directory at {self.directory}")
-            rmtree(self.directory)
-            return True
-            
-        else:
-            log.warning(f"Not tearing down {self.directory} because debug = {self.debug}")
-            return False
-        
-
-
-    def __enter__(self):
-
-        # If we are using the `with Ferre() as model:` context statement then we are going to have
-        # something with many inputs and outputs.
-        self.context_manager = True
-
-        # This means we need to execute FERRE now, and we should already know where the 
-        # "input stream path" goes to, because that has to be defined for the input Ferre file.
-        self.kwds[self._input_stream_path] = "/dev/stdin"
-        self.kwds[self._output_stream_path] = "/dev/stderr"
-
-        if self._input_stream_path == "input_parameter_path":
-            # Need to set nov = 0 for interpolation mode for FERRE.
-            self.kwds["n_parameters"] = 0
-        
-        # Execute FERRE.
-        process = self._execute(interactive=True)
-
-        # Set up non-blocking thread.
-        self._queue = mp.Queue()
-        self._thread = threading.Thread(
-            target=_non_blocking_pipe_read,
-            args=(process.stderr, self._queue),
-            daemon=True
-        )
-        self._thread.needed = True
-        self._thread.start()
-
-        return self
-
-
-    def __exit__(self, type, value, traceback):
-        # Kill off our non-blocking pipe read.        
-        self._thread.needed = False
-
-        # Capture outputs for verbosity.
-        try:
-            self.stdout, self.stderr = self.process.communicate(timeout=1)
-        except:
-            None
-
-        self.teardown()
-        return None
-
-
-
-class FerreSlurmQueue(Ferre):
-
-    def _execute(self, bufsize=1, encoding="utf-8", total=None, **kwargs):
-        """
-        Write an input file and execute FERRE, using the Slurm queue submission system.
-        """
-        
-        self._setup()
-        self._write_ferre_input_file()
-
-        kwds = dict(dir=self.directory)
-        kwds.update(self.slurm_kwds)
-
-        # It's bad practice to import things here, but we do so to avoid import errors on
-        # non-Utah systems, since the slurm package is not a requirement and only available
-        # at Utah.
-        # TODO: Consider using @slurmify for this.
-        from slurm import queue as SlurmQueue
-
-        queue = SlurmQueue(verbose=True)
-        queue.create(**kwds)
-        queue.append(self.executable)
-        queue.commit(hard=True, submit=True)
-        
-        log.info(f"Slurm job submitted with {queue.key} and kwds {kwds}")
-        
-        self.process = None
-
-        # Monitor progress through length of output files.
-        self._monitor_progress(total=total, interval=30, use_tqdm=False, timeout=timeout)
-        # TODO: Monitor the Slurm job completeness instead?
-        return None
-    
-
-
-
-def _non_blocking_pipe_read(stream, queue):
-    """ 
-    A non-blocking and non-destructive stream reader for long-running interactive jobs. 
-    
-    :param stream:
-        The stream to read (e.g., process.stderr).
-    
-    :param queue:
-        The multiprocessing queue to put the output from the stream to.        
-    """
-
-    thread = threading.currentThread()
-    while getattr(thread, "needed", True):
-        f = stream.readline()
-        queue.put(f)
-
-    return None
-
-
-
-if __name__ == "__main__":
-
-
-    from astra.tools.spectrum import Spectrum1D
-
-    spectrum = Spectrum1D.read(
-        "/home/ubuntu/data/sdss/dr16/apogee/spectro/redux/r12/stars/apo25m/120-60/apStar-r12-2M00463666+0347457.fits",
-        format="SDSS APOGEE apStar"
-    )
-    # Grid header path found by dispatcher.
-    grid_header_path = "/home/andy/data/sdss/apogeework/apogee/spectro/speclib/turbospec/marcs/solarisotopes/tdM_180901_lsfa_l33/p_apstdM_180901_lsfa_l33_012_075.hdr"
-
-
-    from astropy.io import fits
-
-    image = fits.open("/home/ubuntu/data/sdss/dr16/apogee/spectro/aspcap/r12/l133/apo25m/070+69_MGA/aspcapStar-r12-2M14212225+3908580.fits")
-
-    #  Teff, logg, vmicro, [M/H], [C/M], [N/M], [alpha/M], vsini/vmacro, [O/M]
-    teff, logg, vmicro, m_h, c_m, n_m, alpha_m, vsini, o_m = image[4].data["PARAM"][0]
-
-    #model.parameter_names                                                                                                                                                                                                                                                                                                          
-    #Out[78]: ['TEFF', 'LOGG', 'METALS', 'O Mg Si S Ca Ti', 'N', 'C', 'LOG10VDOP']
-
-    point = np.array([teff, logg, m_h, alpha_m, n_m, c_m, vsini])
-
-    spectrum = Spectrum1D.read(
-        "/home/ubuntu/data/sdss/dr16/apogee/spectro/redux/r12/stars/apo25m/070+69_MGA/apStar-r12-2M14212225+3908580.fits",
-        format="SDSS APOGEE apStar"
-    )
-
-
-    grid_header_path = "/home/andy/data/sdss/apogeework/apogee/spectro/speclib/turbospec/marcs/giantisotopes/tgGK_180901_lsfa_l33/p_apstgGK_180901_lsfa_l33_012_075.hdr"
-
-    #point = np.array([ 6.1508e+03,  4.5033e+00,  6.2916e-02,  0, 0, 0, 0])
-    
-
-
-
-
-    '''
-
-    with Ferre(grid_header_path=grid_header_path) as model:
-        mid_point_except_teff_logg_feh = model.grid_mid_point[:-3]
-
-        teff_logg_feh = np.random.uniform(
-            model.grid_limits[0][-3:],
-            model.grid_limits[1][-3:],
-            size=(30, 3)
-        )
-
-        ok = []
-        for each in teff_logg_feh:
-            p = list(mid_point_except_teff_logg_feh) + list(each)
-            flux = model(*p[::-1])
-            ok.append(np.any(flux > -1000))
-            print(p, ok[-1])
-
-
-    with Ferre(**kwds) as model:
-        interpolated_flux = model(*point[::-1])
-        interpolated_flux2 = model(*point)
-
-
-    '''
-    
-
-    from time import time
-
-    kwds = dict(
-        grid_header_path=grid_header_path, 
-        debug=True,
+# Cross-check
+# /uufs/chpc.utah.edu/common/home/sdss50/dr17/apogee/spectro/aspcap/dr17/synspec/bundle_apo25m/apo25m_003/ferre/elem_K
+
+def ferre(
+        wavelength,
+        flux,
+        sigma,
+        header_path,
+        names=None,
+        initial_parameters=None,
+        frozen_parameters=None,
+        interpolation_order=1,
+        input_weights_path=None,
+        input_lsf_shape_path=None,
+        lsf_shape_flag=0,
+        error_algorithm_flag=1,
+        wavelength_interpolation_flag=0,
+        optimization_algorithm_flag=3,
         continuum_flag=1,
         continuum_order=4,
-        continuum_reject=0.1,
-        interpolation_order=3,
-        optimization_algorithm_flag=3,
-        wavelength_interpolation_flag=0,
-        input_weights_path="/home/andy/data/sdss/astra-component-data/FERRE/Al.mask",
-        n_ties=0,
-        type_tie=1,
-    )
-
-
-    point = np.array([
-        5.911906e+03,
-        4.349000e+00,
-        7.700000e-02,
-        2.000000e-02,
-        -9.000000e-03,
-        1.290000e-01,
-        -5.000000e-01
-    ])
-    parameter_names = ['LOG10VDOP', 'C', 'N', 'O Mg Si S Ca Ti', 'METALS', 'LOGG', 'TEFF']
-
-    initial_parameters = dict(zip(parameter_names[::-1], point))
-
-    frozen_parameters = initial_parameters.copy()
-    del frozen_parameters["O Mg Si S Ca Ti"]
-
-    kwds.update(
-        frozen_parameters=frozen_parameters,
-        init_flag=0,
-        init_algorithm_flag=None
-    )
-
-    model = Ferre(**kwds)
-    t_init = time()
-    p_opt, p_cov, meta = model.fit(
-        spectrum, 
-        #initial_parameters=initial_parameters,
-        full_output=True,
-    )
-    print(time() - t_init, p_opt[0], meta["log_chisq_fit"])
-
-
+        continuum_segment=None,
+        continuum_reject=0.3,
+        continuum_observations_flag=1,
+        full_covariance=True,
+        pca_project=False,
+        pca_chi=False,
+        n_threads=1,
+        f_access=None,
+        f_format=1,
+        ferre_kwds=None,
+        **kwargs
+    ):
+    """
+    Run FERRE on the given observations and return the parsed outputs.
     
-    import matplotlib.pyplot as plt
-    import matplotlib.gridspec as gridspec
-    from matplotlib.ticker import NullFormatter
+    :param wavelength:
+        An array of wavelength values for the observations. This should be one of:
 
-    fig, ax = plt.subplots()
-
-    ax.plot(
-        spectrum.wavelength,
-        spectrum.flux.value[0, :],
-        c="#000000"
-    )
-
-    sigma = spectrum.uncertainty.array**-0.5
-    ax.fill_between(
-        spectrum.wavelength,
-        spectrum.flux.value[0, :] - sigma[0, :],
-        spectrum.flux.value[0, :] + sigma[0, :],
-        facecolor="#cccccc",
-        zorder=-1
-    )
-
-    weights = np.loadtxt(kwds["input_weights_path"])
-
-
-    ax.plot(
-        spectrum.wavelength[meta["mask"]],
-        weights,
-        c="tab:blue",
-        zorder=10
-    )
-
-    ax.set_ylim(0, 3500)
-
-    
-
-    fig.savefig("tmp1.png")
-
-
-
-    '''
-    fig, axes = plt.subplots(
-        ncols=1, nrows=3,
-        constrained_layout=True,
-        figsize=(15, 5)
-    )
-
-
-    v = np.nanmedian(spectrum.flux)
-
-    P = 0
-    for i, (ax, wavelength) in enumerate(zip(axes, model.wavelength)):
-        p = wavelength.size
-        ax.plot(
-            wavelength, 
-            model_flux[0][P:P+p],
-            c="tab:red"
-        )
+        - a 1D array of shape `P` where P is the number of pixels, if all spectra are
+          on the same wavelength grid
+        - an array of shape `(N, P)` where `N` is the number of observations and `P` 
+          is the number of pixels, if all spectra have the same number of pixels
+        - a list of `N` arrays, where each array contains the number of pixels in 
+          that observation
         
-        #ax.plot(
-        #    wavelength,
-        #    interpolated_flux[P:P+p],
-        #    c="tab:blue",
-        #)
+    :param flux:
+        The observed flux values. This should be one of:
 
+        - an array of shape `(N, P)` where `N` is the number of observations and `P`
+          is the number of pixels, if all spectra have the same number of pixels
+        - a list of `N` arrays, where each array has a size of the number of pixels in
+          that observation.
+        
+    :param sigma:
+        The uncertainty in the observed flux values. This should be one of:
 
-        if "normalized_input_flux" in meta:
-            ax.plot(
-                wavelength,
-                meta["normalized_input_flux"][0][P:P+p],
-                c="#000000"
-            )
+        - an array of shape `(N, P)` where `N` is the number of observations and `P`
+          is the number of pixels, if all spectra have the same number of pixels
+        - a list of `N` arrays, where each array has a size of the number of pixels in
+          that observation
+        
+    :param header_path:
+        The path of the FERRE header file.
+        
+    :param initial_parameters: [optional]
+        The initial parameters to start from. If `None` is given then this will revert
+        to the mid-point of the grid for all observations. This should be an array of
+        shape `(N, L)` where `N` is the number of observations and `L` is the number
+        of dimensions in the FERRE grid supplied.
 
-        else:
-            ax.plot(
-                spectrum.wavelength,
-                spectrum.flux.value[0, :],
-                c="#000000"
-            )
+    :param frozen_parameters: [optional]
+        A dictionary with parameter names (as per the header file) as keys, and either
+        a boolean flag or a float as value. If boolean `True` is given for a parameter,
+        then the value will be fixed at the initial value per spectrum. If a float is
+        given then this value will supercede all initial values given, fixing the
+        dimension for all input spectra regardless of the initial value.
 
-        ax.set_xlim(
-            *wavelength.value[[0, -1]]
-        )
-        ax.set_ylim(0, 1.2)
+    :param interpolation_order: [optional]
+        Order of interpolation to use (default: 1, as per FERRE).
+        This corresponds to the FERRE keyword `inter`.
 
-        P += p
+        0. nearest neighbour
+        1. linear
+        2. quadratic Bezier
+        3. cubic Bezier
+        4. cubic splines
 
-    fig.savefig("tmp.png", dpi=600)
+    :param input_weights_path: [optional]
+        The location of a weight (or mask) file to apply to the pixels. This corresponds
+        to the FERRE keyword `filterfile`.
     
-    '''
+    :para input_lsf_shape_path: [optional]
+        The location of a file containing describing the line spread function to apply to
+        the observations. This keyword is ignored if `lsf_shape_flag` is anything but 0.
+        This corresponds to the FERRE keyword `lsffile`.
+    
+    :param lsf_shape_flag: [optional]
+        A flag indicating what line spread convolution to perform. This should be one of:
 
+        0. no LSF convolution (default)
+        1. 1D (independent of wavelength), one and the same for all spectra
+        2. 2D (a function of wavelength), one and the same for all
+        3. 1D and Gaussian  (i.e. described by a single parameter, its width), one for all objects
+        4. 2D and Gaussian, one for all objects
+        11. 1D and particular for each spectrum
+        12. 2D and particular for each spectrum
+        13. 1D Gaussian, but particular for each spectrum
+        14. 2D Gaussian and particular for each object.
 
-    width_ratios = np.array([np.ptp(wl.value) for wl in model.wavelength])
-    width_ratios = width_ratios/np.min(width_ratios)
+        If `lsf_shape_flag` is anything but 0, then an `input_lsf_path` keyword argument
+        will also be required, pointing to the location of the LSF file.
 
-    fig, axes = plt.subplots(
-        ncols=3, nrows=2, figsize=(40, 5),
-        gridspec_kw=dict(width_ratios=width_ratios, height_ratios=[1, 5])
-    )
+    :param error_algorithm_flag: [optional]
+        Choice of algorithm to compute error bars (default: 1, as per FERRE).
+        This corresponds to the FERRE keyword `errbar`.
 
-    diff_axes = axes[0]
-    plot_axes = axes[1]
+        0. To adopt the distance from the solution at which $\chi^2$ = min($\chi^2$) + 1
+        1. To invert the curvature matrix
+        2. Perform numerical experiments injecting noise into the data
 
-    P = 0
-    for i, (ax, ax_diff, wavelength) in enumerate(zip(plot_axes, diff_axes, model.wavelength)):
-        p = wavelength.size
-        ax.plot(
-            wavelength, 
-            model_flux[0][P:P+p],
-            c="tab:red",
-            lw=1,
+    :param wavelength_interpolation_flag: [optional]
+        Flag to indicate what to do about wavelength interpolation (default: 0).
+        This is not usually needed as the FERRE grids are computed on the resampled
+        APOGEE grid. This corresponds to the FERRE keyword `winter`.
+
+        0. No interpolation.
+        1. Interpolate observations.
+        2. The FERRE documentation says 'Interpolate fluxes', but it is not clear to the
+           writer how that is any different from Option 1.
+
+    :param optimization_algorithm_flag: [optional]
+        Integer flag to indicate which optimization algorithm to use:
+
+        1. Nelder-Mead
+        2. Boender-Timmer-Rinnoy Kan
+        3. Powell's truncated Newton method
+        4. Nash's truncated Newton method
+
+    :param continuum_flag: [optional]
+        Choice of algorithm to use for continuum fitting (default: 1).
+        This corresponds to the FERRE keyword `cont`, and is related to the
+        FERRE keywords `ncont` and `rejectcont`.
+
+        If `None` is supplied then no continuum keywords will be given to FERRE.
+
+        1. Polynomial fitting using an iterative sigma clipping algrithm (set by
+           `continuum_order` and `continuum_reject` keywords).
+        2. Segmented normalization, where the data are split into `continuum_segment`
+           segments, and the values in each are divided by their mean values.
+        3. The input data are divided by a running mean computed with a window of
+           `continuum_segment` pixels.
+    
+    :param continuum_order: [optional]
+        The order of polynomial fitting to use, if `continuum_flag` is 1.
+        This corresponds to the FERRE keyword `ncont`, if `continuum_flag` is 1.
+        If `continuum_flag` is not 1, this keyword argument is ignored.
+    
+    :param continuum_segment: [optional]
+        Either the number of segments to split the data into for performing normalization,
+        (e.g., when `continuum_flag` = 2), or the window size to use when `continuum_flag`
+        = 3. This corresponds to the FERRE keyword `ncont` if `continuum_flag` is 2 or 3.
+        If `continuum_flag` is not 2 or 3, this keyword argument is ignored.
+
+    :param continuum_reject: [optional]
+        When using polynomial fitting with an iterative sigma clipping algorithm
+        (`continuum_flag` = 1), this sets the relative error where data points will be
+        excluded. Any data points with relative errors larger than `continuum_reject`
+        will be excluded. This corresponds to the FERRE keyword `rejectcont`.
+        If `continuum_flag` is not 1, this keyword argument is ignored.
+    
+    :param continuum_observations_flag: [optional]
+        This corresponds to the FERRE keyword `obscont`. Nothing is written down in the
+        FERRE documentation about this keyword.
+    
+    :param full_covariance: [optional]
+        Return the full covariance matrix from FERRE (default: True). 
+        This corresponds to the FERRE keyword `covprint`.
+    
+    :param pca_project: [optional]
+        Use Principal Component Analysis to compress the spectra (default: False).
+        This corresponds to the FERRE keyword `pcaproject`.
+    
+    :param pca_chi: [optional]
+        Use Principal Component Analysis to compress the spectra when calculating the
+        $\chi^2$ statistic. This corresponds to the FERRE keyword `pcachi`.
+    
+    :param n_threads: [optional]
+        The number of threads to use for FERRE. This corresponds to the FERRE keyword
+        `nthreads`.
+
+    :param f_access: [optional]
+        If `False`, load the entire grid into memory. If `True`, run the interpolation 
+        without loading the entire grid into memory -- this is useful for small numbers 
+        of interpolation. If `None` (default), automatically determine which is faster.
+        This corresponds to the FERRE keyword `f_access`.
+    
+    :param f_format: [optional]
+        File format of the FERRE grid: 0 (ASCII) or 1 (UNF format, default).
+        This corresponds to the FERRE keyword `f_format`.
+
+    :param ferre_kwds: [optional]
+        A dictionary of options to apply directly to FERRE, which will over-ride other
+        settings supplied here, so use with caution.
+    """
+
+    # Create a dictionary of all input keywords.
+    input_kwds = {}
+    for arg in getfullargspec(ferre).args:
+        input_kwds[arg] = locals()[arg]
+    
+    # Parse and validate parameters.
+    wavelength, flux, sigma, mask, names, initial_parameters, kwds, meta = utils.parse_ferre_inputs(**input_kwds)
+
+    # Create the temporary directory, if necessary.
+    directory = kwargs.get("directory", None)
+    if directory is None:
+        directory = mkdtemp(**kwargs.get("directory_kwds", {}))
+        log.info(f"Created temporary directory {directory}")
+    
+    # Write control file.
+    with open(os.path.join(directory, "input.nml"), "w") as fp:
+        fp.write(utils.format_ferre_control_keywords(kwds))
+
+    # Write data arrays.
+    utils.write_data_file(flux[:, mask], os.path.join(directory, kwds["ffile"]))
+    utils.write_data_file(sigma[:, mask], os.path.join(directory, kwds["erfile"]))
+
+    # Write initial values.
+    with open(os.path.join(directory, kwds["pfile"]), "w") as fp:
+        for name, point in zip(names, initial_parameters):
+            fp.write(utils.format_ferre_input_parameters(*point, name=name))
+
+    # Execute in non-interactive mode.
+    t_0 = time()
+    try:
+        process = subprocess.Popen(
+            ["ferre.x"],
+            cwd=directory,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=1,
+            encoding="utf-8",
+            close_fds="posix" in sys.builtin_module_names
         )
 
-        ax.plot(
-            wavelength,
-            interpolated_flux[P:P+p],
-            c="tab:blue",
-            lw=1
-        )
+    except subprocess.CalledProcessError:
+        log.exception(f"Exception when calling FERRE in {directory}")
+        raise
 
+    else:
+        interval = 1
+        total = len(flux)
+        stdout, stderr = ("", "")
+        output_flux_path = os.path.join(directory, kwds["offile"])
 
-        if "normalized_input_flux" in meta:
-            ax.plot(
-                wavelength,
-                meta["normalized_input_flux"][0][P:P+p],
-                c="#000000",
-                lw=1,
-            )
+        total_done, total_errors = (0, 0)
+        with tqdm(total=total, desc="FERRE", unit="spectra") as pb:
+            while total > total_done:
+                try:
+                    _stdout, _stderr = process.communicate(timeout=interval)
+                except subprocess.TimeoutExpired:
+                    None
+                else:
+                    stdout += _stdout
+                    stderr += _stderr
 
-            ax_diff.plot(
-                wavelength,
-                meta["normalized_input_flux"][0][P:P+p] - model_flux[0][P:P+p],
-                c="#000000",
-                lw=1,
-            )
-
-
-            s_index, e_index = spectrum.wavelength.value.searchsorted(wavelength[[0, -1]]) 
+                if os.path.exists(output_flux_path):
+                    n_done = utils.line_count(output_flux_path)
+                else:
+                    n_done = 0
+                
+                n_errors = stderr.lower().count("error")
             
-            continuum = spectrum.flux.value[0, s_index:e_index + 1] / meta["normalized_input_flux"][0][P:P+p]
+                n_updated = n_done - total_done
+                pb.update(n_updated)
 
-            sigma = spectrum.uncertainty.array[0, s_index:e_index + 1]**-0.5 / continuum
+                total_done = n_done
+                total_errors = n_errors
 
-            ax.fill_between(
-                wavelength, 
-                meta["normalized_input_flux"][0][P:P+p] - sigma,
-                meta["normalized_input_flux"][0][P:P+p] + sigma,
-                facecolor="#CCCCCC",
-                edgecolor="#CCCCCC",
-                zorder=-1
-            )
+                if n_errors > 0:
+                    pb.set_description(f"FERRE ({total_errors:.0f} errors)")
+                pb.refresh()
 
-            ax_diff.fill_between(
-                wavelength,
-                -sigma,
-                +sigma,
-                facecolor="#CCCCCC",
-                edgecolor="#CCCCCC",
-                zorder=-1
-            )
-
-
+        # Get final processing
+        try:
+            stdout, stderr = process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            processing_times = None
         else:
-            ax.plot(
-                spectrum.wavelength,
-                spectrum.flux.value[0, :],
-                c="#000000"
-            )
-        
-
-
-        ax_diff.set_ylim(-0.1, 0.1)
-        ax.set_ylim(0.5, 1.1)
-
-        ax_diff.axhline(0, c="#666666", ls=":", zorder=-10)
-        
-
-        for ax_ in (ax_diff, ax):
-
-            ax_.set_xlim(*wavelength.value[[0, -1]])
-
-            if not ax.is_last_row():
-                ax.set_xticks([])
-
-            if len(model.wavelength) > 0:
-                if not ax_.is_last_col():
-                    ax_.spines["right"].set_visible(False)
-                    ax_.tick_params(right=False, which="both")
-                    
-                if not ax_.is_first_col():
-                    ax_.spines["left"].set_visible(False)
-                    ax_.tick_params(left=False, which="both")
-                    ax_.yaxis.set_major_formatter(NullFormatter())
-
-            '''
-            if ii == 0 and not nregions == 1:
-                thisax_.spines['right'].set_visible(False)
-                thisax_.tick_params(right=False,which='both')
-            elif ii == (nregions-1) and not nregions == 1:
-                thisax_.spines['left'].set_visible(False)
-                thisax_.tick_params(labelleft='off')
-                thisax_.tick_params(left=False,which='both')
-            elif not nregions == 1:
-                thisax_.spines['left'].set_visible(False)
-                thisax_.spines['right'].set_visible(False)
-                thisax_.tick_params(labelleft='off')
-                thisax_.tick_params(left=False,which='both')
-                thisax_.tick_params(right=False,which='both')
-            '''
-
-            # Plot cut-out markers
-            cutOutkwargs = dict(transform=ax_.transAxes,color='k',
-                                clip_on=False)
-
-            nregions = len(model.wavelength)
-            dx = np.ones(nregions)
-            skipdx = 0.015
-
-            d = .015 # how big to make the diagonal lines in axes coordinates
-            #d = 0.015 if ax.is_last_row() else 0.015/5
-            skipdx = 0.015
-            slope= 1./(dx[i]+0.2*skipdx)/3.
-            slope = slope if ax.is_last_row() else 5 * slope 
-            if i == 0 and not nregions == 1:
-                ax_.plot((1-slope*d,1+slope*d),(-d,+d), **cutOutkwargs)
-                ax_.plot((1-slope*d,1+slope*d),(1-d,1+d), **cutOutkwargs)
-            elif i == (nregions-1) and not nregions == 1:
-                ax_.plot((-slope*d,+slope*d),(-d,+d), **cutOutkwargs)
-                ax_.plot((-slope*d,+slope*d),(1-d,1+d), **cutOutkwargs)
-            elif not nregions == 1:
-                ax_.plot((1-slope*d,1+slope*d),(-d,+d), **cutOutkwargs)
-                ax_.plot((1-slope*d,1+slope*d),(1-d,1+d), **cutOutkwargs)
-                ax_.plot((-slope*d,+slope*d),(-d,+d), **cutOutkwargs)
-                ax_.plot((-slope*d,+slope*d),(1-d,1+d), **cutOutkwargs)
-
-        P += p
-    
-    fig.tight_layout()
-    fig.savefig("tmp.png", dpi=600)
-
-    raise a
-
-
-
-
-
-    grid_header_path = "/home/andy/data/sdss/apogeework/apogee/spectro/speclib/turbospec/marcs/giantisotopes/tgGK_180901_lsfa_l33/p_apstgGK_180901_lsfa_l33_012_075.hdr"
-
-    import numpy as np
-    from astropy.units import Quantity
-    from astropy.nddata import InverseVariance
-    from astropy import units as u
-    units = u.Unit("1e-17 erg / (Angstrom cm2 s)")
-
-    from time import time
-
-    if False:
+            processing_times = utils.get_processing_times(stdout, kwds["nthreads"])
             
-        with Ferre(grid_header_path) as model:
-            points = np.random.uniform(*model.grid_limits, size=(30, 7))
 
-        for interpolation_order in (0, 1, 2, 3, 4):
+    # Parse parameter outputs and uncertainties.
+    output_names, param, param_err, output_meta = utils.read_output_parameter_file(
+        os.path.join(directory, kwds["opfile"]),
+        n_dimensions=kwds["ndim"],
+        full_covariance=kwds["covprint"]
+    )
+    
+    meta.update(
+        processing_times=processing_times,
+        **output_meta
+    )
 
-            with Ferre(grid_header_path, interpolation_order=interpolation_order) as model:
-                print(model.directory)
+    # need parameter names
 
-                times = []
-                for point in points:
-                    model(*point[::-1])
-                    times.append(time())
+    print(f"input names {names}")
+    print(f"output_names: {output_names}")
+    print(f"param: {param}")
+    print(f"param_err: {param_err}")
+    print(f"meta: {meta}")
 
-                diffs = np.diff(times)
-                print(f"Interpolation order {interpolation_order}: median={np.median(diffs):.3f} (stddev={np.std(diffs):.3f}, min={np.min(diffs):.3f}, max={np.max(diffs):.3f})")
+    # Parse elapsed time.
+    
+    print(f"times {processing_times}")
 
-        
-    point = (5000., 2.9, -0.9, 0.2, 0.1, 0.1, 0.0)
-    point2 = (5100., 2.8, -0.9, 0.2, 0.1, 0.1, 0.0)
+    # Parse flux outputs.
+    # exclude frozen things.
+    return (param, param_err, meta)
 
-    debug = False
-
-    with Ferre(grid_header_path, debug=debug) as model:
-        flux = model(*point)
-        flux2 = model(*point2)
-
-        spectra = [
-            Spectrum1D(
-                spectral_axis=np.hstack(model.wavelength),
-                flux=flux * units,
-                uncertainty=InverseVariance(1e6 * np.ones_like(flux))),
-            Spectrum1D(
-                spectral_axis=np.hstack(model.wavelength),
-                flux=flux2 * units,
-                uncertainty=InverseVariance(1e6 * np.ones_like(flux)))
-        ]
-
-
-    second_model = Ferre(grid_header_path, debug=debug)
-
-    result = second_model.fit(
-        spectra,
-        initial_parameters=[point, point2]
-        )
-
-    result2 = second_model.fit(
-        spectra[::-1],
-        initial_parameters=[point2, point]
-        )
 
 
 
