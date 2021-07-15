@@ -1051,7 +1051,7 @@ def get_abundance_keywords(element, header_label_names):
             ]
         },
         "Yb": {
-            "INDV_LABEL": ('METALS'        , ),
+            "INDV_LABEL": ('METALS', ),
             "TIES": [
                 ('C', 0, -1),
                 ('N', 0, -1),
@@ -1067,7 +1067,7 @@ def get_abundance_keywords(element, header_label_names):
     try:
         c = controls[element]
     except:
-        raise ValueError(f"no abundance controls known for element '{element} (available: {tuple(controls.keys())})")
+        raise ValueError(f"no abundance controls known for element '{element}' (available: {tuple(controls.keys())}")
 
     indv = [get_header_index(label) for label in c["INDV_LABEL"]]
     ties = c.get("TIES", [])
@@ -1088,7 +1088,6 @@ def get_abundance_keywords(element, header_label_names):
         })
     
     # Freeze all other labels.
-    frozen_parameters = { {hln: (hln not in c["INDV_LABEL"]) for hln in header_label_names }
+    frozen_parameters = { hln: (hln not in c["INDV_LABEL"]) for hln in header_label_names }
 
     return (frozen_parameters, ferre_kwds)
-

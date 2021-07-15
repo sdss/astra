@@ -16,13 +16,13 @@ from sdss_access import SDSSPath
 
 
 def get_model_path(
-        network_factory: str,
-        training_spectra_path: str,
-        training_labels_path: str,
-        learning_rate: float,
-        weight_decay: float,
-        n_epochs: int,
-        batch_size: int,
+        network_factory,
+        training_spectra_path,
+        training_labels_path,
+        learning_rate,
+        weight_decay,
+        n_epochs,
+        batch_size,
         **kwargs
     ):
     """
@@ -47,8 +47,11 @@ def get_model_path(
     :param batch_size:
         the batch size to use during training
     """
+    kwds = dict()
+    for arg in getargspec(get_model_path).args:
+        kwds[arg] = locals()[arg]
 
-    param_hash = hashify(dict([(arg, locals()[arg]) for arg in getargspec(get_model_path).args]))
+    param_hash = hashify(kwds)
     
     # TODO: This should go to some $ASTRA_DATA_DIR or something.
     return f"classifier_{network_factory}_{param_hash}.pt"

@@ -5,6 +5,7 @@ from astropy.time import Time
 
 
 from astra.database import (astradb, apogee_drpdb, session)
+from astra.utils import log
 
 
 deserialize_pks = lambda pks: json.loads(pks) if isinstance(pks, str) else pks
@@ -128,6 +129,8 @@ def get_sdss5_apstar_kwds(
         )
         kwds.append(d)
         
+    log.info(f"Retrieved {len(kwds)} identifying keywords for SDSS-V ApStar spectra")
+
     return kwds
 
 
@@ -206,8 +209,7 @@ def create_task_instances_for_sdss5_apvisits(
             get_or_create_task_instance(
                 dag_id,
                 task_id,
-                **kwds,
-                **parameters
+                parameters={ **kwds, **parameters}
         ))
 
     if full_output:
@@ -219,9 +221,10 @@ def create_task_instances_for_sdss5_apstars(
         dag_id,
         task_id,
         mjd,
+        parameters=None,
         limit=None,
         full_output=False,
-        **parameters
+        **kwargs
     ):
     """
     Create task instances for SDSS5 APOGEE stars taken on a Modified Julian Date,
@@ -236,21 +239,26 @@ def create_task_instances_for_sdss5_apstars(
     :param mjd:
         the Modified Julian Date of the observations
     
-    :param \**parameters: [optional]
+    :param parameters: [optional]
         additional parameters to be assigned to the task instances
+    
+    :param limit: [optional]
+        limit the number of ApStar objects returned to some number
     """
 
-    all_kwds = get_sdss5_apstar_kwds(mjd, limit=limit)
+    parameters = (parameters or dict())
 
+    all_kwds = get_sdss5_apstar_kwds(mjd, limit=limit)
+    
     instances = []
     for kwds in all_kwds:
         instances.append(
             get_or_create_task_instance(
                 dag_id,
                 task_id,
-                **kwds,
-                **parameters
-        ))
+                parameters={ **kwds, **parameters}
+            )
+        )
 
     if full_output:
         return instances
@@ -330,8 +338,7 @@ def create_task_instances_for_sdss5_apstars_from_apvisits(
             get_or_create_task_instance(
                 dag_id,
                 task_id,
-                **kwds,
-                **parameters
+                parameters={ **kwds, **parameters }
             )
         )
 
