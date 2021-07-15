@@ -39,6 +39,7 @@ create table astra_v02.ti (
 /* Doppler */
 create table astra_v02.doppler (
     output_pk int primary key,
+    ti_pk bigint,
     vhelio real[],
     vrel real[],
     u_vrel real, /* Same as `vrelerr`, changed to be consistent with other astra_v02 tables */
@@ -56,6 +57,7 @@ create table astra_v02.doppler (
 /* APOGEENet */
 create table astra_v02.apogeenet (
     output_pk int primary key,
+    ti_pk bigint,
     snr real[],
     teff real[],
     u_teff real[],
@@ -70,6 +72,7 @@ create table astra_v02.apogeenet (
 /* FERRE */
 create table astra_v02.ferre (
     output_pk int primary key,
+    ti_pk bigint,
     snr real[],
     frozen_teff boolean,
     frozen_logg boolean,
@@ -112,6 +115,7 @@ create table astra_v02.ferre (
 /* ASPCAP (final results from many FERRE executions) */
 create table astra_v02.aspcap (
     output_pk int primary key,
+    ti_pk bigint,
     snr real[],
     teff real[],
     u_teff real[],
@@ -181,6 +185,7 @@ NOTE: If the label names ever change between models of The Cannon, then we will 
 */
 create table astra_v02.thecannon (
     output_pk int primary key,
+    ti_pk bigint,
     teff real,
     foreign key (output_pk) references astra_v02.output_interface(pk) on delete restrict
 );
@@ -193,6 +198,7 @@ NOTE: If the label names ever change between models of The Payne, then we will e
 */
 create table astra_v02.thepayne (
     output_pk int primary key,
+    ti_pk bigint,
     snr real[],
     teff real[],
     u_teff real[],
@@ -251,6 +257,7 @@ create table astra_v02.thepayne (
 /* Classifiers */
 create table astra_v02.classification (
     output_pk int primary key,
+    ti_pk bigint,
     log_prob real[],
     prob real[],
     foreign key (output_pk) references astra_v02.output_interface(pk) on delete restrict
@@ -259,6 +266,7 @@ create table astra_v02.classification (
 /* Classifiers specifically for white dwarfs */
 create table astra_v02.wd_classification (
     output_pk int primary key,
+    ti_pk bigint,
     wd_class char(2),
     flag boolean,
     foreign key (output_pk) references astra_v02.output_interface(pk) on delete restrict
