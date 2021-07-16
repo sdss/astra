@@ -102,14 +102,16 @@ class SlurmPythonOperator(PythonOperator):
             # It's bad practice to import here, but the slurm package is
             # not easily installable outside of Utah, and is not a "must-have"
             # requirement. 
+            slurm_kwds = (self.slurm_kwargs or dict())
+
     
             from slurm import queue
             q = queue(verbose=True)
-            q.create(label=label, **self.slurm_kwargs)
+            q.create(label=label, **slurm_kwds)
             q.append(cmd)
             q.commit(hard=True, submit=True)
 
-            log.info(f"Slurm job submitted with {q.key} and keywords {self.slurm_kwargs}")
+            log.info(f"Slurm job submitted with {q.key} and keywords {slurm_kwds}")
             log.info(f"\tJob directory: {q.job_dir}")
 
             stdout_path = os.path.join(q.job_dir, f"{label}_01.o")

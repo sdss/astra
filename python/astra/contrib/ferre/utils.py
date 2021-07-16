@@ -267,6 +267,8 @@ def _parse_names_and_initial_and_frozen_parameters(
         frozen_parameters,
         headers,
         flux,
+        clip_initial_parameters_to_boundary_edges=True,
+        clip_epsilon_percent=1,
         **kwargs
     ):
 
@@ -287,8 +289,12 @@ def _parse_names_and_initial_and_frozen_parameters(
             except ValueError:
                 log.warning(f"Ignoring initial parameters for {parameter_name} as they are not in {parameter_names}")
             else:
-                parsed_initial_parameters[:, index] = values
-        
+                # Only supply finite values.
+                finite = np.isfinite(values)
+                parsed_initial_parameters[finite][:, index] = np.array(values)[finite]
+                if not np.all(finite):
+                    log.warning(f"Missing or non-finite initial values given for {parameter_name}. Defaulting to the grid mid-point.")                    
+                
     kwds = dict()
     frozen_parameters = (frozen_parameters or dict())
     if frozen_parameters:
@@ -345,11 +351,68 @@ def _parse_names_and_initial_and_frozen_parameters(
         if len(names) != len(parsed_initial_parameters):
             raise ValueError(f"names and initial parameters does not match ({len(names)} != {len(parsed_initial_parameters)})")
 
+    # Let's check the initial values are all within the grid boundaries.
+    lower_limit, upper_limit = _get_grid_limits(headers)
+    try:
+        _check_initial_parameters_within_grid_limits(parsed_initial_parameters, lower_limit, upper_limit, parameter_names)
+    except ValueError as e:
+        log.exception(f"Exception when checking initial parameters within grid boundaries:")
+        log.critical(e, exc_info=True)
+
+        if clip_initial_parameters_to_boundary_edges:
+            log.info(f"Clipping initial parameters to boundary edges (use clip_initial_parameters_to_boundary_edges=False to raise exception instead)")
+
+            clip = clip_epsilon_percent * (upper_limit - lower_limit)/100.
+            parsed_initial_parameters = np.clip(parsed_initial_parameters, lower_limit + clip, upper_limit - clip)
+        else:
+            raise
+        
     return (kwds, names, parsed_initial_parameters, parsed_frozen_parameters)
 
 
+def _get_grid_limits(headers):
+    """
+    Return a two-length tuple that contains the lower limits of the grid and the upper limits of the grid.
+
+    :param headers:
+        The primary headers from a FERRE grid file.
+    """
+    return (
+        headers["LLIMITS"],
+        headers["LLIMITS"] + headers["STEPS"] * headers["N_P"]
+    )
 
 
+def _check_initial_parameters_within_grid_limits(initial_parameters, lower_limit, upper_limit, parameter_names):
+    """
+    Check that the initial parameters are within the boundaries of the FERRE grid.
+
+    :param initial_parameters:
+        A 2D array of shape (N, L) where N is the number of spectra and L is the number of labels in the FERRE grid.
+    
+    :param headers:
+        The primary headers from the FERRE grid file.
+
+    :raise ValueError:
+        If any initial parameter is outside the grid boundary.
+    """
+
+    in_limits = (upper_limit >= initial_parameters) * (initial_parameters >= lower_limit)
+
+    if not np.all(in_limits):
+
+        message = "Initial_parameters are not all within bounds of the grid. For example:\n"
+
+        bad_parameter_indices = np.where(~np.all(in_limits, axis=0))[0]
+        for j in bad_parameter_indices:
+            i = np.where(~in_limits[:, j])[0]
+            message += f"- {parameter_names[j]} has limits of ({lower_limit[j]:.2f}, {upper_limit[j]:.2f}) but {len(i)} indices ({i}) are outside this range: {initial_parameters[:, j][i]}\n"
+        
+        raise ValueError(message)
+
+    return True
+
+        
 
 
 
@@ -373,8 +436,13 @@ def parse_ferre_inputs(**kwargs):
         s_index, e_index = wavelength[0].searchsorted(model_wavelength[[0, -1]])
         mask[s_index:e_index + 1] = True
         
-    _kwds, names, initial_parameters, parsed_frozen_parameters = _parse_names_and_initial_and_frozen_parameters(headers=headers, **kwargs)
+    _kwds, names, initial_parameters, parsed_frozen_parameters = _parse_names_and_initial_and_frozen_parameters(
+        headers=headers, 
+        **kwargs
+    )
     parsed_kwds.update(_kwds)
+
+
 
     parsers = (
         _default_ferre_kwds,

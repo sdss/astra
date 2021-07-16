@@ -295,11 +295,19 @@ def create_initial_parameters(instances, Ns):
             if key.startswith("initial_"):
                 ferre_label = utils.desanitise_parameter_name(key[8:])
                 value = json.loads(value)
-                if isinstance(value, (float, int)):
+                if value is None:
+                    value = [np.nan] * N
+                elif isinstance(value, (float, int)):
                     value = [value] * N
                 elif isinstance(value, (list, tuple)):
                     assert len(value) == N
-                initial_parameters[ferre_label].extend(value)
+
+                try:
+                    initial_parameters[ferre_label].extend(value)
+                except:
+                    print(f"Setting {ferre_label} with {value}")
+                    raise
+
 
     return initial_parameters
 
@@ -465,7 +473,9 @@ def _create_partial_ferre_task_instances_from_observations(
                 initial_metals=np.round(initial_guess["metals"], 2),
                 initial_log10vdop=np.round(utils.approximate_log10_microturbulence(initial_guess["logg"]), 2),
                 initial_o_mg_si_s_ca_ti=0.0,
-                initial_lgvsini=0.0,
+                # lgvsini = 0 is not always in the bounds of the grid (e.g., p_apstdM_180901_lsfa_l33_012_075.hdr has lgvsini limits (0.18, 2.28))
+                # but by default we will clip initial values to be within the bounds of the grid
+                initial_lgvsini=0.0, 
                 initial_c=0.0,
                 initial_n=0.0,
                 # Add the data model keywords.
