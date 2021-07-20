@@ -18,11 +18,6 @@ from astropy.io.fits import getheader
 
 from astra.tools.spectrum import Spectrum1D
 
-#from astra.contrib.ferre.utils import (
-#    parse_header_path, parse_grid_information, safe_read_header, approximate_log10_microturbulence, yield_suitable_grids,
-#    write_data_file, format_ferre_input_parameters, read_output_parameter_file,
-#    sanitise_parameter_name
-#)
 from astra.utils import log, flatten
 from astra.database import astradb, apogee_drpdb, catalogdb, session
 from astra.database.utils import (
@@ -36,10 +31,6 @@ from astra.database.utils import (
 
 from astra.contrib.ferre.core import ferre
 from astra.contrib.ferre import utils
-
-
-
-
 
 
 def estimate_stellar_parameters(
@@ -133,7 +124,6 @@ def estimate_stellar_parameters(
     return [instance.pk for instance in instances]
 
 
-
 def estimate_chemical_abundances(
         pks,
         header_path,
@@ -204,6 +194,131 @@ def estimate_chemical_abundances(
         continuum_path_format=continuum_path_format,
         **kwds
     )
+
+
+def write_summary_database_outputs(pks, task_id="aspcap"):
+    """
+    Write the results of stellar parameters and chemical abundances to a unifed
+    ASPCAP table in the database.
+
+    :param pks:
+        the primary keys of previous task instances that have determined stellar
+        parameters and chemical abundances
+    """
+
+    log.debug(f"Input to pks is {pks}")
+    
+    pks = flatten(deserialize_pks(pks))
+    log.debug(f"Writing summary database outputs with input primary keys {pks}")
+
+    q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk.in_(pks))
+
+    # We need to group and order the primary keys together.
+    trees = {}
+    grouped_pks = {}
+    for instance in q.all():
+        release = instance.parameters["release"]
+        try:
+            tree = trees[release]                
+        except KeyError:
+            tree = trees[release] = SDSSPath(release=release)
+
+        keys = ["release", "filetype"]
+        keys.extend(tree.lookup_keys(instance.parameters["filetype"]))
+
+        uid = "_".join([instance.parameters[key] for key in keys])
+
+        grouped_pks.setdefault(uid, [])
+        log.debug(f"Created grouped set of primary keys with uid {uid}")
+
+        # Put the stellar parameter instance first.    
+        if "stellar_parameters" in instance.task_id:
+            log.debug(f"Adding task instance {instance} as stellar parameter instance {uid}")
+            grouped_pks[uid].insert(0, instance.pk)
+        else:
+            log.debug(f"Adding task instance {instance} as elemental abundance instance {uid}")
+            grouped_pks[uid].append(instance.pk)
+    
+
+    instances = []    
+    for uid, (sp_pk, *element_pks) in grouped_pks.items():
+
+        log.debug(f"Grouped together primary keys {sp_pk} and {element_pks}")
+
+        sp_instance = session.query(astradb.TaskInstance)\
+                             .filter(astradb.TaskInstance.pk == sp_pk).one_or_none()
+        el_instances = session.query(astradb.TaskInstance)\
+                              .filter(astradb.TaskInstance.pk.in_(element_pks)).all()
+
+        # Get the keys that are common to all instances, which will include the release, filetype,
+        # and associated keys.
+        keep_keys = []
+        for instance in el_instances:
+            for key, value in sp_instance.parameters.items():
+                if instance.parameters[key] == value:
+                    keep_keys.append(key)
+        
+        log.debug(f"Keeping keys {keep_keys}")
+
+        parameters = { key: instance.parameters[key] for key in keep_keys }
+        
+        log.debug(f"Passing parameters {parameters}")
+
+        instance = get_or_create_task_instance(
+            task_id=task_id,
+            dag_id=sp_instance.dag_id,
+            run_id=sp_instance.run_id,
+            parameters=parameters,
+        )
+
+        # Create a partial results table.
+        keys = ["snr"]
+        label_names = ("teff", "logg", "metals", "log10vdop", "o_mg_si_s_ca_ti", "lgvsini", "c", "n")
+        for key in label_names:
+            keys.extend([key, f"u_{key}"])
+        
+        results = dict([(key, getattr(sp_instance.output, key)) for key in keys])
+
+        # Now update with elemental abundance instances.
+        for el_instance in el_instances:
+            # TODO: Should not rely on the task ID to infer the element abundance.
+            #       Should we use the input_weights_path, or provide 'element' as a parameter?
+            element = el_instance.task_id.split(".")[1].lower()
+            
+            # Check what is not frozen.
+            thawed_label_names = []
+            for key in label_names:
+                if not getattr(el_instance.output, f"frozen_{key}"):
+                    thawed_label_names.append(key)
+
+            if len(thawed_label_names) > 1:
+                log.warning(f"Multiple thawed label names for {element} {el_instance}: {thawed_label_names}")
+
+            values = np.hstack([getattr(el_instance.output, ln) for ln in thawed_label_names]).tolist()
+            u_values = np.hstack([getattr(el_instance.output, f"u_{ln}") for ln in thawed_label_names]).tolist()
+
+            results.update({
+                f"{element}_h": values,
+                f"u_{element}_h": u_values,
+            })
+
+        # Include associated primary keys so we can reference back to original parameters, etc.
+        results["associated_ti_pks"] = [sp_pk, *element_pks]
+
+        log.debug(f"Results entry: {results}")
+
+        # Create an entry in the output interface table.
+        # (We will update this later with any elemental abundance results).
+        # TODO: Should we link back to the original FERRE primary keys?
+        output = create_task_output(
+            instance,
+            astradb.Aspcap,
+            **results
+        )
+        log.debug(f"Created output {output} for instance {instance}")
+        instances.append(instance)
+    
+    return None
 
 
 def get_instances_with_this_header_path(pks, header_path):

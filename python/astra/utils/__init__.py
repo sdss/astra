@@ -20,6 +20,19 @@ log = logging.getLogger(__name__.split(".")[0])
 #log.propagate = False
 
 
+def get_base_output_path(version=None):
+    """
+    Get the base output path for Astra.
+    
+    :param version: [optional]
+        The version of Astra. If `None` is given then the current version (`astra.__version__`)
+        will be used.
+    """
+    if version is None:
+        from astra import __version__ as version
+        version = version.split("-")[0]
+    return os.path.join(os.path.expandvars(f"$MWM_ASTRA/{version}"))
+
 
 def unique_dicts(list_of_dicts):
     return [dict(y) for y in set(tuple(x.items()) for x in list_of_dicts)]
