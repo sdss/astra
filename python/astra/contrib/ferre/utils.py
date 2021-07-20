@@ -280,21 +280,39 @@ def _parse_names_and_initial_and_frozen_parameters(
     mid_point = _grid_mid_point(headers)
     parsed_initial_parameters = np.tile(mid_point, N).reshape((N, -1))    
 
+    log.debug(f"parsed initial parameters before {parsed_initial_parameters}")
+
     compare_parameter_names = list(map(sanitise_parameter_name, parameter_names))
         
+    log.debug(f"Initial parameters passed for parsing {initial_parameters}")
+
     if initial_parameters is not None:
+        log.debug(f"Comparison names {compare_parameter_names}")
         for i, (parameter_name, values) in enumerate(initial_parameters.items()):
+            spn = sanitise_parameter_name(parameter_name)
+            log.debug(f"{parameter_name} {values} {spn}")
+            
             try:
-                index = compare_parameter_names.index(sanitise_parameter_name(parameter_name))
+                index = compare_parameter_names.index(spn)
             except ValueError:
                 log.warning(f"Ignoring initial parameters for {parameter_name} as they are not in {parameter_names}")
+                log.debug(f"Nothing matched for {index} {spn} {parameter_name} {compare_parameter_names}")
             else:
-                # Only supply finite values.
+                log.debug(f"Matched to index {index}")
+                # Replace non-finite values with the mid point.
                 finite = np.isfinite(values)
-                parsed_initial_parameters[finite][:, index] = np.array(values)[finite]
                 if not np.all(finite):
                     log.warning(f"Missing or non-finite initial values given for {parameter_name}. Defaulting to the grid mid-point.")                    
+
+                values = np.array(values)
+                values[~finite] = mid_point[index]
+
+                log.debug(f"values are {values} {type(values[0])} {finite}")
+                parsed_initial_parameters[:, index] = values 
                 
+    
+    log.debug(f"parsed initial parameters after {parsed_initial_parameters}")
+
     kwds = dict()
     frozen_parameters = (frozen_parameters or dict())
     if frozen_parameters:
@@ -363,7 +381,7 @@ def _parse_names_and_initial_and_frozen_parameters(
             log.info(f"Clipping initial parameters to boundary edges (use clip_initial_parameters_to_boundary_edges=False to raise exception instead)")
 
             clip = clip_epsilon_percent * (upper_limit - lower_limit)/100.
-            parsed_initial_parameters = np.clip(parsed_initial_parameters, lower_limit + clip, upper_limit - clip)
+            parsed_initial_parameters = np.round(np.clip(parsed_initial_parameters, lower_limit + clip, upper_limit - clip), 2)
         else:
             raise
         

@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import json
+from ast import literal_eval
 from typing import Dict, Optional
 
 from airflow.exceptions import AirflowSkipException
@@ -30,10 +31,12 @@ from astra.database.utils import (
     get_or_create_task_instance, 
     get_sdss4_apstar_kwds,
     get_sdss5_apstar_kwds,
+    update_task_instance_parameters
 )
 
 from astra.contrib.ferre.core import ferre
 from astra.contrib.ferre import utils
+
 
 
 
@@ -81,11 +84,12 @@ def estimate_stellar_parameters(
     """
 
     # Get the task instances.
+    log.debug(f"In stellar parameters with pks {pks} ({type(pks)})")
     instances = get_instances_with_this_header_path(pks, header_path)
 
     # Load the spectra.
     spectrum_kwds = (spectrum_kwds or dict())
-    wavelength, flux, sigma, Ns = load_spectra(instances, **spectrum_kwds)
+    wavelength, flux, sigma, spectrum_meta, Ns = load_spectra(instances, **spectrum_kwds)
     
     # Apply any continuum corrections.
     if continuum_path_format is not None:
@@ -96,9 +100,9 @@ def estimate_stellar_parameters(
 
     # Load the initial parameters from the task instances.
     initial_parameters = create_initial_parameters(instances, Ns)
-
+    
     # Run FERRE.
-    param, param_err, meta = ferre(
+    param, param_err, output_meta = ferre(
         wavelength=wavelength,
         flux=flux,
         sigma=sigma,
@@ -109,7 +113,9 @@ def estimate_stellar_parameters(
     )
     
     # Group results by instance.
-    results = group_results_by_instance(param, param_err, meta, Ns)
+    results = group_results_by_instance(param, param_err, output_meta, spectrum_meta, Ns)
+
+    assert len(results) == len(instances)
 
     # Write FERRE outputs to database and to disk
     for instance, result in zip(instances, results):
@@ -120,7 +126,11 @@ def estimate_stellar_parameters(
             **result
         )
 
-    return None
+        # Update the original task instance to include keywords that went to FERRE.
+        update_task_instance_parameters(instance, **output_meta["ferre_control_parameters"])
+
+    # Return primary keys that we worked on, so these can be passed downstream.
+    return [instance.pk for instance in instances]
 
 
 
@@ -176,9 +186,16 @@ def estimate_chemical_abundances(
 
     # Overwrite frozen_parameters and ferre_kwds
     kwds = kwargs.copy()
-    kwds.setdefault(ferre_kwds, {})
-    kwds["ferre_kwds"].update(ferre_kwds)
+    
+    log.debug(f"Printing out everything")
+    for k, v in kwds.items():
+        log.debug(f"    {k}: {v} {type(v)}")
+    
+    kwds.setdefault("ferre_kwds", {})
+    kwds["ferre_kwds"].update(**ferre_kwds)
     kwds["frozen_parameters"] = frozen_parameters
+
+    log.debug(f"AND primary keys are {type(pks)} {pks}")
 
     return estimate_stellar_parameters(
         pks, 
@@ -203,7 +220,8 @@ def get_instances_with_this_header_path(pks, header_path):
     :returns:
         A list of `astra.database.astradb.TaskInstance` objects.
     """
-    pks = deserialize_pks(pks)
+    pks = flatten(deserialize_pks(pks))
+    log.debug(f"in get_instances_with_this_header_path with {pks} ({type(pks)})")
     q = session.query(astradb.TaskInstance).join(astradb.TaskInstanceParameter).join(astradb.Parameter)
     q = q.filter(and_(
         astradb.TaskInstance.pk.in_(pks),
@@ -219,7 +237,8 @@ def get_instances_with_this_header_path(pks, header_path):
 def group_results_by_instance(
         param, 
         param_err, 
-        meta, 
+        output_meta, 
+        spectrum_meta,
         Ns
     ):
     """
@@ -232,8 +251,11 @@ def group_results_by_instance(
     :param param_err:
         The estimated errors on the output parameters from FERRE.
     
-    :param meta:
+    :param output_meta:
         A metadata dictionary output by FERRE.
+    
+    :param spectrum_meta:
+        A list of dictionaries of spectrum metadata for each instance.
     
     :param Ns:
         A list of integers indicating the number of spectra that were loaded with each
@@ -243,10 +265,10 @@ def group_results_by_instance(
         A list of dictionaries that contain results for each instance.
     """
     
-    common_results = dict(frozen_parameters=meta["frozen_parameters"])
+    common_results = dict(frozen_parameters=output_meta["frozen_parameters"])
     
     si, results = (0, [])
-    parameter_names = tuple(map(utils.sanitise_parameter_name, meta["parameter_names"]))
+    parameter_names = tuple(map(utils.sanitise_parameter_name, output_meta["parameter_names"]))
     for i, N in enumerate(Ns):
         if N == 0: 
             results.append(None)
@@ -255,13 +277,15 @@ def group_results_by_instance(
         sliced = slice(si, si + N)
 
         result = dict(
-            log_snr_sq=meta["log_snr_sq"][sliced],
-            log_chisq_fit=meta["log_chisq_fit"][sliced]
+            snr=spectrum_meta[i]["snr"],
+            log_snr_sq=output_meta["log_snr_sq"][sliced],
+            log_chisq_fit=output_meta["log_chisq_fit"][sliced],
         )
         for j, parameter_name in enumerate(parameter_names):
             result[f"{parameter_name}"] = param[sliced][:, j]
             result[f"u_{parameter_name}"] = param_err[sliced][:, j]
-            result[f"initial_{parameter_name}"] = meta["initial_parameters"][sliced][:, j]
+            result[f"initial_{parameter_name}"] = output_meta["initial_parameters"][sliced][:, j]
+            result[f"frozen_{parameter_name}"] = output_meta["frozen_parameters"][parameter_name]
 
         results.append(result)
     
@@ -302,12 +326,7 @@ def create_initial_parameters(instances, Ns):
                 elif isinstance(value, (list, tuple)):
                     assert len(value) == N
 
-                try:
-                    initial_parameters[ferre_label].extend(value)
-                except:
-                    print(f"Setting {ferre_label} with {value}")
-                    raise
-
+                initial_parameters[ferre_label].extend(value)
 
     return initial_parameters
 
@@ -368,9 +387,10 @@ def load_spectra(instances, **kwargs):
 
     # Load the observations from the database instances.
     trees = {}
-    wavelength, flux, sigma = ([], [], [])
+    wavelength, flux, sigma, meta = ([], [], [], [])
     
     Ns = np.zeros(len(instances), dtype=int)
+    data_slice = kwargs.get("data_slice", slice(None)) # for extracting snr info
 
     for i, instance in enumerate(instances):
         release = instance.parameters["release"]
@@ -391,16 +411,19 @@ def load_spectra(instances, **kwargs):
             wavelength.append(
                 np.tile(spectrum.wavelength.value, N).reshape((N, -1))
             )
+            meta.append(dict(snr=spectrum.meta["snr"][data_slice]))
         except:
             log.exception(f"Exception in trying to load data product associated with {instance} from {path} with {kwargs}")
+            meta.append({})
             raise 
+            
 
         else:
             Ns[i] = N
     
     wavelength, flux, sigma = tuple(map(np.vstack, (wavelength, flux, sigma)))
     
-    return (wavelength, flux, sigma, Ns)
+    return (wavelength, flux, sigma, meta, Ns)
 
 
 def yield_initial_guess_from_doppler_headers(data_model_kwds):
@@ -449,6 +472,7 @@ def yield_initial_guess_from_doppler_headers(data_model_kwds):
 
 def _create_partial_ferre_task_instances_from_observations(
         dag_id, 
+        run_id,
         task_id_function,
         data_model_kwds,
         ferre_header_paths,
@@ -483,15 +507,23 @@ def _create_partial_ferre_task_instances_from_observations(
             ))
 
     # Create task instances.
+    log.debug(f"Task ID function is {task_id_function}")
     pks = []
     for meta in instance_meta:
         task_id = task_id_function(**meta)
         instance = get_or_create_task_instance(
             dag_id=dag_id,
+            run_id=run_id,
             task_id=task_id,
             parameters=meta
         )
         log.info(f"Created or retrieved task instance {instance} for {dag_id} {task_id} with {meta}")
+        A = set(instance.parameters).difference(meta) 
+        B = set(meta).difference(instance.parameters)
+        print(f"A {A}")
+        print(f"B {B}")
+        assert not A
+        assert not B
         pks.append(instance.pk)
     
     # Return the primary keys, which will be passed on to the next task.
@@ -530,6 +562,7 @@ def create_task_instances_for_sdss4_apstars(dag_id, task_id_function, ferre_head
 def create_task_instances_for_sdss5_apstars(
         mjd,
         dag_id,
+        run_id,
         task_id_function,
         ferre_header_paths,
         limit=None,
@@ -547,6 +580,9 @@ def create_task_instances_for_sdss5_apstars(
     
     :param dag_id:
         The identifier of the Apache Airflow directed acyclic graph.
+    
+    :param run_id:
+        The identifier of the Apache Airflow run.
     
     :param task_id_function:
         A callable that takes in metadata keywords of the task instance and returns the name of the
@@ -573,6 +609,7 @@ def create_task_instances_for_sdss5_apstars(
     # Create the task instances.
     return _create_partial_ferre_task_instances_from_observations(
         dag_id=dag_id,
+        run_id=run_id,
         task_id_function=task_id_function,
         data_model_kwds=data_model_kwds,
         ferre_header_paths=ferre_header_paths,
@@ -596,6 +633,23 @@ def create_task_instances_for_next_iteration(pks, task_id_function, full_output=
     """
 
     pks = flatten(deserialize_pks(pks))
+    
+    # If we are given the task ID of the immediate downstream task, then just use that.
+    log.debug(f"Creating task instances for next iteration given primary keys {pks} and task_id_function {task_id_function} (type: {type(task_id_function)})")
+    if isinstance(task_id_function, str):
+        try:
+            task_id_function = literal_eval(task_id_function)
+        except:
+            log.debug(f"Using task_id_function as given")
+            raise 
+        
+        else:
+            if isinstance(task_id_function, (set, )) and len(task_id_function) == 1:
+                value, = list(task_id_function)
+                task_id_function = lambda **_: value
+                log.debug(f"Using task identifier '{value}' for all task instances")
+            else:
+                raise ValueError(f"not sure what to do with de-serialized task instance ID function {task_id_function} (type: {type(task_id_function)})")
 
     # Get the existing task instances.
     q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk.in_(pks))
@@ -643,8 +697,11 @@ def create_task_instances_for_next_iteration(pks, task_id_function, full_output=
         new_instances.append(get_or_create_task_instance(
             dag_id=instance.dag_id,
             task_id=task_id_function(**parameters),
+            run_id=instance.run_id,
             parameters=parameters
         ))
+        
+        log.debug(f"Retrieved or created new instance {new_instances[-1]} with header path {header_path}")
     
     if full_output:
         return new_instances
@@ -680,7 +737,9 @@ def choose_which_ferre_tasks_to_execute(pks, task_id_function, **kwargs):
 
     rows = q.all()
 
-    return [task_id_function(header_path=header_path) for header_path, in rows]
+    task_ids = [task_id_function(header_path=header_path) for header_path, in rows]
+    log.debug(f"Execute the following task IDs: {task_ids}")
+    return task_ids
 
 
 def get_best_initial_guess(pks, **kwargs):
@@ -691,19 +750,20 @@ def get_best_initial_guess(pks, **kwargs):
     """
 
     # Get the PKs from upstream.
-    pks = deserialize_pks(pks)
+    pks = flatten(flatten(deserialize_pks(pks)))
+
+    log.debug(f"Getting best initial guess among primary keys {pks}")
 
     # Need to uniquely identify observations.
     trees = {}
     best_tasks = {}
-    for pk in pks:
+    for i, pk in enumerate(pks):
         q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk==pk)
         instance = q.one_or_none()
 
         if instance.output is None:
             log.warn(f"No output found for task instance {instance}")
             continue
-
 
         p = instance.parameters
         try:
@@ -718,9 +778,19 @@ def get_best_initial_guess(pks, **kwargs):
         ])
         
         best_tasks.setdefault(key, (np.inf, None))
+        log.debug(f"Checking best task for key {key} (iteration {i}, pk {pk}). Currently: {best_tasks[key]}")
 
         log_chisq_fit, *_ = instance.output.log_chisq_fit
         previous_teff, *_ = instance.output.teff
+
+        # Note: If FERRE totally fails then it will assign -999 values to the log_chisq_fit. So we have to
+        #       check that the log_chisq_fit is actually sensible!
+        #       (Or we should only query task instances where the output is sensible!)
+        if log_chisq_fit < 0:
+            log.debug(f"Skipping result for {instance} {instance.output} as log_chisq_fit = {log_chisq_fit}")
+            continue
+            
+        log.debug(f"Current instance: {log_chisq_fit} and {previous_teff} from {instance} {instance.output}")
 
         parsed_header = utils.parse_header_path(p["header_path"])
     
@@ -732,8 +802,12 @@ def get_best_initial_guess(pks, **kwargs):
 
         # Is this the best so far?
         if log_chisq_fit < best_tasks[key][0]:
+            log.debug(f"Assigning this output to best task as {log_chisq_fit} < {best_tasks[key][0]}: {pk}")
             best_tasks[key] = (log_chisq_fit, pk)
     
+    for key, (log_chisq_fit, pk) in best_tasks.items():
+        log.debug(f"Best task for key {key} with log \chi^2 of {log_chisq_fit:.2f} is primary key {pk}")
+
     if best_tasks:
         return [pk for (log_chisq_fit, pk) in best_tasks.values()]
     else:
@@ -809,7 +883,7 @@ class FerreOperator2222(BaseOperator):
         """
         task, ti, params = (context["task"], context["ti"], context["params"])
 
-        pks = deserialize_pks(self.pks)
+        pks = flatten(deserialize_pks(self.pks))
 
         log.info(f"In {task} {ti} and there are {len(pks)} upstream primary keys")
         

@@ -36,7 +36,6 @@ class TaskInstance(Base):
         q = session.query(Parameter).join(TaskInstanceParameter).filter(TaskInstanceParameter.ti_pk==self.pk)
         return dict(((p.parameter_name, p.parameter_value) for p in q.all()))
 
-
     
     @property
     def output(self):

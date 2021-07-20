@@ -100,6 +100,8 @@ def get_sdss5_apstar_kwds(
     """
     mjd = parse_mjd(mjd)
 
+    log.debug(f"Parsed input MJD as {mjd}")
+    
     # TODO: Consider switching to 'filetype' instead of 'filetype' to be
     #       consistent with SDSSPath.full() argument names.
     release, filetype = ("sdss5", "apStar")
@@ -116,7 +118,10 @@ def get_sdss5_apstar_kwds(
     if limit is not None:
         q = q.limit(limit)
 
+    log.debug(f"Preparing query {q}")
     rows = q.all()
+    log.debug(f"Retrieved {len(rows)} rows")
+
     keys = [column.name for column in columns]
 
     kwds = []
@@ -180,6 +185,7 @@ def get_sdss5_apvisit_kwds(
 def create_task_instances_for_sdss5_apvisits(
         dag_id,
         task_id,
+        run_id,
         mjd,
         full_output=False,
         **parameters
@@ -209,6 +215,7 @@ def create_task_instances_for_sdss5_apvisits(
             get_or_create_task_instance(
                 dag_id,
                 task_id,
+                run_id,
                 parameters={ **kwds, **parameters}
         ))
 
@@ -256,6 +263,7 @@ def create_task_instances_for_sdss5_apstars(
             get_or_create_task_instance(
                 dag_id,
                 task_id,
+                run_id,
                 parameters={ **kwds, **parameters}
             )
         )
@@ -338,6 +346,7 @@ def create_task_instances_for_sdss5_apstars_from_apvisits(
             get_or_create_task_instance(
                 dag_id,
                 task_id,
+                run_id,
                 parameters={ **kwds, **parameters }
             )
         )
@@ -351,6 +360,7 @@ def create_task_instances_for_sdss5_apstars_from_apvisits(
 def get_task_instance(
         dag_id: str, 
         task_id: str, 
+        run_id,
         parameters: Dict,
     ):
     """
@@ -361,6 +371,9 @@ def get_task_instance(
     
     :param task_id:
         The identifier of the task.
+
+    :param run_id:
+        The identifier of the Apache Airflow execution run.
     
     :param parameters:
         The parameters of the task, as a dictionary
@@ -385,14 +398,26 @@ def get_task_instance(
     )
     N_p = q_p.count()
     if N_p < len(parameters):
+        # No task with all of these parameters.
         return None
+    
     
     # Perform subquery to get primary keys of task instances that have all of these parameters.
     sq = session.query(astradb.TaskInstanceParameter.ti_pk)\
                 .filter(astradb.TaskInstanceParameter.parameter_pk.in_(pk for pk, in q_p.all()))\
                 .group_by(astradb.TaskInstanceParameter.ti_pk)\
                 .having(func.count(distinct(astradb.TaskInstanceParameter.parameter_pk)) == N_p).subquery()
-    
+            
+    # If an exact match is required, combine multiple sub-queries.
+    if True:
+        sq = session.query(
+            astradb.TaskInstanceParameter.ti_pk).join(
+                sq,
+                astradb.TaskInstanceParameter.ti_pk == sq.c.ti_pk
+            )\
+            .group_by(astradb.TaskInstanceParameter.ti_pk)\
+            .having(func.count(distinct(astradb.TaskInstanceParameter.parameter_pk)) == len(parameters)).subquery()
+
     # Query for task instances that match the subquery and match our additional constraints.
     q = session.query(astradb.TaskInstance).join(
         sq,
@@ -400,6 +425,9 @@ def get_task_instance(
     )
     q = q.filter(astradb.TaskInstance.dag_id == dag_id)\
          .filter(astradb.TaskInstance.task_id == task_id)
+    if run_id is not None:
+        q = q.filter(astradb.TaskInstance.run_id == run_id)
+
 
     return q.one_or_none()
 
@@ -437,6 +465,7 @@ def get_or_create_parameter_pk(
 def create_task_instance(
         dag_id, 
         task_id, 
+        run_id,
         parameters=None
     ):
     """
@@ -448,6 +477,9 @@ def create_task_instance(
     :param task_id:
         the task identifier
     
+    :param run_id:
+        the string identifiying the Apache Airflow execution run
+
     :param parameters: [optional]
         a dictionary of parameters to also include in the database
     """
@@ -458,7 +490,7 @@ def create_task_instance(
     parameter_pks = (pk for pk, created in (get_or_create_parameter_pk(k, v) for k, v in parameters.items()))
     
     # Create task instance.
-    ti = astradb.TaskInstance(dag_id=dag_id, task_id=task_id)
+    ti = astradb.TaskInstance(dag_id=dag_id, task_id=task_id, run_id=run_id,)
     with session.begin():
         session.add(ti)
     
@@ -473,9 +505,53 @@ def create_task_instance(
     return ti
 
 
+
+def add_task_instance_parameter(task_instance, key, value):
+    parameter_pk, created = get_or_create_parameter_pk(key, value)
+    with session.begin():
+        # TODO: Check if the task instance already has this parameter.
+        session.add(astradb.TaskInstanceParameter(ti_pk=task_instance.pk, parameter_pk=parameter_pk))
+    log.debug(f"Added key/value pair {key}: {value} to task instance {task_instance}")
+    return parameter_pk
+    
+
+def del_task_instance_parameter(task_instance, key):
+    try:
+        value = task_instance.parameters[key]
+    except KeyError:
+        # That key isn't in there!
+        None
+    else:
+        # Get the PK.
+        parameter_pk, _ = get_or_create_parameter_pk(key, value)
+
+        # Get the TI/PK
+        q = session.query(astra.TaskInstanceParameter).filter(
+            astra.TaskInstanceParameter.ti_pk == task_instance.pk, 
+            astra.TaskInstanceParameter.parameter_pk == parameter_pk
+        ).one_or_none()
+
+        session.delete(q)
+        log.debug(f"Removed key/value pair {key}: {value} from task instance {task_instance}")
+
+    assert key not in task_instance.parameters
+    return True
+
+
+def update_task_instance_parameters(task_instance, **params):
+    for key, value in params.items():
+        del_task_instance_parameter(task_instance, key)
+        add_task_instance_parameter(task_instance, key, value)
+    return True
+
+
+
+
+
 def get_or_create_task_instance(
         dag_id, 
-        task_id, 
+        task_id,
+        run_id,
         parameters=None
     ):
     """
@@ -487,6 +563,9 @@ def get_or_create_task_instance(
 
     :param task_id:
         the task identifier
+
+    :param run_id:
+        the identifier of the Apache Airflow run.
     
     :param parameters: [optional]
         a dictionary of parameters to also include in the database
@@ -494,9 +573,9 @@ def get_or_create_task_instance(
     
     parameters = (parameters or dict())
 
-    instance = get_task_instance(dag_id, task_id, parameters)
+    instance = get_task_instance(dag_id, task_id, run_id, parameters)
     if instance is None:
-        return create_task_instance(dag_id, task_id, parameters)
+        return create_task_instance(dag_id, task_id, run_id, parameters)
     return instance
 
 

@@ -19,6 +19,22 @@ from astra.contrib.ferre import utils
 # Cross-check
 # /uufs/chpc.utah.edu/common/home/sdss50/dr17/apogee/spectro/aspcap/dr17/synspec/bundle_apo25m/apo25m_003/ferre/elem_K
 
+import json
+
+class NumpyEncoder(json.JSONEncoder):
+    """ Special json encoder for numpy types """
+    def default(self, obj):
+        if isinstance(obj, (np.int_, np.intc, np.intp, np.int8,
+                            np.int16, np.int32, np.int64, np.uint8,
+                            np.uint16, np.uint32, np.uint64)):
+            return int(obj)
+        elif isinstance(obj, (np.float_, np.float16, np.float32,
+                              np.float64)):
+            return float(obj)
+        elif isinstance(obj, (np.ndarray,)):
+            return obj.tolist()
+        return json.JSONEncoder.default(self, obj)
+
 def ferre(
         wavelength,
         flux,
@@ -39,7 +55,7 @@ def ferre(
         continuum_segment=None,
         continuum_reject=0.3,
         continuum_observations_flag=1,
-        full_covariance=True,
+        full_covariance=False,
         pca_project=False,
         pca_chi=False,
         n_threads=1,
@@ -225,9 +241,19 @@ def ferre(
     input_kwds = {}
     for arg in getfullargspec(ferre).args:
         input_kwds[arg] = locals()[arg]
-    
+
+    json_kwds = dict(indent=2, cls=NumpyEncoder)
+    log.debug(f"Parameters supplied to FERRE:")
+    log.debug(json.dumps((initial_parameters, frozen_parameters), **json_kwds))
+
     # Parse and validate parameters.
     wavelength, flux, sigma, mask, names, initial_parameters, kwds, meta = utils.parse_ferre_inputs(**input_kwds)
+
+    log.debug(f"Parameters after parsing FERRE:")
+    log.debug(f"Initial parameters: {json.dumps(initial_parameters, **json_kwds)}")
+    log.debug(f"Keywords: {json.dumps(kwds, **json_kwds)}")
+    log.debug(f"Meta: {json.dumps(meta, **json_kwds)}")
+    log.debug(f"Names: {json.dumps(names, **json_kwds)}")
 
     # Create the temporary directory, if necessary.
     directory = kwargs.get("directory", None)
@@ -334,7 +360,26 @@ def ferre(
     print(f"times {processing_times}")
 
     # Parse flux outputs.
-    # exclude frozen things.
+
+    # Send back some relevant information about control.
+    relevant_keys = (
+        "interpolation_order", "input_weights_path", "input_lsf_shape_path", "lsf_shape_flag", "error_algorithm_flag", 
+        "wavelength_interpolation_flag", "optimization_algorithm_flag", "continuum_flag", "continuum_order",
+        "continuum_segment", "continuum_reject", "continuum_observations_flag", "full_covariance", "pca_project",
+        "pca_chi", "f_access", "f_format", "ferre_kwds"
+    )
+    ferre_control_parameters = {}
+    for key in relevant_keys:
+        ferre_control_parameters[key] = locals()[key]
+    
+    # The initial parameters are already in the task instance (before we got to this function),
+    # and the frozen parameters are stored in the FERRE output table, but for the sake of
+    # putting everything in the one place so it is not looked over, we are going to repeat
+    # the frozen parameters here too.
+    ferre_control_parameters.update({f"frozen_{pn}": v for pn, v in meta["frozen_parameters"].items()})
+
+    meta.update(ferre_control_parameters=ferre_control_parameters)
+
     return (param, param_err, meta)
 
 
