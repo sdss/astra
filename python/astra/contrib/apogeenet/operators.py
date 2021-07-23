@@ -1,11 +1,13 @@
 import numpy as np
 import os
 import torch
+#torch.multiprocessing.set_start_method('spawn', force=True)
 
 from tqdm import tqdm
 
 from sdss_access import SDSSPath
-from astra.utils import log
+from astra.utils import log, flatten
+from astra.tools.spectrum import Spectrum1D
 from astra.contrib.apogeenet.model import (Net, predict, create_flux_tensor)
 from astra.database import astradb, session
 from astra.database.utils import (
@@ -14,6 +16,7 @@ from astra.database.utils import (
 )
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
 
 def estimate_stellar_labels(
         pks,
@@ -45,7 +48,17 @@ def estimate_stellar_labels(
         An arbitrarily large error value to assign to bad pixels (default: 1e10).
     """
     
-    log.info(f"Running APOGEENet on device {device}")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    pks = flatten(deserialize_pks(pks))
+
+    log.info(f"Running APOGEENet on device {device} with:")
+    log.info(f"\tmodel_path: {model_path}")
+    log.info(f"\tpks: {pks}")
+    log.info(f"\tanalyze_individual_visits: {analyze_individual_visits}")
+    log.info(f"\tnum_uncertainty_draws: {num_uncertainty_draws}")
+    
+    log.info(f"CUDA_VISIBLE_DEVICES = '{os.environ.get('CUDA_VISIBLE_DEVICES')}'")
 
     # Load the model.
     model = Net()
@@ -63,9 +76,7 @@ def estimate_stellar_labels(
     log.info(f"Loaded model from {model_path}")
 
     # Get the task instances.
-    pks = deserialize_pks(pks)
-    q = session.query(astra.TaskInstance)\
-               .filter(astra.TaskInstance.pk.in_(pks))
+    q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk.in_(pks))
     
     trees = {}
 
@@ -82,7 +93,8 @@ def estimate_stellar_labels(
         try:
             spectrum = Spectrum1D.read(path)
         except:
-            log.exception(f"Unable to load Spectrum1D from path {path} on task instance {instance}")
+            log.exception(f"Unable to load Spectrum1D from path {path} on task instance {instance}:")
+            log.exception(e)
             continue
 
         N, P = spectrum.flux.shape

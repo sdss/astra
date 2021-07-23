@@ -1,4 +1,5 @@
 import json
+import sqlalchemy.exc
 from typing import Dict
 from sqlalchemy import (or_, and_, func, distinct)
 from astropy.time import Time

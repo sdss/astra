@@ -132,8 +132,8 @@ def create_flux_tensor(
         An arbitrarily large value to assign to 'bad' pixels.
     """
     
-    flux = np.atleast_2d(flux)
-    error = np.atleast_2d(error)
+    flux = np.atleast_2d(flux).astype(np.float32)
+    error = np.atleast_2d(error).astype(np.float32)
 
     N, P = flux.shape
 

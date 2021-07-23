@@ -445,13 +445,15 @@ def _execute_ferre_by_slurm(directory, total, offile, interval=60, **kwargs):
             
             total_done = 0
             with tqdm(total=total, desc="FERRE", unit="spectra") as pb:
+                while total_done < total:
+                    n_done = _check_ferre_progress(output_flux_path)            
+                    pb.update(n_done - total_done)
+                    total_done = n_done
 
-                n_done = _check_ferre_progress(output_flux_path)            
-                pb.update(n_done - total_done)
-                total_done = n_done
+                    pb.refresh()
 
-                pb.refresh()
-            
+                    sleep(interval)
+
             log.info("Finishing up.")
 
     with open(stdout_path, "r") as fp:
