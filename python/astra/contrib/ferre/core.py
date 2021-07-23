@@ -9,6 +9,7 @@ import threading
 from collections import OrderedDict
 from io import StringIO, BytesIO
 from inspect import getfullargspec
+from shutil import rmtree
 from tempfile import mkdtemp
 from time import sleep, time
 from tqdm import tqdm
@@ -43,7 +44,7 @@ def ferre(
         names=None,
         initial_parameters=None,
         frozen_parameters=None,
-        interpolation_order=1,
+        interpolation_order=3,
         input_weights_path=None,
         input_lsf_shape_path=None,
         lsf_shape_flag=0,
@@ -58,10 +59,11 @@ def ferre(
         full_covariance=False,
         pca_project=False,
         pca_chi=False,
-        n_threads=1,
+        n_threads=32,
         f_access=None,
         f_format=1,
         ferre_kwds=None,
+        slurm_kwds=None,
         **kwargs
     ):
     """
@@ -261,6 +263,8 @@ def ferre(
         directory = mkdtemp(**kwargs.get("directory_kwds", {}))
         log.info(f"Created temporary directory {directory}")
     
+    log.info(f"Running FERRE in {directory}")
+
     # Write control file.
     with open(os.path.join(directory, "input.nml"), "w") as fp:
         fp.write(utils.format_ferre_control_keywords(kwds))
@@ -274,81 +278,58 @@ def ferre(
         for name, point in zip(names, initial_parameters):
             fp.write(utils.format_ferre_input_parameters(*point, name=name))
 
-    # Execute in non-interactive mode.
-    t_0 = time()
-    try:
-        process = subprocess.Popen(
-            ["ferre.x"],
-            cwd=directory,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=1,
-            encoding="utf-8",
-            close_fds="posix" in sys.builtin_module_names
-        )
-
-    except subprocess.CalledProcessError:
-        log.exception(f"Exception when calling FERRE in {directory}")
-        raise
-
+    execute_args = (directory, len(flux), kwds["offile"])
+    if slurm_kwds:
+        stdout, stderr = _execute_ferre_by_slurm(*execute_args, **slurm_kwds)
     else:
-        interval = 1
-        total = len(flux)
-        stdout, stderr = ("", "")
-        output_flux_path = os.path.join(directory, kwds["offile"])
+        stdout, stderr = _execute_ferre_by_subprocess(*execute_args)
 
-        total_done, total_errors = (0, 0)
-        with tqdm(total=total, desc="FERRE", unit="spectra") as pb:
-            while total > total_done:
-                try:
-                    _stdout, _stderr = process.communicate(timeout=interval)
-                except subprocess.TimeoutExpired:
-                    None
-                else:
-                    stdout += _stdout
-                    stderr += _stderr
-
-                if os.path.exists(output_flux_path):
-                    n_done = utils.line_count(output_flux_path)
-                else:
-                    n_done = 0
-                
-                n_errors = stderr.lower().count("error")
-            
-                n_updated = n_done - total_done
-                pb.update(n_updated)
-
-                total_done = n_done
-                total_errors = n_errors
-
-                if n_errors > 0:
-                    pb.set_description(f"FERRE ({total_errors:.0f} errors)")
-                pb.refresh()
-
-        # Get final processing
-        try:
-            stdout, stderr = process.communicate(timeout=10)
-        except subprocess.TimeoutExpired:
-            processing_times = None
-        else:
-            processing_times = utils.get_processing_times(stdout, kwds["nthreads"])
-            
+    # Get processing times.
+    processing_times = utils.get_processing_times(stdout, kwds["nthreads"])
 
     # Parse parameter outputs and uncertainties.
-    output_names, param, param_err, output_meta = utils.read_output_parameter_file(
-        os.path.join(directory, kwds["opfile"]),
-        n_dimensions=kwds["ndim"],
-        full_covariance=kwds["covprint"]
+    try:
+        output_names, param, param_err, output_meta = utils.read_output_parameter_file(
+            os.path.join(directory, kwds["opfile"]),
+            n_dimensions=kwds["ndim"],
+            full_covariance=kwds["covprint"]
+        )
+    except:
+        log.exception(f"Failed to load FERRE output parameter file at {os.path.join(directory, kwds['opfile'])}")
+        raise
+        
+    # Parse flux outputs.
+    try:
+        model_flux = np.nan * np.ones_like(flux)
+        model_flux[:, mask] = np.loadtxt(os.path.join(directory, kwds["offile"]))
+    except:
+        log.exception(f"Failed to load model flux from {os.path.join(directory, kwds['offile'])}:")
+        raise
+
+    if kwds.get("cont", None) is None:
+        continuum = np.ones_like(model_flux)
+    else:
+        # Infer continuum.
+        normalized_flux = np.nan * np.ones_like(flux)
+        normalized_flux[:, mask] = np.loadtxt(os.path.join(directory, kwds["sffile"]))
+        continuum = flux / normalized_flux
+
+    meta.update(
+        mask=mask,
+        wavelength=wavelength,
+        flux=flux,
+        sigma=sigma,
+        normalized_model_flux=model_flux,
+        continuum=continuum
     )
-    
+
+    # Include processing times.
     meta.update(
         processing_times=processing_times,
         **output_meta
     )
 
     # need parameter names
-
     print(f"input names {names}")
     print(f"output_names: {output_names}")
     print(f"param: {param}")
@@ -379,9 +360,137 @@ def ferre(
     ferre_control_parameters.update({f"frozen_{pn}": v for pn, v in meta["frozen_parameters"].items()})
 
     meta.update(ferre_control_parameters=ferre_control_parameters)
+    
+    log.info(f"Removing directory {directory} and its contents")
+    rmtree(directory)
 
     return (param, param_err, meta)
 
 
+_ferre_executable = "ferre.x"
+# TODO: notti
+_ferre_executable = "/uufs/chpc.utah.edu/common/home/sdss09/software/apogee/Linux/apogee/trunk/bin/ferre.x"
+
+def _check_ferre_progress(output_flux_path):
+    if os.path.exists(output_flux_path):
+        return utils.line_count(output_flux_path)
+    return 0
+
+def _monitor_ferre_progress(process, total, output_flux_path):
+    stdout, stderr = ("", "")
+
+    total_done, total_errors = (0, 0)
+    with tqdm(total=total, desc="FERRE", unit="spectra") as pb:
+        while total > total_done:
+            if process is not None:  
+                try:
+                    _stdout, _stderr = process.communicate(timeout=interval)
+                except subprocess.TimeoutExpired:
+                    None
+                else:
+                    stdout += _stdout
+                    stderr += _stderr
+
+            n_done = _check_ferre_progress(output_flux_path)
+            
+            n_errors = stderr.lower().count("error")
+        
+            n_updated = n_done - total_done
+            pb.update(n_updated)
+
+            total_done = n_done
+            total_errors = n_errors
+
+            if n_errors > 0:
+                pb.set_description(f"FERRE ({total_errors:.0f} errors)")
+            pb.refresh()
+
+    return (stdout, stderr, total_done, total_errors)
 
 
+def _execute_ferre_by_slurm(directory, total, offile, interval=60, **kwargs):
+
+    from slurm import queue as SlurmQueue
+
+    label = "ferre"
+
+    queue = SlurmQueue(verbose=True)
+    queue.create(
+        label=label,
+        **kwargs
+    )
+    queue.append(_ferre_executable, dir=directory)
+    queue.commit(hard=True, submit=True)
+
+    log.info(f"Slurm job submitted with {queue.key} and keywords {kwargs} to run {_ferre_executable} in {directory}")
+    log.info(f"\tJob directory: {queue.job_dir}")
+
+    # 
+    stdout_path = os.path.join(directory, f"{label}_01.o")
+    stderr_path = os.path.join(directory, f"{label}_01.e")    
+    output_flux_path = os.path.join(directory, offile)
+
+    # Now we wait until the Slurm job is complete.
+    t_init, t_to_start = (time(), None)
+    while 100 > queue.get_percent_complete():
+
+        sleep(interval)
+
+        t = time() - t_init
+
+        if not os.path.exists(stderr_path) and not os.path.exists(stdout_path):
+            log.info(f"Waiting on job {queue.key} to start (elapsed: {t / 60:.0f} min)")
+        else:
+            log.info(f"Job in {queue.key} has started")
+            
+            total_done = 0
+            with tqdm(total=total, desc="FERRE", unit="spectra") as pb:
+
+                n_done = _check_ferre_progress(output_flux_path)            
+                pb.update(n_done - total_done)
+                total_done = n_done
+
+                pb.refresh()
+            
+            log.info("Finishing up.")
+
+    with open(stdout_path, "r") as fp:
+        stdout = fp.read()
+    with open(stderr_path, "r") as fp:
+        stderr = fp.read()
+
+    return (stdout, stderr)
+
+
+
+def _execute_ferre_by_subprocess(directory, total, offile, interval=1):
+
+    # Execute in non-interactive mode.
+    t_0 = time()
+    try:
+        process = subprocess.Popen(
+            [_ferre_executable],
+            cwd=directory,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=1,
+            encoding="utf-8",
+            close_fds="posix" in sys.builtin_module_names
+        )
+
+    except subprocess.CalledProcessError:
+        log.exception(f"Exception when calling FERRE in {directory}")
+        raise
+
+    else:
+        output_flux_path = os.path.join(directory, offile)
+        stdout, stderr, total_done, total_errors = _monitor_ferre_progress(process, total, output_flux_path)
+
+        # Get final processing
+        try:
+            stdout, stderr = process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            None
+    
+    return (stdout, stderr) 

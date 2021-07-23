@@ -788,7 +788,7 @@ def parse_header_path(header_path):
 
     is_giant_grid = gd == "g"
     
-    return dict(
+    kwds = dict(
         radiative_transfer_code=radiative_transfer_code,
         model_photospheres=model_photospheres,
         isotopes=isotopes,
@@ -799,7 +799,8 @@ def parse_header_path(header_path):
         lsf=lsf,
         aspcap=aspcap,
     )
-
+    print(f"From {header_path} parsed {kwds}")
+    return kwds
 
 
 

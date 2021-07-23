@@ -2,13 +2,25 @@ import json
 from typing import Dict
 from sqlalchemy import (or_, and_, func, distinct)
 from astropy.time import Time
-
+from tqdm import tqdm
 
 from astra.database import (astradb, apogee_drpdb, session)
 from astra.utils import log
 
 
-deserialize_pks = lambda pks: json.loads(pks) if isinstance(pks, str) else pks
+def deserialize_pks(pks):
+    try:
+        if isinstance(pks, str):
+            result = json.loads(pks)
+        else:
+            result = pks
+    except:
+        log.exception(f"Cannot deserialize pks {type(pks)} {pks}")
+        print(f"Cannot deserialize pks {type(pks)} {pks}")
+        raise 
+    else:
+        return result
+
 serialize = lambda v: json.dumps(v) if not isinstance(v, str) else v
 
 def parse_mjd(
@@ -227,6 +239,7 @@ def create_task_instances_for_sdss5_apvisits(
 def create_task_instances_for_sdss5_apstars(
         dag_id,
         task_id,
+        run_id,
         mjd,
         parameters=None,
         limit=None,
@@ -243,6 +256,9 @@ def create_task_instances_for_sdss5_apstars(
     :param task_id:
         the task identifier
 
+    :param run_id:
+        the string of the run identifier
+
     :param mjd:
         the Modified Julian Date of the observations
     
@@ -258,7 +274,7 @@ def create_task_instances_for_sdss5_apstars(
     all_kwds = get_sdss5_apstar_kwds(mjd, limit=limit)
     
     instances = []
-    for kwds in all_kwds:
+    for kwds in tqdm(all_kwds):
         instances.append(
             get_or_create_task_instance(
                 dag_id,
@@ -270,7 +286,9 @@ def create_task_instances_for_sdss5_apstars(
 
     if full_output:
         return instances
-    return [instance.pk for instance in instances]
+    pks = [instance.pk for instance in instances]
+    log.info(f"Returning pks: {pks}")
+    return pks
 
 
 def create_task_instances_for_sdss5_apstars_from_apvisits(
@@ -384,7 +402,8 @@ def get_task_instance(
         # Quick check for things matching dag_id or task_id, which is cheaper than checking all parameters.
         q_ti = session.query(astradb.TaskInstance).filter(
             astradb.TaskInstance.dag_id == dag_id,
-            astradb.TaskInstance.task_id == task_id
+            astradb.TaskInstance.task_id == task_id,
+            astradb.TaskInstance.run_id == run_id
         )
         if q_ti.count() == 0:
             return None
@@ -400,7 +419,6 @@ def get_task_instance(
     if N_p < len(parameters):
         # No task with all of these parameters.
         return None
-    
     
     # Perform subquery to get primary keys of task instances that have all of these parameters.
     sq = session.query(astradb.TaskInstanceParameter.ti_pk)\
@@ -456,9 +474,18 @@ def get_or_create_parameter_pk(
     create = (instance is None)
     if create:
         instance = astradb.Parameter(**kwds)
-        with session.begin(subtransactions=True):
-            session.add(instance)
-    
+        try:
+            with session.begin(subtransactions=True):
+                session.add(instance)
+
+        except sqlalchemy.exc.IntegrityError:
+
+            q = session.query(astradb.Parameter).filter_by(**kwds)
+            instance = q.one_or_none()
+            if instance is None:
+                log.exception(f"Cannot create or retrieve parameter with {kwds}")
+                raise
+        
     return (instance.pk, create)
 
 
@@ -573,7 +600,8 @@ def get_or_create_task_instance(
     
     parameters = (parameters or dict())
 
-    instance = get_task_instance(dag_id, task_id, run_id, parameters)
+    #instance = get_task_instance(dag_id, task_id, run_id, parameters)
+    instance = None
     if instance is None:
         return create_task_instance(dag_id, task_id, run_id, parameters)
     return instance

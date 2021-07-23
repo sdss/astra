@@ -112,7 +112,13 @@ def _setup_astra_logging():
     
     astra_log.handlers[0].setLevel(astra_log.getEffectiveLevel())
     astra_log.handlers[0].emit = _colored_formatter
-    astra_log.propagate = False
+    # If you set propagate = True then the astra logs do not appear
+    # in the AirFlow UI logs.
+    # The downside to this is that when running 'dag test' on the command
+    # line, the logs get repeated.
+    # TODO: solve this some day in the future when you have more patience.
+    #astra_log.propagate = False
+
 
     return astra_log
 

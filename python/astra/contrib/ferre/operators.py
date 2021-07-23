@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import json
+import pickle
 from ast import literal_eval
 from typing import Dict, Optional
 
@@ -15,10 +16,11 @@ from sqlalchemy import or_, and_
 
 from astropy.time import Time
 from astropy.io.fits import getheader
+from astropy.table import Table
 
 from astra.tools.spectrum import Spectrum1D
-
-from astra.utils import log, flatten
+from astra.tools.spectrum.writers import write_astra_source_data_product
+from astra.utils import log, flatten, get_base_output_path
 from astra.database import astradb, apogee_drpdb, catalogdb, session
 from astra.database.utils import (
     create_task_output,
@@ -31,13 +33,12 @@ from astra.database.utils import (
 
 from astra.contrib.ferre.core import ferre
 from astra.contrib.ferre import utils
-
+from astra.contrib.ferre.continuum import median_filtered_correction
 
 def estimate_stellar_parameters(
         pks,
         header_path,
         spectrum_kwds=None,
-        continuum_path_format=None,
         **kwargs
     ):
     """    
@@ -54,26 +55,11 @@ def estimate_stellar_parameters(
         when loading spectra. For example, `spectrum_kwds=dict(data_slice=slice(0, 1))` will
         only return the first (stacked?) spectrum for analysis.
 
-    :param continuum_path_format: [optional]
-        A string representing the path to continuum files to use for the observations
-        before supplying the data to FERRE. This is useful for making median-filtered
-        corrections on the data before FERRE handles it. This should have a format like:
-
-        '{telescope}/{obj}-continuum-{pk}.pkl'
-
-        where the values will be formatted by Python in the usual way. The parameters
-        available for string formatting include:
-
-        - `pk`: the primary key of this task instance
-        - `release`: the name of the SDSS data release
-        - `filetype`: the SDSS data model name
-        
-        and all other keywords associated with that `filetype`. 
-
     :param \**kwargs:
         Keyword arguments to provide directly to `astra.contrib.ferre.ferre`.
     """
-
+    print(f"In stellar parameters with pks {pks} ({type(pks)})")
+    
     # Get the task instances.
     log.debug(f"In stellar parameters with pks {pks} ({type(pks)})")
     instances = get_instances_with_this_header_path(pks, header_path)
@@ -82,10 +68,6 @@ def estimate_stellar_parameters(
     spectrum_kwds = (spectrum_kwds or dict())
     wavelength, flux, sigma, spectrum_meta, Ns = load_spectra(instances, **spectrum_kwds)
     
-    # Apply any continuum corrections.
-    if continuum_path_format is not None:
-        raise NotImplementedError
-
     # Create names for easy debugging in FERRE outputs.
     names = create_names(instances, Ns, "{star_index}_{telescope}_{obj}_{spectrum_index}")
 
@@ -108,9 +90,12 @@ def estimate_stellar_parameters(
 
     assert len(results) == len(instances)
 
-    # Write FERRE outputs to database and to disk
-    for instance, result in zip(instances, results):
+    base_output_path = get_base_output_path()
+    
+    for instance, (result, data) in zip(instances, results):
         if result is None: continue
+
+        # Write FERRE outputs to database.
         create_task_output(
             instance,
             astradb.Ferre,
@@ -119,6 +104,21 @@ def estimate_stellar_parameters(
 
         # Update the original task instance to include keywords that went to FERRE.
         update_task_instance_parameters(instance, **output_meta["ferre_control_parameters"])
+        
+        # Write FERRE outputs to disk.
+        output_path = os.path.join(
+            base_output_path,
+            "ferre",
+            "scratch",
+            f"{instance.pk}",
+            "outputs.pkl"
+        )
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, "wb") as fp:
+            pickle.dump((result, data), fp)
+
+        log.debug(f"Wrote additional outputs to {output_path}")
+
 
     # Return primary keys that we worked on, so these can be passed downstream.
     return [instance.pk for instance in instances]
@@ -196,6 +196,105 @@ def estimate_chemical_abundances(
     )
 
 
+def write_astra_source_data_products(pks):
+    """
+    Write the results of stellar parameters and chemical abundances to AstraSource
+    data model products on disk.
+
+    :param pks:
+        the primary keys of previous task instances that have determined stellar
+        parameters and chemical abundances
+    """
+
+    pks = flatten(deserialize_pks(pks))
+
+    log.debug(f"Writing AstraSource objects with pks {pks}")
+
+    base_output_path = get_base_output_path()
+    # TODO: Make a single source of truth for this path reference
+    get_output_path = lambda pk: os.path.join(base_output_path, "ferre", "scratch", f"{pk:.0f}", "outputs.pkl")
+
+    trees = {}
+
+    for pk in pks:
+
+        q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk)
+        instance = q.one_or_none()
+
+        #if "stellar_parameters" not in instance.task_id:
+        #    log.debug(f"Skipping instance {instance} because need to decide what to store about chemical abundances")
+        #    continue
+
+        release = instance.parameters["release"]
+        try:
+            tree = trees[release]                
+        except KeyError:
+            tree = trees[release] = SDSSPath(release=release)
+
+        path = tree.full(**instance.parameters)
+
+        spectrum = Spectrum1D.read(path)
+        
+        # Get the FERRE outputs.
+        for associated_pk in instance.output.associated_ti_pks:
+            
+            q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == associated_pk)
+            associated_instance = q.one_or_none()
+
+            if "stellar_parameters" in associated_instance.task_id:
+                log.debug(f"Taking {associated_pk} as the associated instance {associated_instance} for stellar parameters")
+                with open(get_output_path(associated_pk), "rb") as fp:
+                    result, data = pickle.load(fp)
+                break
+
+            else:
+                log.debug(f"Skipping associated instance {associated_instance} because {associated_instance.task_id}")
+
+            
+        # TODO: Check whether the median filtered correction is being applied here or not.
+        continuum = data["continuum"]
+        normalized_flux = data["flux"] / continuum
+        normalized_ivar = (data["sigma"] / continuum)**-2
+
+
+        N = len(instance.output.snr)
+        result_rows = {}
+        for k, v in instance.output.__dict__.items():
+            if k == "_sa_instance_state": continue
+            if k == "associated_ti_pks":
+                v = " ".join(map(str, v))
+            
+            if isinstance(v, list):
+                result_rows[k] = v
+            else:
+                if v is None:
+                    v = ""
+                result_rows[k] = [v] * N
+        
+        results_table = Table(data=result_rows)
+
+        # Decide on where this will be stored.
+        output_path = os.path.join(base_output_path, "aspcap", f"{instance.parameters['obj']}-{instance.pk}.fits")
+
+        kwds = dict(
+            output_path=output_path,
+            spectrum=spectrum,
+            normalized_flux=normalized_flux,
+            normalized_ivar=normalized_ivar,
+            continuum=continuum,
+            model_flux=data["normalized_model_flux"],
+            model_ivar=np.zeros_like(data["normalized_model_flux"]),
+            results_table=results_table,
+            instance=instance,
+        )
+        
+        write_astra_source_data_product(**kwds)
+
+        log.debug(f"Written AstraSource object to {output_path}")
+
+    return None
+    
+
 def write_summary_database_outputs(pks, task_id="aspcap"):
     """
     Write the results of stellar parameters and chemical abundances to a unifed
@@ -253,10 +352,12 @@ def write_summary_database_outputs(pks, task_id="aspcap"):
         # Get the keys that are common to all instances, which will include the release, filetype,
         # and associated keys.
         keep_keys = []
-        for instance in el_instances:
-            for key, value in sp_instance.parameters.items():
-                if instance.parameters[key] == value:
-                    keep_keys.append(key)
+        for key, value in sp_instance.parameters.items():
+            for instance in el_instances:
+                if instance.parameters[key] != value:
+                    break
+            else:
+                keep_keys.append(key)
         
         log.debug(f"Keeping keys {keep_keys}")
 
@@ -318,7 +419,7 @@ def write_summary_database_outputs(pks, task_id="aspcap"):
         log.debug(f"Created output {output} for instance {instance}")
         instances.append(instance)
     
-    return None
+    return [instance.pk for instance in instances]
 
 
 def get_instances_with_this_header_path(pks, header_path):
@@ -386,7 +487,7 @@ def group_results_by_instance(
     parameter_names = tuple(map(utils.sanitise_parameter_name, output_meta["parameter_names"]))
     for i, N in enumerate(Ns):
         if N == 0: 
-            results.append(None)
+            results.append((None, None))
             continue
         
         sliced = slice(si, si + N)
@@ -396,13 +497,22 @@ def group_results_by_instance(
             log_snr_sq=output_meta["log_snr_sq"][sliced],
             log_chisq_fit=output_meta["log_chisq_fit"][sliced],
         )
+
+        data = {}
+        for key in ("wavelength", "flux", "sigma", "normalized_model_flux", "continuum"):
+            data[key] = output_meta[key][sliced]
+
+        # Same for all results in this group, but we include it for convenience.
+        # TODO: Consider sending back something else instead of mask array.
+        data["mask"] = output_meta["mask"]
+
         for j, parameter_name in enumerate(parameter_names):
             result[f"{parameter_name}"] = param[sliced][:, j]
             result[f"u_{parameter_name}"] = param_err[sliced][:, j]
             result[f"initial_{parameter_name}"] = output_meta["initial_parameters"][sliced][:, j]
             result[f"frozen_{parameter_name}"] = output_meta["frozen_parameters"][parameter_name]
 
-        results.append(result)
+        results.append((result, data))
     
     return results
 
@@ -507,6 +617,10 @@ def load_spectra(instances, **kwargs):
     Ns = np.zeros(len(instances), dtype=int)
     data_slice = kwargs.get("data_slice", slice(None)) # for extracting snr info
 
+    base_output_path = get_base_output_path()
+    # TODO: Make a single source of truth for this path reference
+    get_output_path = lambda pk: os.path.join(base_output_path, "ferre", "scratch", f"{pk:.0f}", "outputs.pkl")
+
     for i, instance in enumerate(instances):
         release = instance.parameters["release"]
         try:
@@ -519,10 +633,28 @@ def load_spectra(instances, **kwargs):
         try:
             # TODO: Profile this.
             spectrum = Spectrum1D.read(path, **kwargs)
-            
             N, P = spectrum.flux.shape
-            flux.append(spectrum.flux.value)
-            sigma.append(spectrum.uncertainty.array**-0.5)
+
+            flux_ = spectrum.flux.value
+            sigma_ = spectrum.uncertainty.array**-0.5            
+
+            prev_pk = instance.parameters.get("use_median_filter_continuum_correction_from_pk", None)
+            if prev_pk is not None:
+                prev_path = get_output_path(int(prev_pk))
+                log.debug(
+                    f"In instance {instance.pk} we are applying median filtered continuum correction "\
+                    f"from previous instance {prev_pk} stored at {prev_path}"
+                )
+                with open(prev_path, "rb") as fp:
+                    result, data = pickle.load(fp)
+
+                flux_ /= data["median_filtered_continuum"]
+                sigma_ /= data["median_filtered_continuum"]
+            else:
+                log.debug(f"Not doing any median_filter_continuum_correction on instance {instance}")
+
+            flux.append(flux_)
+            sigma.append(sigma_)
             wavelength.append(
                 np.tile(spectrum.wavelength.value, N).reshape((N, -1))
             )
@@ -584,6 +716,90 @@ def yield_initial_guess_from_doppler_headers(data_model_kwds):
             yield (kwds, initial_guess)
 
 
+def median_filter_continuum(pks, **kwargs):
+    """
+    Estimate the continuum using a median filtered correction, based on the existing result.
+
+    :param pks:
+        the primary keys of the task instances to estimate continuum for
+    
+    :param \**kwargs:
+        all keyword arguments will go directly to `astra.contrib.ferre.continuum.median_filtered_correction`
+    """
+
+    pks = flatten(deserialize_pks(pks))
+
+    # Get the path
+    base_output_path = get_base_output_path()
+    # TODO: Make a single source of truth for this path reference
+    get_output_path = lambda pk: os.path.join(base_output_path, "ferre", "scratch", f"{pk:.0f}", "outputs.pkl")
+
+    all_n_pixels = {}
+
+    for pk in pks:
+        log.debug(f"Running median filtered continuum for primary key {pk}")
+
+        with open(get_output_path(pk), "rb") as fp:
+            result, data = pickle.load(fp)
+        
+        # Need the header path.
+        q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk).one_or_none()
+        header_path = q.parameters["header_path"]
+
+        try:
+            n_pixels = all_n_pixels[header_path]
+        except KeyError:
+            n_pixels = all_n_pixels[header_path] = [header["NPIX"] for header in utils.read_ferre_headers(utils.expand_path(header_path))][1:]
+
+        indices = 1 + np.cumsum(data["mask"]).searchsorted(np.cumsum(n_pixels))
+        # These indices will be for each chip, but will need to be left-trimmed.
+        segment_indices = np.sort(np.hstack([
+            0,
+            np.repeat(indices[:-1], 2),
+            data["mask"].size
+        ])).reshape((-1, 2))
+        
+        # Left-trim the indices.
+        for i, (start, end) in enumerate(segment_indices):
+            segment_indices[i, 0] += data["mask"][start:].searchsorted(True)
+    
+        continuum = median_filtered_correction(
+            wavelength=data["wavelength"],
+            # TODO: Check this median filtered correction.
+            normalised_observed_flux=data["flux"] / data["continuum"],
+            normalised_observed_flux_err=data["sigma"] / data["continuum"],
+            normalised_model_flux=data["normalized_model_flux"],
+            segment_indices=segment_indices,
+            **kwargs
+        )
+
+        # Save it back to the file.
+        data["median_filtered_continuum"] = continuum
+        
+        with open(get_output_path(pk), "wb") as fp:
+            pickle.dump((result, data), fp)
+
+        log.info(f"Wrote median filtered continuum output back to {get_output_path(pk)}")
+        '''
+        import matplotlib.pyplot as plt
+        fig, axes = plt.subplots(3, 1, figsize=(8, 12))
+        axes[0].plot(data["wavelength"][0], data["normalized_model_flux"][0], c="r")
+        axes[0].plot(data["wavelength"][0], data["flux"][0] / data["continuum"][0], c="k")
+        axes[1].plot(data["wavelength"][0], continuum, c="b")
+        axes[2].plot(data["wavelength"][0], data["normalized_model_flux"][0], c="r")
+        axes[2].plot(data["wavelength"][0], (data["flux"][0] / data["continuum"][0]) / continuum, c="k")
+        fig.tight_layout()
+        fig.savefig("/uufs/chpc.utah.edu/common/home/u6020307/astra/tmp.png", dpi=300)
+
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.plot(data["wavelength"][0], continuum, c='b')
+        fig.savefig("/uufs/chpc.utah.edu/common/home/u6020307/astra/tmp2.png", dpi=300)
+        '''
+
+    log.debug(f"Done")
+    return [] # Do not return 'None' here or it wont deserialize downstream.
+
+
 
 def _create_partial_ferre_task_instances_from_observations(
         dag_id, 
@@ -633,12 +849,6 @@ def _create_partial_ferre_task_instances_from_observations(
             parameters=meta
         )
         log.info(f"Created or retrieved task instance {instance} for {dag_id} {task_id} with {meta}")
-        A = set(instance.parameters).difference(meta) 
-        B = set(meta).difference(instance.parameters)
-        print(f"A {A}")
-        print(f"B {B}")
-        assert not A
-        assert not B
         pks.append(instance.pk)
     
     # Return the primary keys, which will be passed on to the next task.
@@ -732,7 +942,12 @@ def create_task_instances_for_sdss5_apstars(
     )
 
 
-def create_task_instances_for_next_iteration(pks, task_id_function, full_output=False):
+def create_task_instances_for_next_iteration(
+        pks, 
+        task_id_function, 
+        use_median_filter_continuum_correction=False,
+        full_output=False
+    ):
     """
     Create task instances for a subsequent iteration of FERRE execution, based on
     some FERRE task instances that have already been executed. An example might be
@@ -745,7 +960,14 @@ def create_task_instances_for_next_iteration(pks, task_id_function, full_output=
 
     :param task_id_function:
         A callable function that returns the task ID to use, given the parameters.
+    
+    :param use_median_filter_continuum_correction: [optional]
+        On the new tasks, use the median filter continuum correction from the previous 
+        results.
     """
+
+    log.debug(f"Deserializing pks {pks} ({type(pks)}")
+    print(f"PRINT deserializing pks {pks} ({type(pks)})")
 
     pks = flatten(deserialize_pks(pks))
     
@@ -801,6 +1023,17 @@ def create_task_instances_for_next_iteration(pks, task_id_function, full_output=
             filetype=filetype,
             header_path=header_path
         )
+
+        # Use any continuum correction?
+        if use_median_filter_continuum_correction:
+            # If it was already supplied in the previous instance, just propagate that.
+            k = "use_median_filter_continuum_correction_from_pk" 
+            if k in instance.parameters:
+                log.debug(f"Propagating {k} from previous instance {instance}: {instance.parameters[k]}")
+                parameters[k] = instance.parameters[k]
+            else:
+                log.debug(f"Setting {k} as {instance.pk} from instance {instance}")
+                parameters[k] = instance.pk
 
         tree = trees.get(release, None)
         if tree is None:
@@ -926,273 +1159,5 @@ def get_best_initial_guess(pks, **kwargs):
     if best_tasks:
         return [pk for (log_chisq_fit, pk) in best_tasks.values()]
     else:
-        raise ValueError(f"no task outputs found from {len(pks)} primary keys")
-
-
-
-class FerreOperator2222(BaseOperator):
-
-    template_fields = ("pks", )
-    template_fields_renderers = {
-        "pks": "py"
-    }
-
-    def __init__(
-        self,
-        pks,
-        *,
-        header_path: str,
-        frozen_parameters: Optional[Dict] = None,
-        interpolation_order: int = 3,
-        init_flag: int = 1,
-        init_algorithm_flag: int = 1,
-        error_algorithm_flag: int = 0,
-        continuum_flag: Optional[int] = None,
-        continuum_order: Optional[int] = None,
-        continuum_reject: Optional[float] = None,
-        continuum_observations_flag: int = 0,
-        optimization_algorithm_flag: int = 3,
-        wavelength_interpolation_flag: int = 0,
-        lsf_shape_flag: int = 0,
-        use_direct_access: bool = False,
-        n_threads: int = 1,
-        input_weights_path: Optional[str] = None,
-        input_lsf_path: Optional[str] = None,
-        ferre_kwds: Optional[Dict[str, str]] = None,
-        slurm_kwds: Optional[Dict] = None,
-        analyze_individual_visits: bool = False,
-        **kwargs
-    ):
-        super().__init__(**kwargs)
-        self.pks = pks
-        self.header_path = header_path
-        self.frozen_parameters = frozen_parameters
-        self.interpolation_order = interpolation_order
-        self.init_flag = init_flag
-        self.init_algorithm_flag = init_algorithm_flag
-        self.error_algorithm_flag = error_algorithm_flag
-        self.continuum_flag = continuum_flag
-        self.continuum_order = continuum_order
-        self.continuum_reject = continuum_reject
-        self.continuum_observations_flag = continuum_observations_flag
-        self.optimization_algorithm_flag = optimization_algorithm_flag
-        self.wavelength_interpolation_flag = wavelength_interpolation_flag
-        self.lsf_shape_flag = lsf_shape_flag
-        self.use_direct_access = use_direct_access
-        self.n_threads = n_threads
-        self.input_weights_path = input_weights_path
-        self.input_lsf_path = input_lsf_path
-        self.ferre_kwds = ferre_kwds
-        self.slurm_kwds = slurm_kwds
-        self.analyze_individual_visits = analyze_individual_visits
-        return None
-    
-
-    def get_partial_task_instances_in_database(self, context):
-        """
-        Look upstream in the DAG and get the primary keys of the task instances 
-        that were created in the database and to be executed by FERRE.
-
-        :param context:
-            The context of the task instance in the DAG.
-        """
-        task, ti, params = (context["task"], context["ti"], context["params"])
-
-        pks = flatten(deserialize_pks(self.pks))
-
-        log.info(f"In {task} {ti} and there are {len(pks)} upstream primary keys")
-        
-        q = session.query(astradb.TaskInstance)\
-                   .join(astradb.TaskInstanceParameter)\
-                   .join(astradb.Parameter)
-        q = q.filter(astradb.TaskInstance.pk.in_(pks))
-        q = q.filter(and_(
-            astradb.Parameter.parameter_name == "header_path",
-            astradb.Parameter.parameter_value == self.header_path
-        ))
-        
-        r = q.all()
-        log.info(f"In {task} {ti} and there are now {len(r)} relevant primary keys")
-
-        return r
-        
-    def prepare_observations(
-            self,
-            instances,
-            parameter_names,
-            grid_mid_point,
-            analyze_individual_visits,
-            wavelength_interpolation_flag
-        ):
-        
-        # Load the observations from the database instances.
-        trees = {}
-        wavelength, flux, sigma, initial_parameters, names, snrs = ([], [], [], [], [], [])
-        
-        Ns = np.zeros(len(instances), dtype=int)
-
-        data_slice = slice(None) if analyze_individual_visits else slice(0, 1)
-
-        for i, instance in enumerate(instances):
-            release = instance.parameters["release"]
-            try:
-                tree = trees[release]                
-            except KeyError:
-                tree = trees[release] = SDSSPath(release=release)
-            
-            path = tree.full(**instance.parameters)
-
-            try:
-                # TODO: Profile this.
-                spectrum = Spectrum1D.read(path, data_slice=data_slice)
-
-                N, P = spectrum.flux.shape
-                flux.append(spectrum.flux.value)
-                sigma.append(spectrum.uncertainty.array**-0.5)
-                if wavelength_interpolation_flag > 0:
-                    wavelength.append(
-                        np.tile(spectrum.wavelength.value, N).reshape((N, -1))
-                    )
-
-                point = np.tile(grid_mid_point, N).reshape((N, -1))
-
-                for j, parameter_name in enumerate(parameter_names):
-                    v = instance.parameters.get(f"initial_{parameter_name.lower().replace(' ', '_')}", None)
-                    if v is not None:
-                        point[:, j] = float(v)
-
-                names.extend([f"{i}_{instance.parameters['telescope']}_{instance.parameters['obj']}_{j}" for j in range(N)])
-                initial_parameters.append(point)
-
-                snrs.append(spectrum.meta["snr"][data_slice])
-
-            except:
-                log.exception(f"Exception in trying to load data product associated with {instance}")
-                raise 
-
-            else:
-                Ns[i] = N
-        
-        if wavelength_interpolation_flag > 0:
-            wavelength = np.vstack(wavelength)
-        else:
-            wavelength = spectrum.wavelength.value.copy()
-
-        snrs = np.vstack(snrs).flatten()
-        flux = np.vstack(flux)
-        sigma = np.vstack(sigma)
-        initial_parameters = np.vstack(initial_parameters)
-
-        bad = ~np.isfinite(flux) + ~np.isfinite(sigma) + (sigma == 0)
-        flux[bad] = 1.0
-        sigma[bad] = 1e6
-
-        return (wavelength, flux, sigma, initial_parameters, names, snrs, Ns)
-
-    
-
-    def execute(self, context, instances=None):
-        
-        # The upstream task has created an instance in the database for this FERRE task, 
-        # which includes the observation source parameters, etc.
-        if instances is None:
-            instances = self.get_partial_task_instances_in_database(context)
-
-        log.info(f"Got instances {instances}")
-
-        # Create all the files.
-        ferre = Ferre(
-            os.path.expandvars(self.header_path),
-            frozen_parameters=self.frozen_parameters,
-            interpolation_order=self.interpolation_order,
-            init_flag=self.init_flag,
-            init_algorithm_flag=self.init_algorithm_flag,
-            error_algorithm_flag=self.error_algorithm_flag,
-            continuum_flag=self.continuum_flag,
-            continuum_order=self.continuum_order,
-            continuum_reject=self.continuum_reject,
-            continuum_observations_flag=self.continuum_observations_flag,
-            optimization_algorithm_flag=self.optimization_algorithm_flag,
-            wavelength_interpolation_flag=self.wavelength_interpolation_flag,
-            lsf_shape_flag=self.lsf_shape_flag,
-            n_threads=self.n_threads,
-            use_direct_access=self.use_direct_access,
-            input_weights_path=self.input_weights_path,
-            input_lsf_path=self.input_lsf_path,
-            ferre_kwds=self.ferre_kwds
-        )
-
-        # Create some directory.
-        log.info(f"Preparing to run FERRE in {ferre.directory}")
-
-        ferre._setup()
-        ferre._write_ferre_input_file()
-
-        wavelength, flux, sigma, initial_parameters, names, snr, Ns = self.prepare_observations(
-            instances=instances,
-            parameter_names=ferre.parameter_names,
-            grid_mid_point=ferre.grid_mid_point,
-            analyze_individual_visits=self.analyze_individual_visits,
-            wavelength_interpolation_flag=self.wavelength_interpolation_flag
-        )
-
-        ferre.write_inputs(wavelength, flux, sigma, initial_parameters, names)
-        
-        # Execute FERRE.
-        # TODO: Slurm it and/or batch it
-        ferre._execute(total=int(sum(Ns)))
-
-        # Parse outputs.
-        output_names, p_opt, p_opt_err, meta = ferre.parse_outputs(full_output=True)
-
-        # TODO: Update tasks to include other relevant FERRE keywords.
-
-        # Write FERRE outputs to database.
-        _parameter_names = []
-        common_kwds = {}
-        frozen_parameters = self.frozen_parameters or dict()
-        for parameter_name in ferre.parameter_names:
-            sanitised_parameter_name = sanitise_parameter_name(parameter_name)
-            common_kwds[f"frozen_{sanitised_parameter_name}"] = frozen_parameters.get(parameter_name, False)
-            _parameter_names.append(sanitised_parameter_name)
-
-        # TODO: Assuming FERRE outputs are ordered the same as inputs.
-        si = 0
-        for i, (instance, N) in enumerate(zip(instances, Ns)):
-            if N == 0: continue
-
-            if N > 1:
-                print(f"MULTIPLE OBSERVATIONS {instance} {N}")
-
-            sliced = slice(si, si + N)
-
-            results = dict(
-                snr=list(snr[sliced]),
-                log_snr_sq=list(meta["log_snr_sq"][sliced]),
-                log_chisq_fit=list(meta["log_chisq_fit"][sliced])
-            )
-            # Initial values.
-            for j, pn in enumerate(_parameter_names):
-                results[f"initial_{pn}"] = list(initial_parameters[sliced][:, j]) # Initial.
-                results[pn] = list(p_opt[sliced][:, j]) # Optimized
-                results[f"u_{pn}"] = list(p_opt_err[sliced][:, j]) # errors.
-
-            results.update(common_kwds) # Add frozen parameters.
-
-            # Create result.
-            _instance, output = create_task_output(
-                instance,
-                astradb.Ferre,
-                **results
-            )
-            si += N
-
-            log.info(f"Created output {output} for instance {_instance}")
-        
-        # Teardown
-        ferre.teardown()
-
-        return [instance.pk for instance in instances]
-
-
+        raise AirflowSkipException(f"no task outputs found from {len(pks)} primary keys")
 

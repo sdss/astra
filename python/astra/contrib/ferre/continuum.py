@@ -11,7 +11,7 @@ def median_filtered_correction(
         normalised_observed_flux_err,
         normalised_model_flux,
         segment_indices=None,
-        width=151,
+        median_filter_width=151,
         bad_minimum_flux=0.01,
         non_finite_err_value=1e10,
         mode="nearest",
@@ -32,7 +32,7 @@ def median_filtered_correction(
     :param normalised_model_flux:
         The best-fitting pseudo-continuum normalised model flux. This should have the same format as `wavelength`.
 
-    :param width: [optional]
+    :param median_filter_width: [optional]
         The width (int) for the median filter (default: 151).
     
     :param bad_minimum_flux: [optional]
@@ -65,6 +65,10 @@ def median_filtered_correction(
     if isinstance(bad_minimum_flux, float):
         bad_minimum_flux = tuple([bad_minimum_flux] * N)
     '''
+    wavelength = np.atleast_1d(wavelength).flatten()
+    normalised_observed_flux = np.atleast_1d(normalised_observed_flux).flatten()
+    normalised_observed_flux_err = np.atleast_1d(normalised_observed_flux_err).flatten()
+    normalised_model_flux = np.atleast_1d(normalised_model_flux).flatten()
 
     data = (wavelength, normalised_observed_flux, normalised_observed_flux_err, normalised_model_flux)
 
@@ -82,7 +86,7 @@ def median_filtered_correction(
         flux_err = normalised_observed_flux_err[start:end]
         model_flux = normalised_model_flux[start:end]
         
-        median = median_filter(flux, width, mode=mode, **kwargs)
+        median = median_filter(flux, median_filter_width, mode=mode)
 
         bad = np.where(flux < bad_minimum_flux)[0]
         
@@ -95,7 +99,7 @@ def median_filtered_correction(
         ratio[0] = np.median(ratio[:E])
         ratio[-1] = np.median(ratio[-E:])
 
-        continuum[start:end] = median_filter(ratio, width, mode=mode)
+        continuum[start:end] = median_filter(ratio, median_filter_width, mode=mode)
 
         '''
 
