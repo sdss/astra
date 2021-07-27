@@ -296,7 +296,7 @@ def _parse_names_and_initial_and_frozen_parameters(
                 index = compare_parameter_names.index(spn)
             except ValueError:
                 log.warning(f"Ignoring initial parameters for {parameter_name} as they are not in {parameter_names}")
-                log.debug(f"Nothing matched for {index} {spn} {parameter_name} {compare_parameter_names}")
+                log.debug(f"Nothing matched for {spn} {parameter_name} {compare_parameter_names}")
             else:
                 log.debug(f"Matched to index {index}")
                 # Replace non-finite values with the mid point.
@@ -780,11 +780,9 @@ def parse_header_path(header_path):
     _ = 4
     gd, spectral_type = (parts[1][_], parts[1][_ + 1:])
     date_str = parts[2]
-    year, month, day = (2000 + int(date_str[:2]), int(date_str[2:4]), int(date_str[4:]))
+    year, month, day = (2000 + int(date_str[:2]), int(date_str[2:4]), int(date_str[4:6]))
     lsf = parts[3][3]
     lsf_telescope_model = "lco25m" if parts[3][4:] == "s" else "apo25m"
-
-    aspcap = parts[4]
 
     is_giant_grid = gd == "g"
     
@@ -797,9 +795,8 @@ def parse_header_path(header_path):
         spectral_type=spectral_type,
         grid_creation_date=datetime.date(year, month, day),
         lsf=lsf,
-        aspcap=aspcap,
     )
-    print(f"From {header_path} parsed {kwds}")
+    print(f"From: {header_path} parsed {kwds}")
     return kwds
 
 

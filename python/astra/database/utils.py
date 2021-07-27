@@ -1,28 +1,75 @@
 import json
+import os
 import sqlalchemy.exc
+from tempfile import mktemp
 from typing import Dict
 from sqlalchemy import (or_, and_, func, distinct)
 from astropy.time import Time
 from tqdm import tqdm
 
 from astra.database import (astradb, apogee_drpdb, session)
-from astra.utils import log
+from astra.utils import log, flatten as _flatten
 
 
-def deserialize_pks(pks):
-    try:
-        if isinstance(pks, str):
-            result = json.loads(pks)
+def deserialize_pks(pk, flatten=False):
+    """
+    Recursively de-serialize input primary keys, which could be in the form of integers, or as
+    paths to temporary files that contain integers.
+    
+    :param pks:
+        the input primary keys
+    
+    :param flatten: [optional]
+        return all primary keys as a single flattened list (default: False)
+    
+    :returns:
+        a list of primary keys as integers
+    """    
+    if isinstance(pk, int):
+        v = pk
+    elif isinstance(pk, float):
+        log.warning(f"Forcing primary key input {pk} as integer")
+        v = int(pk)
+    elif isinstance(pk, (list, tuple)):
+        v = list(map(deserialize_pks, pk))
+    elif isinstance(pk, str):
+        if os.path.exists(pk):
+            with open(pk, "r") as fp:
+                contents = json.load(fp)
         else:
-            result = pks
-    except:
-        log.exception(f"Cannot deserialize pks {type(pks)} {pks}")
-        print(f"Cannot deserialize pks {type(pks)} {pks}")
-        raise 
+            # Need to use double quotes.
+            try:
+                contents = json.loads(pk.replace("'", '"'))
+            except:
+                raise ValueError(f"Cannot deserialize primary key of type {type(pk)}: {pk}")
+        v = list(map(deserialize_pks, contents))
     else:
-        return result
+        raise ValueError(f"Cannot deserialize primary key of type {type(pk)}: {pk}")
+    
+    return _flatten([v]) if flatten else v
+    
 
-serialize = lambda v: json.dumps(v) if not isinstance(v, str) else v
+def serialize_pks_to_path(pks, **kwargs):
+    keys = ("suffix", "prefix", "dir")
+    kwds = { k: kwargs[k] for k in set(keys).intersection(kwargs) }
+
+    path = mktemp(**kwds)
+    with open(path, "w") as fp:
+        json.dump(pks, fp)
+    return path
+
+
+def serialize(v):
+    if isinstance(v, str):
+        return v
+    else:
+        try:
+            return json.dumps(v)
+        except:
+            log.exception(f"Failed to serialize {type(v)}: {v}")
+            raise
+    
+
 
 def parse_mjd(
         mjd
@@ -152,14 +199,16 @@ def get_sdss5_apstar_kwds(
     return kwds
 
 
-def get_sdss5_apvisit_kwds(
-        mjd
-    ):
+def get_sdss5_apvisit_kwds(mjd_start, mjd_end):
     """
-    Get identifying keywords for SDSS-V APOGEE visits taken on the given MJD.
+    Get identifying keywords for SDSS-V APOGEE visits taken between the given MJDs
+    (end > observed >= start)
 
-    :param mjd:
-        The Modified Julian Date of the observations.
+    :param mjd_start:
+        The starting Modified Julian Date of the observations.
+    
+    :param mjd_end:
+        the ending Modified Julian Date of the observations.
     
     :returns:
         a list of dictionaries containing the identifying keywords for SDSS-V
@@ -167,7 +216,9 @@ def get_sdss5_apvisit_kwds(
         `filetype` keys necessary to identify the path
     """
 
-    mjd = parse_mjd(mjd)
+    mjd_start = parse_mjd(mjd_start)
+    mjd_end = parse_mjd(mjd_end)
+
     release, filetype = ("sdss5", "apVisit")
     columns = (
         apogee_drpdb.Visit.fiberid.label("fiber"), # TODO: Raise with Nidever
@@ -177,7 +228,12 @@ def get_sdss5_apvisit_kwds(
         apogee_drpdb.Visit.apred_vers.label("apred"), # TODO: Raise with Nidever
         apogee_drpdb.Visit.file
     )
-    q = session.query(*columns).distinct(*columns).q.filter(apogee_drpdb.Visit.mjd == mjd)
+    q = session.query(*columns).distinct(*columns)
+    q = q.filter(apogee_drpdb.Visit.mjd >= mjd_start)\
+         .filter(apogee_drpdb.Visit.mjd < mjd_end)
+
+    total = q.count()
+    log.debug(f"Found {q.count()} {release} {filetype} files between MJD {mjd_start} and {mjd_end}")
 
     kwds = []
     for fiber, plate, field, mjd, apred, filename in q.all():
@@ -191,7 +247,7 @@ def get_sdss5_apvisit_kwds(
             apred=apred,
             prefix=filename[:2]
         ))
-
+            
     return kwds
     
 
@@ -199,13 +255,16 @@ def create_task_instances_for_sdss5_apvisits(
         dag_id,
         task_id,
         run_id,
-        mjd,
-        full_output=False,
-        **parameters
+        mjd_start,
+        mjd_end,
+        parameters=None,
+        return_list=False,
+        **kwargs
     ):
     """
-    Create task instances for SDSS5 APOGEE visits taken on a Modified Julian Date,
-    with the given identifiers for the directed acyclic graph and the task.
+    Create task instances for SDSS5 APOGEE visits taken between the given Modified
+    Julian Dates (end > observed >= start), with the given identifiers for the 
+    directed acyclic graph and the task.
 
     :param dag_id:
         the identifier string of the directed acyclic graph
@@ -213,28 +272,37 @@ def create_task_instances_for_sdss5_apvisits(
     :param task_id:
         the task identifier
 
-    :param mjd:
-        the Modified Julian Date of the observations
+    :param mjd_start:
+        the starting Modified Julian Date of the observations
+
+    :param mjd_end:
+        the ending Modified Julian Date of the observations.
     
-    :param \**parameters: [optional]
+    :param parameters: [optional]
         additional parameters to be assigned to the task instances
     """
 
-    all_kwds = get_sdss5_apvisit_kwds(mjd)
+    parameters = (parameters or dict())
 
-    instances = []
-    for kwds in all_kwds:
-        instances.append(
-            get_or_create_task_instance(
-                dag_id,
-                task_id,
-                run_id,
-                parameters={ **kwds, **parameters}
-        ))
+    all_kwds = get_sdss5_apvisit_kwds(mjd_start, mjd_end)
 
-    if full_output:
-        return instances
-    return [instance.pk for instance in instances]
+    pks = []
+    for kwds in tqdm(all_kwds):
+        instance = get_or_create_task_instance(
+            dag_id,
+            task_id,
+            run_id,
+            parameters={ **kwds, **parameters}
+        )
+        pks.append(instance.pk)
+    
+    if return_list:
+        log.info(f"Returning pks: {pks}")
+        return pks
+    else:
+        path = serialize_pks_to_path(pks, **kwargs)
+        log.info(f"Serialized pks to path {path}: {pks}")
+        return path
 
 
 def create_task_instances_for_sdss5_apstars(
@@ -244,7 +312,7 @@ def create_task_instances_for_sdss5_apstars(
         mjd,
         parameters=None,
         limit=None,
-        full_output=False,
+        return_list=False,
         **kwargs
     ):
     """
@@ -268,28 +336,33 @@ def create_task_instances_for_sdss5_apstars(
     
     :param limit: [optional]
         limit the number of ApStar objects returned to some number
+    
+    :param return_list: [optional]
+        If True, return a list of primary keys. Otherwise, write those primary 
+        keys to a temporary file and return the path (default).
     """
 
     parameters = (parameters or dict())
 
     all_kwds = get_sdss5_apstar_kwds(mjd, limit=limit)
     
-    instances = []
+    pks = []
     for kwds in tqdm(all_kwds):
-        instances.append(
-            get_or_create_task_instance(
-                dag_id,
-                task_id,
-                run_id,
-                parameters={ **kwds, **parameters}
-            )
+        instance = get_or_create_task_instance(
+            dag_id,
+            task_id,
+            run_id,
+            parameters={ **kwds, **parameters}
         )
-
-    if full_output:
-        return instances
-    pks = [instance.pk for instance in instances]
-    log.info(f"Returning pks: {pks}")
-    return pks
+        pks.append(instance.pk)
+    
+    if return_list:
+        log.info(f"Returning pks: {pks}")
+        return pks
+    else:
+        path = serialize_pks_to_path(pks, **kwargs)
+        log.info(f"Serialized pks to path {path}: {pks}")
+        return path
 
 
 def create_task_instances_for_sdss5_apstars_from_apvisits(
@@ -554,9 +627,9 @@ def del_task_instance_parameter(task_instance, key):
         parameter_pk, _ = get_or_create_parameter_pk(key, value)
 
         # Get the TI/PK
-        q = session.query(astra.TaskInstanceParameter).filter(
-            astra.TaskInstanceParameter.ti_pk == task_instance.pk, 
-            astra.TaskInstanceParameter.parameter_pk == parameter_pk
+        q = session.query(astradb.TaskInstanceParameter).filter(
+            astradb.TaskInstanceParameter.ti_pk == task_instance.pk, 
+            astradb.TaskInstanceParameter.parameter_pk == parameter_pk
         ).one_or_none()
 
         session.delete(q)
