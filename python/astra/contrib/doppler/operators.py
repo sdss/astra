@@ -36,19 +36,22 @@ def estimate_radial_velocity(
     See `doppler.rv.fit` for more information on other keyword arguments.
     """
 
-    pks = deserialize_pks(pks)
+    pks = deserialize_pks(pks, flatten=True)
     N = len(pks)
 
     log.info(f"Estimating radial velocities for {N} task instances")
 
     trees = {} # if only it were so easy to grow trees
 
-    # Get the instances.
-    q = astradb.query(astradb.TaskInstance)\
-               .filter(astradb.TaskInstance.pk.in_(pks))
+    for pk in tqdm(pks):
+        
+        q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk)
+        instance = q.one_or_none()
 
-    for instance in tqdm(q.yield_per(1), total=N):
-
+        if instance is None:
+            log.warning(f"No instance found for primary key {pk}")
+            continue
+        
         parameters = instance.parameters
         tree = trees.get(parameters["release"], None)
         if tree is None:
@@ -73,7 +76,7 @@ def estimate_radial_velocity(
 
         except:
             log.exception(f"Exception occurred on Doppler on {path} with task instance {instance}")
-            continue
+            raise 
         
         else:
             # Write the output to the database.

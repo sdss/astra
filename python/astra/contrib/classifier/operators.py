@@ -10,7 +10,7 @@ from astra.contrib.classifier import networks, model, plot_utils, utils
 from astra.database import astradb, session
 from astra.database.utils import create_task_output, deserialize_pks
 from astra.tools.spectrum import Spectrum1D
-from astra.utils import log, hashify
+from astra.utils import log, hashify, get_base_output_path
 
 from sdss_access import SDSSPath
 
@@ -53,8 +53,8 @@ def get_model_path(
 
     param_hash = hashify(kwds)
     
-    # TODO: This should go to some $ASTRA_DATA_DIR or something.
-    return f"classifier_{network_factory}_{param_hash}.pt"
+    basename = f"classifier_{network_factory}_{param_hash}.pt"
+    return os.path.join(get_base_output_path(), basename)
 
 
 def classify(
@@ -86,12 +86,17 @@ def classify(
     model.eval()
 
     # Get the task instances.
-    q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk.in_(deserialize_pks(pks)))
+    pks = deserialize_pks(pks, flatten=True)
 
     trees = {}
+    for pk in tqdm(pks):
 
-    for instance in tqdm(q.yield_per(1)):
-        
+        q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk)
+        instance = q.one_or_none()
+        if instance is None:
+            log.warning(f"No TaskInstance found with pk = {pk}")
+            continue
+
         parameters = instance.parameters
         tree = trees.get(parameters["release"], None)
         if tree is None:

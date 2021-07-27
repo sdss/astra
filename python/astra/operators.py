@@ -5,9 +5,18 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Union
 from airflow.models import BaseOperator
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
+from airflow.exceptions import AirflowSkipException
 
 from astra.utils import log
 from time import sleep, time
+from astra.database.utils import deserialize_pks
+
+
+def skip_if_empty(pks, **kwargs):
+    """ Avoid submitting Slurm jobs for empty lists of PKs. """
+    if not deserialize_pks(pks, flatten=True):
+        raise AirflowSkipException
+
 
 class SlurmPythonOperator(PythonOperator):
     
@@ -147,8 +156,20 @@ class SlurmPythonOperator(PythonOperator):
                     log.info(f"Waiting on job {q.key} to finish (elapsed: {t / 60:.0f} min; started: {(t_to_start - time())/60:.0f} min ago)")
             
             log.info(f"Job {q.key} in {q.job_dir} is complete after {(time() - t_init)/60:.0f} minutes.")
-            return None
+        
+            with open(stderr_path, "r", newline="\n") as fp:
+                stderr = fp.read()
+            log.info(f"Contents of {stderr_path}:\n{stderr}")
+
+            with open(stdout_path, "r", newline="\n") as fp:
+                stdout = fp.read()
+            log.info(f"Contents of {stdout_path}:\n{stdout}")
             
+            # TODO: Better parsing for critical errors.
+            if "Error" in stderr.rstrip().split("\n")[-1]:
+                raise RuntimeError(f"detected exception at task end-point")
+
+            return None            
 
 
 class SlurmBashOperator(BashOperator):
@@ -309,7 +330,7 @@ class SlurmBashOperator(BashOperator):
         # Now we wait until the Slurm job is complete.
         # TODO: Should we just return None and then have a Sensor?
 
-        t_init, t_to_start = (time(), None)
+        t_init = time()
         while 100 > q.get_percent_complete():
 
             sleep(poke_interval)
@@ -318,18 +339,25 @@ class SlurmBashOperator(BashOperator):
 
             if not os.path.exists(stderr_path) and not os.path.exists(stdout_path):
                 log.info(f"Waiting on job {q.key} to start (elapsed: {t / 60:.0f} min)")
-                t_to_start = time() - t_init
 
             else:
-                if t_to_start is None:
-                    t_to_start = time() - t_init
-                log.info(f"Waiting on job {q.key} to finish (elapsed: {t / 60:.0f} min; started: {(t_to_start - time())/60:.0f} min ago)")
+                log.info(f"Waiting on job {q.key} to finish (elapsed: {t / 60:.0f} min)")
+                # Open last line of stdout path?
+
         
         log.info(f"Job {q.key} in {q.job_dir} is complete after {(time() - t_init)/60:.0f} minutes.")
+
         with open(stderr_path, "r", newline="\n") as fp:
-            contents = fp.read()
+            stderr = fp.read()
+        log.info(f"Contents of {stderr_path}:\n{stderr}")
+
+        with open(stdout_path, "r", newline="\n") as fp:
+            stdout = fp.read()
+        log.info(f"Contents of {stdout_path}:\n{stdout}")
         
-        log.info(f"Contents of {stderr_path}:\n{contents}")
+        # TODO: Better parsing for critical errors.
+        if "Error" in stderr.rstrip().split("\n")[-1]:
+            raise RuntimeError(f"detected exception at task end-point")
 
         return None
         

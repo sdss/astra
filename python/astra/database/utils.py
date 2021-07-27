@@ -7,7 +7,7 @@ from sqlalchemy import (or_, and_, func, distinct)
 from astropy.time import Time
 from tqdm import tqdm
 
-from astra.database import (astradb, apogee_drpdb, session)
+from astra.database import (astradb, apogee_drpdb, catalogdb, session)
 from astra.utils import log, flatten as _flatten
 
 
@@ -221,6 +221,8 @@ def get_sdss5_apvisit_kwds(mjd_start, mjd_end):
 
     release, filetype = ("sdss5", "apVisit")
     columns = (
+        apogee_drpdb.Visit.apogee_id.label("obj"), # TODO: Raise with Nidever
+        apogee_drpdb.Visit.telescope,
         apogee_drpdb.Visit.fiberid.label("fiber"), # TODO: Raise with Nidever
         apogee_drpdb.Visit.plate,
         apogee_drpdb.Visit.field,
@@ -236,8 +238,10 @@ def get_sdss5_apvisit_kwds(mjd_start, mjd_end):
     log.debug(f"Found {q.count()} {release} {filetype} files between MJD {mjd_start} and {mjd_end}")
 
     kwds = []
-    for fiber, plate, field, mjd, apred, filename in q.all():
+    for obj, telescope, fiber, plate, field, mjd, apred, filename in q.all():
         kwds.append(dict(
+            obj=obj,
+            telescope=telescope,
             release=release,
             filetype=filetype,
             fiber=fiber,
@@ -250,6 +254,53 @@ def get_sdss5_apvisit_kwds(mjd_start, mjd_end):
             
     return kwds
     
+
+def get_sdss5_boss_kwds(mjd_start, mjd_end):
+    """
+    Get identifying keywords for SDSS-V BOSS spectra taken between the given MJDs
+    (end > observed >= start)
+
+    :param mjd_start:
+        The starting Modified Julian Date of the observations.
+    
+    :param mjd_end:
+        the ending Modified Julian Date of the observations.
+    
+    :returns:
+        a list of dictionaries containing the identifying keywords for SDSS-V
+        BOSS spectra observed on the given MJD, including the `release` and
+        `filetype` keys necessary to identify the path.
+    """    
+
+    mjd_start = parse_mjd(mjd_start)
+    mjd_end = parse_mjd(mjd_end)
+
+    release, filetype = ("sdss5", "spSpec")
+    columns = (
+        catalogdb.SDSSVBossSpall.catalogid,
+        catalogdb.SDSSVBossSpall.run2d,
+        catalogdb.SDSSVBossSpall.plate,
+        catalogdb.SDSSVBossSpall.mjd
+    )
+    q = session.query(*columns).distinct(*columns)
+    q = q.filter(catalogdb.SDSSVBossSpall.mjd >= mjd_start)\
+         .filter(catalogdb.SDSSVBossSpall.mjd < mjd_end)
+
+    log.debug(f"Found {q.count()} {release} {filetype} files between MJD {mjd_start} and {mjd_end}")
+
+    kwds = []
+    for catalogid, run2d, plate, mjd in q.all():
+        kwds.append(dict(
+            release=release,
+            filetype=filetype,
+            catalogid=catalogid,
+            run2d=run2d,
+            plate=plate,
+            mjd=mjd,
+        ))
+            
+    return kwds
+
 
 def create_task_instances_for_sdss5_apvisits(
         dag_id,
@@ -296,7 +347,60 @@ def create_task_instances_for_sdss5_apvisits(
         )
         pks.append(instance.pk)
     
-    if return_list:
+    if not pks or return_list:
+        log.info(f"Returning pks: {pks}")
+        return pks
+    else:
+        path = serialize_pks_to_path(pks, **kwargs)
+        log.info(f"Serialized pks to path {path}: {pks}")
+        return path
+
+
+def create_task_instances_for_sdss5_boss(
+        dag_id,
+        task_id,
+        run_id,
+        mjd_start,
+        mjd_end,
+        parameters=None,
+        return_list=False,
+        **kwargs
+    ):
+    """
+    Create task instances for SDSS5 BOSS visits taken between the given Modified
+    Julian Dates (end > observed >= start), with the given identifiers for the 
+    directed acyclic graph and the task.
+
+    :param dag_id:
+        the identifier string of the directed acyclic graph
+
+    :param task_id:
+        the task identifier
+
+    :param mjd_start:
+        the starting Modified Julian Date of the observations
+
+    :param mjd_end:
+        the ending Modified Julian Date of the observations.
+    
+    :param parameters: [optional]
+        additional parameters to be assigned to the task instances
+    """
+    parameters = (parameters or dict())
+
+    all_kwds = get_sdss5_boss_kwds(mjd_start, mjd_end)
+    
+    pks = []
+    for kwds in tqdm(all_kwds):
+        instance = get_or_create_task_instance(
+            dag_id,
+            task_id,
+            run_id,
+            parameters={ **kwds, **parameters}
+        )
+        pks.append(instance.pk)
+    
+    if not pks or return_list:
         log.info(f"Returning pks: {pks}")
         return pks
     else:
@@ -356,7 +460,7 @@ def create_task_instances_for_sdss5_apstars(
         )
         pks.append(instance.pk)
     
-    if return_list:
+    if not pks or return_list:
         log.info(f"Returning pks: {pks}")
         return pks
     else:
@@ -369,8 +473,9 @@ def create_task_instances_for_sdss5_apstars_from_apvisits(
         dag_id,
         task_id,
         apvisit_pks,
-        full_output=False,
-        **parameters
+        parameters=None,
+        return_list=False,
+        **kwargs
     ):
     """
     Create task instances for SDSS-V ApStar objects, given some primary keys for task instances 
@@ -385,22 +490,34 @@ def create_task_instances_for_sdss5_apstars_from_apvisits(
     :param apvisit_pks:
         primary keys of task instances that refer to SDSS-V ApVisit objects
     
-    :param full_output: [optional]
-        If true, return the instances created. Otherwise just return the primary keys of the instances.
-    
-    :param \**parameters: [optional]
+    :param parameters: [optional]
         additional parameters to be assigned to the task instances
     """
 
-    # Get the unique stars from the primary keys.
-    q = session.join(astradb.TaskInstance)\
-               .filter(astradb.TaskInstance.pk._in(deserialize_pks(apvisit_pks)))
+    parameters = parameters or dict()
 
+    # Get the unique stars from the primary keys.
+    apvisit_pks = deserialize_pks(apvisit_pks, flatten=True)
+    
+    log.info(f"Creating task instances for SDSS5 ApStars from ApVisit PKs: {apvisit_pks}")
+    
     # Match stars to visits by:
     keys = ("telescope", "obj", "apred")
     
-    star_keywords = set([[ti.parameters[k] for k in keys] for ti in q.all()])
+    star_keywords = []
+    for pk in apvisit_pks:
+        q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk)
+        instance = q.one_or_none()
 
+        if instance is None:
+            log.warning(f"No task instance found for pk {pk}")
+            continue
+        
+        star_keywords.append([instance.parameters[k] for k in keys])
+        
+    star_keywords = set(star_keywords)
+    log.info(f"Found {len(star_keywords)} unique combinations of {keys}")
+    
     # Match these to the apogee_drp.Star table.
     columns = (
         apogee_drpdb.Star.apred_vers.label("apred"), # TODO: Raise with Nidever
@@ -410,7 +527,7 @@ def create_task_instances_for_sdss5_apstars_from_apvisits(
     )
     common_kwds = dict(apstar="stars") # TODO: Raise with Nidever
 
-    instances = []
+    pks = []
     for telescope, obj, apred in star_keywords:
         q = session.query(apogee_drpdb.Star.healpix)\
                    .distinct(apogee_drpdb.Star.healpix)\
@@ -434,18 +551,22 @@ def create_task_instances_for_sdss5_apstars_from_apvisits(
             obj=obj,
         )
 
-        instances.append(
-            get_or_create_task_instance(
-                dag_id,
-                task_id,
-                run_id,
-                parameters={ **kwds, **parameters }
-            )
+        instance = get_or_create_task_instance(
+            dag_id,
+            task_id,
+            run_id,
+            parameters={ **kwds, **parameters }
         )
+        pks.append(instance.pk)
 
-    if full_output:
-        return instances
-    return [instance.pk for instance in instances]
+    if not pks or return_list:
+        log.info(f"Returning pks: {pks}")
+        return pks
+    else:
+        path = serialize_pks_to_path(pks, **kwargs)
+        log.info(f"Serialized pks to path {path}: {pks}")
+        return path
+
 
 
 

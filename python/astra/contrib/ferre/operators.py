@@ -20,10 +20,11 @@ from astropy.table import Table
 
 from astra.tools.spectrum import Spectrum1D
 from astra.tools.spectrum.writers import write_astra_source_data_product
-from astra.utils import log, flatten, get_base_output_path
+from astra.utils import log, get_base_output_path
 from astra.database import astradb, apogee_drpdb, catalogdb, session
 from astra.database.utils import (
     create_task_output,
+    serialize_pks_to_path,
     deserialize_pks,
     get_or_create_task_instance, 
     get_sdss4_apstar_kwds,
@@ -206,7 +207,7 @@ def write_astra_source_data_products(pks):
         parameters and chemical abundances
     """
 
-    pks = flatten(deserialize_pks(pks))
+    pks = deserialize_pks(pks, flatten=True)
 
     log.debug(f"Writing AstraSource objects with pks {pks}")
 
@@ -271,7 +272,20 @@ def write_astra_source_data_products(pks):
                     v = ""
                 result_rows[k] = [v] * N
         
-        results_table = Table(data=result_rows)
+        try:
+            results_table = Table(data=result_rows)
+            
+        except:
+            log.exception(f"Unable to create results table.")
+            log.warning(f"Outputting row details:")
+            for key, values in result_rows.items():
+                log.warning(f"\t{key} ({type(key)}): {type(values)} ({len(values)})")
+                
+            log.warning(f"Data values:")
+            for key, values in result_rows.items():
+                log.warning(f"\t{key}: {values}")
+
+            raise
 
         # Decide on where this will be stored.
         output_path = os.path.join(base_output_path, "aspcap", f"{instance.parameters['obj']}-{instance.pk}.fits")
@@ -307,7 +321,7 @@ def write_summary_database_outputs(pks, task_id="aspcap"):
 
     log.debug(f"Input to pks is {pks}")
     
-    pks = flatten(deserialize_pks(pks))
+    pks = deserialize_pks(pks, flatten=True)
     log.debug(f"Writing summary database outputs with input primary keys {pks}")
 
     q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk.in_(pks))
@@ -388,8 +402,9 @@ def write_summary_database_outputs(pks, task_id="aspcap"):
             
             # Check what is not frozen.
             thawed_label_names = []
+            ignore = ("lgvsini", ) # Ignore situations where lgvsini was missing from grid and it screws up the task
             for key in label_names:
-                if not getattr(el_instance.output, f"frozen_{key}"):
+                if key not in ignore and not getattr(el_instance.output, f"frozen_{key}"):
                     thawed_label_names.append(key)
 
             if len(thawed_label_names) > 1:
@@ -436,7 +451,7 @@ def get_instances_with_this_header_path(pks, header_path):
     :returns:
         A list of `astra.database.astradb.TaskInstance` objects.
     """
-    pks = flatten(deserialize_pks(pks))
+    pks = deserialize_pks(pks, flatten=True)
     log.debug(f"in get_instances_with_this_header_path with {pks} ({type(pks)})")
     q = session.query(astradb.TaskInstance).join(astradb.TaskInstanceParameter).join(astradb.Parameter)
     q = q.filter(and_(
@@ -727,7 +742,7 @@ def median_filter_continuum(pks, **kwargs):
         all keyword arguments will go directly to `astra.contrib.ferre.continuum.median_filtered_correction`
     """
 
-    pks = flatten(deserialize_pks(pks))
+    pks = deserialize_pks(pks, flatten=True)
 
     # Get the path
     base_output_path = get_base_output_path()
@@ -852,7 +867,7 @@ def _create_partial_ferre_task_instances_from_observations(
         pks.append(instance.pk)
     
     # Return the primary keys, which will be passed on to the next task.
-    return pks
+    return serialize_pks_to_path(pks, **kwargs)
     
 
 def create_task_instances_for_sdss4_apstars(dag_id, task_id_function, ferre_header_paths, **kwargs):
@@ -946,7 +961,7 @@ def create_task_instances_for_next_iteration(
         pks, 
         task_id_function, 
         use_median_filter_continuum_correction=False,
-        full_output=False
+        **kwargs
     ):
     """
     Create task instances for a subsequent iteration of FERRE execution, based on
@@ -969,7 +984,7 @@ def create_task_instances_for_next_iteration(
     log.debug(f"Deserializing pks {pks} ({type(pks)}")
     print(f"PRINT deserializing pks {pks} ({type(pks)})")
 
-    pks = flatten(deserialize_pks(pks))
+    pks = deserialize_pks(pks, flatten=True)
     
     # If we are given the task ID of the immediate downstream task, then just use that.
     log.debug(f"Creating task instances for next iteration given primary keys {pks} and task_id_function {task_id_function} (type: {type(task_id_function)})")
@@ -1008,7 +1023,7 @@ def create_task_instances_for_next_iteration(
     
     trees = {}
 
-    new_instances = []
+    new_pks = []
     for instance in q.all():
 
         # Initial parameters.
@@ -1042,21 +1057,16 @@ def create_task_instances_for_next_iteration(
         for key in tree.lookup_keys(filetype):
             parameters[key] = instance.parameters[key]
 
-        new_instances.append(get_or_create_task_instance(
+        new_instance = get_or_create_task_instance(
             dag_id=instance.dag_id,
             task_id=task_id_function(**parameters),
             run_id=instance.run_id,
             parameters=parameters
-        ))
-        
-        log.debug(f"Retrieved or created new instance {new_instances[-1]} with header path {header_path}")
+        )
+        new_pks.append(new_instance.pk)
+        log.debug(f"Retrieved or created new instance {new_instance} with header path {header_path}")
     
-    if full_output:
-        return new_instances
-
-    return [instance.pk for instance in new_instances]
-
-
+    return serialize_pks_to_path(new_pks, **kwargs)
 
 
 
@@ -1073,7 +1083,7 @@ def choose_which_ferre_tasks_to_execute(pks, task_id_function, **kwargs):
         task identifier.
     """
     # Get primary keys from immediate upstream task.
-    pks = flatten(deserialize_pks(pks))
+    pks = deserialize_pks(pks, flatten=True)
 
     # Get the header paths for those task instances.
     q = session.query(astradb.Parameter.parameter_value)\
@@ -1098,7 +1108,7 @@ def get_best_initial_guess(pks, **kwargs):
     """
 
     # Get the PKs from upstream.
-    pks = flatten(flatten(deserialize_pks(pks)))
+    pks = deserialize_pks(pks, flatten=True)
 
     log.debug(f"Getting best initial guess among primary keys {pks}")
 
@@ -1110,7 +1120,7 @@ def get_best_initial_guess(pks, **kwargs):
         instance = q.one_or_none()
 
         if instance.output is None:
-            log.warn(f"No output found for task instance {instance}")
+            log.warning(f"No output found for task instance {instance}")
             continue
 
         p = instance.parameters
@@ -1126,8 +1136,7 @@ def get_best_initial_guess(pks, **kwargs):
         ])
         
         best_tasks.setdefault(key, (np.inf, None))
-        log.debug(f"Checking best task for key {key} (iteration {i}, pk {pk}). Currently: {best_tasks[key]}")
-
+        
         log_chisq_fit, *_ = instance.output.log_chisq_fit
         previous_teff, *_ = instance.output.teff
 
@@ -1138,8 +1147,6 @@ def get_best_initial_guess(pks, **kwargs):
             log.debug(f"Skipping result for {instance} {instance.output} as log_chisq_fit = {log_chisq_fit}")
             continue
             
-        log.debug(f"Current instance: {log_chisq_fit} and {previous_teff} from {instance} {instance.output}")
-
         parsed_header = utils.parse_header_path(p["header_path"])
     
         # Penalise chi-sq in the same way they did for DR16.
@@ -1154,10 +1161,13 @@ def get_best_initial_guess(pks, **kwargs):
             best_tasks[key] = (log_chisq_fit, pk)
     
     for key, (log_chisq_fit, pk) in best_tasks.items():
-        log.debug(f"Best task for key {key} with log \chi^2 of {log_chisq_fit:.2f} is primary key {pk}")
+        if pk is None:
+            log.warning(f"No good task found for key {key}: ({log_chisq_fit}, {pk})")
+        else:
+            log.info(f"Best task for key {key} with log \chi^2 of {log_chisq_fit:.2f} is primary key {pk}")
 
     if best_tasks:
-        return [pk for (log_chisq_fit, pk) in best_tasks.values()]
+        return [pk for (log_chisq_fit, pk) in best_tasks.values() if pk is not None]
     else:
         raise AirflowSkipException(f"no task outputs found from {len(pks)} primary keys")
 

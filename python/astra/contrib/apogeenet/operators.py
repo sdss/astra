@@ -50,7 +50,7 @@ def estimate_stellar_labels(
     
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    pks = flatten(deserialize_pks(pks))
+    pks = deserialize_pks(pks, flatten=True)
 
     log.info(f"Running APOGEENet on device {device} with:")
     log.info(f"\tmodel_path: {model_path}")
