@@ -1,4 +1,5 @@
 import numpy as np
+import os
 from tqdm import tqdm
 from sdss_access import SDSSPath
 
@@ -43,6 +44,7 @@ def estimate_radial_velocity(
 
     trees = {} # if only it were so easy to grow trees
 
+    failed_pks = []
     for pk in tqdm(pks):
         
         q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk)
@@ -57,7 +59,18 @@ def estimate_radial_velocity(
         if tree is None:
             trees[parameters["release"]] = tree = SDSSPath(release=parameters["release"])
         
-        path = tree.full(**parameters)
+        if parameters["filetype"] == "spSpec":
+            log.warning(f"Using monkey-patch for filetype {parameters['filetype']} on pk {pk}")
+            path = os.path.expandvars(
+                "$BOSS_SPECTRO_REDUX/{run2d}/{plate}p/coadd/{mjd}/spSpec-{plate}-{mjd}-{identifier:0>11}.fits".format(
+                    identifier=max(int(parameters["fiberid"]), int(parameters["catalogid"])),
+                    **parameters
+                )
+            )
+        else:
+            path = tree.full(**parameters)
+
+        log.debug(f"Running Doppler on {instance} at {path}")
 
         try:
             spectrum = doppler.read(path)
@@ -76,8 +89,9 @@ def estimate_radial_velocity(
 
         except:
             log.exception(f"Exception occurred on Doppler on {path} with task instance {instance}")
-            raise 
-        
+            failed_pks.append(pk)
+            continue
+
         else:
             # Write the output to the database.
             results = prepare_results(summary)
@@ -88,6 +102,13 @@ def estimate_radial_velocity(
                 **results
             )
 
+    if len(failed_pks) > 0:
+        log.warning(f"There were {len(failed_pks)} Doppler failures out of a total {len(pks)} executions.")
+        log.warning(f"Failed primary keys include: {failed_pks}")
+
+        log.warning(f"Raising last exception to indicate failure in pipeline.")
+        raise
+    
 
 def prepare_results(summary_table):
     """

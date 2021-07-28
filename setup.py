@@ -39,12 +39,12 @@ def run(packages, install_requires):
           install_requires=install_requires,
           package_dir={'': 'python'},
           scripts=['bin/astra'],
-        entry_points = {
-            'console_scripts': [
-                'apogeenet=astra.contrib.apogeenet.cli:main',
-                'classifier-train=astra.contrib.classifier.cli:train_model',
-            ],
-        },
+        #entry_points = {
+        #    'console_scripts': [
+        #        'apogeenet=astra.contrib.apogeenet.cli:main',
+        #        'classifier-train=astra.contrib.classifier.cli:train_model',
+        #    ],
+        #},
           classifiers=[
               'Development Status :: 4 - Beta',
               'Intended Audience :: Science/Research',

@@ -1,15 +1,11 @@
-#!/usr/bin/env python
-# encoding: utf-8
 
 import click
-import argparse
 import os
-from astra.utils import log
 from logging import DEBUG, INFO
+from astra.utils import log
 
-from astra.tools.parsers import (component, folder, setup, subset, task, execute)
-
-
+from astra.contrib.apogeenet.cli import apogeenet
+from astra.contrib.classifier.cli import classifier
 
 # Common options.
 @click.group()
@@ -25,37 +21,18 @@ def cli(context, verbose):
     log.set_level(DEBUG if verbose else INFO)
 
 
-# Add various commands
-cli.add_command(setup.parser, name="setup")
-cli.add_command(folder.parser, name="folder")
-cli.add_command(subset.parser, name="subset")
-cli.add_command(component.parser, name="component")
-cli.add_command(task.parser, name="task")
-cli.add_command(execute.execute, name="execute")
+# Add 'run' sub-commands.
+@click.group()
+@click.pass_context
+def run(context):
+    print("IN RUN")
+    pass
+    
+run.add_command(apogeenet)
+run.add_command(classifier)
 
-# Query execute
-# Execute
-# Schedule
+cli.add_command(run)
+
 
 if __name__ == "__main__":
     cli(obj=dict())
-
-"""
-
-astra setup
-astra folder watch [PATH]
-astra folder unwatch [PATH]
-astra subset create
-astra subset delete
-astra component add
-astra component delete
-
-astra run:
-
-# Every minute check if we should check for new folders.
-# With any new data, update subsets.
-# With any new data, identify suitable components
-# With any new data, create tasks for those components.
-# Execute the tasks.
-
-"""

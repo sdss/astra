@@ -280,7 +280,8 @@ def get_sdss5_boss_kwds(mjd_start, mjd_end):
         catalogdb.SDSSVBossSpall.catalogid,
         catalogdb.SDSSVBossSpall.run2d,
         catalogdb.SDSSVBossSpall.plate,
-        catalogdb.SDSSVBossSpall.mjd
+        catalogdb.SDSSVBossSpall.mjd,
+        catalogdb.SDSSVBossSpall.fiberid
     )
     q = session.query(*columns).distinct(*columns)
     q = q.filter(catalogdb.SDSSVBossSpall.mjd >= mjd_start)\
@@ -289,7 +290,7 @@ def get_sdss5_boss_kwds(mjd_start, mjd_end):
     log.debug(f"Found {q.count()} {release} {filetype} files between MJD {mjd_start} and {mjd_end}")
 
     kwds = []
-    for catalogid, run2d, plate, mjd in q.all():
+    for catalogid, run2d, plate, mjd, fiberid in q.all():
         kwds.append(dict(
             release=release,
             filetype=filetype,
@@ -297,6 +298,7 @@ def get_sdss5_boss_kwds(mjd_start, mjd_end):
             run2d=run2d,
             plate=plate,
             mjd=mjd,
+            fiberid=fiberid
         ))
             
     return kwds
@@ -826,8 +828,8 @@ def create_task_output(
     # Get the task instance.
     if not isinstance(task_instance_or_pk, astradb.TaskInstance):
         task_instance = session.query(astradb.TaskInstance)\
-                            .filter(astradb.TaskInstance.pk == task_instance_pk)\
-                            .one_or_none()
+                               .filter(astradb.TaskInstance.pk == task_instance_or_pk)\
+                               .one_or_none()
                             
         if task_instance is None:
             raise ValueError(f"no task instance found matching primary key {task_instance_pk}")
@@ -856,5 +858,5 @@ def create_task_output(
         task_instance.output_pk = output_interface.pk
 
     assert task_instance.output_pk is not None
-    log.info(f"Created output {output_result} for task instance {task_instance}")
+    #log.info(f"Created output {output_result} for task instance {task_instance}")
     return output_result

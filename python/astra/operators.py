@@ -172,7 +172,7 @@ class SlurmPythonOperator(PythonOperator):
             return None            
 
 
-class SlurmBashOperator(BashOperator):
+class SlurmOperator(BashOperator):
     r"""
     Submit a Slurm job that will execute a Bash script, command or set of commands.
 
@@ -272,7 +272,7 @@ class SlurmBashOperator(BashOperator):
         '.sh',
         '.bash',
     )
-    ui_color = '#f0ede4'
+    ui_color = '#ADBBBF'
 
     def __init__(
         self,
@@ -305,6 +305,7 @@ class SlurmBashOperator(BashOperator):
         label = ".".join([
             context["dag"].dag_id,
             context["task"].task_id,
+            context['execution_date'].strftime('%Y-%m-%d'),
             # run_id is None if triggered by command line
             uid
         ])
