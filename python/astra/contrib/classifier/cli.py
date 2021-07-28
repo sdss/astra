@@ -1,37 +1,45 @@
 
+import click
 
-import argparse
+@click.group("classifier")
+@click.pass_context
+def classifier(context):
+    """ Classify sources using a convolutional neural network """
+    pass
 
-def train_model():
-        
-    parser = argparse.ArgumentParser()
-    parser.add_argument('output_model_path')
-    parser.add_argument('training_spectra_path')
-    parser.add_argument('training_labels_path')
-    parser.add_argument('validation_spectra_path')
-    parser.add_argument('validation_labels_path')
-    parser.add_argument('test_spectra_path')
-    parser.add_argument('test_labels_path')
-    #parser.add_argument('class_names')
-    parser.add_argument('network_factory')
-
-    args = parser.parse_args()
-
+@classifier.command(context_settings=dict(ignore_unknown_options=True))
+@click.argument("output_model_path", nargs=1, required=True)
+@click.argument("network_factory", nargs=1, required=True)
+@click.argument("training_spectra_path", nargs=1, required=True)
+@click.argument("training_labels_path", nargs=1, required=True)
+@click.argument("validation_spectra_path", nargs=1, required=True)
+@click.argument("validation_labels_path", nargs=1, required=True)
+@click.argument("test_spectra_path", nargs=1, required=True)
+@click.argument("test_labels_path", nargs=1, required=True)
+@click.option("--learning-rate", default=1e-5, show_default=True)
+@click.option("--weight-decay", default=1e-5, show_default=True)
+@click.option("--num-epochs", default=200, show_default=True)
+@click.option("--batch-size", default=100, show_default=True)
+@click.pass_context
+def train(context, **kwargs):
+    """
+    Train a classifier.
+    """
     from astra.contrib.classifier.operators import train_model
+    return train_model(**kwargs)
 
-    train_model(
-        args.output_model_path,
-        args.training_spectra_path,
-        args.training_labels_path,
-        args.validation_spectra_path,
-        args.validation_labels_path,
-        args.test_spectra_path,
-        args.test_labels_path,
-        ["fgkm", "hotstar", "sb2", "yso"],
-        args.network_factory
-    )
 
-    #    learning_rate=1e-5,
-    #    weight_decay=1e-5,
-    #    n_epochs=200,
-    #    batch_size=100,
+@classifier.command(context_settings=dict(ignore_unknown_options=True))
+@click.argument("model_path", nargs=1, required=True)
+@click.argument("pk", nargs=1, required=True)
+@click.pass_context
+def test(context, model_path, pk, **kwargs):
+    """
+    Classify some SDSS data products.
+    """
+
+    from astra.contrib.classifier.operators import classify
+
+    # TODO: Optionally supply the network factory.
+    network_factory = model_path.split("_")[-2]
+    return classify(pk, model_path, network_factory)

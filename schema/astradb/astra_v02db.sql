@@ -259,10 +259,17 @@ create table astra_v02.thepayne (
 create table astra_v02.classification (
     output_pk int primary key,
     ti_pk bigint,
-    log_prob real[],
-    prob real[],
+    p_fgkm real[],
+    lp_fgkm real[],
+    p_hotstar real[],
+    lp_hotstar real[],
+    p_sb2 real[],
+    lp_sb2 real[],
+    p_yso real[],
+    lp_yso real[],
     foreign key (output_pk) references astra_v02.output_interface(pk) on delete restrict
 );
+
 
 /* Classifiers specifically for white dwarfs */
 create table astra_v02.wd_classification (

@@ -3,6 +3,7 @@ import os
 import torch
 import numpy as np
 from inspect import getargspec
+from scipy.special import logsumexp
 from torch.autograd import Variable
 from tqdm import tqdm
 
@@ -10,7 +11,7 @@ from astra.contrib.classifier import networks, model, plot_utils, utils
 from astra.database import astradb, session
 from astra.database.utils import create_task_output, deserialize_pks
 from astra.tools.spectrum import Spectrum1D
-from astra.utils import log, hashify, get_base_output_path
+from astra.utils import log, flatten, hashify, get_base_output_path
 
 from sdss_access import SDSSPath
 
@@ -21,7 +22,7 @@ def get_model_path(
         training_labels_path,
         learning_rate,
         weight_decay,
-        n_epochs,
+        num_epochs,
         batch_size,
         **kwargs
     ):
@@ -41,7 +42,7 @@ def get_model_path(
     :param learning_rate:
         the learning rate to use during training
     
-    :param n_epochs:
+    :param num_epochs:
         the number of epochs to use during training
     
     :param batch_size:
@@ -54,7 +55,124 @@ def get_model_path(
     param_hash = hashify(kwds)
     
     basename = f"classifier_{network_factory}_{param_hash}.pt"
-    return os.path.join(get_base_output_path(), basename)
+    path = os.path.join(get_base_output_path(), "classifier", basename)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
+
+def train_model(
+        output_model_path,
+        training_spectra_path, 
+        training_labels_path,
+        validation_spectra_path,
+        validation_labels_path,
+        test_spectra_path,
+        test_labels_path,
+        network_factory,
+        class_names=None,
+        learning_rate=1e-5,
+        weight_decay=1e-5,
+        num_epochs=200,
+        batch_size=100,
+        **kwargs
+    ):
+    """
+    Train a classifier.
+
+    :param output_model_path:
+        the disk path where to save the model to
+
+    :param training_spectra_path:
+        A path that contains the spectra for the training set.
+    
+    :param training_set_labels:
+        A path that contains the labels for the training set.
+
+    :param validation_spectra_path:
+        A path that contains the spectra for the validation set.
+
+    :param validation_labels_path:
+        A path that contains the labels for the validation set.
+
+    :param test_spectra_path:
+        A path that contains the spectra for the test set.
+    
+    :param test_labels_path:
+        A path that contains ths labels for the test set.
+
+    :param network_factory:
+        The name of the network factory to use in `astra.contrib.classifier.model`
+
+    :param class_names: (optional)
+        A tuple of names for the object classes.
+    
+    :param num_epochs: (optional)
+        The number of epochs to use for training (default: 200).
+    
+    :param batch_size: (optional)
+        The number of objects to use per batch in training (default: 100).
+    
+    :param weight_decay: (optional)
+        The weight decay to use during training (default: 1e-5).
+    
+    :param learning_rate: (optional)
+        The learning rate to use during training (default: 1e-4).
+    """
+
+    try:
+        network_factory = getattr(networks, network_factory)
+    
+    except AttributeError:
+        raise ValueError(f"No such network factory exists ({network_factory})")
+    
+    training_spectra, training_labels = utils.load_data(training_spectra_path, training_labels_path)
+    validation_spectra, validation_labels = utils.load_data(validation_spectra_path, validation_labels_path)
+    test_spectra, test_labels = utils.load_data(test_spectra_path, test_labels_path)
+
+    state, network, optimizer = model.train(
+        network_factory,
+        training_spectra,
+        training_labels,
+        validation_spectra,
+        validation_labels,
+        test_spectra,
+        test_labels,
+        class_names=class_names,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        num_epochs=num_epochs,
+        batch_size=batch_size,
+    )
+
+    # Write the model to disk.
+    utils.write_network(network, output_model_path)
+
+    '''
+    # Disable dropout for inference.
+    with torch.no_grad():                
+        pred = network.forward(Variable(torch.Tensor(test_spectra)))
+        outputs = pred.data.numpy()
+
+    pred_test_labels = np.argmax(outputs, axis=1)
+
+    # Make a confusion matrix plot.
+    fig = plot_utils.plot_confusion_matrix(
+        test_labels, 
+        pred_test_labels, 
+        self.class_names,
+        normalize=False,
+        title=None,
+        cmap=plt.cm.Blues
+    )
+    fig.savefig(
+        os.path.join(
+            self.output_base_dir,
+            f"{self.task_id}.png"
+        ),
+        dpi=300
+    )
+    '''
+
 
 
 def classify(
@@ -89,7 +207,9 @@ def classify(
     pks = deserialize_pks(pks, flatten=True)
 
     trees = {}
-    for pk in tqdm(pks):
+    results = {}
+
+    for pk in tqdm(pks, desc="Classifying"):
 
         q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk)
         instance = q.one_or_none()
@@ -134,26 +254,29 @@ def classify(
         with np.errstate(under="ignore"):
             relative_log_prob = log_prob - logsumexp(log_prob)
         
-        # TODO: This many not be necessary anymore now that we are using SQLAlchemy ORM.
-        #       Leaving the logic here in case this fails and we do need to re-cast types.
-
         # Round for PostgreSQL 'real' type.
         # https://www.postgresql.org/docs/9.1/datatype-numeric.html
         # and
         # https://stackoverflow.com/questions/9556586/floating-point-numbers-of-python-float-and-postgresql-double-precision
-        decimals = 36
+        decimals = 3
         prob = np.round(np.exp(relative_log_prob), decimals)
         log_prob = np.round(log_prob, decimals)
 
+        results[pk] = (prob, log_prob)
+    
+
+    for pk, (prob, log_prob) in tqdm(results.items(), desc="Writing results"):
+        
+        result = {}
+        for i, class_name in enumerate(factory.class_names):
+            result[f"p_{class_name}"] = [prob[i]]
+            result[f"lp_{class_name}"] = [log_prob[i]]
+    
         # Write the output to the database.
-        create_task_output(
-            instance,
-            astradb.Classification,
-            log_prob=log_prob,
-            prob=prob
-        )
+        create_task_output(pk, astradb.Classification, **result)
 
 
+    
 def classify_sdss5_apstar(pks):
     """
     Classify observations of SDSS5 APOGEE (ApStar) sources, given the existing classifications of the
@@ -173,117 +296,5 @@ def classify_sdss5_apstar(pks):
 
 
 
-
-
-
-def train_model(
-        output_model_path,
-        training_spectra_path, 
-        training_labels_path,
-        validation_spectra_path,
-        validation_labels_path,
-        test_spectra_path,
-        test_labels_path,
-        class_names,
-        network_factory,
-        learning_rate=1e-5,
-        weight_decay=1e-5,
-        n_epochs=200,
-        batch_size=100,
-        **kwargs
-    ):
-    """
-    Train a classifier.
-
-    :param output_model_path:
-        the disk path where to save the model to
-
-    :param training_spectra_path:
-        A path that contains the spectra for the training set.
-    
-    :param training_set_labels:
-        A path that contains the labels for the training set.
-
-    :param validation_spectra_path:
-        A path that contains the spectra for the validation set.
-
-    :param validation_labels_path:
-        A path that contains the labels for the validation set.
-
-    :param test_spectra_path:
-        A path that contains the spectra for the test set.
-    
-    :param test_labels_path:
-        A path that contains ths labels for the test set.
-
-    :param class_names:
-        A tuple of names for the object classes.
-    
-    :param n_epochs: (optional)
-        The number of epochs to use for training (default: 200).
-    
-    :param batch_size: (optional)
-        The number of objects to use per batch in training (default: 100).
-    
-    :param weight_decay: (optional)
-        The weight decay to use during training (default: 1e-5).
-    
-    :param learning_rate: (optional)
-        The learning rate to use during training (default: 1e-4).
-    """
-
-    try:
-        network_factory = getattr(networks, network_factory)
-    
-    except AttributeError:
-        raise ValueError(f"No such network factory exists ({network_factory})")
-    
-    training_spectra, training_labels = utils.load_data(training_spectra_path, training_labels_path)
-    validation_spectra, validation_labels = utils.load_data(validation_spectra_path, validation_labels_path)
-    test_spectra, test_labels = utils.load_data(test_spectra_path, test_labels_path)
-
-    state, network, optimizer = model.train(
-        network_factory,
-        training_spectra,
-        training_labels,
-        validation_spectra,
-        validation_labels,
-        test_spectra,
-        test_labels,
-        class_names=class_names,
-        learning_rate=learning_rate,
-        weight_decay=weight_decay,
-        n_epochs=n_epochs,
-        batch_size=batch_size,
-    )
-
-    # Write the model to disk.
-    utils.write_network(network, output_model_path)
-
-    '''
-    # Disable dropout for inference.
-    with torch.no_grad():                
-        pred = network.forward(Variable(torch.Tensor(test_spectra)))
-        outputs = pred.data.numpy()
-
-    pred_test_labels = np.argmax(outputs, axis=1)
-
-    # Make a confusion matrix plot.
-    fig = plot_utils.plot_confusion_matrix(
-        test_labels, 
-        pred_test_labels, 
-        self.class_names,
-        normalize=False,
-        title=None,
-        cmap=plt.cm.Blues
-    )
-    fig.savefig(
-        os.path.join(
-            self.output_base_dir,
-            f"{self.task_id}.png"
-        ),
-        dpi=300
-    )
-    '''
 
 

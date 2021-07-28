@@ -14,7 +14,6 @@ from torch.autograd import Variable
 device = torch.device("cuda:0" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu")
 
 CUDA_AVAILABLE = torch.cuda.is_available()
-print(f"Using {device} in Classifier because {torch.cuda.is_available()}")
 
 def train(
         network_factory,
@@ -27,7 +26,7 @@ def train(
         class_names=None,
         learning_rate=1e-4,
         weight_decay=1e-5,
-        n_epochs=200,
+        num_epochs=200,
         batch_size=100,
         task=None
     ):
@@ -64,7 +63,7 @@ def train(
     :param weight_decay: (optional)
         The weight decay to use during training (default: 1e-5).
     
-    :param n_epochs: (optional)
+    :param num_epochs: (optional)
         The number of epochs to use during training (default: 200).
     
     :param batch_size: (optional)
@@ -107,11 +106,11 @@ def train(
 
     t = time()
 
-    for epoch in range(n_epochs):
+    for epoch in range(num_epochs):
 
         status_message = []
         status_message.append("="*15)
-        status_message.append(f"Epoch {epoch} of {n_epochs}")
+        status_message.append(f"Epoch {epoch} of {num_epochs}")
 
         total, correct, losses = (0, 0, 0)
 
@@ -246,8 +245,6 @@ def train(
 
         print("\n".join(status_message))
 
-
-
     state = dict(
         epoch=epoch, 
         losses=(
@@ -277,69 +274,3 @@ def predict_classes(network, spectra):
 
     return preds.numpy()
 
-
-
-if __name__ == "__main__":
-
-    import os
-    import utils
-    from networks import NIRCNN
-
-    model_path = "cnn_nir.model"
-
-    data_dir = "data/nir/"
-
-    training_set_spectra, training_set_labels = utils.load_data(
-        os.path.join(data_dir, "nir_clean_spectra_shfl.npy"),
-        os.path.join(data_dir, "nir_clean_labels_shfl.npy")
-    )
-
-    validation_set_spectra, validation_set_labels = utils.load_data(
-        os.path.join(data_dir, "nir_clean_spectra_valid_shfl.npy"),
-        os.path.join(data_dir, "nir_clean_labels_valid_shfl.npy")
-    )
-
-    test_set_spectra, test_set_labels = utils.load_data(
-        os.path.join(data_dir, "nir_clean_spectra_test_shfl.npy"),
-        os.path.join(data_dir, "nir_clean_labels_test_shfl.npy")
-    )
-    class_names = [
-        "FGKM", 
-        "Hot stars", 
-        "SB2", 
-        "YSO"
-    ]
-
-    if os.path.exists(model_path):
-        network = utils.read_network(NIRCNN, model_path)
-
-    else:
-        state, network, optimizer = train(
-            NIRCNN,
-            training_set_spectra,
-            training_set_labels,
-            validation_set_spectra,
-            validation_set_labels,
-            test_set_spectra,
-            test_set_labels,
-            
-        )
-        utils.write_network(network, model_path)
-
-    from sklearn.metrics import confusion_matrix
-
-    from plot_utils import plot_confusion_matrix
-
-    y_true = test_set_labels
-    y_pred = predict_classes(network, test_set_spectra)
-
-    cm = confusion_matrix(y_true, y_pred)
-    cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-
-    fig = plot_confusion_matrix(
-        y_true,
-        y_pred,
-        class_names=class_names
-    )
-
-    raise a

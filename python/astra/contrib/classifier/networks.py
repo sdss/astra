@@ -10,10 +10,6 @@ from torch import nn
 from torch.autograd import Variable
 
 
-#default_tensor_type = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
-#torch.set_default_tensor_type(default_tensor_type)
-
-
 class OpticalCNN(nn.Module):
     
     def __init__(self, in_channels=1, nb_channels=3, nb_classes=4):
@@ -60,6 +56,8 @@ class OpticalCNN(nn.Module):
 
 
 class NIRCNN(nn.Module):
+
+    class_names = ["fgkm", "hotstar", "sb2", "yso"]
     
     def __init__(self, nb_channels=3, nb_classes=4):
         super(NIRCNN, self).__init__()
