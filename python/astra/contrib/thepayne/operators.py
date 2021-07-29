@@ -2,17 +2,19 @@ import os
 import pickle
 from tqdm import tqdm
 from sdss_access import SDSSPath
+from inspect import signature
+from collections import OrderedDict
 
 from astra.database import astradb, session
 from astra.tools.spectrum import Spectrum1D
 from astra.database.utils import create_task_output
 from astra.contrib.thepayne import training, test
-from astra.utils import hashify, log
+from astra.utils import hashify, log, get_base_output_path
 
 def get_model_path(
         training_set_path: str,
-        n_steps=100_000,
-        n_neurons=300,
+        num_epochs=100_000,
+        num_neurons=300,
         weight_decay=0.0,
         learning_rate=0.001,
         **kwargs
@@ -24,10 +26,10 @@ def get_model_path(
     :param training_set_path:
         the path of the training set
 
-    :param n_steps: (optional)
+    :param num_epochs: (optional)
         The number of steps to train the network for (default 100000).
     
-    :param n_neurons: (optional)
+    :param num_neurons: (optional)
         The number of neurons to use in the hidden layer (default: 300).
     
     :param weight_decay: (optional)
@@ -36,20 +38,35 @@ def get_model_path(
     :param learning_rate: (optional)
         The learning rate to use during training (default: 0.001).    
     """
+    # Expand the training set path for the purposes of hashing.
+    training_set_path = os.path.expanduser(os.path.expandvars(training_set_path))
 
-    param_hash = hashify(dict([(arg, locals()[arg]) for arg in getargspec(get_model_path).args]))
+    param_dict = OrderedDict()
+    for arg in signature(get_model_path).parameters.keys():
+        if arg != "kwargs":
+            param_dict[arg] = locals()[arg]
     
-    # TODO: This should go to some $ASTRA_DATA_DIR or something.
-    return f"thepayne_model_{param_hash}.pkl"
+    param_hash = hashify(param_dict)
+    
+    basename = f"thepayne_model_{param_hash}.pkl"
+    path = os.path.join(
+        get_base_output_path(),
+        "thepayne",
+        basename
+    )
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
 
 
 def train_model(
         output_model_path,
         training_set_path,
-        n_steps=100_000,
-        n_neurons=300,
+        num_epochs=100_000,
+        num_neurons=300,
         weight_decay=0.0,
-        learning_rate=0.001
+        learning_rate=0.001,
+        **kwargs
     ):
     """
     Train a single-layer neural network given a pre-computed grid of synthetic spectra.
@@ -63,10 +80,10 @@ def train_model(
         - labels: an array of shape (L, P) where L is the number of labels and P is the number of pixels
         - label_names: a tuple of length L that contains the names of the labels
     
-    :param n_steps: (optional)
+    :param num_epochs: (optional)
         The number of steps to train the network for (default 100000).
     
-    :param n_neurons: (optional)
+    :param num_neurons: (optional)
         The number of neurons to use in the hidden layer (default: 300).
     
     :param weight_decay: (optional)
@@ -86,8 +103,8 @@ def train_model(
         validation_spectra,
         validation_labels,
         label_names,
-        n_neurons=n_neurons,
-        n_steps=n_steps,
+        num_neurons=num_neurons,
+        num_epochs=num_epochs,
         learning_rate=learning_rate,
         weight_decay=weight_decay
     )   
@@ -140,16 +157,19 @@ def estimate_stellar_labels(
 
     log.info(f"Estimating stellar labels for {N} task instances")
 
-    # Get the task instances.
-    q = session.query(astradb.TaskInstance)\
-               .filter(astradb.TaskInstance.pk.in_(pks))
-    
-    trees = {}
-
     sliced = slice(0, 1) if analyze_individual_visits else slice(None)
 
-    for instance in tqdm(q.yield_per(1), total=N):
+    trees = {}
+    results = {}
+    for pk in tqdm(pks, desc="The Payne"):
 
+        q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk)
+
+        instance = q.one_or_none()
+        if instance is None:
+            log.warning(f"No task instance found for primary key {pk}")
+            continue
+        
         # Get the path.
         parameters = instance.parameters
         tree = trees.get(parameters["release"], None)
@@ -174,22 +194,19 @@ def estimate_stellar_labels(
         )
 
         # Prepare outputs.
-        results = dict(zip(label_names, p_opt.T))
-        results.update(snr=spectrum.meta["snr"][sliced])
+        result = dict(zip(label_names, p_opt.T))
+        result.update(snr=spectrum.meta["snr"][sliced])
         # Include uncertainties.
-        results.update(dict(zip(
+        result.update(dict(zip(
             (f"u_{ln}" for ln in label_names),
             np.sqrt(p_cov[:, np.arange(L), np.arange(L)].T)
         )))
         
-        # Write database outputs.
-        create_task_output(
-            instance,
-            astradb.ThePayne,
-            **results
-        )
+        results[instance.pk] = result
 
-        # Query whether to write AstraSource objects.
-        log.warning(f"Not writing AstraSource objects.")
+    # Write database outputs.
+    for pk, result in tqdm(results.items(), desc="Writing database outputs"):
+        # Write database outputs.
+        create_task_output(pk, astradb.ThePayne, **result)
 
     return None

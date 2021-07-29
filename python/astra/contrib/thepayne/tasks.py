@@ -19,7 +19,9 @@ from astra.tools.spectrum.writers import create_astra_source
 from astra.contrib.thepayne import training, test as testing
 from astra.tasks.slurm import (slurm_mixin_factory, slurmify)
 from astra.database import astradb
-
+from luigi.parameter import (
+    BoolParameter, IntParameter, FloatParameter, Parameter
+)
 
 SlurmMixin = slurm_mixin_factory("ThePayne")
 
@@ -27,23 +29,23 @@ class ThePayneMixin(SlurmMixin, BaseTask):
 
     task_namespace = "ThePayne"
 
-    n_steps = astra.IntParameter(
+    n_steps = IntParameter(
         default=100000,
         config_path=dict(section=task_namespace, name="n_steps")
     )
-    n_neurons = astra.IntParameter(
+    n_neurons = IntParameter(
         default=300,
         config_path=dict(section=task_namespace, name="n_neurons")
     )
-    weight_decay = astra.FloatParameter(
+    weight_decay = FloatParameter(
         default=0.0,
         config_path=dict(section=task_namespace, name="weight_decay")
     )
-    learning_rate = astra.FloatParameter(
+    learning_rate = FloatParameter(
         default=0.001,
         config_path=dict(section=task_namespace, name="learning_rate")
     )
-    training_set_path = astra.Parameter(
+    training_set_path = Parameter(
         config_path=dict(section=task_namespace, name="training_set_path")
     )
 
@@ -149,11 +151,16 @@ class EstimateStellarLabels(ThePayneMixin):
     """
 
     max_batch_size = 10_000
+    analyze_individual_visits = BoolParameter(default=False)
 
     def prepare_observation(self):
         """ Prepare the observations for analysis. """
 
-        observation = Spectrum1D.read(self.input()["observation"].path)
+        data_slice = None if self.analyze_individual_visits else [0, 1]
+        observation = Spectrum1D.read(
+            self.input()["observation"].path,
+            data_slice=slice(*data_slice)
+        )
 
         if "continuum" in self.input():
             continuum_path = self.input()["continuum"]["continuum"].path
@@ -166,6 +173,12 @@ class EstimateStellarLabels(ThePayneMixin):
                 # continuum task was run. In this case we need to re-run the continuum
                 # normalisation.
 
+                #log.debug(f"Continuum for {self} original shape {continuum.shape}")
+                if self.analyze_individual_visits is not None:
+                    continuum = continuum[slice(*data_slice)]
+
+                #log.debug(f"New shapes {observation.flux.shape} {continuum.shape}")
+                
                 O = observation.flux.shape[0]
                 C = continuum.shape[0]
 
@@ -195,6 +208,7 @@ class EstimateStellarLabels(ThePayneMixin):
         """ Execute this task. """
 
         # Load the model.
+        log.info(f"Loading model for {self}")
         state = testing.load_state(self.input()["model"].path)
 
         # We can run this in batch mode.
@@ -203,8 +217,11 @@ class EstimateStellarLabels(ThePayneMixin):
         for init, task in tqdm(timer(self.get_batch_tasks()), **tqdm_kwds):
             if task.complete():
                 continue
-                
+            
+            #log.debug(f"Running {task}")
             spectrum, continuum, normalized_flux, normalized_ivar = task.prepare_observation()
+
+            #log.debug(f"Prepared observations for {task}")
             
             p_opt, p_cov, model_flux, meta = testing.test(
                 spectrum.wavelength.value,
@@ -212,6 +229,8 @@ class EstimateStellarLabels(ThePayneMixin):
                 normalized_ivar,
                 **state
             )
+
+            #log.debug(f"Completed inference on {task}. p_opt has shape {p_opt.shape}")
 
             results = dict(zip(label_names, p_opt.T))
             # Note: we count the number of label names here in case we are sometimes using
@@ -228,19 +247,23 @@ class EstimateStellarLabels(ThePayneMixin):
             results.update(snr=spectrum.meta["snr"])
             
             # Write AstraSource object.
-            task.output()["AstraSource"].write(
-                spectrum=spectrum,
-                normalized_flux=normalized_flux,
-                normalized_ivar=normalized_ivar,
-                continuum=continuum,
-                model_flux=model_flux,
-                # TODO: Project uncertainties to flux space.
-                model_ivar=None,
-                results_table=Table(results)
-            )
+            if "AstraSource" in task.output():
+                #log.debug(f"Writing AstraSource object for {task}")    
+                task.output()["AstraSource"].write(
+                    spectrum=spectrum,
+                    normalized_flux=normalized_flux,
+                    normalized_ivar=normalized_ivar,
+                    continuum=continuum,
+                    model_flux=model_flux,
+                    # TODO: Project uncertainties to flux space.
+                    model_ivar=None,
+                    results_table=Table(results)
+                )
 
             # Write output to database.
-            task.output()["database"].write(results)
+            if "database" in task.output():
+                #log.debug(f"Writing database output for {task}")
+                task.output()["database"].write(results)
 
             # Trigger this event as complete, and record task duration.
             task.trigger_event_processing_time(time() - init, cascade=True)
@@ -255,7 +278,7 @@ class EstimateStellarLabels(ThePayneMixin):
         
         return dict(
             database=DatabaseTarget(astradb.ThePayne, self),
-            AstraSource=AstraSource(self)
+            #AstraSource=AstraSource(self)
         )
         
 

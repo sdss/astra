@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 from astra.database import (astradb, apogee_drpdb, catalogdb, session)
 from astra.utils import log, flatten as _flatten
+from airflow.exceptions import AirflowSkipException
 
 
 def deserialize_pks(pk, flatten=False):

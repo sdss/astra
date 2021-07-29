@@ -4,16 +4,131 @@ import torch
 import numpy as np
 from inspect import getargspec
 from scipy.special import logsumexp
+from sqlalchemy import (or_, and_, func, distinct)
 from torch.autograd import Variable
 from tqdm import tqdm
 
 from astra.contrib.classifier import networks, model, plot_utils, utils
 from astra.database import astradb, session
-from astra.database.utils import create_task_output, deserialize_pks
+from astra.database.utils import (get_or_create_task_instance, create_task_output, deserialize_pks, get_or_create_parameter_pk)
 from astra.tools.spectrum import Spectrum1D
 from astra.utils import log, flatten, hashify, get_base_output_path
 
 from sdss_access import SDSSPath
+
+
+    
+def classify_apstar(pks, **kwargs):
+    """
+    Classify observations of APOGEE (ApStar) sources, given the existing classifications of the
+    individual visits.
+
+    :param pks:
+        The primary keys of task instances where visits have been classified. These primary keys will
+        be used to work out which stars need classifying, before tasks
+    """
+
+    pks = deserialize_pks(pks, flatten=True)
+
+    # Select distinct objects by `obj` and `apred`.
+    distinct_sources = []
+    dag_id, task_id = (None, None)
+    for pk in pks:
+        q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk)
+        instance = q.one_or_none()
+        distinct_sources.append((instance.parameters["obj"], instance.parameters["apred"]))
+
+        dag_id = dag_id or instance.dag_id
+        task_id = task_id or instance.task_id
+    
+    distinct_sources = set(distinct_sources)
+    N = len(distinct_sources)
+
+    try:
+        this_task_id = kwargs["task"].task_id
+    except:
+        this_task_id = "classify_apstar"
+    
+    try:
+        run_id = kwargs["run_id"]
+    except:
+        print(kwargs)
+        raise
+
+    for i, (obj, apred) in enumerate(distinct_sources):
+        
+        log.info(f"Combining classifications for distinct source {i} / {N}: {obj} ({apred})")
+
+        parameter_pks = [
+            get_or_create_parameter_pk("obj", obj)[0],
+            get_or_create_parameter_pk("apred", apred)[0]
+        ]
+
+        # Get all task instances matching this obj and apred.
+        s1 = session.query(astradb.TaskInstanceParameter.ti_pk)\
+                    .filter(astradb.TaskInstanceParameter.parameter_pk.in_(parameter_pks))\
+                    .group_by(astradb.TaskInstanceParameter.ti_pk)\
+                    .having(func.count(distinct(astradb.TaskInstanceParameter.parameter_pk)) == len(parameter_pks))\
+                    .subquery()
+
+        s2 = session.query(astradb.TaskInstance)\
+                    .filter(astradb.TaskInstance.dag_id == dag_id)\
+                    .filter(astradb.TaskInstance.task_id == task_id)\
+                    .filter(astradb.TaskInstance.output_pk != None)\
+                    .join(s1, astradb.TaskInstance.pk == s1.c.ti_pk)\
+                    .subquery()
+        
+        s3 = session.query(func.max(astradb.TaskInstance.output_pk).label("latest"))\
+                    .join(astradb.TaskInstanceParameter)\
+                    .join(s2, astradb.TaskInstance.pk == s2.c.pk)\
+                    .group_by(astradb.TaskInstance.dag_id, astradb.TaskInstance.run_id, astradb.TaskInstance.task_id, astradb.TaskInstanceParameter)\
+                    .subquery()
+
+        q = session.query(astradb.TaskInstance)\
+                   .join(s3, astradb.TaskInstance.output_pk == s3.c.latest)\
+                   .join(s2, astradb.TaskInstance.pk == s2.c.pk)
+
+        # Get all these results.
+        lps = {}
+        for instance in q.all():
+            if instance.output is None: continue
+            for k, v in instance.output.__dict__.items():
+                if k.startswith("lp_"):
+                    lps.setdefault(k, 0)
+                    lps[k] += np.sum(v)
+        
+        if not lps:
+            log.warning(f"No results found for {obj} / {apred}!")
+            continue
+
+        class_names = [ea[3:] for ea in lps.keys()]
+        log_probs = list(lps.values())
+        result = _prepare_log_prob_result(class_names, log_probs)
+
+        # NOTE: This won't be enough parameters to identify the apStar file, because we are combining information here
+        #       from visits across multiple telescopes. This might not be what we want to do.
+        parameters = dict(
+            release=instance.parameters["release"],
+            apred=apred,
+            obj=obj,
+            model_path=instance.parameters["model_path"],
+        )
+
+        instance = get_or_create_task_instance(
+            dag_id=dag_id,
+            task_id=this_task_id,
+            run_id=run_id,
+            parameters=parameters
+        )
+
+        create_task_output(
+            instance,
+            astradb.Classification,
+            **result
+        )
+
+        log.debug(f"Created task {instance} with classification {result}")
+    
 
 
 def get_model_path(
@@ -245,56 +360,39 @@ def classify(
 
         with torch.no_grad():
             prediction = model.forward(Variable(torch.Tensor(batch)))
-            log_prob = prediction.cpu().numpy().flatten()
+            log_probs = prediction.cpu().numpy().flatten()
                 
-        # Make sure the log_probs are dtype float so that postgresql does not complain.
-        log_prob = np.array(log_prob, dtype=float)
-
-        # Calculate normalized probabilities.
-        with np.errstate(under="ignore"):
-            relative_log_prob = log_prob - logsumexp(log_prob)
-        
-        # Round for PostgreSQL 'real' type.
-        # https://www.postgresql.org/docs/9.1/datatype-numeric.html
-        # and
-        # https://stackoverflow.com/questions/9556586/floating-point-numbers-of-python-float-and-postgresql-double-precision
-        decimals = 3
-        prob = np.round(np.exp(relative_log_prob), decimals)
-        log_prob = np.round(log_prob, decimals)
-
-        results[pk] = (prob, log_prob)
+        results[pk] = log_probs
     
 
-    for pk, (prob, log_prob) in tqdm(results.items(), desc="Writing results"):
+    for pk, log_probs in tqdm(results.items(), desc="Writing results"):
         
-        result = {}
-        for i, class_name in enumerate(factory.class_names):
-            result[f"p_{class_name}"] = [prob[i]]
-            result[f"lp_{class_name}"] = [log_prob[i]]
+        result = _prepare_log_prob_result(factory.class_names, log_probs)
     
         # Write the output to the database.
         create_task_output(pk, astradb.Classification, **result)
 
 
+
+def _prepare_log_prob_result(class_names, log_probs, decimals=3):
+
+    # Make sure the log_probs are dtype float so that postgresql does not complain.
+    log_probs = np.array(log_probs, dtype=float)
+
+    # Calculate normalized probabilities.
+    with np.errstate(under="ignore"):
+        relative_log_probs = log_probs - logsumexp(log_probs)
     
-def classify_sdss5_apstar(pks):
-    """
-    Classify observations of SDSS5 APOGEE (ApStar) sources, given the existing classifications of the
-    individual visits.
+    # Round for PostgreSQL 'real' type.
+    # https://www.postgresql.org/docs/9.1/datatype-numeric.html
+    # and
+    # https://stackoverflow.com/questions/9556586/floating-point-numbers-of-python-float-and-postgresql-double-precision
+    probs = np.round(np.exp(relative_log_probs), decimals)
+    log_probs = np.round(log_probs, decimals)
 
-    :param pks:
-        The primary keys of task instances where visits have been classified. These primary keys will
-        be used to work out which stars need classifying, before tasks
-    """
+    result = {}
+    for i, class_name in enumerate(class_names):
+        result[f"p_{class_name}"] = [probs[i]]
+        result[f"lp_{class_name}"] = [log_probs[i]]
 
-    print(pks)
-    print(deserialize_pks(pks))
-    # Match stars to visits, for the same dag_id.
-    q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk.in_(deserialize_pks(pks)))
-    
-    raise NotImplementedError
-
-
-
-
-
+    return result

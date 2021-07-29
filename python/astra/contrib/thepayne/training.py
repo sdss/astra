@@ -95,7 +95,7 @@ def _whiten_labels(training_labels, validation_labels):
 
 
 def train(training_spectra, training_labels, validation_spectra, validation_labels, label_names,
-          n_neurons=300, n_steps=1e5, learning_rate=0.001, weight_decay=0, **kwargs):
+          num_neurons=300, num_epochs=1e5, learning_rate=0.001, weight_decay=0, **kwargs):
     r"""
     Train a neural network to emulate spectral models.
     
@@ -113,10 +113,10 @@ def train(training_spectra, training_labels, validation_spectra, validation_labe
         A table containing the validation labels to use. This must include the list of label names
         given in `label_names`.
 
-    :param n_neurons: [optional]
+    :param num_neurons: [optional]
         The number of neurons to use per hidden layer in the network (default: 300).
 
-    :param n_steps: [optional]
+    :param num_epochs: [optional]
         The maximum nubmer of steps to take until convergence (default: 1e5).
 
     :param learning_rate: [optional]
@@ -135,14 +135,14 @@ def train(training_spectra, training_labels, validation_spectra, validation_labe
         training_spectra, training_labels, validation_spectra, validation_labels, label_names)
 
     return _train(training_flux, training_labels, validation_flux, validation_labels, label_names,
-                  n_neurons, n_steps, learning_rate, weight_decay, **kwargs)
+                  num_neurons, num_epochs, learning_rate, weight_decay, **kwargs)
 
 
 
 def _train(training_flux, training_labels, validation_flux, validation_labels, label_names,
-           n_neurons, n_steps, learning_rate, weight_decay, **kwargs):
+           num_neurons, num_epochs, learning_rate, weight_decay, **kwargs):
     
-    n_neurons, n_steps = (int(n_neurons), int(n_steps))
+    num_neurons, num_epochs = (int(num_neurons), int(num_epochs))
 
     # Normalize.
     whitened_training_labels, whitened_validation_labels, *scales = _whiten_labels(training_labels,
@@ -153,11 +153,11 @@ def _train(training_flux, training_labels, validation_flux, validation_labels, l
 
     # Define network.
     model = torch.nn.Sequential(
-        torch.nn.Linear(n_labels, n_neurons),
+        torch.nn.Linear(n_labels, num_neurons),
         torch.nn.Sigmoid(),
-        torch.nn.Linear(n_neurons, n_neurons),
+        torch.nn.Linear(num_neurons, num_neurons),
         torch.nn.Sigmoid(),
-        torch.nn.Linear(n_neurons, n_pixels)
+        torch.nn.Linear(num_neurons, n_pixels)
     )
     if CUDA_AVAILABLE:
         model.cuda()
@@ -174,13 +174,13 @@ def _train(training_flux, training_labels, validation_flux, validation_labels, l
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
     # Train the network.
-    training_loss = np.zeros(n_steps, dtype=float)
-    validation_loss = np.zeros(n_steps, dtype=float)
+    training_loss = np.zeros(num_epochs, dtype=float)
+    validation_loss = np.zeros(num_epochs, dtype=float)
 
     _BOOSTER = 1e4 # MAGIC HACK
 
-    with trange(n_steps) as pb:
-        for step in range(n_steps):
+    with trange(num_epochs) as pb:
+        for step in range(num_epochs):
             y_train_pred = model(x_train)
             y_valid_pred = model(x_valid)
 
@@ -202,7 +202,7 @@ def _train(training_flux, training_labels, validation_flux, validation_labels, l
 
     state = dict(epoch=1 + step, model_state=model.state_dict(), scales=scales,
                  label_names=label_names, losses=(training_loss, validation_loss),
-                 weight_decay=weight_decay, n_neurons=n_neurons, n_pixels=n_pixels,
+                 weight_decay=weight_decay, num_neurons=num_neurons, n_pixels=n_pixels,
                  n_labels=n_labels, learning_rate=learning_rate)
 
     if kwargs.get("full_output", False):
@@ -240,20 +240,4 @@ def load_training_data(path):
     validation_labels = contents["labels"].T[N:, :]
     validation_spectra = contents["spectra"][N:, :]
     return (contents["wavelength"], contents["label_names"], training_labels, training_spectra, validation_labels, validation_spectra)
-
-
-
-if __name__ == "__main__":
-
-
-
-    label_names = ("teff", "logg", "v_turb", "c_h", "n_h", "o_h", "na_h", "mg_h", "al_h", "si_h",
-        "p_h", "s_h", "k_h", "ca_h", "ti_h", "v_h", "cr_h", "mn_h", "fe_h", "co_h", "ni_h", "cu_h",
-        "ge_h", "c12_c13", "v_macro", "v_rad")
-
-    training_labels, training_spectra, validation_labels, validation_spectra = load_training_data(
-        "../../../yst.the-payne/The_Payne/other_data/kurucz_training_spectra.npz")
-
-    _train(training_spectra, training_labels, validation_spectra, validation_labels, label_names,
-           n_steps=200)
 
