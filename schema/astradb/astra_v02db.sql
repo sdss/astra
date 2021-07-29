@@ -150,6 +150,8 @@ create table astra_v02.aspcap (
     u_cu_h real[],
     fe_h real[],
     u_fe_h real[],
+    k_h real[],
+    u_k_h real[],
     mg_h real[],
     u_mg_h real[],
     mn_h real[],
