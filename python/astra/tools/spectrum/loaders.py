@@ -72,6 +72,9 @@ def load_sdss_apstar(path, **kwargs):
             snr.append(snr[0])
             snr.extend([image[0].header[f"SNRVIS{i}"] for i in range(1, 1 + n_visits)])
 
+        if data_slice is not None:
+            snr = snr[data_slice]
+
         meta = OrderedDict([
             ("header", image[0].header),
             ("bitmask", slicer(image[3].data)),

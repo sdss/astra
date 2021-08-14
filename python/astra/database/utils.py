@@ -143,6 +143,7 @@ def get_sdss4_apstar_kwds(limit=None, **kwargs):
 def get_sdss5_apstar_kwds(
         mjd, 
         min_ngoodrvs=1,
+        only_last_observed_on_this_mjd=True,
         limit=None,
     ):
     """
@@ -154,6 +155,12 @@ def get_sdss5_apstar_kwds(
     :param min_ngoodrvs: [optional]
         the minimum number of good radial velocity measurements (default: 1)
     
+    :param only_last_observed_on_this_mjd: [optional]
+        Only return objects that were last observed on this MJD. If there are any
+        newer observations of this object, then these will not be returned in this
+        query (default: True).
+        
+
     :returns:
         a list of dictionaries containing the identifying keywords for SDSS-V
         APOGEE stars observed on the given MJD, including the `release` and
@@ -172,10 +179,24 @@ def get_sdss5_apstar_kwds(
         apogee_drpdb.Star.telescope,
         apogee_drpdb.Star.apogee_id.label("obj"), # TODO: Raise with Nidever
     )
+    if only_last_observed_on_this_mjd:
+        sq = session.query(*columns, func.max(apogee_drpdb.Star.mjdend).label('max_mjdend')).group_by(*columns).subquery()
+        q = session.query(*columns).join(
+            sq, and_(
+                apogee_drpdb.Star.mjdend == sq.c.max_mjdend,
+                apogee_drpdb.Star.apred_vers == sq.c.apred,
+                apogee_drpdb.Star.healpix == sq.c.healpix,
+                apogee_drpdb.Star.telescope == sq.c.telescope,
+                apogee_drpdb.Star.apogee_id == sq.c.obj
+            )        
+        )
+    
+    else:
+        q = session.query(*columns).distinct(*columns)
 
-    q = session.query(*columns).distinct(*columns)
     q = q.filter(apogee_drpdb.Star.mjdend == mjd)\
-         .filter(apogee_drpdb.Star.ngoodrvs >= min_ngoodrvs)
+        .filter(apogee_drpdb.Star.ngoodrvs >= min_ngoodrvs)
+
     if limit is not None:
         q = q.limit(limit)
 

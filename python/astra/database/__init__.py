@@ -1,5 +1,7 @@
 import json
 import os
+import numpy
+
 from functools import partial
 from luigi.parameter import _DictParamEncoder
 from sqlalchemy import MetaData, create_engine
@@ -8,6 +10,7 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base, DeferredReflection
 from sdssdb.connection import SQLADatabaseConnection
 from sdssdb.sqlalchemy import BaseModel
+from psycopg2.extensions import register_adapter, AsIs
 
 AstraBase = declarative_base(cls=(DeferredReflection, BaseModel))
 
@@ -102,3 +105,9 @@ def init_process(database):
     """
     print(f"Disposing engine {database.engine} because we are in a child process (PID = {os.getpid()}).")
     database.engine.dispose()
+
+
+
+register_adapter(numpy.float64, AsIs)
+register_adapter(numpy.float32, AsIs)
+

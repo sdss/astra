@@ -22,6 +22,9 @@ class SDSSVBossSpall(Base):
     __tablename__ = "sdssv_boss_spall"
     
 
+class SDSSApogeeAllStarMergeR13(Base):
+    __tablename__ = "sdss_apogeeallstarmerge_r13"
+
 def define_relations():
     pass
 

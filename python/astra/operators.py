@@ -1,21 +1,195 @@
 
 import os
 import uuid
+import pickle
+import numpy as np
+from tqdm import tqdm
+from tempfile import mktemp
+from time import sleep, time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Union
 from airflow.models import BaseOperator
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.exceptions import AirflowSkipException
 
-from astra.utils import log
-from time import sleep, time
+from sdss_access import SDSSPath
+
+
+from astra.utils import log, get_base_output_path
+from astra.database import astradb, session
 from astra.database.utils import deserialize_pks
+from astra.tools.spectrum import Spectrum1D
+from astra.utils.continuum.sines_and_cosines import normalize as normalize_with_sines_and_cosines
+
+class AstraOperator(BaseOperator):
+    """
+    A base operator for performing work on SDSS data products.
+    
+    :param python_callable: A reference to an object that is callable
+    :type python_callable: python callable
+    :param op_kwargs: a dictionary of keyword arguments that will get unpacked
+        in your function
+    :type op_kwargs: dict (templated)
+    :param slurm_kwargs: a dictionary of keyword arguments that will be submitted
+        to the slurm queue
+    :type slurm_kwargs: dict
+    """
+
+    ui_color = "#CEE8F2"
+
+    template_fields = ("pks", "spectrum_kwargs", "op_kwargs", "slurm_kwargs")
+    template_fields_renderers = {
+        "pks": "py",
+        "op_kwargs": "py",
+        "spectrum_kwargs": "py",
+        "slurm_kwargs": "py"
+    }
+
+    shallow_copy_attrs = (
+        "pks",
+        "method",
+        "op_kwargs",
+        "spectrum_kwargs",
+        "slurm_kwargs"
+    )
+
+    def __init__(
+        self,
+        *,
+        pks: [str,List],
+        op_kwargs: Optional[Dict] = None,
+        spectrum_kwargs: Optional[Dict] = None,
+        slurm_kwargs: Optional[Dict] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.pks = pks
+        self.op_kwargs = op_kwargs or dict()
+        self.spectrum_kwargs = spectrum_kwargs or dict()
+        self.slurm_kwargs = slurm_kwargs or dict()
+        return None
 
 
-def skip_if_empty(pks, **kwargs):
-    """ Avoid submitting Slurm jobs for empty lists of PKs. """
-    if not deserialize_pks(pks, flatten=True):
-        raise AirflowSkipException
+    def yield_data(self):
+        yield from _yield_data(self.pks, **self.spectrum_kwargs)
+    
+    @property
+    def num_pks(self):
+        return len(deserialize_pks(self.pks, flatten=True))
+
+
+
+
+
+class ContinuumOperator(AstraOperator):
+    """
+    Performs continuum normalization on spectra.
+
+    :param python_callable: A reference to an object that is callable
+    :type python_callable: python callable
+    :param op_kwargs: a dictionary of keyword arguments that will get unpacked
+        in your function
+    :type op_kwargs: dict (templated)
+    :param slurm_kwargs: a dictionary of keyword arguments that will be submitted
+        to the slurm queue
+    :type slurm_kwargs: dict
+    """
+
+    ui_color = "#DFEFCB"
+
+    def __init__(
+        self,
+        *,
+        method: str,
+        write_block: bool = False,
+        write_individual: bool = False,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.method = method
+        self.write_block = write_block
+        self.write_individual = write_individual
+        return None
+
+
+    @property
+    def method_function(self):
+        try:
+            return self._method_function
+
+        except AttributeError:
+            available_methods = dict(
+                sinusoidal=normalize_with_sines_and_cosines,
+            )
+            try:
+                self._method_function = available_methods[self.method]
+            except KeyError:
+                raise ValueError(f"unknown normalization method '{self.method}', available: {available_methods}")
+            else:
+                return self._method_function
+
+
+    def execute(self, context):
+
+        if not self.write_block and not self.write_individual:
+            log.warning(f"Not writing continuum outputs to any location because `write_block` and `write_individual` are False")
+
+        if self.write_block:
+            block_normalized_flux = []
+            block_normalized_ivar = []
+
+        total, block_wavelength = (self.num_pks, None)
+        num_spectra = np.zeros(total, dtype=bool)
+        for i, (pk, instance, path, spectrum) in enumerate(tqdm(self.yield_data(), total=total)):
+            if spectrum is None:
+                
+                continue
+
+            num_spectra[i] = spectrum.flux.shape[0]
+            
+            #log.debug(f"{i}/{total}: primary key {pk} has spectrum shape {spectrum.flux.shape} loaded from path {path}")
+
+            if block_wavelength is None and self.write_block:
+                block_wavelength = spectrum.wavelength.value
+                
+            normalized_flux, normalized_ivar, continuum, metadata = self.method_function(
+                spectrum.wavelength.value,
+                spectrum.flux.value,
+                spectrum.uncertainty.quantity.value,
+                **self.op_kwargs,
+                full_output=True
+            )
+
+            # Where should we write to disk?
+            if self.write_individual:
+                raise NotImplementedError("haven't specified data model yet")
+
+            if self.write_block:
+                block_normalized_flux.append(normalized_flux)
+                block_normalized_ivar.append(normalized_ivar)
+        
+        if self.write_block:
+            block_normalized_flux = np.vstack(block_normalized_flux)
+            block_normalized_ivar = np.vstack(block_normalized_ivar)
+
+            path = mktemp(suffix=".pkl")
+            with open(path, "wb") as fp:
+                pickle.dump(
+                    {
+                        "wavelength": block_wavelength,
+                        "normalized_flux": block_normalized_flux,
+                        "normalized_ivar": block_normalized_ivar,
+                        "num_spectra": num_spectra,
+                    },
+                    fp
+                )
+            
+            log.info(f"Wrote block continuum to {path}")
+
+            return path
+
+
+        
 
 
 class SlurmPythonOperator(PythonOperator):
@@ -362,3 +536,42 @@ class SlurmOperator(BashOperator):
 
         return None
         
+
+
+
+def _yield_data(pks, **kwargs):
+    
+    trees = {}
+
+    for pk in deserialize_pks(pks, flatten=True):
+        q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk)
+        instance = q.one_or_none()
+
+        if instance is None:
+            log.warning(f"No task instance found for primary key {pk}")
+            path = None
+            spectrum = None
+
+        else:
+            release = instance.parameters["release"]
+            tree = trees.get(release, None)
+            if tree is None:
+                trees[release] = tree = SDSSPath(release=release)
+
+            path = tree.full(**instance.parameters)
+        
+            try:
+                spectrum = Spectrum1D.read(path, **kwargs)
+
+            except:
+                log.exception(f"Unable to load Spectrum1D from path {path} on task instance {instance}")
+                spectrum = None
+
+        yield (pk, instance, path, spectrum)
+    
+
+
+def skip_if_empty(pks, **kwargs):
+    """ Avoid submitting Slurm jobs for empty lists of PKs. """
+    if not deserialize_pks(pks, flatten=True):
+        raise AirflowSkipException

@@ -65,6 +65,9 @@ create table astra_v02.apogeenet (
     u_logg real[],
     fe_h real[],
     u_fe_h real[],
+    _teff_median real[],
+    _logg_median real[],
+    _fe_h_median real[],
     bitmask_flag int[],
     foreign key (output_pk) references astra_v02.output_interface(pk) on delete restrict
 );
@@ -108,7 +111,7 @@ create table astra_v02.ferre (
     u_n real[],
     log_chisq_fit real[],
     log_snr_sq real[],
-    bitmask_flag int[],
+    bitmask_flag int[][], /* Allow param-level arrays for multiple results per task */
     foreign key (output_pk) references astra_v02.output_interface(pk) on delete restrict
 );
 
