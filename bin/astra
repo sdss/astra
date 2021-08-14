@@ -1,11 +1,10 @@
-
 import click
 import os
-from logging import DEBUG, INFO
-from astra.utils import log
+import logging
 
 from astra.contrib.apogeenet.cli import apogeenet
 from astra.contrib.classifier.cli import classifier
+from astra.contrib.thepayne.cli import thepayne
 
 # Common options.
 @click.group()
@@ -16,20 +15,24 @@ def cli(context, verbose):
     context.ensure_object(dict)
     context.obj["verbose"] = verbose
 
-    # TODO: This isn't correctly followed for sqlalchemy output. 
-    # It defaults to verbose!
-    log.set_level(DEBUG if verbose else INFO)
+    # TODO: Check this is propagated to:
+    #       [ ] astra
+    #       [ ] airflow
+    #       [ ] sqlalchemy
+    #logging.set_level(logging.DEBUG if verbose else logging.INFO)
 
 
 # Add 'run' sub-commands.
 @click.group()
 @click.pass_context
 def run(context):
-    print("IN RUN")
     pass
     
+# TODO: Figure out how to do lazy-loading of these things.
 run.add_command(apogeenet)
 run.add_command(classifier)
+run.add_command(thepayne)
+
 
 cli.add_command(run)
 

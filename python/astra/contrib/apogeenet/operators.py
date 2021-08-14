@@ -1,22 +1,61 @@
-import numpy as np
-import os
-import torch
-#torch.multiprocessing.set_start_method('spawn', force=True)
 
+import numpy as np
+import os        
 from tqdm import tqdm
 
-from sdss_access import SDSSPath
-from astra.utils import log, flatten
-from astra.tools.spectrum import Spectrum1D
-from astra.contrib.apogeenet.model import (Net, predict, create_flux_tensor)
-from astra.database import astradb, session
-from astra.database.utils import (
-    deserialize_pks,
-    create_task_output
-)
+from astra.new_operators import (ApStarOperator, _yield_data)
+from astra.database.utils import (create_task_output, deserialize_pks, serialize_pks_to_path)
+from astra.utils import log
+from astra.database import astradb
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+from astra.contrib.apogeenet.model import Model
+from astra.contrib.apogeenet.utils import (create_bitmask, get_metadata)
 
+import torch
+
+class ApogeeNetOperator(ApStarOperator):
+
+    def __init__(
+        self,
+        *,
+        model_path: str,
+        analyze_individual_visits=True,
+        num_uncertainty_draws=100,
+        large_error=1e10,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.model_path = model_path
+        self.num_uncertainty_draws = num_uncertainty_draws
+        self.analyze_individual_visits = analyze_individual_visits
+        self.large_error = large_error
+
+
+    def execute(self, context):
+
+        if self.slurm_kwargs:
+            # Write the primary keys to a path that is accessible by all nodes.
+            pks_path = serialize_pks_to_path(self.pks)
+
+            all_visits_str = "--all-visits" if self.analyze_individual_visits else ""
+            bash_command = f"astra run apogeenet {all_visits_str} {self.model_path} {pks_path}"
+            
+            self.execute_by_slurm(
+                context,
+                bash_command,
+            )
+
+        else:
+            # Just run it in Python.
+            estimate_stellar_labels(
+                self.pks,
+                model_path=self.model_path,
+                analyze_individual_visits=self.analyze_individual_visits,
+                num_uncertainty_draws=self.num_uncertainty_draws,
+                large_error=self.large_error
+            )
+        return None
+    
 
 def estimate_stellar_labels(
         pks,
@@ -47,87 +86,96 @@ def estimate_stellar_labels(
     :param large_error: [optional]
         An arbitrarily large error value to assign to bad pixels (default: 1e10).
     """
-    
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    pks = deserialize_pks(pks, flatten=True)
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     log.info(f"Running APOGEENet on device {device} with:")
     log.info(f"\tmodel_path: {model_path}")
     log.info(f"\tpks: {pks}")
     log.info(f"\tanalyze_individual_visits: {analyze_individual_visits}")
-    log.info(f"\tnum_uncertainty_draws: {num_uncertainty_draws}")
-    
-    log.info(f"CUDA_VISIBLE_DEVICES = '{os.environ.get('CUDA_VISIBLE_DEVICES')}'")
+
+    log.debug(f"CUDA_VISIBLE_DEVICES = '{os.environ.get('CUDA_VISIBLE_DEVICES')}'")
 
     # Load the model.
-    model = Net()
-    model.load_state_dict(
-        torch.load(
-            model_path,
-            map_location=device
-        ),
-        strict=False
-    )
-    model.to(device)
-    # Disable any dropout for inference.
-    model.eval()
+    model = Model(model_path, device)
 
     log.info(f"Loaded model from {model_path}")
 
-    # Get the task instances.
-    q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk.in_(pks))
-    
-    trees = {}
+    pks = deserialize_pks(pks, flatten=True)
+    total = len(pks)
 
-    for instance in tqdm(q.yield_per(1), total=len(pks)):
-
-        parameters = instance.parameters
-        tree = trees.get(parameters["release"], None)
-        if tree is None:
-            trees[parameters["release"]] = tree = SDSSPath(release=parameters["release"])
-
-        path = tree.full(**parameters)
-
-        # Load the spectrum.
-        try:
-            spectrum = Spectrum1D.read(path)
-        except:
-            log.exception(f"Unable to load Spectrum1D from path {path} on task instance {instance}:")
-            log.exception(e)
-            continue
-
+    for pk, instance, path, spectrum in tqdm(_yield_data(pks), total=total):
+        if spectrum is None: continue
+        
         N, P = spectrum.flux.shape
 
-        if analyze_individual_visits:
-            K = N
-            results = dict(snr=spectrum.meta["snr"])
-        else:
-            K = 1
-            results = dict(snr=[spectrum.meta["snr"][0]])
+        # Build metadata array.
+        metadata_keys, metadata, metadata_norm = get_metadata(spectrum)
+
+        flux = np.nan_to_num(spectrum.flux.value).astype(np.float32).reshape((N, 1, P))
+        meta = np.tile(metadata_norm, N).reshape((N, -1))
+
+        flux = torch.from_numpy(flux).to(device)
+        meta = torch.from_numpy(meta).to(device)
+
+        with torch.set_grad_enabled(False):
+            predictions = model.predict_spectra(flux, meta).detach().numpy()
+
+        # Create results array.
+        log_g, log_teff, fe_h = predictions.T
+
+        result = dict(
+            snr=spectrum.meta["snr"],
+            teff=10**log_teff,
+            logg=log_g,
+            fe_h=fe_h,
+        )
         
-        for i in range(K):
-            # Buld the flux tensor as required.
-            flux_tensor = create_flux_tensor(
-                flux=spectrum.flux.value[i],
-                error=spectrum.uncertainty.array[i]**-0.5,
-                device=device,
-                num_uncertainty_draws=num_uncertainty_draws,
-                large_error=large_error
+        if num_uncertainty_draws > 0:
+            flux_error = np.nan_to_num(spectrum.uncertainty.array**-0.5).astype(np.float32).reshape((N, 1, P))
+            median_error = 5 * np.median(flux_error, axis=(1, 2))
+            
+            for j, value in enumerate(median_error):
+                bad_pixel = (flux_error[j] == large_error) | (flux_error[j] >= value)
+                flux_error[j][bad_pixel] = value
+            
+            flux_error = torch.from_numpy(flux_error).to(device)
+
+            inputs = torch.randn((num_uncertainty_draws, N, 1, P), device=device) * flux_error + flux
+            inputs = inputs.reshape((num_uncertainty_draws * N, 1, P))
+
+            meta_error = meta.repeat(num_uncertainty_draws, 1)
+            with torch.set_grad_enabled(False):
+                draws = model.predict_spectra(inputs, meta_error)
+            draws = draws.detach().numpy().reshape((num_uncertainty_draws, N, -1))
+
+            median_draw_predictions = np.median(draws, axis=0)
+            std_draw_predictions = np.std(draws, axis=0)
+
+            log_g_median, log_teff_median, fe_h_median = median_draw_predictions.T
+            log_g_std, log_teff_std, fe_h_std = std_draw_predictions.T
+
+            result.update(
+                _teff_median=10**log_teff_median,
+                _logg_median=log_g_median,
+                _fe_h_median=fe_h_median,
+                u_teff=10**log_teff_std,
+                u_logg=log_g_std,
+                u_fe_h=fe_h_std
             )
 
-            # Predict the quantities.
-            result = predict(model, flux_tensor)
-            for key, value in result.items():
-                if i == 0:
-                    results.setdefault(key, [])
-                
-                results[key].append(value)
+        else:
+            median_draw_predictions, std_draw_predictions = (None, None)
 
-        # Write the database output.
-        create_task_output(
-            instance,
-            astradb.ApogeeNet,
-            **results
+        # Add the bitmask flag.
+        bitmask_flag = create_bitmask(
+            predictions,
+            median_draw_predictions=median_draw_predictions,
+            std_draw_predictions=std_draw_predictions
         )
+
+        result.update(bitmask_flag=bitmask_flag.tolist())
+
+        # Write the result to database.        
+        create_task_output(instance, astradb.ApogeeNet, **result)
         
