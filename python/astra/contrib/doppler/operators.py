@@ -4,14 +4,61 @@ from tqdm import tqdm
 from sdss_access import SDSSPath
 
 from astra.database import astradb, session
-from astra.database.utils import (deserialize_pks, create_task_output)
-from astra.utils import log
+from astra.database.utils import (serialize_pks_to_path, deserialize_pks, create_task_output)
+from astra.utils import log, get_scratch_dir
+
+from astra.new_operators import (ApVisitOperator, BossSpecOperator)
 
 # TODO: Move this to astra/contrib
-try:
-    import doppler
-except:
-    log.exception(f"Cannot import `doppler` module!")
+import doppler
+
+
+class BaseDopplerOperator:
+
+    def __init__(
+        self,
+        *,
+        slurm_kwargs=None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        # TODO: Allow to pass on any parameters?
+        self.slurm_kwargs = slurm_kwargs or dict()
+        return None
+
+
+    def execute(self, context):
+
+        if self.slurm_kwargs:
+            # Write the primary keys to a path that is accessible by all nodes.
+            pks_path = serialize_pks_to_path(
+                self.pks,
+                dir=get_scratch_dir()
+            )
+            bash_command = f"astra run doppler {pks_path}"
+            
+            self.execute_by_slurm(
+                context,
+                bash_command,
+            )
+            
+            # Remove the temporary file.
+            os.unlink(pks_path)
+
+        else:
+            # Run it in Python.
+            estimate_radial_velocity(self.pks)
+            
+        return None
+    
+class DopplerApVisitOperator(BaseDopplerOperator, ApVisitOperator):
+    pass
+
+class DopplerBossSpecOperator(BaseDopplerOperator, BossSpecOperator):
+    pass
+
+class DopplerOperator(BaseDopplerOperator, ApVisitOperator, BossSpecOperator):
+    pass
 
 
 def estimate_radial_velocity(
@@ -108,6 +155,7 @@ def estimate_radial_velocity(
 
         log.warning(f"Raising last exception to indicate failure in pipeline.")
         raise
+    
     
 
 def prepare_results(summary_table):

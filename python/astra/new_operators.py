@@ -1,26 +1,18 @@
 import os
-from re import A
 import uuid
-import pickle
 import inspect
-import numpy as np
-from tqdm import tqdm
-from tempfile import mktemp
 from time import sleep, time
-from typing import Any, Callable, Dict, Iterable, List, Optional, Union
 from airflow.models import BaseOperator
-from airflow.operators.bash import BashOperator
-from airflow.operators.python import PythonOperator
 from airflow.exceptions import AirflowSkipException
 from astropy.time import Time
 from sqlalchemy import and_, func
 from sdss_access import SDSSPath
+from datetime import datetime
 
-from astra.utils import log, get_base_output_path
-from astra.database import astradb, session, apogee_drpdb
+from astra.utils import log
+from astra.database import astradb, catalogdb, session, apogee_drpdb
 from astra.database.utils import (create_task_instance, deserialize_pks)
 from astra.tools.spectrum import Spectrum1D
-from astra.utils.continuum.sines_and_cosines import normalize as normalize_with_sines_and_cosines
 
 
 class AstraOperator(BaseOperator):
@@ -40,38 +32,12 @@ class AstraOperator(BaseOperator):
 
     ui_color = "#CEE8F2"
 
-    template_fields = ("op_kwargs", "slurm_kwargs")
-    template_fields_renderers = {
-        "op_kwargs": "py",
-        "slurm_kwargs": "py"
-    }
-
-    shallow_copy_attrs = (
-        "op_kwargs",
-        "spectrum_kwargs",
-        "slurm_kwargs"
-    )
-
-    def __init__(
-        self,
-        *,
-        op_kwargs: Optional[Dict] = None,
-        slurm_kwargs: Optional[Dict] = None,
-        spectrum_kwargs: Optional[Dict] = None,
-        **kwargs,
-    ) -> None:
-        super().__init__(**kwargs)
-        self.op_kwargs = op_kwargs or dict()
-        self.slurm_kwargs = slurm_kwargs or dict()
-        self.spectrum_kwargs = spectrum_kwargs or dict()
-        return None
-
 
     def yield_data(self):
         yield from _yield_data(self.pks, **self.spectrum_kwargs)
     
     
-    def pre_execute(self, context: Any):
+    def pre_execute(self, context):
         """
         Create task instances for all the data model identifiers. 
         
@@ -82,7 +48,8 @@ class AstraOperator(BaseOperator):
         args = (context["dag"].dag_id, context["task"].task_id, context["run_id"])
 
         # Get parameters from the parent class initialisation that should also be stored.
-        common_parameter_names = set(inspect.signature(self.__init__).parameters).difference(("kwargs", ))
+        ignore = ("kwargs", "slurm_kwargs")
+        common_parameter_names = set(inspect.signature(self.__init__).parameters).difference(ignore)
         common_parameters = { pn: getattr(self, pn) for pn in common_parameter_names }
 
         pks = []
@@ -91,17 +58,17 @@ class AstraOperator(BaseOperator):
             pks.append(create_task_instance(*args, parameters).pk)
 
         if not pks:
-            raise AirflowSkipException("no data model identifiers found for this time period")
+            raise AirflowSkipException("No data model identifiers found for this time period.")
         
         self.pks = pks
-        return pks
+        return None
         
 
     def execute_by_slurm(
             self, 
-            context: Any, 
-            bash_command: Any,
-            poke_interval: Optional[int] = 60
+            context, 
+            bash_command,
+            poke_interval=60
         ):
 
         log.info(f"Submitting Slurm job with command:\n{bash_command}")
@@ -164,31 +131,58 @@ class AstraOperator(BaseOperator):
         return None
         
 
+class SDSSDataProductOperator(AstraOperator):
+
+    def infer_release(self, context):
+        """
+        Infer the SDSS release based on the DAG execution date. 
+        
+        If the start date is greater than or equal to 2020-10-24 then we infer the release to be 'sdss5'. 
+        
+        If it is earlier then we infer it to be 'DR17'.
+
+        :param context:
+            The DAG execution context.
+        """
+        
+        start_date = datetime.strptime(context["ds"], "%Y-%m-%d")
+        sdss5_start_date = datetime(2020, 10, 24)
+        release = "sdss5" if start_date >= sdss5_start_date else "DR17"
+
+        log.info(f"Inferring `release` for SDSS data product operator {self} to be '{release}' based on {start_date}")
+        return release
 
 
-class ApStarOperator(AstraOperator):
+    def yield_data_model_identifiers(self, context):
+        """ Yield data model identifiers matching this operator's constraints. """
 
-    template_fields = ("op_kwargs", "slurm_kwargs")
-    template_fields_renderers = {
-        "op_kwargs": "py",
-        "slurm_kwargs": "py"
-    }
+        # Hierarchically yield so that we can have mixed operators that supply data model identifiers
+        # for two or mode data model classes. For example:
+        #
+        # class MyOperator(ApVisitOperator, BossSpecOperator):
+        #    pass
+        #
+        # This would yield data model identifiers for ApVisit files *and* for BossSpec files.
 
-    shallow_copy_attrs = (
-        "op_kwargs",
-        "spectrum_kwargs",
-        "slurm_kwargs"
-    )
+        for mro in self.__class__.__mro__:
+            try:
+                yield from super(mro, self).query_data_model_identifiers_from_database(context)
+            except AttributeError:
+                break
+
+        # TODO: Allow data model identifiers to be read from an AllStar file, if a filename
+        #       is supplied when the ApStar operator was __init__'d.
+
+
+class ApStarOperator(SDSSDataProductOperator):
+
     def __init__(
         self,
         *,
-        limit: Optional[int] = None,
-        release: Optional[str] = "sdss5",
-        skip_sources_with_more_recent_observations: Optional[bool] = True,
-        query_filter_by_kwargs: Optional[Dict] = None,
-        op_kwargs: Optional[Dict] = None,
-        slurm_kwargs: Optional[Dict] = None,
-        spectrum_kwargs: Optional[Dict] = None,
+        limit = None,
+        release = None,
+        skip_sources_with_more_recent_observations = True,
+        query_filter_by_kwargs = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -196,28 +190,19 @@ class ApStarOperator(AstraOperator):
         self.release = release
         self.query_filter_by_kwargs = query_filter_by_kwargs
         self.skip_sources_with_more_recent_observations = skip_sources_with_more_recent_observations
-
-
-    def execute(self, context: Any):
-
-        # pre_execute: create task instances for all the data model identifiers,
-        #              and store the primary keys somewhere...
-
-        
-        raise NotImplementedError
     
+    
+    def query_data_model_identifiers_from_database(self, context):
+        """
+        Query the SDSS-V database for data model identifiers.
+    
+        :param context:
+            The DAG execution context.
+        """
 
-    def yield_data_model_identifiers(self, context: Any):
-        """ Yield data model identifiers matching this operator's constraints. """
-
-        #try:
-        #    yield from super().yield_data_model_identifiers(context)
-        #except:
-        #    None
-        
-        if self.release != "sdss5":
-            raise NotImplementedError
-        
+        # If the release is None, infer it from the execution date.
+        release = self.release or self.infer_release(context)
+                
         obs_start = parse_as_mjd(context["prev_ds"])
         obs_end = parse_as_mjd(context["ds"])
 
@@ -270,11 +255,131 @@ class ApStarOperator(AstraOperator):
         for values in q.yield_per(1):
             d = dict(zip(keys, values))
             d.update(
-                release=self.release,
+                release=release,
                 filetype=filetype,
                 apstar=apstar,
             )
             yield d
+
+
+
+class ApVisitOperator(SDSSDataProductOperator):
+
+    def __init__(
+        self,
+        *,
+        limit = None,
+        release = None,
+        query_filter_by_kwargs = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.limit = limit
+        self.release = release
+        self.query_filter_by_kwargs = query_filter_by_kwargs
+
+
+    def query_data_model_identifiers_from_database(self, context):
+        """
+        Query the SDSS-V database for ApVisit data model identifiers.
+        
+        :param context:
+            The DAG execution context.
+        """
+
+        # If the release is None, infer it from the execution date.
+        filetype = "apVisit"
+        release = self.release or self.infer_release(context)
+                
+        obs_start = parse_as_mjd(context["prev_ds"])
+        obs_end = parse_as_mjd(context["ds"])
+
+        log.debug(f"Parsed MJD range as between {obs_start} and {obs_end}")
+
+        columns = (
+            apogee_drpdb.Visit.apogee_id.label("obj"), # TODO: Raise with Nidever
+            apogee_drpdb.Visit.telescope,
+            apogee_drpdb.Visit.fiberid.label("fiber"), # TODO: Raise with Nidever
+            apogee_drpdb.Visit.plate,
+            apogee_drpdb.Visit.field,
+            apogee_drpdb.Visit.mjd,
+            apogee_drpdb.Visit.apred_vers.label("apred"), # TODO: Raise with Nidever
+            func.left(apogee_drpdb.Visit.file, 2).label("prefix")
+        )
+        q = session.query(*columns).distinct(*columns)
+        q = q.filter(apogee_drpdb.Visit.mjd >= obs_start)\
+             .filter(apogee_drpdb.Visit.mjd < obs_end)
+        
+        if self.query_filter_by_kwargs is not None:
+            q = q.filter_by(**self.query_filter_by_kwargs)
+
+        if self.limit is not None:
+            q = q.limit(self.limit)
+
+        log.debug(f"Found {q.count()} {release} {filetype} files between MJD {obs_start} and {obs_end}")
+
+        common = dict(release=release, filetype=filetype)
+        keys = [column.name for column in columns]
+        for values in q.yield_per(1):
+            yield { **common, **dict(zip(keys, values)) }
+                
+
+
+class BossSpecOperator(SDSSDataProductOperator):
+    
+    def __init__(
+        self,
+        *,
+        limit = None,
+        release = None,
+        query_filter_by_kwargs = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.limit = limit
+        self.release = release
+        self.query_filter_by_kwargs = query_filter_by_kwargs
+        return None
+
+
+    def query_data_model_identifiers_from_database(self, context):
+
+        """
+        Query the SDSS-V database for BOSS spectra observed in the execution period.
+
+        :param context:
+            The DAG execution context.
+        """
+
+        filetype = "spec"
+        release = self.release or self.infer_release(context)
+                
+        obs_start = parse_as_mjd(context["prev_ds"])
+        obs_end = parse_as_mjd(context["ds"])
+
+        columns = (
+            catalogdb.SDSSVBossSpall.catalogid,
+            catalogdb.SDSSVBossSpall.run2d,
+            catalogdb.SDSSVBossSpall.plate,
+            catalogdb.SDSSVBossSpall.mjd,
+            catalogdb.SDSSVBossSpall.fiberid
+        )
+        q = session.query(*columns).distinct(*columns)
+        q = q.filter(catalogdb.SDSSVBossSpall.mjd >= obs_start)\
+             .filter(catalogdb.SDSSVBossSpall.mjd < obs_end)
+
+        if self.query_filter_by_kwargs is not None:
+            q = q.filter_by(**self.query_filter_by_kwargs)
+
+        if self.limit is not None:
+            q = q.limit(self.limit)
+
+        log.debug(f"Found {q.count()} {release} {filetype} files between MJD {obs_start} and {obs_end}")
+
+        common = dict(release=release, filetype=filetype)
+        keys = [column.name for column in columns]
+        for values in q.yield_per(1):
+            yield { **common, **dict(zip(keys, values)) }
 
 
 
@@ -332,3 +437,5 @@ def parse_as_mjd(mjd):
         except:
             return Time(mjd).mjd
     return mjd
+
+

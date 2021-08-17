@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from astra.new_operators import (ApStarOperator, _yield_data)
 from astra.database.utils import (create_task_output, deserialize_pks, serialize_pks_to_path)
-from astra.utils import log
+from astra.utils import log, get_scratch_dir
 from astra.database import astradb
 
 from astra.contrib.apogeenet.model import Model
@@ -22,6 +22,7 @@ class ApogeeNetOperator(ApStarOperator):
         analyze_individual_visits=True,
         num_uncertainty_draws=100,
         large_error=1e10,
+        slurm_kwargs=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -29,13 +30,18 @@ class ApogeeNetOperator(ApStarOperator):
         self.num_uncertainty_draws = num_uncertainty_draws
         self.analyze_individual_visits = analyze_individual_visits
         self.large_error = large_error
+        self.slurm_kwargs = slurm_kwargs or dict()
+        return None
 
 
     def execute(self, context):
 
         if self.slurm_kwargs:
             # Write the primary keys to a path that is accessible by all nodes.
-            pks_path = serialize_pks_to_path(self.pks)
+            pks_path = serialize_pks_to_path(
+                self.pks,
+                dir=get_scratch_dir()
+            )
 
             all_visits_str = "--all-visits" if self.analyze_individual_visits else ""
             bash_command = f"astra run apogeenet {all_visits_str} {self.model_path} {pks_path}"
@@ -44,6 +50,10 @@ class ApogeeNetOperator(ApStarOperator):
                 context,
                 bash_command,
             )
+            
+            # Remove the temporary file.
+            os.unlink(pks_path)
+
 
         else:
             # Just run it in Python.
@@ -121,6 +131,9 @@ def estimate_stellar_labels(
         with torch.set_grad_enabled(False):
             predictions = model.predict_spectra(flux, meta).detach().numpy()
 
+        # Replace infinites with non-finite.
+        predictions[~np.isfinite(predictions)] = np.nan
+
         # Create results array.
         log_g, log_teff, fe_h = predictions.T
 
@@ -151,6 +164,10 @@ def estimate_stellar_labels(
 
             median_draw_predictions = np.median(draws, axis=0)
             std_draw_predictions = np.std(draws, axis=0)
+
+            # Replace infinites with non-finites
+            median_draw_predictions[~np.isfinite(median_draw_predictions)] = np.nan
+            std_draw_predictions[~np.isfinite(std_draw_predictions)] = np.nan
 
             log_g_median, log_teff_median, fe_h_median = median_draw_predictions.T
             log_g_std, log_teff_std, fe_h_std = std_draw_predictions.T

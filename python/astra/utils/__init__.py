@@ -19,6 +19,11 @@ import tempfile
 log = logging.getLogger(__name__.split(".")[0])
 #log.propagate = False
 
+def get_scratch_dir():
+    dirname = os.path.join(get_base_output_path(), "scratch")
+    os.makedirs(dirname, exist_ok=True)
+    return dirname
+
 
 def get_base_output_path(version=None):
     """
