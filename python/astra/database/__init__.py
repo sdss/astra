@@ -3,7 +3,6 @@ import os
 import numpy
 
 from functools import partial
-from luigi.parameter import _DictParamEncoder
 from sqlalchemy import MetaData, create_engine
 from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import scoped_session, sessionmaker
@@ -24,7 +23,8 @@ class AstraDatabaseConnection(SQLADatabaseConnection):
             self, 
             db_connection_string=None, 
             echo=False, 
-            use_pooling=True,
+            pool_size=5,
+            pool_recycle=1800,
             expire_on_commit=True,
             pool_pre_ping=True,
             **kwargs
@@ -40,31 +40,30 @@ class AstraDatabaseConnection(SQLADatabaseConnection):
 
         if not db_connection_string:
             dbname = self.dbname or self.DATABASE_NAME
-            db_connection_string = self._make_connection_string(dbname,
-                                                                **self.connection_params)
-
-        if use_pooling:
-            # Some defaults for pooling:
-            kwds = dict(pool_size=5, pool_recycle=1800)
-            kwds.update(kwargs)
-        else:
-            # No pooling. Necessary when using multiple workers.
-            # See https://docs.sqlalchemy.org/en/14/core/pooling.html#pooling-multiprocessing
-            kwds = dict(poolclass=NullPool)
+            db_connection_string = self._make_connection_string(
+                dbname,
+                **self.connection_params
+            )
 
         self.engine = create_engine(
             db_connection_string, 
             echo=echo, 
+            pool_size=pool_size,
+            pool_recycle=pool_recycle,
             pool_pre_ping=pool_pre_ping,
-            json_serializer=partial(
-                json.dumps,
-                cls=_DictParamEncoder
-            ),
-            **kwds
+            #json_serializer=partial(
+            #    json.dumps,
+            #    cls=_DictParamEncoder
+            #),
         )
         self.metadata = MetaData(bind=self.engine)
-        self.Session = scoped_session(sessionmaker(bind=self.engine, autocommit=True,
-                                                expire_on_commit=expire_on_commit))
+        self.Session = scoped_session(
+            sessionmaker(
+                bind=self.engine, 
+                autocommit=True,
+                expire_on_commit=expire_on_commit
+            )
+        )
 
 
 database = AstraDatabaseConnection(autoconnect=True)

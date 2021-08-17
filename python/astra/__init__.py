@@ -5,30 +5,12 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 from datetime import datetime
 import os
 import re
-import logging
-import signal
 import sys
 import yaml
 from pkg_resources import parse_version
 from sdsstools.logger import (color_text, get_logger)
 
 __version__ = '0.2.0-dev'
-
-try:
-    from luigi import build as luigi_build
-    from luigi.util import inherits, requires
-    from luigi.parameter import (Parameter, OptionalParameter, DateParameter,
-        IntParameter, FloatParameter, BoolParameter, TaskParameter, DictParameter,
-        EnumParameter, EnumListParameter, ListParameter, NumericalParameter, ChoiceParameter)
-
-    from luigi.interface import (
-        _WorkerSchedulerFactory, core, lock, PidLockAlreadyTakenExit, LuigiRunResult,
-        InterfaceLogging
-    )
-
-except ImportError:
-    # When the user is running python setup.py install we want them to be able to 
-    print(f"Warning: cannot import luigi requirements")
 
 def merge(user, default):
     """Merges a user configuration with the default one."""
@@ -123,64 +105,3 @@ def _setup_astra_logging():
     return astra_log
 
 _log = _setup_astra_logging()
-luigi_interface = logging.getLogger("luigi-interface")
-luigi_interface.setLevel(_log.getEffectiveLevel())    
-if not luigi_interface.handlers:
-    luigi_interface.addHandler(_log.handlers[0])
-luigi_interface.propagate = False
-
-def build(
-        tasks,
-        worker_scheduler_factory=None,
-        detailed_summary=False,
-        **override_defaults
-    ):
-
-    if worker_scheduler_factory is None:
-        worker_scheduler_factory = _WorkerSchedulerFactory()
-
-    if "no_lock" not in override_defaults:
-        override_defaults["no_lock"] = True
-
-    env_params = core(**override_defaults)
-    
-    #InterfaceLogging.setup(env_params)
-
-    if worker_scheduler_factory is None:
-        worker_scheduler_factory = _WorkerSchedulerFactory()
-    if override_defaults is None:
-        override_defaults = {}
-    env_params = core(**override_defaults)
-
-
-    kill_signal = signal.SIGUSR1 if env_params.take_lock else None
-    if (not env_params.no_lock and
-            not(lock.acquire_for(env_params.lock_pid_dir, env_params.lock_size, kill_signal))):
-        raise PidLockAlreadyTakenExit()
-
-    if env_params.local_scheduler:
-        sch = worker_scheduler_factory.create_local_scheduler()
-    else:
-        if env_params.scheduler_url != '':
-            url = env_params.scheduler_url
-        else:
-            url = 'http://{host}:{port:d}/'.format(
-                host=env_params.scheduler_host,
-                port=env_params.scheduler_port,
-            )
-        sch = worker_scheduler_factory.create_remote_scheduler(url=url)
-
-    worker = worker_scheduler_factory.create_worker(
-        scheduler=sch, worker_processes=env_params.workers, assistant=env_params.assistant)
-
-    success = True
-    logger = logging.getLogger('luigi-interface')
-    with worker:
-        for t in tasks:
-            success &= worker.add(t, env_params.parallel_scheduling, env_params.parallel_scheduling_processes)
-        logger.info('Done scheduling tasks')
-        success &= worker.run()
-    luigi_run_result = LuigiRunResult(worker, success)
-    logger.info(f"Execution summary:\n{luigi_run_result.summary_text[38:-38]}")
-
-    return luigi_run_result if detailed_summary else luigi_run_result.scheduling_succeeded

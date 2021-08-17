@@ -1,6 +1,5 @@
 import json
 import hashlib
-from luigi.task_register import Register
 from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.ext.declarative import AbstractConcreteBase, declared_attr
@@ -30,6 +29,9 @@ class TaskInstance(Base):
     def _output_dependent_objects(self):
         if self.output_interface is not None:
             yield from dependent_objects(self.output_interface)
+
+    #def __repr__(self):
+    #    return "<TaskInstance "
 
     @property
     def parameters(self):
