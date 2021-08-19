@@ -11,10 +11,13 @@ from torch.autograd import Variable
 
 
 class OpticalCNN(nn.Module):
+
+    class_names = ["cv", "fgkm", "hotstar", "wd", "sb2", "yso"]
     
-    def __init__(self, in_channels=1, nb_channels=3, nb_classes=4):
+    def __init__(self, in_channels=1, nb_channels=3, nb_classes=None):
         super(OpticalCNN, self).__init__()
         self.nb_channels = nb_channels
+        nb_classes = nb_classes or len(self.class_names)
         self.model = nn.Sequential(
             nn.Conv1d(in_channels=in_channels, out_channels=nb_channels, kernel_size=3, stride=2),
             nn.BatchNorm1d(nb_channels),

@@ -10,14 +10,190 @@ from tqdm import tqdm
 
 from astra.contrib.classifier import networks, model, plot_utils, utils
 from astra.database import astradb, session
-from astra.database.utils import (get_or_create_task_instance, create_task_output, deserialize_pks, get_or_create_parameter_pk)
+from astra.database.utils import (get_or_create_task_instance, create_task_output, serialize_pks_to_path, deserialize_pks, get_or_create_parameter_pk)
 from astra.tools.spectrum import Spectrum1D
-from astra.utils import log, flatten, hashify, get_base_output_path
+from astra.utils import log, get_scratch_dir, hashify, get_base_output_path
 
 from sdss_access import SDSSPath
 
+from astra.new_operators import AstraOperator, ApStarOperator, ApVisitOperator
 
+class TrainOperator(AstraOperator):
+
+    template_fields = ("output_model_path", )
+
+    def __init__(
+        self,
+        *,
+        output_model_path: str,
+        network_factory: str,
+        training_spectra_path: str,
+        training_labels_path: str,
+        validation_spectra_path: str,
+        validation_labels_path: str,
+        test_spectra_path: str,
+        test_labels_path: str,
+        learning_rate=1e-5,
+        weight_decay=1e-5,
+        num_epochs=200,
+        batch_size=100,
+        slurm_kwargs=None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        # TODO: Should this operator just return an output model path, and if it exists,
+        #       it won't actually train?
+        self.output_model_path = output_model_path
+        self.network_factory = network_factory
+        self.training_spectra_path = training_spectra_path
+        self.training_labels_path = training_labels_path
+        self.validation_spectra_path = validation_spectra_path
+        self.validation_labels_path = validation_labels_path
+        self.test_spectra_path = test_spectra_path
+        self.test_labels_path = test_labels_path
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.num_epochs = num_epochs
+        self.batch_size = batch_size
+        self.slurm_kwargs = slurm_kwargs or dict()
+        return None
+
+
+    def execute(self, context):
+
+        if self.slurm_kwargs:
+            bash_command = f"astra run classifier train {self.output_model_path} " \
+                                                        f"{self.network_factory} "\
+                                                        f"{self.training_spectra_path} "\
+                                                        f"{self.training_labels_path} "\
+                                                        f"{self.validation_spectra_path} "\
+                                                        f"{self.validation_labels_path} "\
+                                                        f"{self.test_spectra_path} "\
+                                                        f"{self.test_labels_path} "\
+                                                        f"--learning-rate {self.learning_rate} "\
+                                                        f"--weight-decay {self.weight_decay} "\
+                                                        f"--num-epochs {self.num_epochs} "\
+                                                        f"--batch-size {self.batch_size}"
+            
+            self.execute_by_slurm(context, bash_command)
+
+        else:
+            # Just run it in Python.
+            train_model(
+                output_model_path=self.output_model_path,
+                training_spectra_path=self.training_spectra_path, 
+                training_labels_path=self.training_labels_path,
+                validation_spectra_path=self.validation_spectra_path,
+                validation_labels_path=self.validation_labels_path,
+                test_spectra_path=self.test_spectra_path,
+                test_labels_path=self.test_labels_path,
+                network_factory=self.network_factory,
+                class_names=None,
+                learning_rate=self.learning_rate,
+                weight_decay=self.weight_decay,
+                num_epochs=self.num_epochs,
+                batch_size=self.batch_size,
+            )
+
+        return None
     
+
+
+
+class ClassifyOperator:
+
+    template_fields = ("model_path", )
+
+    def __init__(
+        self,
+        *,
+        model_path: str,
+        slurm_kwargs=None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.model_path = model_path
+        self.slurm_kwargs = slurm_kwargs or dict()
+        return None
+
+
+    @property
+    def network_factory(self):
+        return self.model_path.split("_")[-2]
+
+
+
+class ClassifyApVisitOperator(ClassifyOperator, ApVisitOperator):
+
+    """ Classify a source based on an ApVisit spectrum. """ 
+
+    def execute(self, context):
+
+        if self.slurm_kwargs:
+            # Write the primary keys to a path that is accessible by all nodes.
+            pks_path = serialize_pks_to_path(
+                self.pks,
+                dir=get_scratch_dir()
+            )
+           
+            self.execute_by_slurm(
+                context,
+                f"astra run classifier {self.model_path} {pks_path}",
+            )
+            
+            # Remove the temporary file.
+            os.unlink(pks_path)
+
+        else:
+            # Just run it in Python.
+            classify(
+                self.pks,
+                model_path=self.model_path,
+                network_factory=self.network_factory,
+            )
+        return None
+
+
+class ClassifyApStarOperator(ApStarOperator):
+
+    """ Classify an ApStar source given existing classifications on ApVisit data products. """
+
+    def execute(self, context):
+
+        # TODO: get upstream task ID and use that to query results as well.
+        for pk, instance, path, spectrum in self.yield_data():
+
+            # Find all previous classifications of this source that have the same model path.
+            s = session.query(
+                    astradb.Classification,
+                    func.json_object_agg(
+                        astradb.Parameter.parameter_name, 
+                        astradb.Parameter.parameter_value
+                    ).label("parameters")
+                )\
+                .filter(astradb.TaskInstance.dag_id == instance.dag_id)\
+                .filter(astradb.TaskInstance.output_pk == astradb.Classification.output_pk)\
+                .filter(astradb.TaskInstance.pk == astradb.TaskInstanceParameter.ti_pk)\
+                .filter(astradb.TaskInstanceParameter.parameter_pk == astradb.Parameter.pk)\
+                .group_by(astradb.Classification)\
+                .subquery(with_labels=True)
+
+            q = session.query(s)\
+                       .filter(s.c.parameters.op("->>")("apred") == instance.parameters["apred"])\
+                       .filter(s.c.parameters.op("->>")("obj") == instance.parameters["obj"])
+
+            for ea in q.all():
+                print(ea)
+
+
+            # match by obj and apred.
+            # get 
+
+
+            raise a
+
+
+
 def classify_apstar(pks, **kwargs):
     """
     Classify observations of APOGEE (ApStar) sources, given the existing classifications of the
@@ -389,6 +565,8 @@ def _prepare_log_prob_result(class_names, log_probs, decimals=3):
     # https://stackoverflow.com/questions/9556586/floating-point-numbers-of-python-float-and-postgresql-double-precision
     probs = np.round(np.exp(relative_log_probs), decimals)
     log_probs = np.round(log_probs, decimals)
+    
+    probs, log_probs = (probs.tolist(), log_probs.tolist())
 
     result = {}
     for i, class_name in enumerate(class_names):
