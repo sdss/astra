@@ -51,15 +51,15 @@ class ThePayneCheOperator:
         fitter = UncertFit(fit, self.spectral_resolution)
 
         for pk, instance, path, spectrum in self.yield_data():
-			
-			assert self.wavelength_start is None
-			assert self.wavelength_end is None
-				
-			fit_result = fitter.run(
-				spectrum.wavelength.value,
-				spectrum.flux.array[0],
-				spectrum.uncertainty.array**-0.5
-			)
+        
+        assert self.wavelength_start is None
+        assert self.wavelength_end is None
+        
+        fit_result = fitter.run(
+            spectrum.wavelength.value,
+            spectrum.flux.array[0],
+            spectrum.uncertainty.array**-0.5
+        )
 
         raise a
 
