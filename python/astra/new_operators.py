@@ -8,6 +8,7 @@ from astropy.time import Time
 from sqlalchemy import and_, func
 from sdss_access import SDSSPath
 from datetime import datetime
+from subprocess import CalledProcessError
 
 from astra.utils import log
 from astra.database import astradb, catalogdb, session, apogee_drpdb
@@ -32,11 +33,97 @@ class AstraOperator(BaseOperator):
 
     ui_color = "#CEE8F2"
 
+    def execute_by_slurm(
+            self, 
+            context, 
+            bash_command,
+            poke_interval=60
+        ):
+        
+        uid = str(uuid.uuid4())[:8]
+        label = ".".join([
+            context["dag"].dag_id,
+            context["task"].task_id,
+            context["execution_date"].strftime('%Y-%m-%d'),
+            # run_id is None if triggered by command line
+            uid
+        ])
+
+        # It's bad practice to import here, but the slurm package is
+        # not easily installable outside of Utah, and is not a "must-have"
+        # requirement. 
+        from slurm import queue
+        
+        # TODO: HACK to be able to use local astra installation while in development
+        if bash_command.startswith("astra "):
+            bash_command = f"/uufs/chpc.utah.edu/common/home/u6020307/.local/bin/astra {bash_command[6:]}"
+
+        slurm_kwargs = (self.slurm_kwargs or dict())
+
+        log.info(f"Submitting Slurm job {label} with command:\n\t{bash_command}\nAnd Slurm keyword arguments: {slurm_kwargs}")        
+        q = queue(verbose=True)
+        q.create(label=label, **slurm_kwargs)
+        q.append(bash_command)
+        try:
+            q.commit(hard=True, submit=True)
+        except CalledProcessError as e:
+            log.exception(f"Exception occurred when committing Slurm job with output:\n{e.output}")
+            raise
+
+        log.info(f"Slurm job submitted with {q.key} and keywords {slurm_kwargs}")
+        log.info(f"\tJob directory: {q.job_dir}")
+
+        stdout_path = os.path.join(q.job_dir, f"{label}_01.o")
+        stderr_path = os.path.join(q.job_dir, f"{label}_01.e")    
+
+        # Now we wait until the Slurm job is complete.
+        t_submitted, t_started = (time(), None)
+        while 100 > q.get_percent_complete():
+
+            sleep(poke_interval)
+
+            t = time() - t_submitted
+
+            if not os.path.exists(stderr_path) and not os.path.exists(stdout_path):
+                log.info(f"Waiting on job {q.key} to start (elapsed: {t / 60:.0f} min)")
+
+            else:
+                # Check if this is the first time it has started.
+                if t_started is None:
+                    t_started = time()
+                    log.debug(f"Recording job {q.key} as starting at {t_started} (took {t / 60:.0f} min to start)")
+
+                log.info(f"Waiting on job {q.key} to finish (elapsed: {t / 60:.0f} min)")
+                # Open last line of stdout path?
+
+                # If this has been going much longer than the walltime, then something went wrong.
+                # TODO: Check on the status of the job from Slurm.
+
+        log.info(f"Job {q.key} in {q.job_dir} is complete after {(time() - t_submitted)/60:.0f} minutes.")
+
+        with open(stderr_path, "r", newline="\n") as fp:
+            stderr = fp.read()
+        log.info(f"Contents of {stderr_path}:\n{stderr}")
+
+        with open(stdout_path, "r", newline="\n") as fp:
+            stdout = fp.read()
+        log.info(f"Contents of {stdout_path}:\n{stdout}")
+        
+        # TODO: Better parsing for critical errors.
+        if "Error" in stderr.rstrip().split("\n")[-1]:
+            raise RuntimeError(f"detected exception at task end-point")
+
+        return None
+        
+
+class SDSSDataProductOperator(AstraOperator):
+
 
     def yield_data(self):
-        yield from _yield_data(self.pks, **self.spectrum_kwargs)
+        spectrum_kwargs = getattr(self, "spectrum_kwargs", {})
+        yield from _yield_data(self.pks, **spectrum_kwargs)
     
-    
+
     def pre_execute(self, context):
         """
         Create task instances for all the data model identifiers. 
@@ -64,74 +151,6 @@ class AstraOperator(BaseOperator):
         return None
         
 
-    def execute_by_slurm(
-            self, 
-            context, 
-            bash_command,
-            poke_interval=60
-        ):
-
-        log.info(f"Submitting Slurm job with command:\n{bash_command}")
-        
-        uid = str(uuid.uuid4())[:8]
-        label = ".".join([
-            context["dag"].dag_id,
-            context["task"].task_id,
-            context["execution_date"].strftime('%Y-%m-%d'),
-            # run_id is None if triggered by command line
-            uid
-        ])
-
-        # It's bad practice to import here, but the slurm package is
-        # not easily installable outside of Utah, and is not a "must-have"
-        # requirement. 
-        from slurm import queue
-
-        slurm_kwargs = (self.slurm_kwargs or dict())
-        q = queue(verbose=False)
-        q.create(label=label, **slurm_kwargs)
-        q.append(bash_command)
-        q.commit(hard=True, submit=True)
-
-        log.info(f"Slurm job submitted with {q.key} and keywords {slurm_kwargs}")
-        log.info(f"\tJob directory: {q.job_dir}")
-
-        stdout_path = os.path.join(q.job_dir, f"{label}_01.o")
-        stderr_path = os.path.join(q.job_dir, f"{label}_01.e")    
-
-        # Now we wait until the Slurm job is complete.
-        t_init = time()
-        while 100 > q.get_percent_complete():
-
-            sleep(poke_interval)
-
-            t = time() - t_init
-
-            if not os.path.exists(stderr_path) and not os.path.exists(stdout_path):
-                log.info(f"Waiting on job {q.key} to start (elapsed: {t / 60:.0f} min)")
-
-            else:
-                log.info(f"Waiting on job {q.key} to finish (elapsed: {t / 60:.0f} min)")
-                # Open last line of stdout path?
-
-        log.info(f"Job {q.key} in {q.job_dir} is complete after {(time() - t_init)/60:.0f} minutes.")
-
-        with open(stderr_path, "r", newline="\n") as fp:
-            stderr = fp.read()
-        log.info(f"Contents of {stderr_path}:\n{stderr}")
-
-        with open(stdout_path, "r", newline="\n") as fp:
-            stdout = fp.read()
-        log.info(f"Contents of {stdout_path}:\n{stdout}")
-        
-        # TODO: Better parsing for critical errors.
-        if "Error" in stderr.rstrip().split("\n")[-1]:
-            raise RuntimeError(f"detected exception at task end-point")
-
-        return None
-        
-
-class SDSSDataProductOperator(AstraOperator):
 
     def infer_release(self, context):
         """
@@ -164,12 +183,17 @@ class SDSSDataProductOperator(AstraOperator):
         #
         # This would yield data model identifiers for ApVisit files *and* for BossSpec files.
 
+        yield from self.query_data_model_identifiers_from_database(context)
+
+        # TODO: This needs testing! 
+        '''
         for mro in self.__class__.__mro__:
             try:
                 yield from super(mro, self).query_data_model_identifiers_from_database(context)
             except AttributeError:
                 break
-
+        '''
+        
         # TODO: Allow data model identifiers to be read from an AllStar file, if a filename
         #       is supplied when the ApStar operator was __init__'d.
 
@@ -402,8 +426,18 @@ def _yield_data(pks, **kwargs):
             if tree is None:
                 trees[release] = tree = SDSSPath(release=release)
 
-            path = tree.full(**instance.parameters)
-        
+            # Monkey-patch BOSS Spec paths.
+            try:
+                path = tree.full(**instance.parameters)
+            except:
+                if instance.parameters["filetype"] == "spec":
+
+                    from astra.utils import monkey_patch_get_boss_spec_path
+                    path = monkey_patch_get_boss_spec_path(**instance.parameters)
+            
+                else:
+                    raise
+
             try:
                 spectrum = Spectrum1D.read(path, **kwargs)
 
