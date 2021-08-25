@@ -152,12 +152,8 @@ def estimate_stellar_labels(
 
 class ApogeeNetOperator(ApStarOperator):
 
-    python_callable = estimate_stellar_labels
-    bash_command_prefix = "astra run apogeenet"
-
     def __init__(
         self,
-        *,
         model_path: str,
         num_uncertainty_draws=100,
         large_error=1e10,
@@ -167,4 +163,7 @@ class ApogeeNetOperator(ApStarOperator):
         self.model_path = model_path
         self.num_uncertainty_draws = num_uncertainty_draws
         self.large_error = large_error
+        self.python_callable = estimate_stellar_labels
+        self.bash_command_prefix = "astra run apogeenet"
         return None
+        
