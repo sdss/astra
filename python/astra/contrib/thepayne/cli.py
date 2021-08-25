@@ -24,11 +24,10 @@ def train(context, **kwargs):
 
 
 @thepayne.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("model_path", nargs=1, required=True)
 @click.argument("pk", nargs=1, required=True)
-@click.option("--all-visits", is_flag=True)
+@click.argument("model_path", nargs=1, required=True)
 @click.pass_context
-def test(context, model_path, pk, all_visits, **kwargs):
+def test(context, model_path, pk, **kwargs):
     """
     Estimate stellar labels given a single layer neural network
     """
@@ -37,5 +36,4 @@ def test(context, model_path, pk, all_visits, **kwargs):
     return estimate_stellar_labels(
         pks=pk,
         model_path=model_path,
-        analyze_individual_visits=all_visits
     )

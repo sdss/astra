@@ -62,7 +62,7 @@ def prepare_data(pks):
                 # Are there any spectrum callbacks?
                 spectrum_callback = instance.parameters.get("spectrum_callback", None)
                 if spectrum_callback is not None:
-                    spectrum_callback_kwargs = literal_eval(instance.parameters.get("spectrum_callback_kwargs", {}))
+                    spectrum_callback_kwargs = literal_eval(instance.parameters.get("spectrum_callback_kwargs", "{}"))
 
                     try:
                         mod_name, func_name = spectrum_callback.rsplit('.',1)

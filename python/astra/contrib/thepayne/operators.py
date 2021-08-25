@@ -1,5 +1,6 @@
 import os
 import pickle
+import numpy as np
 from tqdm import tqdm
 from sdss_access import SDSSPath
 from inspect import signature
@@ -7,9 +8,11 @@ from collections import OrderedDict
 
 from astra.database import astradb, session
 from astra.tools.spectrum import Spectrum1D
-from astra.database.utils import create_task_output
+from astra.database.utils import create_task_output, deserialize_pks
 from astra.contrib.thepayne import training, test
 from astra.utils import hashify, log, get_base_output_path
+from astra.operators import ApStarOperator, AstraOperator
+from astra.operators.utils import prepare_data
 
 def get_model_path(
         training_set_path: str,
@@ -128,7 +131,6 @@ def train_model(
 def estimate_stellar_labels(
         pks,
         model_path,
-        analyze_individual_visits=True,
     ):
     """
     Estimate stellar labels given a single-layer neural network.
@@ -146,63 +148,42 @@ def estimate_stellar_labels(
         data product, which is usually the stacked spectrum.
     """
     log.info(f"Loading model from {model_path}")
+    
     state = test.load_state(model_path)
 
     label_names = state["label_names"]
     L = len(label_names)
     log.info(f"Estimating these {L} label names: {label_names}")
 
-    pks = deserialize_pks(pks)
-    N = len(pks)
+    log.info(f"Estimating stellar labels for task instances")
 
-    log.info(f"Estimating stellar labels for {N} task instances")
-
-    sliced = slice(0, 1) if analyze_individual_visits else slice(None)
-
-    trees = {}
     results = {}
-    for pk in tqdm(pks, desc="The Payne"):
+    for instance, path, spectrum in prepare_data(pks):
+        if spectrum is None: continue
 
-        q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk)
-
-        instance = q.one_or_none()
-        if instance is None:
-            log.warning(f"No task instance found for primary key {pk}")
-            continue
-        
-        # Get the path.
-        parameters = instance.parameters
-        tree = trees.get(parameters["release"], None)
-        if tree is None:
-            trees[parameters["release"]] = tree = SDSSPath(release=parameters["release"])
-        
-        path = tree.full(**parameters)
-
-        # Load spectrum.
-        try:
-            spectrum = Spectrum1D.read(path)
-        except:
-            log.exception(f"Unable to load spectrum from {path} for task instance {instance}")
-            continue
-        
         # Run optimization.
         p_opt, p_cov, model_flux, meta = test.test(
             spectrum.wavelength.value,
-            spectrum.flux.value[sliced],
-            spectrum.uncertainty.array[sliced],
+            spectrum.flux.value,
+            spectrum.uncertainty.array,
             **state
         )
+        
+        log.debug(f"spectrum shape: {spectrum.flux.shape}")
+        log.debug(f"p_opt shape: {p_opt.shape}")
+        log.debug(f"spectrum meta: {spectrum.meta['snr']}")
 
         # Prepare outputs.
         result = dict(zip(label_names, p_opt.T))
-        result.update(snr=spectrum.meta["snr"][sliced])
+        result.update(snr=spectrum.meta["snr"])
         # Include uncertainties.
         result.update(dict(zip(
             (f"u_{ln}" for ln in label_names),
-            np.sqrt(p_cov[:, np.arange(L), np.arange(L)].T)
+            np.sqrt(p_cov[:, np.arange(p_opt.shape[1]), np.arange(p_opt.shape[1])].T)
         )))
         
         results[instance.pk] = result
+        log.info(f"Result for {instance}: {result}")
 
     # Write database outputs.
     for pk, result in tqdm(results.items(), desc="Writing database outputs"):
@@ -210,3 +191,47 @@ def estimate_stellar_labels(
         create_task_output(pk, astradb.ThePayne, **result)
 
     return None
+
+
+class TrainThePayneOperator(AstraOperator):
+
+    def __init__(
+        self,
+        output_model_path,
+        training_set_path,
+        num_epochs=100_000,
+        num_neurons=300,
+        weight_decay=0.0,
+        learning_rate=0.001,
+        **kwargs,
+    ) -> None:
+        super(TrainThePayneOperator, self).__init__(**kwargs)
+        self.output_model_path = output_model_path
+        self.training_set_path = training_set_path
+        self.num_epochs = num_epochs
+        self.num_neurons = num_neurons
+        self.weight_decay = weight_decay
+        self.learning_rate = learning_rate
+        
+        self.bash_command_prefix = "astra run thepayne train"
+        self.python_callable = train_model
+
+        return None
+
+    
+
+class ThePayneApStarOperator(ApStarOperator):
+
+    template_fields = ("model_path", )
+
+    def __init__(
+        self,
+        model_path: str,
+        **kwargs,
+    ) -> None:
+        super(ThePayneApStarOperator, self).__init__(**kwargs)
+        self.model_path = model_path
+        self.python_callable = estimate_stellar_labels
+        self.bash_command_prefix = "astra run thepayne test"
+
+        return None

@@ -70,7 +70,7 @@ class AstraOperator(BaseOperator):
 
     def inherited_parameters(
             self, 
-            ignore=("args", "kwargs", "slurm_kwargs"),
+            ignore=("self", "args", "kwargs", "slurm_kwargs"),
             ignore_keywords_with_leading_underscores=True,
             ignore_arguments_with_nones_and_default_values=True,
         ):
@@ -94,23 +94,22 @@ class AstraOperator(BaseOperator):
             A dictionary of keyword arguments to include as task parameters.
         """
 
-        mro, inherited_parameters = (self, {})
-        while True:
+        inherited_parameters = {}
+        mros = type(self).mro()
+        
+        for mro in mros[:1 + mros.index(AstraOperator)]:
             signature = inspect.signature(mro.__init__)
             init_parameters = signature.parameters
             if ignore_keywords_with_leading_underscores:
                 init_parameters = [pn for pn in init_parameters if not pn.startswith("_")]
             
             parameters = set(init_parameters).difference(ignore)
-            if not parameters: break
             for parameter in parameters:
                 if ignore_arguments_with_nones_and_default_values \
                 and getattr(self, parameter) is None \
                 and signature.parameters[parameter].default == getattr(self, parameter):
                     continue
                 inherited_parameters.setdefault(parameter, getattr(self, parameter))
-
-            mro = super(mro.__class__, mro)
 
         return inherited_parameters
     

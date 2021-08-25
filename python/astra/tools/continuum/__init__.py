@@ -2,7 +2,6 @@
 import numpy as np
 from astra.utils import log
 
-
 def slice_and_shape(spectrum, slice_args, shape, repeat=None, **kwargs):
 
     if repeat is not None:

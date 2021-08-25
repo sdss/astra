@@ -4,16 +4,11 @@ Continuum-normalization using sines and cosines.
 
 import numpy as np
 import os
-from warnings import warn
 
-from astropy.units import Quantity
-from astropy.nddata.nduncertainty import InverseVariance 
-
+from astra.utils import log
 
 def normalize(
-        dispersion,
-        flux, 
-        ivar, 
+        spectrum,
         continuum_regions=None, 
         L=1400, 
         order=3, 
@@ -25,16 +20,8 @@ def normalize(
     Pseudo-continuum-normalize the flux using a defined set of continuum pixels and a sum of sine 
     and cosine functions.
 
-    :param dispersion:
-        The dispersion values.
-
-    :param flux:
-        The flux values for all pixels, as they correspond to the `dispersion`
-        array.
-
-    :param ivar:
-        The inverse variances for all pixels, as they correspond to the
-        `dispersion` array.
+    :param spectrum:
+        The `Spectrum1D` object to normalize.
 
     :param continuum_regions: [optional]
         A list of two-length tuples that describe the start and end of regions
@@ -68,12 +55,18 @@ def normalize(
         metadata about the fit.
     """
 
-    if False and continuum_regions is None:
-        default_path = os.path.join(os.path.dirname(__file__), "etc/continuum-regions.list")
+    if continuum_regions is None:
+        default_path = os.path.join(
+            os.path.dirname(os.path.realpath(__file__)),
+            "../../etc/continuum-regions.list"
+        )
         continuum_regions = np.loadtxt(default_path)
 
     elif isinstance(continuum_regions, str):
         continuum_regions = np.loadtxt(continuum_regions)
+
+    dispersion = spectrum.wavelength.value
+    flux, ivar = (spectrum.flux.value, spectrum.uncertainty.array)
 
     # Work out the continuum pixels.
     mask = np.zeros(dispersion.size, dtype=bool)
@@ -98,15 +91,43 @@ def normalize(
         **kwargs
     )
 
-    normalized_flux = flux/continuum
-    normalized_ivar = continuum * ivar * continuum
-    normalized_flux[normalized_ivar == 0] = 1.0
-    
-    non_finite_pixels = ~np.isfinite(normalized_flux)
-    normalized_flux[non_finite_pixels] = 1.0
-    normalized_ivar[non_finite_pixels] = 0.0
+    spectrum._data /= continuum
+    spectrum._uncertainty.array *= continuum * continuum
 
-    return (normalized_flux, normalized_ivar, continuum, metadata)
+    no_information = (spectrum._uncertainty.array == 0)
+    spectrum._data[no_information] = 1.0
+
+    non_finite_pixels = ~np.isfinite(spectrum._data)
+    spectrum._data[non_finite_pixels] = 1.0
+    spectrum._uncertainty.array[non_finite_pixels] = 0.0
+
+    if "slice_args" in kwargs or "shape" in kwargs:
+        return slice_and_shape(spectrum, **kwargs)
+    return spectrum
+
+
+
+def slice_and_shape(spectrum, slice_args, shape, repeat=None, **kwargs):
+
+    if repeat is not None:
+        spectrum._data = np.repeat(spectrum._data, repeat)
+        spectrum._uncertainty.array = np.repeat(spectrum._uncertainty.array, repeat)
+
+    if slice_args is not None:
+        slices = tuple([slice(*each) for each in slice_args])
+
+        spectrum._data = spectrum._data[slices]
+        spectrum._uncertainty.array = spectrum._uncertainty.array[slices]
+
+        try:
+            spectrum.meta["snr"] = spectrum.meta["snr"][slices[0]]
+        except:
+            log.warning(f"Unable to slice 'snr' metadata with {slice_args}")
+
+    spectrum._data = spectrum._data.reshape(shape)
+    spectrum._uncertainty.array = spectrum._uncertainty.array.reshape(shape)
+
+    return spectrum
 
 
 def sines_and_cosines(
@@ -223,8 +244,8 @@ def sines_and_cosines(
             segments = ", ".join(["{:.1f} to {:.1f}".format(
                 dispersion[s], dispersion[e], e-s) for s, e in segment_indices])
 
-            warn(f"Some pixels in have measured flux values (e.g., ivar > 0) but are not included "
-                 f"in any specified region ({segments}).")
+            log.warning(f"Some pixels in have measured flux values (e.g., ivar > 0) but "
+                        f"are not included in any specified region ({segments}).")
 
         # Get the flux and inverse variance for this object.
         object_metadata = []
@@ -291,3 +312,14 @@ def _continuum_design_matrix(
             [np.cos(o * scale * dispersion), np.sin(o * scale * dispersion)] \
             for o in range(1, order + 1)]).reshape((2 * order, dispersion.size))
         ])
+
+
+if __name__ == "__main__":
+
+    #path = '/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/mwm/apogee/spectro/redux/daily/stars/apo25m/97/97480/apStar-daily-apo25m-2M21241108+0023308.fits'
+    path = path = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/mwm/apogee/spectro/redux/daily/stars/apo25m/56/56822/apStar-daily-apo25m-2M11322307+2500207-59314.fits"
+    from astra.tools.spectrum import Spectrum1D
+    spec = Spectrum1D.read(path)
+
+
+    normalize(spec)
