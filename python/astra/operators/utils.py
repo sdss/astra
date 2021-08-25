@@ -1,5 +1,6 @@
 import importlib
 import numpy as np
+from ast import literal_eval
 from astropy.time import Time
 from datetime import datetime
 
@@ -52,7 +53,6 @@ def prepare_data(pks):
                 else:
                     raise
 
-            modified_spectrum = None
             try:
                 spectrum = Spectrum1D.read(path)
             except:
@@ -62,14 +62,14 @@ def prepare_data(pks):
                 # Are there any spectrum callbacks?
                 spectrum_callback = instance.parameters.get("spectrum_callback", None)
                 if spectrum_callback is not None:
-                    spectrum_callback_kwargs = instance.parameters.get("spectrum_callback_kwargs", {})
+                    spectrum_callback_kwargs = literal_eval(instance.parameters.get("spectrum_callback_kwargs", {}))
 
                     try:
                         mod_name, func_name = spectrum_callback.rsplit('.',1)
                         module = importlib.import_module(mod_name)
                         func = getattr(module, func_name)
 
-                        modified_spectrum = func(
+                        spectrum = func(
                             spectrum=spectrum,
                             path=path,
                             instance=instance,
@@ -80,7 +80,7 @@ def prepare_data(pks):
                         log.exception(f"Unable to execute spectrum callback '{spectrum_callback}' on {instance}")
                         raise
                                         
-        yield (instance, path, spectrum, modified_spectrum)
+        yield (instance, path, spectrum)
     
 
 def parse_as_mjd(mjd):

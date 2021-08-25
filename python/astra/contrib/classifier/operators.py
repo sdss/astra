@@ -16,11 +16,129 @@ from astra.utils import log, get_scratch_dir, hashify, get_base_output_path
 
 from sdss_access import SDSSPath
 
-from astra.new_operators import AstraOperator, ApStarOperator, ApVisitOperator
+from astra.operators import (AstraOperator, ApStarOperator, ApVisitOperator, BossSpecOperator)
+from astra.operators.utils import prepare_data
+
+def train_model(
+        output_model_path,
+        training_spectra_path, 
+        training_labels_path,
+        validation_spectra_path,
+        validation_labels_path,
+        test_spectra_path,
+        test_labels_path,
+        network_factory,
+        class_names=None,
+        learning_rate=1e-5,
+        weight_decay=1e-5,
+        num_epochs=200,
+        batch_size=100,
+        **kwargs
+    ):
+    """
+    Train a classifier.
+
+    :param output_model_path:
+        the disk path where to save the model to
+
+    :param training_spectra_path:
+        A path that contains the spectra for the training set.
+    
+    :param training_set_labels:
+        A path that contains the labels for the training set.
+
+    :param validation_spectra_path:
+        A path that contains the spectra for the validation set.
+
+    :param validation_labels_path:
+        A path that contains the labels for the validation set.
+
+    :param test_spectra_path:
+        A path that contains the spectra for the test set.
+    
+    :param test_labels_path:
+        A path that contains ths labels for the test set.
+
+    :param network_factory:
+        The name of the network factory to use in `astra.contrib.classifier.model`
+
+    :param class_names: (optional)
+        A tuple of names for the object classes.
+    
+    :param num_epochs: (optional)
+        The number of epochs to use for training (default: 200).
+    
+    :param batch_size: (optional)
+        The number of objects to use per batch in training (default: 100).
+    
+    :param weight_decay: (optional)
+        The weight decay to use during training (default: 1e-5).
+    
+    :param learning_rate: (optional)
+        The learning rate to use during training (default: 1e-4).
+    """
+
+    try:
+        network_factory = getattr(networks, network_factory)
+    
+    except AttributeError:
+        raise ValueError(f"No such network factory exists ({network_factory})")
+    
+    training_spectra, training_labels = utils.load_data(training_spectra_path, training_labels_path)
+    validation_spectra, validation_labels = utils.load_data(validation_spectra_path, validation_labels_path)
+    test_spectra, test_labels = utils.load_data(test_spectra_path, test_labels_path)
+
+    state, network, optimizer = model.train(
+        network_factory,
+        training_spectra,
+        training_labels,
+        validation_spectra,
+        validation_labels,
+        test_spectra,
+        test_labels,
+        class_names=class_names,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        num_epochs=num_epochs,
+        batch_size=batch_size,
+    )
+
+    # Write the model to disk.
+    utils.write_network(network, output_model_path)
+
+    '''
+    # Disable dropout for inference.
+    with torch.no_grad():                
+        pred = network.forward(Variable(torch.Tensor(test_spectra)))
+        outputs = pred.data.numpy()
+
+    pred_test_labels = np.argmax(outputs, axis=1)
+
+    # Make a confusion matrix plot.
+    fig = plot_utils.plot_confusion_matrix(
+        test_labels, 
+        pred_test_labels, 
+        self.class_names,
+        normalize=False,
+        title=None,
+        cmap=plt.cm.Blues
+    )
+    fig.savefig(
+        os.path.join(
+            self.output_base_dir,
+            f"{self.task_id}.png"
+        ),
+        dpi=300
+    )
+    '''
+
+
 
 class TrainOperator(AstraOperator):
 
     template_fields = ("output_model_path", )
+    python_callable = train_model
+    bash_command_prefix = "astra run classifier train"
 
     def __init__(
         self,
@@ -37,7 +155,6 @@ class TrainOperator(AstraOperator):
         weight_decay=1e-5,
         num_epochs=200,
         batch_size=100,
-        slurm_kwargs=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -55,71 +172,106 @@ class TrainOperator(AstraOperator):
         self.weight_decay = weight_decay
         self.num_epochs = num_epochs
         self.batch_size = batch_size
-        self.slurm_kwargs = slurm_kwargs or dict()
         return None
 
 
-    def execute(self, context):
 
-        if self.slurm_kwargs:
-            bash_command = f"astra run classifier train {self.output_model_path} " \
-                                                        f"{self.network_factory} "\
-                                                        f"{self.training_spectra_path} "\
-                                                        f"{self.training_labels_path} "\
-                                                        f"{self.validation_spectra_path} "\
-                                                        f"{self.validation_labels_path} "\
-                                                        f"{self.test_spectra_path} "\
-                                                        f"{self.test_labels_path} "\
-                                                        f"--learning-rate {self.learning_rate} "\
-                                                        f"--weight-decay {self.weight_decay} "\
-                                                        f"--num-epochs {self.num_epochs} "\
-                                                        f"--batch-size {self.batch_size}"
-            
-            self.execute_by_slurm(context, bash_command)
 
-        else:
-            # Just run it in Python.
-            train_model(
-                output_model_path=self.output_model_path,
-                training_spectra_path=self.training_spectra_path, 
-                training_labels_path=self.training_labels_path,
-                validation_spectra_path=self.validation_spectra_path,
-                validation_labels_path=self.validation_labels_path,
-                test_spectra_path=self.test_spectra_path,
-                test_labels_path=self.test_labels_path,
-                network_factory=self.network_factory,
-                class_names=None,
-                learning_rate=self.learning_rate,
-                weight_decay=self.weight_decay,
-                num_epochs=self.num_epochs,
-                batch_size=self.batch_size,
-            )
+def classify(
+        pks,
+        model_path,
+        network_factory=None,
+    ):
+    """
+    Classify a source given primary keys that reference some partially created task instances.
 
-        return None
+    :param pks:
+        the primary keys of the task instances in the database that need classification
     
+    :param model_path:
+        the path where the model is stored on disk
+    
+    :param network_factory: [optional]
+        the name of the network factory to use to load the model (e.g., OpticalCNN, NIRCNN)
+    """
+    if network_factory is None:
+        network_factory = model_path.split("_")[-2]
+
+
+    print(f"In classify with pks {type(pks)} {pks} {model_path}, {network_factory}")
+    
+    factory = getattr(networks, network_factory)
+    if factory is None:
+        raise ValueError(f"unknown network factory '{network_factory}'")
+    
+    model = utils.read_network(factory, model_path)
+    # Disable dropout for inference.
+    model.eval()
+
+    results = {}
+    for instance, path, spectrum in prepare_data(pks):
+        if spectrum is None: continue
+
+        with torch.no_grad():
+            prediction = model.forward(Variable(torch.Tensor(spectrum.flux.value)))
+            log_probs = prediction.cpu().numpy().flatten()
+                
+        results[instance.pk] = log_probs
+    
+
+    for pk, log_probs in tqdm(results.items(), desc="Writing results"):
+        
+        result = _prepare_log_prob_result(factory.class_names, log_probs)
+    
+        # Write the output to the database.
+        create_task_output(pk, astradb.Classification, **result)
+
+
+
+def _prepare_log_prob_result(class_names, log_probs, decimals=3):
+
+    # Make sure the log_probs are dtype float so that postgresql does not complain.
+    log_probs = np.array(log_probs, dtype=float)
+
+    # Calculate normalized probabilities.
+    with np.errstate(under="ignore"):
+        relative_log_probs = log_probs - logsumexp(log_probs)
+    
+    # Round for PostgreSQL 'real' type.
+    # https://www.postgresql.org/docs/9.1/datatype-numeric.html
+    # and
+    # https://stackoverflow.com/questions/9556586/floating-point-numbers-of-python-float-and-postgresql-double-precision
+    probs = np.round(np.exp(relative_log_probs), decimals)
+    log_probs = np.round(log_probs, decimals)
+    
+    probs, log_probs = (probs.tolist(), log_probs.tolist())
+
+    result = {}
+    for i, class_name in enumerate(class_names):
+        result[f"p_{class_name}"] = [probs[i]]
+        result[f"lp_{class_name}"] = [log_probs[i]]
+
+    return result
 
 
 
 class ClassifyOperator:
 
     template_fields = ("model_path", )
+    
+    python_callable = classify
+    bash_command_prefix = "astra run classifier"
 
     def __init__(
         self,
         *,
         model_path: str,
-        slurm_kwargs=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.model_path = model_path
-        self.slurm_kwargs = slurm_kwargs or dict()
         return None
 
-
-    @property
-    def network_factory(self):
-        return self.model_path.split("_")[-2]
 
 
 
@@ -127,31 +279,15 @@ class ClassifyApVisitOperator(ClassifyOperator, ApVisitOperator):
 
     """ Classify a source based on an ApVisit spectrum. """ 
 
-    def execute(self, context):
+    pass
 
-        if self.slurm_kwargs:
-            # Write the primary keys to a path that is accessible by all nodes.
-            pks_path = serialize_pks_to_path(
-                self.pks,
-                dir=get_scratch_dir()
-            )
-           
-            self.execute_by_slurm(
-                context,
-                f"astra run classifier {self.model_path} {pks_path}",
-            )
-            
-            # Remove the temporary file.
-            os.unlink(pks_path)
 
-        else:
-            # Just run it in Python.
-            classify(
-                self.pks,
-                model_path=self.model_path,
-                network_factory=self.network_factory,
-            )
-        return None
+class ClassifyBossSpecOperator(ClassifyOperator, BossSpecOperator):
+
+    """ Classify a source based on a BOSS spectrum. """ 
+
+    pass
+
 
 
 class ClassifyApStarOperator(ApStarOperator):
@@ -351,226 +487,3 @@ def get_model_path(
     return path
 
 
-def train_model(
-        output_model_path,
-        training_spectra_path, 
-        training_labels_path,
-        validation_spectra_path,
-        validation_labels_path,
-        test_spectra_path,
-        test_labels_path,
-        network_factory,
-        class_names=None,
-        learning_rate=1e-5,
-        weight_decay=1e-5,
-        num_epochs=200,
-        batch_size=100,
-        **kwargs
-    ):
-    """
-    Train a classifier.
-
-    :param output_model_path:
-        the disk path where to save the model to
-
-    :param training_spectra_path:
-        A path that contains the spectra for the training set.
-    
-    :param training_set_labels:
-        A path that contains the labels for the training set.
-
-    :param validation_spectra_path:
-        A path that contains the spectra for the validation set.
-
-    :param validation_labels_path:
-        A path that contains the labels for the validation set.
-
-    :param test_spectra_path:
-        A path that contains the spectra for the test set.
-    
-    :param test_labels_path:
-        A path that contains ths labels for the test set.
-
-    :param network_factory:
-        The name of the network factory to use in `astra.contrib.classifier.model`
-
-    :param class_names: (optional)
-        A tuple of names for the object classes.
-    
-    :param num_epochs: (optional)
-        The number of epochs to use for training (default: 200).
-    
-    :param batch_size: (optional)
-        The number of objects to use per batch in training (default: 100).
-    
-    :param weight_decay: (optional)
-        The weight decay to use during training (default: 1e-5).
-    
-    :param learning_rate: (optional)
-        The learning rate to use during training (default: 1e-4).
-    """
-
-    try:
-        network_factory = getattr(networks, network_factory)
-    
-    except AttributeError:
-        raise ValueError(f"No such network factory exists ({network_factory})")
-    
-    training_spectra, training_labels = utils.load_data(training_spectra_path, training_labels_path)
-    validation_spectra, validation_labels = utils.load_data(validation_spectra_path, validation_labels_path)
-    test_spectra, test_labels = utils.load_data(test_spectra_path, test_labels_path)
-
-    state, network, optimizer = model.train(
-        network_factory,
-        training_spectra,
-        training_labels,
-        validation_spectra,
-        validation_labels,
-        test_spectra,
-        test_labels,
-        class_names=class_names,
-        learning_rate=learning_rate,
-        weight_decay=weight_decay,
-        num_epochs=num_epochs,
-        batch_size=batch_size,
-    )
-
-    # Write the model to disk.
-    utils.write_network(network, output_model_path)
-
-    '''
-    # Disable dropout for inference.
-    with torch.no_grad():                
-        pred = network.forward(Variable(torch.Tensor(test_spectra)))
-        outputs = pred.data.numpy()
-
-    pred_test_labels = np.argmax(outputs, axis=1)
-
-    # Make a confusion matrix plot.
-    fig = plot_utils.plot_confusion_matrix(
-        test_labels, 
-        pred_test_labels, 
-        self.class_names,
-        normalize=False,
-        title=None,
-        cmap=plt.cm.Blues
-    )
-    fig.savefig(
-        os.path.join(
-            self.output_base_dir,
-            f"{self.task_id}.png"
-        ),
-        dpi=300
-    )
-    '''
-
-
-
-def classify(
-        pks,
-        model_path,
-        network_factory,
-    ):
-    """
-    Classify a source given primary keys that reference some partially created task instances.
-
-    :param pks:
-        the primary keys of the task instances in the database that need classification
-    
-    :param model_path:
-        the path where the model is stored on disk
-    
-    :param network_factory:
-        the name of the network factory to use to load the model (e.g., OpticalCNN, NIRCNN)
-    """
-
-    print(f"In classify with pks {type(pks)} {pks} {model_path}, {network_factory}")
-    
-    factory = getattr(networks, network_factory)
-    if factory is None:
-        raise ValueError(f"unknown network factory '{network_factory}'")
-    
-    model = utils.read_network(factory, model_path)
-    # Disable dropout for inference.
-    model.eval()
-
-    # Get the task instances.
-    pks = deserialize_pks(pks, flatten=True)
-
-    trees = {}
-    results = {}
-
-    for pk in tqdm(pks, desc="Classifying"):
-
-        q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk)
-        instance = q.one_or_none()
-        if instance is None:
-            log.warning(f"No TaskInstance found with pk = {pk}")
-            continue
-
-        parameters = instance.parameters
-        tree = trees.get(parameters["release"], None)
-        if tree is None:
-            trees[parameters["release"]] = tree = SDSSPath(release=parameters["release"])
-        
-        path = tree.full(**parameters)
-
-        # Load the spectrum.
-        try:
-            spectrum = Spectrum1D.read(path)
-        except:
-            log.exception(f"Unable to load Spectrum1D from path {path} on task instance {instance}")
-            continue
-
-        flux = spectrum.flux.value
-        if flux.size == 6144:
-            # Undithered ApVisit spectra have half as many pixels as dithered spectra (duh). 
-            # This is a hack to make them work with the classifier, which expects the test set to be
-            # the same shape (in pixels) as the training set.
-            # TODO: Consider doing something clever instead.
-            flux = np.repeat(flux, 2)
-
-        # TODO: Is this the same for the Optical CNN? Should check.
-        flux = flux.reshape((1, 3, -1))
-        batch = flux / np.nanmedian(flux, axis=2)[:, :, None]
-
-        with torch.no_grad():
-            prediction = model.forward(Variable(torch.Tensor(batch)))
-            log_probs = prediction.cpu().numpy().flatten()
-                
-        results[pk] = log_probs
-    
-
-    for pk, log_probs in tqdm(results.items(), desc="Writing results"):
-        
-        result = _prepare_log_prob_result(factory.class_names, log_probs)
-    
-        # Write the output to the database.
-        create_task_output(pk, astradb.Classification, **result)
-
-
-
-def _prepare_log_prob_result(class_names, log_probs, decimals=3):
-
-    # Make sure the log_probs are dtype float so that postgresql does not complain.
-    log_probs = np.array(log_probs, dtype=float)
-
-    # Calculate normalized probabilities.
-    with np.errstate(under="ignore"):
-        relative_log_probs = log_probs - logsumexp(log_probs)
-    
-    # Round for PostgreSQL 'real' type.
-    # https://www.postgresql.org/docs/9.1/datatype-numeric.html
-    # and
-    # https://stackoverflow.com/questions/9556586/floating-point-numbers-of-python-float-and-postgresql-double-precision
-    probs = np.round(np.exp(relative_log_probs), decimals)
-    log_probs = np.round(log_probs, decimals)
-    
-    probs, log_probs = (probs.tolist(), log_probs.tolist())
-
-    result = {}
-    for i, class_name in enumerate(class_names):
-        result[f"p_{class_name}"] = [probs[i]]
-        result[f"lp_{class_name}"] = [log_probs[i]]
-
-    return result

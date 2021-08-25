@@ -5,6 +5,7 @@ import logging
 from astra.contrib.apogeenet.cli import apogeenet
 from astra.contrib.classifier.cli import classifier
 from astra.contrib.thepayne.cli import thepayne
+from astra.contrib.doppler.cli import doppler
 
 # Common options.
 @click.group()
@@ -32,6 +33,7 @@ def run(context):
 run.add_command(apogeenet)
 run.add_command(classifier)
 run.add_command(thepayne)
+run.add_command(doppler)
 
 
 cli.add_command(run)

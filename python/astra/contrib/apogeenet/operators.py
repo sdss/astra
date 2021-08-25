@@ -3,7 +3,8 @@ import numpy as np
 import os        
 from tqdm import tqdm
 
-from astra.new_operators import (ApStarOperator, _yield_data)
+from astra.operators import ApStarOperator
+from astra.operators.utils import prepare_data
 from astra.database.utils import (create_task_output, deserialize_pks, serialize_pks_to_path)
 from astra.utils import log, get_scratch_dir
 from astra.database import astradb
@@ -13,64 +14,10 @@ from astra.contrib.apogeenet.utils import (create_bitmask, get_metadata)
 
 import torch
 
-class ApogeeNetOperator(ApStarOperator):
-
-    def __init__(
-        self,
-        *,
-        model_path: str,
-        analyze_individual_visits=True,
-        num_uncertainty_draws=100,
-        large_error=1e10,
-        slurm_kwargs=None,
-        **kwargs,
-    ) -> None:
-        super().__init__(**kwargs)
-        self.model_path = model_path
-        self.num_uncertainty_draws = num_uncertainty_draws
-        self.analyze_individual_visits = analyze_individual_visits
-        self.large_error = large_error
-        self.slurm_kwargs = slurm_kwargs or dict()
-        return None
-
-
-    def execute(self, context):
-
-        if self.slurm_kwargs:
-            # Write the primary keys to a path that is accessible by all nodes.
-            pks_path = serialize_pks_to_path(
-                self.pks,
-                dir=get_scratch_dir()
-            )
-
-            all_visits_str = "--all-visits" if self.analyze_individual_visits else ""
-            bash_command = f"astra run apogeenet {all_visits_str} {self.model_path} {pks_path}"
-            
-            self.execute_by_slurm(
-                context,
-                bash_command,
-            )
-            
-            # Remove the temporary file.
-            os.unlink(pks_path)
-
-
-        else:
-            # Just run it in Python.
-            estimate_stellar_labels(
-                self.pks,
-                model_path=self.model_path,
-                analyze_individual_visits=self.analyze_individual_visits,
-                num_uncertainty_draws=self.num_uncertainty_draws,
-                large_error=self.large_error
-            )
-        return None
-    
 
 def estimate_stellar_labels(
         pks,
         model_path,
-        analyze_individual_visits=True,
         num_uncertainty_draws=100,
         large_error=1e10
     ):
@@ -84,11 +31,7 @@ def estimate_stellar_labels(
     
     :param model_path:
         The disk path of the pre-trained model.
-    
-    :param analyze_individual_visits: [optional]
-        Analyze individual visits stored in the ApStar object. If `False` then it
-        will only analyze the stacked (zero-th index) observation (default: `True`).
-    
+     
     :param num_uncertainty_draws: [optional]
         The number of random draws to make of the flux uncertainties, which will be
         propagated into the estimate of the stellar parameter uncertainties (default: 100).
@@ -102,10 +45,11 @@ def estimate_stellar_labels(
     log.info(f"Running APOGEENet on device {device} with:")
     log.info(f"\tmodel_path: {model_path}")
     log.info(f"\tpks: {pks}")
-    log.info(f"\tanalyze_individual_visits: {analyze_individual_visits}")
 
     log.debug(f"CUDA_VISIBLE_DEVICES = '{os.environ.get('CUDA_VISIBLE_DEVICES')}'")
 
+    log.debug(f"Using torch version {torch.__version__} in {torch.__path__}")
+    
     # Load the model.
     model = Model(model_path, device)
 
@@ -114,7 +58,9 @@ def estimate_stellar_labels(
     pks = deserialize_pks(pks, flatten=True)
     total = len(pks)
 
-    for pk, instance, path, spectrum in tqdm(_yield_data(pks), total=total):
+    log.info(f"There are {total} primary keys to process: {pks}")
+
+    for instance, path, spectrum in tqdm(prepare_data(pks), total=total):
         if spectrum is None: continue
         
         N, P = spectrum.flux.shape
@@ -129,8 +75,10 @@ def estimate_stellar_labels(
         meta = torch.from_numpy(meta).to(device)
 
         with torch.set_grad_enabled(False):
-            predictions = model.predict_spectra(flux, meta).detach().numpy()
-
+            predictions = model.predict_spectra(flux, meta)
+            if device != "cpu":
+                predictions = predictions.cpu().data.numpy()
+                
         # Replace infinites with non-finite.
         predictions[~np.isfinite(predictions)] = np.nan
 
@@ -160,23 +108,25 @@ def estimate_stellar_labels(
             meta_error = meta.repeat(num_uncertainty_draws, 1)
             with torch.set_grad_enabled(False):
                 draws = model.predict_spectra(inputs, meta_error)
-            draws = draws.detach().numpy().reshape((num_uncertainty_draws, N, -1))
+                if device != "cpu":
+                    draws = draws.cpu().data.numpy()
+                
+            draws = draws.reshape((num_uncertainty_draws, N, -1))
+            
+            # Need to put the log(teffs) to teffs before calculating std_dev
+            draws[:, :, 1] = 10**draws[:, :, 1]
 
-            median_draw_predictions = np.median(draws, axis=0)
-            std_draw_predictions = np.std(draws, axis=0)
+            median_draw_predictions = np.nanmedian(draws, axis=0)
+            std_draw_predictions = np.nanstd(draws, axis=0)
 
-            # Replace infinites with non-finites
-            median_draw_predictions[~np.isfinite(median_draw_predictions)] = np.nan
-            std_draw_predictions[~np.isfinite(std_draw_predictions)] = np.nan
-
-            log_g_median, log_teff_median, fe_h_median = median_draw_predictions.T
-            log_g_std, log_teff_std, fe_h_std = std_draw_predictions.T
+            log_g_median, teff_median, fe_h_median = median_draw_predictions.T
+            log_g_std, teff_std, fe_h_std = std_draw_predictions.T
 
             result.update(
-                _teff_median=10**log_teff_median,
+                _teff_median=teff_median,
                 _logg_median=log_g_median,
                 _fe_h_median=fe_h_median,
-                u_teff=10**log_teff_std,
+                u_teff=teff_std,
                 u_logg=log_g_std,
                 u_fe_h=fe_h_std
             )
@@ -196,3 +146,25 @@ def estimate_stellar_labels(
         # Write the result to database.        
         create_task_output(instance, astradb.ApogeeNet, **result)
         
+    log.info(f"Completed processing of {total} primary keys")
+
+
+
+class ApogeeNetOperator(ApStarOperator):
+
+    python_callable = estimate_stellar_labels
+    bash_command_prefix = "astra run apogeenet"
+
+    def __init__(
+        self,
+        *,
+        model_path: str,
+        num_uncertainty_draws=100,
+        large_error=1e10,
+        **kwargs,
+    ) -> None:
+        super(ApogeeNetOperator, self).__init__(**kwargs)
+        self.model_path = model_path
+        self.num_uncertainty_draws = num_uncertainty_draws
+        self.large_error = large_error
+        return None

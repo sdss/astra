@@ -72,7 +72,7 @@ class BossSpecOperator(AstraOperator):
         _query_filter_by_kwargs = None,
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs)
+        super(BossSpecOperator, self).__init__(**kwargs)
         self.release = release
         self._limit = _limit
         self._query_filter_by_kwargs = _query_filter_by_kwargs

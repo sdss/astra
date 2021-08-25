@@ -260,21 +260,30 @@ create table astra_v02.thepayne (
     foreign key (output_pk) references astra_v02.output_interface(pk) on delete restrict
 );
 
-/* Classifiers */
+/* 
+Classifiers 
+
+The column names here should refer to real astrophysical classes. If a classifier only has
+the ability to discriminate between classes A, B, D, but not class C, then it will only report
+values for A, B, D.
+*/
 create table astra_v02.classification (
     output_pk int primary key,
     ti_pk bigint,
+    p_cv real[],
+    lp_cv real[],
     p_fgkm real[],
     lp_fgkm real[],
     p_hotstar real[],
     lp_hotstar real[],
+    p_wd real[],
+    lp_wd real[],
     p_sb2 real[],
     lp_sb2 real[],
     p_yso real[],
     lp_yso real[],
     foreign key (output_pk) references astra_v02.output_interface(pk) on delete restrict
 );
-
 
 /* Classifiers specifically for white dwarfs */
 create table astra_v02.wd_classification (

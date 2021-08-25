@@ -30,8 +30,8 @@ def train(context, **kwargs):
 
 
 @classifier.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("model_path", nargs=1, required=True)
 @click.argument("pk", nargs=1, required=True)
+@click.argument("model_path", nargs=1, required=True)
 @click.pass_context
 def test(context, model_path, pk, **kwargs):
     """
@@ -39,7 +39,4 @@ def test(context, model_path, pk, **kwargs):
     """
 
     from astra.contrib.classifier.operators import classify
-
-    # TODO: Optionally supply the network factory.
-    network_factory = model_path.split("_")[-2]
-    return classify(pk, model_path, network_factory)
+    return classify(pk, model_path)

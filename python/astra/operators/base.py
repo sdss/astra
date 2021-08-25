@@ -61,10 +61,10 @@ class AstraOperator(BaseOperator):
         _data_model_identifiers=None,
         **kwargs
     ):
-        super().__init__(**kwargs)
+        super(AstraOperator, self).__init__(**kwargs)
         self.spectrum_callback = spectrum_callback
         self.spectrum_callback_kwargs = spectrum_callback_kwargs
-        self.slurm_kwargs = None
+        self.slurm_kwargs = slurm_kwargs
         self._data_model_identifiers = _data_model_identifiers
 
 
@@ -72,7 +72,7 @@ class AstraOperator(BaseOperator):
             self, 
             ignore=("args", "kwargs", "slurm_kwargs"),
             ignore_keywords_with_leading_underscores=True,
-            ignore_arguments_with_default_values=True,
+            ignore_arguments_with_nones_and_default_values=True,
         ):
         """
         Return a dictionary of keyword arguments that should be recorded as parameters for
@@ -86,9 +86,9 @@ class AstraOperator(BaseOperator):
         :param ignore_keywords_with_leading_underscores:
             ignore keywords with leading underscores (e.g., '_data_model_identifiers') (default: True)
         type ignore_keywords_with_leading_underscores: bool
-        :param ignore_arguments_with_default_values:
+        :param ignore_arguments_with_nones_and_default_values:
             ignore arguments where the value given is the default value (e.g., None).
-        :type ignore_arguments_with_default_values: bool
+        :type ignore_arguments_with_nones_and_default_values: bool
 
         :returns:
             A dictionary of keyword arguments to include as task parameters.
@@ -104,8 +104,9 @@ class AstraOperator(BaseOperator):
             parameters = set(init_parameters).difference(ignore)
             if not parameters: break
             for parameter in parameters:
-                if ignore_arguments_with_default_values \
-                and (signature.parameters[parameter].default == getattr(self, parameter)):
+                if ignore_arguments_with_nones_and_default_values \
+                and getattr(self, parameter) is None \
+                and signature.parameters[parameter].default == getattr(self, parameter):
                     continue
                 inherited_parameters.setdefault(parameter, getattr(self, parameter))
 
@@ -113,6 +114,26 @@ class AstraOperator(BaseOperator):
 
         return inherited_parameters
     
+
+    @property
+    def bash_command_line_arguments(self):
+        """
+        Return the parameters supplied to this task as a string of command line arguments.
+        """
+
+        cla = []
+        for key, parameter in inspect.signature(self.__init__).parameters.items():
+            if key.startswith("_") or key in ("args", "kwargs", "slurm_kwargs"): continue
+
+            value = getattr(self, key)
+            if parameter.default is parameter.empty:
+                # Supply as an argument.
+                cla.append(value)
+            else:
+                cla.append(f"--{key.replace('_', '-')} {value}")
+        
+        return " ".join(cla)
+
 
     def data_model_identifiers(self, context):
         """ 
@@ -173,28 +194,50 @@ class AstraOperator(BaseOperator):
 
 
     def execute(self, context):
+        """
+        Execute the operator.
 
-        raise NotImplementedError("todo")
-        
-        if self.slurm_kwargs:
+        :param context:
+            The Airflow DAG execution context.
+        """
+
+        if not self.slurm_kwargs and callable(getattr(self, "python_callable", None)):
+            # Use Python callable.
+            log.info(f"Executing Python callable in {self}")
+            self.python_callable(
+                self.pks,
+                **self.inherited_parameters()
+            )
+
+        else:
+            # Use bash command. Maybe in Slurm.
             pks_path = serialize_pks_to_path(
                 self.pks,
                 dir=get_scratch_dir()
             )
-            
-            # TODO: Build args and kwargs to bash command.
+            log.info(f"Serialized {len(self.pks)} primary keys to {pks_path}")
 
-            self.execute_by_slurm(
-                context,
-                self.bash_command.format(pks_path=pks_path),
-            )
+            try:
+                bash_command = f"{self.bash_command_prefix} {pks_path} {self.bash_command_line_arguments}"
+            except:
+                log.exception(f"Cannot construct bash command")
+                raise
+            else:
+                log.info(f"Executing bash command:\n{bash_command}")
+
+            if self.slurm_kwargs:
+                self.execute_by_slurm(
+                    context,
+                    bash_command,
+                )
+            else:
+                raise NotImplementedError
             
             # Remove the temporary file.
             os.unlink(pks_path)
-        
-        else:
-            self.execute_by_slurm()
 
+        return self.pks
+    
 
     def execute_by_slurm(
         self, 

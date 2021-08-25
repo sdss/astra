@@ -49,6 +49,7 @@ class OpticalCNN(nn.Module):
         self.fc2 = nn.Linear(58*4, 58)
         self.fc3 = nn.Linear(58, nb_classes)
         
+
     def forward(self,x):
         x = self.model(x)
         x = x.view(-1, 58 * 8 * self.nb_channels)
@@ -102,7 +103,6 @@ class NIRCNN(nn.Module):
         self.fc2 = nn.Linear(64*4, 64)
         self.fc3 = nn.Linear(64, nb_classes)
         return None
-
 
     def forward(self,x):
         x = self.model(x)

@@ -1,13 +1,12 @@
 import click
 
 @click.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("model_path", nargs=1, required=True)
 @click.argument("pks", nargs=1, required=True)
-@click.option('--all-visits', is_flag=True)
+@click.argument("model_path", nargs=1, required=True)
 @click.option("--num-uncertainty-draws", default=100, show_default=True)
 @click.option("--large-error", default=1e10)
 @click.pass_context
-def apogeenet(context, model_path, pks, all_visits, num_uncertainty_draws, large_error, **kwargs):
+def apogeenet(context, model_path, pks, num_uncertainty_draws, large_error, **kwargs):
     """
     Estimate stellar labels using APOGEENet II.
     """
@@ -17,7 +16,6 @@ def apogeenet(context, model_path, pks, all_visits, num_uncertainty_draws, large
     estimate_stellar_labels(
         pks,
         model_path,
-        analyze_individual_visits=all_visits,
         num_uncertainty_draws=num_uncertainty_draws,
         large_error=large_error
     )
