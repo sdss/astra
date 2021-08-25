@@ -17,6 +17,9 @@ class Base(AbstractConcreteBase, AstraBase):
 class SDSSDR16ApogeeStar(Base):
     __tablename__ = "sdss_dr16_apogeestar"
 
+class SDSSDR16ApogeeVisit(Base):
+    __tablename__ = "sdss_dr16_apogeevisit"
+
 
 class SDSSVBossSpall(Base):
     __tablename__ = "sdssv_boss_spall"
@@ -24,6 +27,23 @@ class SDSSVBossSpall(Base):
 
 class SDSSApogeeAllStarMergeR13(Base):
     __tablename__ = "sdss_apogeeallstarmerge_r13"
+
+
+class Catalog(Base):
+    __tablename__ = "catalog"
+
+
+class TICV8(Base):
+    __tablename__ = "tic_v8"
+
+
+class CatalogToTICV8(Base):
+    __tablename__ = "catalog_to_tic_v8"
+
+
+class GaiaDR2Source(Base):
+    __tablename__ = "gaia_dr2_source"
+    
 
 def define_relations():
     pass

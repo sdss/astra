@@ -30,8 +30,11 @@ class TaskInstance(Base):
         if self.output_interface is not None:
             yield from dependent_objects(self.output_interface)
 
-    #def __repr__(self):
-    #    return "<TaskInstance "
+
+    def __repr__(self):
+        output_str = f", output_pk={self.output_pk}" if self.output_pk is not None else ""
+        return f"<{self.__class__.__name__} (pk={self.pk:.0f}, dag_id={self.dag_id}, task_id={self.task_id}, run_id={self.run_id}{output_str})>"
+
 
     @property
     def parameters(self):
