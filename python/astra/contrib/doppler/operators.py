@@ -1,64 +1,11 @@
 import numpy as np
-import os
-from tqdm import tqdm
-from sdss_access import SDSSPath
 
-from astra.database import astradb, session
-from astra.database.utils import (serialize_pks_to_path, deserialize_pks, create_task_output)
-from astra.utils import log, get_scratch_dir
+from astra.database import astradb
+from astra.database.utils import create_task_output
+from astra.utils import log
 
-from astra.new_operators import (ApVisitOperator, BossSpecOperator)
-
-# TODO: Move this to astra/contrib
-import doppler
-
-
-class BaseDopplerOperator:
-
-    def __init__(
-        self,
-        *,
-        slurm_kwargs=None,
-        **kwargs,
-    ) -> None:
-        super().__init__(**kwargs)
-        # TODO: Allow to pass on any parameters?
-        self.slurm_kwargs = slurm_kwargs or dict()
-        return None
-
-
-    def execute(self, context):
-
-        if self.slurm_kwargs:
-            # Write the primary keys to a path that is accessible by all nodes.
-            pks_path = serialize_pks_to_path(
-                self.pks,
-                dir=get_scratch_dir()
-            )
-            bash_command = f"astra run doppler {pks_path}"
-            
-            self.execute_by_slurm(
-                context,
-                bash_command,
-            )
-            
-            # Remove the temporary file.
-            os.unlink(pks_path)
-
-        else:
-            # Run it in Python.
-            estimate_radial_velocity(self.pks)
-            
-        return None
-    
-class DopplerApVisitOperator(BaseDopplerOperator, ApVisitOperator):
-    pass
-
-class DopplerBossSpecOperator(BaseDopplerOperator, BossSpecOperator):
-    pass
-
-class DopplerOperator(BaseDopplerOperator, ApVisitOperator, BossSpecOperator):
-    pass
+from astra.operators import (ApVisitOperator, BossSpecOperator)
+from astra.operators.utils import prepare_data
 
 
 def estimate_radial_velocity(
@@ -84,40 +31,16 @@ def estimate_radial_velocity(
     See `doppler.rv.fit` for more information on other keyword arguments.
     """
 
-    pks = deserialize_pks(pks, flatten=True)
-    N = len(pks)
+    # TODO: Move this to astra/contrib
+    import doppler
 
-    log.info(f"Estimating radial velocities for {N} task instances")
+    log.info(f"Estimating radial velocities for {len(pks)} task instances")
 
-    trees = {} # if only it were so easy to grow trees
+    failures = []
+    for instance, path, spectrum in prepare_data(pks):
+        if spectrum is None: continue
 
-    failed_pks = []
-    for pk in tqdm(pks):
-        
-        q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk)
-        instance = q.one_or_none()
-
-        if instance is None:
-            log.warning(f"No instance found for primary key {pk}")
-            continue
-        
-        parameters = instance.parameters
-        tree = trees.get(parameters["release"], None)
-        if tree is None:
-            trees[parameters["release"]] = tree = SDSSPath(release=parameters["release"])
-        
-        if parameters["filetype"] == "spSpec":
-            log.warning(f"Using monkey-patch for filetype {parameters['filetype']} on pk {pk}")
-            path = os.path.expandvars(
-                "$BOSS_SPECTRO_REDUX/{run2d}/{plate}p/coadd/{mjd}/spSpec-{plate}-{mjd}-{identifier:0>11}.fits".format(
-                    identifier=max(int(parameters["fiberid"]), int(parameters["catalogid"])),
-                    **parameters
-                )
-            )
-        else:
-            path = tree.full(**parameters)
-
-        log.debug(f"Running Doppler on {instance} at {path}")
+        log.debug(f"Running Doppler on {instance} from {path}")
 
         try:
             spectrum = doppler.read(path)
@@ -136,7 +59,7 @@ def estimate_radial_velocity(
 
         except:
             log.exception(f"Exception occurred on Doppler on {path} with task instance {instance}")
-            failed_pks.append(pk)
+            failures.append(instance.pk)
             continue
 
         else:
@@ -149,13 +72,12 @@ def estimate_radial_velocity(
                 **results
             )
 
-    if len(failed_pks) > 0:
-        log.warning(f"There were {len(failed_pks)} Doppler failures out of a total {len(pks)} executions.")
-        log.warning(f"Failed primary keys include: {failed_pks}")
+    if len(failures) > 0:
+        log.warning(f"There were {len(failures)} Doppler failures out of a total {len(pks)} executions.")
+        log.warning(f"Failed primary keys include: {failures}")
 
         log.warning(f"Raising last exception to indicate failure in pipeline.")
         raise
-    
     
 
 def prepare_results(summary_table):
@@ -180,3 +102,22 @@ def prepare_results(summary_table):
         key = _translate.get(column_name, column_name)
         results[key] = tuple(np.array(summary_table[column_name]).astype(float))
     return results
+
+
+class BaseDopplerOperator:
+
+    bash_command_prefix = "astra run doppler"
+    python_callable = estimate_radial_velocity
+
+    
+class DopplerApVisitOperator(BaseDopplerOperator, ApVisitOperator):
+    pass
+
+class DopplerBossSpecOperator(BaseDopplerOperator, BossSpecOperator):
+    pass
+
+class DopplerOperator(BaseDopplerOperator, ApVisitOperator, BossSpecOperator):
+    pass
+
+
+    

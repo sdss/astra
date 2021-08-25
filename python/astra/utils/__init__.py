@@ -19,6 +19,15 @@ import tempfile
 log = logging.getLogger(__name__.split(".")[0])
 #log.propagate = False
 
+def monkey_patch_get_boss_spec_path(**kwargs):
+    #/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/bhm/boss/spectro/redux/v6_0_3/spectra/full/15000p/59146/
+    identifier = max(int(kwargs["fiberid"]), int(kwargs["catalogid"]))
+    path = f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/bhm/boss/spectro/redux/{kwargs['run2d']}/spectra/full/{kwargs['plate']}p/{kwargs['mjd']}/spec-{kwargs['plate']}-{kwargs['mjd']}-{identifier:0>11}.fits"
+    print(f"Monkey-patching BOSS Spec path because it is STILL not in the tree product!")
+    return path
+
+
+
 def get_scratch_dir():
     dirname = os.path.join(get_base_output_path(), "scratch")
     os.makedirs(dirname, exist_ok=True)
