@@ -255,41 +255,7 @@ def _prepare_log_prob_result(class_names, log_probs, decimals=3):
 
 
 
-class ClassifyOperator:
-
-    template_fields = ("model_path", )
-    
-    python_callable = classify
-    bash_command_prefix = "astra run classifier"
-
-    def __init__(
-        self,
-        *,
-        model_path: str,
-        **kwargs,
-    ) -> None:
-        super().__init__(**kwargs)
-        self.model_path = model_path
-        return None
-
-
-
-
-class ClassifyApVisitOperator(ClassifyOperator, ApVisitOperator):
-
-    """ Classify a source based on an ApVisit spectrum. """ 
-
-    pass
-
-
-class ClassifyBossSpecOperator(ClassifyOperator, BossSpecOperator):
-
-    """ Classify a source based on a BOSS spectrum. """ 
-
-    pass
-
-
-
+'''
 class ClassifyApStarOperator(ApStarOperator):
 
     """ Classify an ApStar source given existing classifications on ApVisit data products. """
@@ -327,7 +293,7 @@ class ClassifyApStarOperator(ApStarOperator):
 
 
             raise a
-
+'''
 
 
 def classify_apstar(pks, **kwargs):

@@ -8,14 +8,14 @@ def classifier(context):
     pass
 
 @classifier.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("output_model_path", nargs=1, required=True)
-@click.argument("network_factory", nargs=1, required=True)
-@click.argument("training_spectra_path", nargs=1, required=True)
-@click.argument("training_labels_path", nargs=1, required=True)
-@click.argument("validation_spectra_path", nargs=1, required=True)
-@click.argument("validation_labels_path", nargs=1, required=True)
-@click.argument("test_spectra_path", nargs=1, required=True)
-@click.argument("test_labels_path", nargs=1, required=True)
+@click.option("--output-model-path", nargs=1, required=True)
+@click.option("--network-factory", nargs=1, required=True)
+@click.option("--training-spectra-path", nargs=1, required=True)
+@click.option("--training-labels-path", nargs=1, required=True)
+@click.option("--validation-spectra-path", nargs=1, required=True)
+@click.option("--validation-labels-path", nargs=1, required=True)
+@click.option("--test-spectra-path", nargs=1, required=True)
+@click.option("--test-labels-path", nargs=1, required=True)
 @click.option("--learning-rate", default=1e-5, show_default=True)
 @click.option("--weight-decay", default=1e-5, show_default=True)
 @click.option("--num-epochs", default=200, show_default=True)
@@ -30,13 +30,13 @@ def train(context, **kwargs):
 
 
 @classifier.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("pk", nargs=1, required=True)
-@click.argument("model_path", nargs=1, required=True)
+@click.argument("primary_keys", nargs=1, required=True)
+@click.option("--model-path", nargs=1, required=True)
 @click.pass_context
-def test(context, model_path, pk, **kwargs):
+def test(context, primary_keys, model_path, **kwargs):
     """
     Classify some SDSS data products.
     """
 
     from astra.contrib.classifier.operators import classify
-    return classify(pk, model_path)
+    return classify(primary_keys, model_path)

@@ -8,8 +8,8 @@ def thepayne(context):
     pass
 
 @thepayne.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("output_model_path", nargs=1, required=True)
-@click.argument("training_set_path", nargs=1, required=True)
+@click.option("--output-model-path", nargs=1, required=True)
+@click.option("--training-set-path", nargs=1, required=True)
 @click.option("--num-neurons", default=100, show_default=True)
 @click.option("--num-epochs", default=100_000, show_default=True)
 @click.option("--learning-rate", default=1e-3, show_default=True)
@@ -24,16 +24,16 @@ def train(context, **kwargs):
 
 
 @thepayne.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("pk", nargs=1, required=True)
-@click.argument("model_path", nargs=1, required=True)
+@click.argument("primary_keys", nargs=1, required=True)
+@click.option("--model-path", nargs=1, required=True)
 @click.pass_context
-def test(context, model_path, pk, **kwargs):
+def test(context, primary_keys, model_path, **kwargs):
     """
     Estimate stellar labels given a single layer neural network
     """
 
     from astra.contrib.thepayne.operators import estimate_stellar_labels
     return estimate_stellar_labels(
-        pks=pk,
+        pks=primary_keys,
         model_path=model_path,
     )

@@ -3,17 +3,15 @@ import numpy as np
 import os        
 from tqdm import tqdm
 
-from astra.operators import ApStarOperator
 from astra.operators.utils import prepare_data
-from astra.database.utils import (create_task_output, deserialize_pks, serialize_pks_to_path)
-from astra.utils import log, get_scratch_dir
+from astra.database.utils import (create_task_output, deserialize_pks)
+from astra.utils import log
 from astra.database import astradb
 
 from astra.contrib.apogeenet.model import Model
 from astra.contrib.apogeenet.utils import (create_bitmask, get_metadata)
 
 import torch
-
 
 def estimate_stellar_labels(
         pks,
@@ -84,12 +82,12 @@ def estimate_stellar_labels(
 
         # Create results array.
         log_g, log_teff, fe_h = predictions.T
-
+        teff = 10**log_teff
         result = dict(
             snr=spectrum.meta["snr"],
-            teff=10**log_teff,
-            logg=log_g,
-            fe_h=fe_h,
+            teff=teff.tolist(),
+            logg=log_g.tolist(),
+            fe_h=fe_h.tolist(),
         )
         
         if num_uncertainty_draws > 0:
@@ -123,12 +121,12 @@ def estimate_stellar_labels(
             log_g_std, teff_std, fe_h_std = std_draw_predictions.T
 
             result.update(
-                _teff_median=teff_median,
-                _logg_median=log_g_median,
-                _fe_h_median=fe_h_median,
-                u_teff=teff_std,
-                u_logg=log_g_std,
-                u_fe_h=fe_h_std
+                _teff_median=teff_median.tolist(),
+                _logg_median=log_g_median.tolist(),
+                _fe_h_median=fe_h_median.tolist(),
+                u_teff=teff_std.tolist(),
+                u_logg=log_g_std.tolist(),
+                u_fe_h=fe_h_std.tolist()
             )
 
         else:
@@ -147,23 +145,3 @@ def estimate_stellar_labels(
         create_task_output(instance, astradb.ApogeeNet, **result)
         
     log.info(f"Completed processing of {total} primary keys")
-
-
-
-class ApogeeNetOperator(ApStarOperator):
-
-    def __init__(
-        self,
-        model_path: str,
-        num_uncertainty_draws=100,
-        large_error=1e10,
-        **kwargs,
-    ) -> None:
-        super(ApogeeNetOperator, self).__init__(**kwargs)
-        self.model_path = model_path
-        self.num_uncertainty_draws = num_uncertainty_draws
-        self.large_error = large_error
-        self.python_callable = estimate_stellar_labels
-        self.bash_command_prefix = "astra run apogeenet"
-        return None
-        

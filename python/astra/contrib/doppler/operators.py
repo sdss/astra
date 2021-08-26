@@ -2,11 +2,8 @@ import numpy as np
 
 from astra.database import astradb
 from astra.database.utils import create_task_output
-from astra.utils import log
-
-from astra.operators import (ApVisitOperator, BossSpecOperator)
 from astra.operators.utils import prepare_data
-
+from astra.utils import log
 
 def estimate_radial_velocity(
         pks, 
@@ -102,22 +99,3 @@ def prepare_results(summary_table):
         key = _translate.get(column_name, column_name)
         results[key] = tuple(np.array(summary_table[column_name]).astype(float))
     return results
-
-
-class BaseDopplerOperator:
-
-    bash_command_prefix = "astra run doppler"
-    python_callable = estimate_radial_velocity
-
-    
-class DopplerApVisitOperator(BaseDopplerOperator, ApVisitOperator):
-    pass
-
-class DopplerBossSpecOperator(BaseDopplerOperator, BossSpecOperator):
-    pass
-
-class DopplerOperator(BaseDopplerOperator, ApVisitOperator, BossSpecOperator):
-    pass
-
-
-    
