@@ -2,11 +2,11 @@
 from astra.utils import log
 
 from astra.database import (catalogdb, session)
-from astra.operators.base import AstraOperator
+from astra.operators.data import DataProductOperator
 from astra.operators.utils import parse_as_mjd
 
 
-class BossSpecOperator(AstraOperator):
+class BossSpecOperator(DataProductOperator):
     """
     A base operator for working with SDSS BOSS spectrum data products. 
     
@@ -61,6 +61,8 @@ class BossSpecOperator(AstraOperator):
         An iterable that includes dictionaries that fully define a data model product, or a
         callable function that returns an iterable.
     """
+
+    ui_color = "#A0B9D9"
 
     def __init__(
         self,

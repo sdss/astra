@@ -4,10 +4,10 @@ from sqlalchemy import func
 from astra.utils import log
 
 from astra.database import (apogee_drpdb, catalogdb, session)
-from astra.operators.base import AstraOperator
+from astra.operators.data import DataProductOperator
 from astra.operators.utils import (parse_as_mjd, infer_release)
 
-class ApVisitOperator(AstraOperator):
+class ApVisitOperator(DataProductOperator):
     """
     A base operator for working with SDSS ApVisit data products. 
     
@@ -63,9 +63,10 @@ class ApVisitOperator(AstraOperator):
         callable function that returns an iterable.
     """
 
+    ui_color = "#fbd9d3"
+
     def __init__(
         self,
-        *,
         release = None,
         # We want to be able to supply these arguments, but we don't want them stored as parameters
         # in the task instances, so we prefix them with '_'.

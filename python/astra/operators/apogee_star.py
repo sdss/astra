@@ -4,10 +4,10 @@ from sqlalchemy import and_, func
 from astra.utils import log
 
 from astra.database import (apogee_drpdb, catalogdb, session)
-from astra.operators.base import AstraOperator
+from astra.operators.data import DataProductOperator
 from astra.operators.utils import (parse_as_mjd, infer_release)
 
-class ApStarOperator(AstraOperator):
+class ApStarOperator(DataProductOperator):
     """
     A base operator for working with SDSS ApStar data products. 
     
@@ -78,6 +78,8 @@ class ApStarOperator(AstraOperator):
         An iterable that includes dictionaries that fully define a data model product, or a
         callable function that returns an iterable.
     """
+
+    ui_color = "#ffb09c"
 
     def __init__(
         self,
