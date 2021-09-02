@@ -230,7 +230,8 @@ class ApStarOperator(DataProductOperator):
 
         log.debug(f"Preparing query {q}")
         total = q.count()
-        log.debug(f"Retrieved {total} rows")
+        log.debug(f"Retrieved {total} rows between {mjd_start} <= MJD < {mjd_end}")
+
 
         keys = [column.name for column in columns]
 

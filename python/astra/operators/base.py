@@ -5,7 +5,7 @@ from time import sleep, time
 from airflow.exceptions import AirflowException, AirflowSkipException
 from airflow.compat.functools import cached_property
 from airflow.models import BaseOperator
-from airflow.hooks.subprocess import SubprocessHook
+from astra.hooks.subprocess import SubprocessHook
 from airflow.utils.operator_helpers import context_to_airflow_vars
 from datetime import datetime
 from subprocess import CalledProcessError
@@ -141,7 +141,7 @@ class AstraOperator(BaseOperator):
         return pks_path
 
 
-    def execute(self, context):
+    def execute(self, context, directory=None, primary_keys=True, allow_exit_codes=(0, )):
         """
         Execute the operator.
 
@@ -150,21 +150,29 @@ class AstraOperator(BaseOperator):
         """
 
         # Use bash command. Maybe in Slurm.
-        try:
-            bash_command = f"{self.bash_command} {self.path_to_serialized_pks} {self.bash_command_line_arguments}"
-        except:
-            log.exception(f"Cannot construct bash command")
-            raise
+        if primary_keys:    
+            try:
+                bash_command = f"{self.bash_command} {self.path_to_serialized_pks} {self.bash_command_line_arguments}"
+            except:
+                log.exception(f"Cannot construct bash command")
+                raise
         else:
-            log.info(f"Executing bash command:\n{bash_command}")
+            try:
+                bash_command = f"{self.bash_command} {self.bash_command_line_arguments}"
+            except:
+                log.exception(f"Cannot construct bash command")
+                raise
+
+        log.info(f"Executing bash command:\n{bash_command}")
 
         if self.slurm_kwargs:
             self.execute_by_slurm(
                 context,
                 bash_command,
+                directory
             )
         else:
-            # TODO: 
+            # TODO: do something with the directory for directory
             output_encoding = "utf-8"
             skip_exit_code = 99
 
@@ -174,11 +182,12 @@ class AstraOperator(BaseOperator):
             result = self.subprocess_hook.run_command(
                 command=command,
                 env=env,
-                output_encoding=output_encoding
+                output_encoding=output_encoding,
+                cwd=directory
             )
             if skip_exit_code is not None and result.exit_code == skip_exit_code:
                 raise AirflowSkipException(f"Bash command returned exit code {skip_exit_code}. Skipping.")
-            elif result.exit_code != 0:
+            elif result.exit_code not in allow_exit_codes:
                 raise AirflowException(
                     f"Bash command failed. The command returned a non-zero exit code {result.exit_code}."
                 )
@@ -209,6 +218,7 @@ class AstraOperator(BaseOperator):
         self, 
         context, 
         bash_command,
+        directory=None,
         poke_interval=60
     ):
         
@@ -220,6 +230,10 @@ class AstraOperator(BaseOperator):
             # run_id is None if triggered by command line
             uid
         ])
+        if len(label) > 64:
+            log.warning(f"Truncating Slurm label ({label}) to 64 characters: {label[:64]}")
+            label = label[:64]
+
         self._slurm_label = label
 
         # It's bad practice to import here, but the slurm package is
@@ -235,7 +249,7 @@ class AstraOperator(BaseOperator):
 
         log.info(f"Submitting Slurm job {label} with command:\n\t{bash_command}\nAnd Slurm keyword arguments: {slurm_kwargs}")        
         q = queue(verbose=True)
-        q.create(label=label, **slurm_kwargs)
+        q.create(label=label, dir=directory, **slurm_kwargs)
         q.append(bash_command)
         try:
             q.commit(hard=True, submit=True)
@@ -244,10 +258,10 @@ class AstraOperator(BaseOperator):
             raise
 
         log.info(f"Slurm job submitted with {q.key} and keywords {slurm_kwargs}")
-        log.info(f"\tJob directory: {q.job_dir}")
+        log.info(f"\tJob directory: {directory or q.job_dir}")
 
-        stdout_path = os.path.join(q.job_dir, f"{label}_01.o")
-        stderr_path = os.path.join(q.job_dir, f"{label}_01.e")    
+        stdout_path = os.path.join(directory or q.job_dir, f"{label}_01.o")
+        stderr_path = os.path.join(directory or q.job_dir, f"{label}_01.e")    
 
         # Now we wait until the Slurm job is complete.
         t_submitted, t_started = (time(), None)
@@ -286,6 +300,8 @@ class AstraOperator(BaseOperator):
         if "Error" in stderr.rstrip().split("\n")[-1]:
             raise RuntimeError(f"detected exception at task end-point")
 
+        # TODO: Get exit codes from squeue
+        
         return None
         
 

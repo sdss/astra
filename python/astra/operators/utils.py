@@ -35,7 +35,7 @@ def prepare_data(pks):
 
         if instance is None:
             log.warning(f"No task instance found for primary key {pk}")
-            path = spectrum = modified_spectrum = None
+            path = spectrum = None
 
         else:
             release = instance.parameters["release"]
@@ -62,7 +62,12 @@ def prepare_data(pks):
                 # Are there any spectrum callbacks?
                 spectrum_callback = instance.parameters.get("spectrum_callback", None)
                 if spectrum_callback is not None:
-                    spectrum_callback_kwargs = literal_eval(instance.parameters.get("spectrum_callback_kwargs", "{}"))
+                    spectrum_callback_kwargs = instance.parameters.get("spectrum_callback_kwargs", "{}")
+                    try:
+                        spectrum_callback_kwargs = literal_eval(spectrum_callback_kwargs)
+                    except:
+                        log.exception(f"Unable to literally evalute spectrum callback kwargs for {instance}: {spectrum_callback_kwargs}")
+                        raise
 
                     try:
                         mod_name, func_name = spectrum_callback.rsplit('.',1)

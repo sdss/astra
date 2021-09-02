@@ -15,7 +15,7 @@ from time import sleep, time
 from tqdm import tqdm
 
 from astra.utils import log
-from astra.contrib.ferre import utils
+from astra.contrib.ferre import utils, bitmask
 
 # Cross-check
 # /uufs/chpc.utah.edu/common/home/sdss50/dr17/apogee/spectro/aspcap/dr17/synspec/bundle_apo25m/apo25m_003/ferre/elem_K
@@ -35,6 +35,37 @@ class NumpyEncoder(json.JSONEncoder):
         elif isinstance(obj, (np.ndarray,)):
             return obj.tolist()
         return json.JSONEncoder.default(self, obj)
+
+
+def prepare_ferre(directory, input_kwds):
+    json_kwds = dict(indent=2, cls=NumpyEncoder)
+    log.debug(f"Parameters supplied to FERRE:")
+    log.debug(json.dumps((input_kwds["initial_parameters"], input_kwds["frozen_parameters"]), **json_kwds))
+
+    # Parse and validate parameters.
+    wavelength, flux, sigma, mask, names, initial_parameters, kwds, meta = parsed_kwds = utils.parse_ferre_inputs(**input_kwds)
+
+    log.debug(f"Parameters after parsing FERRE:")
+    log.debug(f"Initial parameters: {json.dumps(initial_parameters, **json_kwds)}")
+    log.debug(f"Keywords: {json.dumps(kwds, **json_kwds)}")
+    log.debug(f"Meta: {json.dumps(meta, **json_kwds)}")
+    log.debug(f"Names: {json.dumps(names, **json_kwds)}")
+
+    # Write control file.
+    with open(os.path.join(directory, "input.nml"), "w") as fp:
+        fp.write(utils.format_ferre_control_keywords(kwds))
+
+    # Write data arrays.
+    utils.write_data_file(flux[:, mask], os.path.join(directory, kwds["ffile"]))
+    utils.write_data_file(sigma[:, mask], os.path.join(directory, kwds["erfile"]))
+
+    # Write initial values.
+    with open(os.path.join(directory, kwds["pfile"]), "w") as fp:
+        for name, point in zip(names, initial_parameters):
+            fp.write(utils.format_ferre_input_parameters(*point, name=name))    
+
+    return parsed_kwds
+    
 
 def ferre(
         wavelength,
@@ -62,8 +93,10 @@ def ferre(
         n_threads=32,
         f_access=None,
         f_format=1,
-        ferre_kwds=None,
-        slurm_kwds=None,
+        ferre_kwargs=None,
+        directory=None,
+        clean_up_on_exit=False,
+        raise_exception_on_bad_outputs=False,
         **kwargs
     ):
     """
@@ -234,58 +267,54 @@ def ferre(
         File format of the FERRE grid: 0 (ASCII) or 1 (UNF format, default).
         This corresponds to the FERRE keyword `f_format`.
 
-    :param ferre_kwds: [optional]
+    :param ferre_kwargs: [optional]
         A dictionary of options to apply directly to FERRE, which will over-ride other
         settings supplied here, so use with caution.
     """
+
+    # Create the temporary directory, if necessary.
+    if directory is None:
+        directory = mkdtemp(**kwargs.get("directory_kwds", {}))
+        log.info(f"Created temporary directory {directory}")
+
+    os.makedirs(directory, exist_ok=True)
 
     # Create a dictionary of all input keywords.
     input_kwds = {}
     for arg in getfullargspec(ferre).args:
         input_kwds[arg] = locals()[arg]
 
-    json_kwds = dict(indent=2, cls=NumpyEncoder)
-    log.debug(f"Parameters supplied to FERRE:")
-    log.debug(json.dumps((initial_parameters, frozen_parameters), **json_kwds))
-
-    # Parse and validate parameters.
-    wavelength, flux, sigma, mask, names, initial_parameters, kwds, meta = utils.parse_ferre_inputs(**input_kwds)
-
-    log.debug(f"Parameters after parsing FERRE:")
-    log.debug(f"Initial parameters: {json.dumps(initial_parameters, **json_kwds)}")
-    log.debug(f"Keywords: {json.dumps(kwds, **json_kwds)}")
-    log.debug(f"Meta: {json.dumps(meta, **json_kwds)}")
-    log.debug(f"Names: {json.dumps(names, **json_kwds)}")
-
-    # Create the temporary directory, if necessary.
-    directory = kwargs.get("directory", None)
-    if directory is None:
-        directory = mkdtemp(**kwargs.get("directory_kwds", {}))
-        log.info(f"Created temporary directory {directory}")
-    
-    log.info(f"Running FERRE in {directory}")
-
-    # Write control file.
-    with open(os.path.join(directory, "input.nml"), "w") as fp:
-        fp.write(utils.format_ferre_control_keywords(kwds))
-
-    # Write data arrays.
-    utils.write_data_file(flux[:, mask], os.path.join(directory, kwds["ffile"]))
-    utils.write_data_file(sigma[:, mask], os.path.join(directory, kwds["erfile"]))
-
-    # Write initial values.
-    with open(os.path.join(directory, kwds["pfile"]), "w") as fp:
-        for name, point in zip(names, initial_parameters):
-            fp.write(utils.format_ferre_input_parameters(*point, name=name))
+    wavelength, flux, sigma, mask, names, initial_parameters, kwds, meta = prepare_ferre(directory, input_kwds)
 
     execute_args = (directory, len(flux), kwds["offile"])
+    
     if slurm_kwds:
         stdout, stderr = _execute_ferre_by_slurm(*execute_args, **slurm_kwds)
     else:
         stdout, stderr = _execute_ferre_by_subprocess(*execute_args)
 
+    return parse_ferre_outputs(
+        directory, 
+        header_path,
+        wavelength,
+        flux,
+        sigma,
+        mask,
+        names,
+        initial_parameters,
+        kwds,
+        meta,
+        clean_up_on_exit=clean_up_on_exit,
+        raise_exception_on_bad_outputs=raise_exception_on_bad_outputs
+    )
+
+
+def parse_ferre_outputs(directory, header_path, wavelength, flux, sigma, mask, names, initial_parameters, kwds, meta,
+    clean_up_on_exit=False,
+    raise_exception_on_bad_outputs=False):
+
     # Get processing times.
-    processing_times = utils.get_processing_times(stdout, kwds["nthreads"])
+    #processing_times = utils.get_processing_times(stdout, kwds["nthreads"])
 
     # Parse parameter outputs and uncertainties.
     try:
@@ -297,7 +326,7 @@ def ferre(
     except:
         log.exception(f"Failed to load FERRE output parameter file at {os.path.join(directory, kwds['opfile'])}")
         raise
-        
+    
     # Parse flux outputs.
     try:
         model_flux = np.nan * np.ones_like(flux)
@@ -322,10 +351,35 @@ def ferre(
         normalized_model_flux=model_flux,
         continuum=continuum
     )
+    
+    # Flag things.
+    P, L = param.shape
 
-    # Include processing times.
+    param_bitmask = bitmask.ParamBitMask()
+    bitmask_flag = np.zeros((P, L), dtype=np.int64)
+    
+    grid_headers, *segment_headers = utils.read_ferre_headers(utils.expand_path(header_path))
+    bad_lower = (grid_headers["LLIMITS"] + grid_headers["STEPS"]/8)
+    bad_upper = (grid_headers["ULIMITS"] - grid_headers["STEPS"]/8)
+    bitmask_flag[(param < bad_lower) | (param > bad_upper)] |= param_bitmask.get_value("GRIDEDGE_BAD")
+
+    warn_lower = (grid_headers["LLIMITS"] + grid_headers["STEPS"])
+    warn_upper = (grid_headers["ULIMITS"] - grid_headers["STEPS"])
+    bitmask_flag[(param < warn_lower) | (param > warn_upper)] |= param_bitmask.get_value("GRIDEDGE_WARN")
+
+    bitmask_flag[(param == -999) | (param_err < -0.01)] |= param_bitmask.get_value("FERRE_FAIL")
+
+    # Check for any erroneous outputs
+    if raise_exception_on_bad_outputs and np.any(bitmask_flag & param_bitmask.get_value("FERRE_FAIL")):
+        v = bitmask_flag & param_bitmask.get_value("FERRE_FAIL")
+        idx = np.where(np.any(bitmask_flag & param_bitmask.get_value("FERRE_FAIL"), axis=1))
+        
+        raise ValueError(f"FERRE returned all erroneous values for an entry: {idx} {v}")
+
+    # Include processing times and bitmask etc.
     meta.update(
-        processing_times=processing_times,
+        bitmask_flag=bitmask_flag.tolist(), # .tolist() for postgresql encoding.
+        #processing_times=processing_times,
         **output_meta
     )
 
@@ -335,48 +389,34 @@ def ferre(
     print(f"param: {param}")
     print(f"param_err: {param_err}")
     print(f"meta: {meta}")
+    print(f"bitmask_flag: {bitmask_flag}")
 
     # Parse elapsed time.
     
-    print(f"times {processing_times}")
+    #print(f"times {processing_times}")
 
-    # Parse flux outputs.
-
-    # Send back some relevant information about control.
-    relevant_keys = (
-        "interpolation_order", "input_weights_path", "input_lsf_shape_path", "lsf_shape_flag", "error_algorithm_flag", 
-        "wavelength_interpolation_flag", "optimization_algorithm_flag", "continuum_flag", "continuum_order",
-        "continuum_segment", "continuum_reject", "continuum_observations_flag", "full_covariance", "pca_project",
-        "pca_chi", "f_access", "f_format", "ferre_kwds"
-    )
-    ferre_control_parameters = {}
-    for key in relevant_keys:
-        ferre_control_parameters[key] = locals()[key]
-    
-    # The initial parameters are already in the task instance (before we got to this function),
-    # and the frozen parameters are stored in the FERRE output table, but for the sake of
-    # putting everything in the one place so it is not looked over, we are going to repeat
-    # the frozen parameters here too.
-    ferre_control_parameters.update({f"frozen_{pn}": v for pn, v in meta["frozen_parameters"].items()})
-
-    meta.update(ferre_control_parameters=ferre_control_parameters)
-    
-    log.info(f"Removing directory {directory} and its contents")
-    rmtree(directory)
+    if clean_up_on_exit:
+        log.info(f"Removing directory {directory} and its contents")
+        rmtree(directory)
+    else:
+        log.info(f"Leaving directory {directory} and its contents as clean_up_on_exit = {clean_up_on_exit}")
 
     return (param, param_err, meta)
+
 
 
 _ferre_executable = "ferre.x"
 # TODO: notti
 _ferre_executable = "/uufs/chpc.utah.edu/common/home/sdss09/software/apogee/Linux/apogee/trunk/bin/ferre.x"
 
+
+
 def _check_ferre_progress(output_flux_path):
     if os.path.exists(output_flux_path):
         return utils.line_count(output_flux_path)
     return 0
 
-def _monitor_ferre_progress(process, total, output_flux_path):
+def _monitor_ferre_progress(process, total, output_flux_path, interval=30):
     stdout, stderr = ("", "")
 
     total_done, total_errors = (0, 0)

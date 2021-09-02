@@ -4,14 +4,33 @@ import os
 import numpy as np
 import re
 import subprocess
+import warnings
 
 from collections import OrderedDict
 from inspect import getfullargspec
 
 
-from astra.utils import log
+from astra.utils import log, get_base_output_path
 
 expand_path = lambda path: os.path.expandvars(os.path.expanduser(path))
+
+_base_output_path = get_base_output_path()
+def output_data_product_path(pk, **kwargs):
+    """
+    Temporary function to return an output data product path, until we have a data model
+    for intermediate ASPCAP data products.
+    """
+    # Using warnings.warn here so this does not appear \infinity times in a loop
+    warnings.warn(f"Using temporary function to return output data product path. This will be deprecated.")
+
+    return os.path.join(
+        _base_output_path,
+        "ferre",
+        "by_task_primary_key",
+        f"{pk / 10_000:.0f}",
+        f"{pk}.pkl"
+    )
+
 
 
 
@@ -187,8 +206,8 @@ def _parse_continuum_args(
     return kwds
 
 
-def _parse_ferre_kwds(ferre_kwds, **kwargs):
-    return (ferre_kwds or dict())
+def _parse_ferre_kwargs(ferre_kwargs, **kwargs):
+    return (ferre_kwargs or dict())
 
 
 def _parse_wavelength_and_flux_and_sigma(
@@ -381,7 +400,7 @@ def _parse_names_and_initial_and_frozen_parameters(
             log.info(f"Clipping initial parameters to boundary edges (use clip_initial_parameters_to_boundary_edges=False to raise exception instead)")
 
             clip = clip_epsilon_percent * (upper_limit - lower_limit)/100.
-            parsed_initial_parameters = np.round(np.clip(parsed_initial_parameters, lower_limit + clip, upper_limit - clip), 2)
+            parsed_initial_parameters = np.round(np.clip(parsed_initial_parameters, lower_limit + clip, upper_limit - clip), 3)
         else:
             raise
         
@@ -397,7 +416,7 @@ def _get_grid_limits(headers):
     """
     return (
         headers["LLIMITS"],
-        headers["LLIMITS"] + headers["STEPS"] * headers["N_P"]
+        headers["LLIMITS"] + headers["STEPS"] * (headers["N_P"] - 1)
     )
 
 
@@ -415,7 +434,7 @@ def _check_initial_parameters_within_grid_limits(initial_parameters, lower_limit
         If any initial parameter is outside the grid boundary.
     """
 
-    in_limits = (upper_limit >= initial_parameters) * (initial_parameters >= lower_limit)
+    in_limits = (upper_limit > initial_parameters) * (initial_parameters > lower_limit)
 
     if not np.all(in_limits):
 
@@ -478,7 +497,7 @@ def parse_ferre_inputs(**kwargs):
         _parse_f_access,
         _parse_f_format,
         _parse_continuum_args,
-        _parse_ferre_kwds,
+        _parse_ferre_kwargs,
     )
 
     for parser in parsers:
@@ -492,27 +511,6 @@ def parse_ferre_inputs(**kwargs):
         initial_parameters=initial_parameters
     )
     return (wavelength, flux, sigma, mask, names, initial_parameters, parsed_kwds, meta)
-
-    
-
-def non_blocking_pipe_read(stream, queue):
-    """ 
-    A non-blocking and non-destructive stream reader for long-running interactive jobs. 
-    
-    :param stream:
-        The stream to read (e.g., process.stderr).
-    
-    :param queue:
-        The multiprocessing queue to put the output from the stream to.        
-    """
-
-    thread = threading.currentThread()
-    while getattr(thread, "needed", True):
-        f = stream.readline()
-        queue.put(f)
-
-    return None
-
 
 sanitise_parameter_name = lambda pn: pn.lower().strip().replace(" ", "_")
 desanitise_parameter_name = lambda pn: pn.upper().replace("_", " ")
@@ -556,8 +554,6 @@ def safe_read_header(headers, keys):
         raise KeyError(f"no header keyword found among {keys}")
 
         
-
-
 def read_ferre_header(fp):
     """ 
     Read a FERRE library header into a dictionary.
@@ -606,7 +602,7 @@ def read_ferre_header(fp):
                 header[key] = value
 
     # Put in upper grid limits as a 'value-added' header.
-    header["ULIMITS"] = header["LLIMITS"] + header["STEPS"] * header["N_P"]
+    header["ULIMITS"] = header["LLIMITS"] + header["STEPS"] * (header["N_P"] - 1)
 
     return header
 
@@ -666,159 +662,6 @@ def get_grid_boundaries(ferre_grid_header_files, **kwargs):
     return boundaries
     
 
-def parse_grid_information(header_paths):
-    """
-    Parse the parameter limits of a pre-computed grid (e.g., in effective temperature) from grid header paths provided,
-    and other possibly relevant information (e.g., telescope of the LSF model).
-
-    :param header_paths:
-        A list of paths that store information about pre-computed grids.
-    
-    :returns:
-        A dictionary with paths as keys, and the value of the dictionary is a three-length tuple containing (1) metadata, (2) lower limits in parameters, (2) upper limits in parameters.
-    """
-
-    grids = {}
-    for header_path in header_paths:
-        
-        full_header_path = os.path.expandvars(header_path)
-
-        try:
-            headers = read_ferre_headers(full_header_path)
-            meta = parse_header_path(full_header_path)
-
-        except:
-            raise
-    
-        else:
-            # Get grid limits.
-            grids[header_path] = (meta, list(headers[0]["LLIMITS"]), list(headers[0]["ULIMITS"]))
-
-    return grids
-        
-
-
-def yield_suitable_grids(grid_info, mean_fiber, teff, logg, metals, telescope, **kwargs):
-    """
-    Yield suitable FERRE grids given header information from an observation and a dictionary of grid limits.
-    
-    :param grid_info:
-        A dictionary containing header paths as keys, and a three-length tuple as values: (1) metadata, (2) lower limits, (3) upper limits.
-        This is the expected output from `parse_grid_information`.
-    
-    :param mean_fiber:
-        The mean fiber number of observations.
-    
-    :param teff:
-        An initial guess of the effective temperature.
-    
-    :param logg:
-        An initial guess of the surface gravity.
-    
-    :param metals:
-        An initial guess of the metallicity.
-    
-    :returns:
-        A generator that yields two-length tuples containing header path, and metadata..
-    """
-
-    # Figure out which grids are suitable.
-    lsf_grid = get_lsf_grid_name(int(np.round(mean_fiber)))
-
-    point = np.array([metals, logg, teff])
-    P = point.size
-    
-    for header_path, (meta, lower_limits, upper_limits) in grid_info.items():
-
-        #print(meta["lsf"], lsf_grid, telescope, meta["lsf_telescope_model"], header_path)
-        # Match star to LSF fiber number model (a, b, c, d) and telescope model (apo25m/lco25m).
-        # TODO: This is a very APOGEE-specific thing and perhaps should be moved elsewhere.
-        if meta["lsf"] != lsf_grid or telescope != meta["lsf_telescope_model"]:
-            continue
-
-        # We will take the RV parameters as the initial parameters. 
-        # Check to see if they are within bounds of the grid.
-        if np.all(point >= lower_limits[-P:]) and np.all(point <= upper_limits[-P:]):
-            yield (header_path, meta)
-
-
-def get_lsf_grid_name(fibre_number):
-    """
-    Return the appropriate LSF name (a, b, c, or d) to use, given a mean fiber number.
-
-    :param fiber_number:
-        The mean fiber number of observations.
-    
-    :returns:
-        A one-length string describing which LSF grid to use ('a', 'b', 'c', or 'd').
-    """
-    if 50 >= fibre_number >= 1:
-        return "d"
-    if 145 >= fibre_number > 50:
-        return "c"
-    if 245 >= fibre_number > 145:
-        return "b"
-    if 300 >= fibre_number > 245:
-        return "a"
-
-
-def parse_header_path(header_path):
-    """
-    Parse the path of a header file and return a dictionary of relevant parameters.
-
-    :param header_path:
-        The path of a grid header file.
-    
-    :returns:
-        A dictionary of keywords that are relevant to running FERRE tasks.
-    """
-
-    *_, radiative_transfer_code, model_photospheres, isotopes, folder, basename = header_path.split("/")
-
-    parts = basename.split("_")
-    # p_apst{gd}{spectral_type}_{date}_lsf{lsf}_{aspcap}_012_075
-    _ = 4
-    gd, spectral_type = (parts[1][_], parts[1][_ + 1:])
-    date_str = parts[2]
-    year, month, day = (2000 + int(date_str[:2]), int(date_str[2:4]), int(date_str[4:6]))
-    lsf = parts[3][3]
-    lsf_telescope_model = "lco25m" if parts[3][4:] == "s" else "apo25m"
-
-    is_giant_grid = gd == "g"
-    
-    kwds = dict(
-        radiative_transfer_code=radiative_transfer_code,
-        model_photospheres=model_photospheres,
-        isotopes=isotopes,
-        gd=gd,
-        lsf_telescope_model=lsf_telescope_model,
-        spectral_type=spectral_type,
-        grid_creation_date=datetime.date(year, month, day),
-        lsf=lsf,
-    )
-    print(f"From: {header_path} parsed {kwds}")
-    return kwds
-
-
-
-def approximate_log10_microturbulence(log_g):
-    """
-    Approximate the log10(microturbulent velocity) given the surface gravity.
-
-    :param log_g:
-        The surface gravity.
-    
-    :returns:
-        The log base-10 of the microturbulent velocity, vt: log_10(vt).
-    """
-
-    coeffs = np.array([0.372160, -0.090531, -0.000802, 0.001263, -0.027321])
-    # I checked with Holtz on this microturbulence relation because last term is not used.
-    DM = np.array([1, log_g, log_g**2, log_g**3, 0])
-    return DM @ coeffs
-
-
-
 def read_output_parameter_file(path, n_dimensions, full_covariance, **kwargs):
     """
     Three more columns follow, giving the fraction of photometric data
@@ -832,8 +675,9 @@ def read_output_parameter_file(path, n_dimensions, full_covariance, **kwargs):
 
     names = np.loadtxt(path, usecols=(0, ), dtype=str)
     
-    N_cols = 2 * n_dimensions
+    N_cols = 2 * n_dimensions + 3
     if full_covariance:
+        raise NotImplementedError("needs testing")
         N_cols += 3 + n_dimensions**2
 
     results = np.atleast_2d(np.loadtxt(path, usecols=1 + np.arange(N_cols)))
@@ -841,10 +685,11 @@ def read_output_parameter_file(path, n_dimensions, full_covariance, **kwargs):
     param = results[:, 0:n_dimensions]
     param_err = results[:, n_dimensions:2*n_dimensions]
 
+    frac_phot_data_points, log_snr_sq, log_chisq_fit = results[:, 2*n_dimensions:2*n_dimensions + 3].T
     meta = dict(
-        frac_phot_data_points=results[:, -3],
-        log_snr_sq=results[:, -2],
-        log_chisq_fit=results[:, -1],
+        frac_phot_data_points=frac_phot_data_points,
+        log_snr_sq=log_snr_sq,
+        log_chisq_fit=log_chisq_fit
     #    cov=cov,
     )
     if full_covariance:
@@ -853,9 +698,6 @@ def read_output_parameter_file(path, n_dimensions, full_covariance, **kwargs):
         meta.update(cov=cov)
 
     return (names, param, param_err, meta)
-
-
-
 
 
 def format_ferre_control_keywords(ferre_kwds):
@@ -926,7 +768,7 @@ def format_ferre_input_parameters(*p, name="dummy"):
     """
     contents = f"{name:40s}"
     for each in p:
-        contents += f"{each:12.3f} "
+        contents += f"{each:12.3f}"
     contents += "\n"
     return contents
 
