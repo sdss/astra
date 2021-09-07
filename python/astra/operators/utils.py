@@ -149,6 +149,10 @@ def healpix(obj, nside=128):
 def infer_release(context):
     """
     Infer the SDSS release to use, if none is given, based on the execution context.
+
+    SDSS-IV APOGEE DR16 observations took place between 2011-08-31 and 2018-08-28.
+    SDSS-IV APOGEE DR17 observations took place between ?????????? and ??????????.
+    SDSS-V APOGEE observations took place from 2020-10-24.
     
     :param context:
         The Airflow context dictionary.
