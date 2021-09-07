@@ -11,7 +11,7 @@ from astra.database import AstraBase, database, session
 
 class Base(AbstractConcreteBase, AstraBase):
     __abstract__ = True
-    _schema = "astra_v02"
+    _schema = "astra"
     _relations = "define_relations"
 
 
