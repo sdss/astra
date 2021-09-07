@@ -15,3 +15,7 @@ class Tester(object):
 
     def test_truth(self):
         assert 1 + 1 == 2
+
+
+def test_foo():
+    assert True
