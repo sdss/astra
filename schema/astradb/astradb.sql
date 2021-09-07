@@ -30,6 +30,7 @@ create table astra.ti (
     task_id text not null,
     run_id text,
     output_pk bigint,
+    astra_version text,
     created timestamp default now(),
     foreign key (output_pk) references astra.output_interface(pk) on delete cascade
 );

@@ -11,6 +11,8 @@ from astra.database import (astradb, apogee_drpdb, catalogdb, session)
 from astra.utils import log, flatten as _flatten
 from airflow.exceptions import AirflowSkipException
 
+from astra import __version__ as astra_version
+
 
 def deserialize_pks(pk, flatten=False):
     """
@@ -739,7 +741,12 @@ def create_task_instance(
     parameter_pks = (pk for pk, created in (get_or_create_parameter_pk(k, v) for k, v in parameters.items()))
     
     # Create task instance.
-    ti = astradb.TaskInstance(dag_id=dag_id, task_id=task_id, run_id=run_id,)
+    ti = astradb.TaskInstance(
+        dag_id=dag_id, 
+        task_id=task_id, 
+        run_id=run_id,
+        astra_version=astra_version
+    )
     with session.begin():
         session.add(ti)
     
