@@ -4,11 +4,15 @@ import pickle
 import sqlalchemy
 import warnings
 
+from luigi.parameter import ListParameter, Parameter, IntParameter
+
 from itertools import cycle
 from tqdm import tqdm
 from astra.tasks import BaseTask
 from astra.tasks.targets import DatabaseTarget, LocalTarget
-from astra.tasks.io import LocalTargetTask, SpecFile
+from astra.database import astradb
+from astra.tasks.io import LocalTargetTask
+from astra.tasks.io.sdss4 import SDSS4SpecFile
 from astra.tools.spectrum import Spectrum1D
 
 from astra.contrib.wd.utils import line_features
@@ -22,9 +26,9 @@ class ClassifyWhiteDwarfMixin(BaseTask):
     Mix-in class for classifying white dwarfs.
     """
 
-    model_path = astra.Parameter()
+    model_path = Parameter()
 
-    wavelength_regions = astra.ListParameter(
+    wavelength_regions = ListParameter(
         default=[
             [3860, 3900], # Balmer line
             [3950, 4000], # Balmer line
@@ -52,8 +56,8 @@ class ClassifyWhiteDwarfMixin(BaseTask):
         ]
     )
 
-    polyfit_order = astra.IntParameter(default=5)
-    polyfit_regions = astra.ListParameter(
+    polyfit_order = IntParameter(default=5)
+    polyfit_regions = ListParameter(
         default=[
             [3850, 3870],
             [4220, 4245],
@@ -64,18 +68,10 @@ class ClassifyWhiteDwarfMixin(BaseTask):
     )
 
 
-class WDClassification(DatabaseTarget):
-    
-    """ A target database row for a WD classification result. """
-
-    wd_class = sqlalchemy.Column("wd_class", sqlalchemy.String(2))
-    flag = sqlalchemy.Column("flag", sqlalchemy.Boolean())
-    
-
-class ClassifyWhiteDwarfGivenSpecFile(ClassifyWhiteDwarfMixin, SpecFile):
+class ClassifyWhiteDwarfGivenSDSS4SpecFile(ClassifyWhiteDwarfMixin, SDSS4SpecFile):
 
     """
-    Classify a white dwarf given a BOSS SpecFile.
+    Classify a white dwarf given a SDSS4 BOSS SpecFile.
 
     :param model_path:
         The path to a file where the model is stored.
@@ -96,7 +92,7 @@ class ClassifyWhiteDwarfGivenSpecFile(ClassifyWhiteDwarfMixin, SpecFile):
         """ The requirements for this task. """
         requirements = dict(model=LocalTargetTask(path=self.model_path))
         if not self.is_batch_mode:
-            requirements.update(observation=SpecFile(**self.get_common_param_kwargs(SpecFile)))
+            requirements.update(observation=self.clone(SDSS4SpecFile))
         return requirements
 
 
@@ -145,5 +141,5 @@ class ClassifyWhiteDwarfGivenSpecFile(ClassifyWhiteDwarfMixin, SpecFile):
         if self.is_batch_mode:
             return [task.output() for task in self.get_batch_tasks()]
         
-        return dict(database=WDClassification(self))
+        return dict(database=DatabaseTarget(astradb.WDClassification, self))
     

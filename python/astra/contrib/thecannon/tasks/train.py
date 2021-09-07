@@ -2,6 +2,7 @@
 import os
 import numpy as np
 import astra
+from luigi.parameter import Parameter, FloatParameter, IntParameter, BoolParameter, TaskParameter
 from astropy.table import Table
 from astra.tasks.base import BaseTask
 from astra.tasks.targets import LocalTarget
@@ -34,9 +35,9 @@ class TrainTheCannonBase(TheCannonMixin):
         A boolean flag to indicate whether to produce post-training quality plots.
     """
 
-    regularization = astra.FloatParameter(default=0.0)
-    threads = astra.IntParameter(default=1, significant=False)
-    plot = astra.BoolParameter(default=True, significant=False)
+    regularization = FloatParameter(default=0.0)
+    threads = IntParameter(default=1, significant=False)
+    plot = BoolParameter(default=True, significant=False)
 
     def run(self):
         """ Execute this task. """
@@ -118,7 +119,7 @@ class TrainingSetTarget(BaseTask):
         - `label_names`: a tuple of length `L` that describes the names of the labels
     """
 
-    training_set_path = astra.Parameter()
+    training_set_path = Parameter()
 
     def output(self):
         return LocalTarget(self.training_set_path)
@@ -150,7 +151,7 @@ class TrainTheCannonGivenTrainingSetTarget(TrainTheCannonBase):
         Produce quality assurance figures after training (default: True).
     """
 
-    training_set_path = astra.Parameter(
+    training_set_path = Parameter(
         config_path=dict(section="TheCannon", name="training_set_path")
     )
 
@@ -164,7 +165,7 @@ class TrainTheCannonGivenTrainingSetTask(TrainTheCannonBase):
     A general task to train The Cannon, given some task that would create the training set.
     """
 
-    create_training_set_task = astra.TaskParameter()
+    create_training_set_task = TaskParameter()
 
     def requires(self):
         """ The requirements of this task. """
