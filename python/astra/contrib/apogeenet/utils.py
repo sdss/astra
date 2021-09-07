@@ -92,7 +92,13 @@ def get_metadata(spectrum):
         APOGEENet model.
     """
     keys = ("PLX", "GMAG", "BPMAG", "RPMAG", "JMAG", "HMAG", "KMAG")
-    metadata = [spectrum.meta["header"][k] for k in keys]
+    metadata = []
+    for key in keys:
+        try:
+            metadata.append(spectrum.meta["header"][key])
+        except KeyError:
+            metadata.append(np.nan)
+    
     metadata = np.array([(value if value != "NaN" else np.nan) for value in metadata])
     mdata_replacements = np.array([-84.82700,21.40844,24.53892,20.26276,18.43900,24.00000,17.02500])
     mdata_stddevs = np.array([14.572430555504504,2.2762944923233883,2.8342029214199704,2.136884367623457,
