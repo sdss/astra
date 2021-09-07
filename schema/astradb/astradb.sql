@@ -2,10 +2,9 @@ create schema astra;
 
 set search_path to astra;
 
-drop table if exists astra.task cascade;
+drop table if exists astra.ti cascade;
 drop table if exists astra.parameter cascade;
-drop table if exists astra.task_parameter  cascade;
-drop table if exists astra.batch_interface cascade;
+drop table if exists astra.ti_parameter cascade;
 drop table if exists astra.output_interface cascade;
 
 /* Contributed methods */
@@ -23,25 +22,24 @@ create table astra.output_interface (
     pk serial primary key
 );
 
-/* Create the primary task table */
-create table astra.task (
+
+/* Create the primary task instance table */
+create table astra.ti (
     pk serial primary key,
-    task_module text not null,
+    dag_id text,
     task_id text not null,
-    status_code int default 0,
+    run_id text,
     output_pk bigint,
-    duration real,
     created timestamp default now(),
-    modified timestamp default now(),
     foreign key (output_pk) references astra.output_interface(pk) on delete cascade
 );
-create unique index on astra.task (task_module, task_id);
 
 /* Create tables for contributed methods */
 
 /* Doppler */
 create table astra.doppler (
     output_pk int primary key,
+    ti_pk bigint,
     vhelio real[],
     vrel real[],
     u_vrel real, /* Same as `vrelerr`, changed to be consistent with other astra tables */
@@ -59,6 +57,7 @@ create table astra.doppler (
 /* APOGEENet */
 create table astra.apogeenet (
     output_pk int primary key,
+    ti_pk bigint,
     snr real[],
     teff real[],
     u_teff real[],
@@ -66,6 +65,9 @@ create table astra.apogeenet (
     u_logg real[],
     fe_h real[],
     u_fe_h real[],
+    _teff_median real[],
+    _logg_median real[],
+    _fe_h_median real[],
     bitmask_flag int[],
     foreign key (output_pk) references astra.output_interface(pk) on delete restrict
 );
@@ -73,6 +75,7 @@ create table astra.apogeenet (
 /* FERRE */
 create table astra.ferre (
     output_pk int primary key,
+    ti_pk bigint,
     snr real[],
     frozen_teff boolean,
     frozen_logg boolean,
@@ -108,13 +111,15 @@ create table astra.ferre (
     u_n real[],
     log_chisq_fit real[],
     log_snr_sq real[],
-    bitmask_flag int[],
+    bitmask_flag int[][], /* Allow param-level arrays for multiple results per task */
     foreign key (output_pk) references astra.output_interface(pk) on delete restrict
 );
 
 /* ASPCAP (final results from many FERRE executions) */
 create table astra.aspcap (
     output_pk int primary key,
+    ti_pk bigint,
+    associated_ti_pks bigint[],
     snr real[],
     teff real[],
     u_teff real[],
@@ -128,10 +133,10 @@ create table astra.aspcap (
     u_o_mg_si_s_ca_ti real[],
     lgvsini real[],
     u_lgvsini real[],
-    c_h real[],
-    u_c_h real[],
-    n_h real[],
-    u_n_h real[],
+    c real[],
+    u_c real[],
+    n real[],
+    u_n real[],
     cn_h real[],
     u_cn_h real[],
     al_h real[],
@@ -148,6 +153,8 @@ create table astra.aspcap (
     u_cu_h real[],
     fe_h real[],
     u_fe_h real[],
+    k_h real[],
+    u_k_h real[],
     mg_h real[],
     u_mg_h real[],
     mn_h real[],
@@ -184,6 +191,7 @@ NOTE: If the label names ever change between models of The Cannon, then we will 
 */
 create table astra.thecannon (
     output_pk int primary key,
+    ti_pk bigint,
     teff real,
     foreign key (output_pk) references astra.output_interface(pk) on delete restrict
 );
@@ -196,6 +204,7 @@ NOTE: If the label names ever change between models of The Payne, then we will e
 */
 create table astra.thepayne (
     output_pk int primary key,
+    ti_pk bigint,
     snr real[],
     teff real[],
     u_teff real[],
@@ -251,22 +260,61 @@ create table astra.thepayne (
     foreign key (output_pk) references astra.output_interface(pk) on delete restrict
 );
 
-/* Classifiers */
+create table astra.thepayne_che (
+    output_pk int primary key,
+    ti_pk bigint,
+    snr real[],
+    teff real[],
+    u_teff real[],
+    logg real[],
+    u_logg real[],
+    vsini real[],
+    u_vsini real[],
+    v_micro real[],
+    u_v_micro real[],
+    m_h real[],
+    u_m_h real[],
+    v_rad real[],
+    u_v_rad real[],
+    theta real[][], /* Chebyshev polynomial coefficients */
+    chi2 real[],
+    foreign key (output_pk) references astra.output_interface(pk) on delete restrict
+);
+
+
+/* 
+Classifiers 
+
+The column names here should refer to real astrophysical classes. If a classifier only has
+the ability to discriminate between classes A, B, D, but not class C, then it will only report
+values for A, B, D.
+*/
 create table astra.classification (
     output_pk int primary key,
-    log_prob real[],
-    prob real[],
+    ti_pk bigint,
+    p_cv real[],
+    lp_cv real[],
+    p_fgkm real[],
+    lp_fgkm real[],
+    p_hotstar real[],
+    lp_hotstar real[],
+    p_wd real[],
+    lp_wd real[],
+    p_sb2 real[],
+    lp_sb2 real[],
+    p_yso real[],
+    lp_yso real[],
     foreign key (output_pk) references astra.output_interface(pk) on delete restrict
 );
 
 /* Classifiers specifically for white dwarfs */
 create table astra.wd_classification (
     output_pk int primary key,
+    ti_pk bigint,
     wd_class char(2),
     flag boolean,
     foreign key (output_pk) references astra.output_interface(pk) on delete restrict
 );
-
 
 /* Create the parameter table */
 create table astra.parameter (
@@ -277,21 +325,12 @@ create table astra.parameter (
 create unique index unique_parameter on astra.parameter (parameter_name, parameter_value);
 
 /* Create the junction table between tasks and parameters */
-create table astra.task_parameter (
+create table astra.ti_parameter (
     pk serial primary key,
-    task_pk bigint,
-    parameter_pk bigint,
+    ti_pk bigint not null,
+    parameter_pk bigint not null,
     foreign key (parameter_pk) references astra.parameter(pk) on delete restrict,
-    foreign key (task_pk) references astra.task(pk) on delete restrict
+    foreign key (ti_pk) references astra.ti(pk) on delete restrict
 );
-create unique index task_parameter_ref on astra.task_parameter (task_pk, parameter_pk);
+create unique index ti_parameter_ref on astra.ti_parameter (ti_pk, parameter_pk);
 
-/* Create the interface for batched tasks */
-create table astra.batch_interface (
-    pk serial primary key,
-    parent_task_pk bigint not null,
-    child_task_pk bigint not null,
-    foreign key (child_task_pk) references astra.task(pk) on delete restrict,
-    foreign key (parent_task_pk) references astra.task(pk) on delete restrict
-);
-create unique index on astra.batch_interface (parent_task_pk, child_task_pk);
