@@ -53,3 +53,30 @@ def median(spectrum, axis=1, slice_args=None, shape=None, **kwargs):
 
     return spectrum
 
+
+def mean(spectrum, axis=1, slice_args=None, shape=None, **kwargs):
+    """
+    Rectify a spectrum by dividing through the mean of (finite) flux values.
+
+    :param spectrum:
+        The spectrum to rectify.
+
+    :param axis: [optional]
+        The axis to take the median across (default: 1).
+    
+    :param slice_args: [optional]
+        Slice the spectrum given these arguments.
+    
+    :param shape: [optional]
+        Re-shape the spectrum.
+    """
+
+    continuum = np.nanmean(spectrum.flux.value, axis=axis).reshape((-1, 1))
+
+    spectrum._data /= continuum
+    spectrum._uncertainty.array *= continuum**2
+    
+    if slice_args is not None or shape is not None:
+        spectrum = slice_and_shape(spectrum, slice_args, shape, **kwargs)
+
+    return spectrum

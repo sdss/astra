@@ -112,6 +112,9 @@ class WDClassification(Base, OutputMixin):
     __tablename__ = "wd_classification"
 
 
+class ThePayneChe(Base, OutputMixin):
+    __tablename__ = "thepayne_che"
+
 def define_relations():    
     
     #Task.batch_interface = relationship("BatchInterface", backref="task", foreign_keys="BatchInterface.parent_task_pk")

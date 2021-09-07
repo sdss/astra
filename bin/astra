@@ -6,6 +6,7 @@ from astra.contrib.apogeenet.cli import apogeenet
 from astra.contrib.classifier.cli import classifier
 from astra.contrib.thepayne.cli import thepayne
 from astra.contrib.doppler.cli import doppler
+from astra.contrib.thepayne_che.cli import thepayne_che
 
 # Common options.
 @click.group()
@@ -34,6 +35,7 @@ run.add_command(apogeenet)
 run.add_command(classifier)
 run.add_command(thepayne)
 run.add_command(doppler)
+run.add_command(thepayne_che)
 
 
 cli.add_command(run)

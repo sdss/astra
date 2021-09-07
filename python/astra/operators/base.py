@@ -133,6 +133,9 @@ class AstraOperator(BaseOperator):
             #       construct a bash command.
             return ""
         
+        if len(self.pks) == 1:
+            return f"{self.pks[0]}"
+        
         pks_path = serialize_pks_to_path(
             self.pks,
             dir=get_scratch_dir()
@@ -176,8 +179,14 @@ class AstraOperator(BaseOperator):
             output_encoding = "utf-8"
             skip_exit_code = 99
 
+            # TODO: HACK for allowing local development and testing
+            if bash_command.startswith("astra "):
+                bash_command = f"/uufs/chpc.utah.edu/common/home/u6020307/.local/bin/astra {bash_command[6:]}"
+
             env = self.get_env(context)
-            command = f"bash -c {bash_command}".split()
+            #command = f"bash -c {bash_command}".split()
+            command = bash_command.split()
+
 
             result = self.subprocess_hook.run_command(
                 command=command,
@@ -193,7 +202,7 @@ class AstraOperator(BaseOperator):
                 )
             
         # Remove the temporary file.
-        if self.path_to_serialized_pks:
+        if len(self.pks) > 1 and self.path_to_serialized_pks:
             try:
                 os.unlink(self.path_to_serialized_pks)
             except:

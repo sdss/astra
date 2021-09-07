@@ -260,6 +260,28 @@ create table astra_v02.thepayne (
     foreign key (output_pk) references astra_v02.output_interface(pk) on delete restrict
 );
 
+create table astra_v02.thepayne_che (
+    output_pk int primary key,
+    ti_pk bigint,
+    snr real[],
+    teff real[],
+    u_teff real[],
+    logg real[],
+    u_logg real[],
+    vsini real[],
+    u_vsini real[],
+    v_micro real[],
+    u_v_micro real[],
+    m_h real[],
+    u_m_h real[],
+    v_rad real[],
+    u_v_rad real[],
+    theta real[][], /* Chebyshev polynomial coefficients */
+    chi2 real[],
+    foreign key (output_pk) references astra_v02.output_interface(pk) on delete restrict
+);
+
+
 /* 
 Classifiers 
 

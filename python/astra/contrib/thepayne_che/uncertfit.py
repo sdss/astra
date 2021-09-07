@@ -1,6 +1,6 @@
 import math
 import numpy as np
-from multiprocessing import Pool
+#from multiprocessing import Pool
 
 from astra.contrib.thepayne_che.common import *
 
@@ -153,8 +153,9 @@ class UncertFit:
 
         work = [(c, np.copy(popt)) for c in new_params]
 
-        with Pool() as pool:
-            Chi2 = pool.map(_run_3_work_unit, work)
+        #with Pool() as pool:
+        #    Chi2 = pool.map(_run_3_work_unit, work)
+        Chi2 = list(map(_run_3_work_unit, work))
 
         Chi2_table = np.array(Chi2)
         uncert = [get_param(pn) for pn in grid_params]

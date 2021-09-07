@@ -43,7 +43,10 @@ def deserialize_pks(pk, flatten=False):
                 contents = json.loads(pk.replace("'", '"'))
             except:
                 raise ValueError(f"Cannot deserialize primary key of type {type(pk)}: {pk}")
-        v = list(map(deserialize_pks, contents))
+        if isinstance(contents, int):
+            v = contents
+        else:
+            v = list(map(deserialize_pks, contents))
     else:
         raise ValueError(f"Cannot deserialize primary key of type {type(pk)}: {pk}")
     
