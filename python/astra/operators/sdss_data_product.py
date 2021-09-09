@@ -5,7 +5,7 @@ from airflow.exceptions import AirflowSkipException
 
 from astra.database.utils import create_task_instance
 from astra.operators.base import AstraOperator
-from astra.operators.utils import prepare_data
+from astra.operators.utils import prepare_data, parse_as_mjd
 from astra.utils import log
 
 class DataProductOperator(AstraOperator):
@@ -61,6 +61,31 @@ class DataProductOperator(AstraOperator):
 
         return common_task_parameters
 
+
+    def query_data_model_identifiers_from_database(self, context):
+        """
+        Query the SDSS database for ApStar data model identifiers.
+
+        :param context:
+            The Airflow DAG execution context.
+        """ 
+        if self.release is not None:
+            releases = [self.release]
+        else:
+            releases = self.infer_releases(context)
+        
+        mjd_start = parse_as_mjd(context["prev_ds"])
+        mjd_end = parse_as_mjd(context["ds"])
+
+        for release in releases:
+            if release.upper() == "DR16":
+                yield from self.query_sdss4_dr16_data_model_identifiers_from_database(mjd_start, mjd_end)
+            elif release.upper() == "SDSS5":
+                yield from self.query_sdss5_data_model_identifiers_from_database(mjd_start, mjd_end)
+            else:
+                log.warning(f"Don't know how to query for data model identifiers for release '{release}'!")
+                continue
+    
 
     def data_model_identifiers(self, context):
         """ 

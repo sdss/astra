@@ -5,7 +5,7 @@ from astra.utils import log
 
 from astra.database import (apogee_drpdb, catalogdb, session)
 from astra.operators.sdss_data_product import DataProductOperator
-from astra.operators.utils import (parse_as_mjd, infer_release)
+from astra.operators.utils import parse_as_mjd
 
 class ApVisitOperator(DataProductOperator):
     """

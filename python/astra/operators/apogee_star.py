@@ -5,7 +5,7 @@ from astra.utils import log
 
 from astra.database import (apogee_drpdb, catalogdb, session)
 from astra.operators.sdss_data_product import DataProductOperator
-from astra.operators.utils import (parse_as_mjd, infer_release)
+from astra.operators.utils import parse_as_mjd
 
 class ApStarOperator(DataProductOperator):
     """
@@ -98,30 +98,8 @@ class ApStarOperator(DataProductOperator):
         self._query_filter_by_kwargs = _query_filter_by_kwargs
         self._skip_sources_with_more_recent_observations = _skip_sources_with_more_recent_observations
     
-    
-    def query_data_model_identifiers_from_database(self, context):
-        """
-        Query the SDSS database for ApVisit data model identifiers.
 
-        :param context:
-            The Airflow DAG execution context.
-        """ 
-        if self.release is not None:
-            releases = [self.release]
-        else:
-            releases = self.infer_releases(context)
-            
-        for release in releases:
-            if release.upper() == "DR16":
-                yield from self.query_sdss4_dr16_data_model_identifiers_from_database(context)
-            elif release.upper() == "SDSS5":
-                yield from self.query_sdss5_data_model_identifiers_from_database(context)
-            else:
-                log.warning(f"Don't know how to query for data model identifiers for release '{release}'!")
-                continue
-    
-
-    def query_sdss4_dr16_data_model_identifiers_from_database(self, context):
+    def query_sdss4_dr16_data_model_identifiers_from_database(self, mjd_start, mjd_end):
         """
         Query the SDSS database for SDSS-IV (DR16) ApStar data model identifiers.
 
@@ -129,11 +107,7 @@ class ApStarOperator(DataProductOperator):
             The Airflow DAG execution context.
         """
 
-        mjd_start = parse_as_mjd(context["prev_ds"])
-        mjd_end = parse_as_mjd(context["ds"])
-
-        release = self.release or infer_release(context)
-        filetype = "apStar"
+        release, filetype = ("DR16", "apStar")
         columns = (
             func.left(catalogdb.SDSSDR16ApogeeStar.file, 2).label("prefix"),
             catalogdb.SDSSDR16ApogeeStar.field,
@@ -185,19 +159,11 @@ class ApStarOperator(DataProductOperator):
             yield { **common, **dict(zip(keys, values)) }
                         
 
-    def query_sdss5_data_model_identifiers_from_database(self, context):
+    def query_sdss5_data_model_identifiers_from_database(self, mjd_start, mjd_end):
         """
         Query the SDSS-V database for ApStar data model identifiers.
-        
-        :param context:
-            The Airflow DAG execution context.
         """
-        # TODO: Raise apstar keyword with Nidever
-        mjd_start = parse_as_mjd(context["prev_ds"])
-        mjd_end = parse_as_mjd(context["ds"])
-
-        release = self.release or infer_release(context)
-        filetype, apstar = ("apStar", "stars")
+        release, filetype, apstar = ("sdss5", "apStar", "stars")
         
         columns = (
             apogee_drpdb.Star.apred_vers.label("apred"), # TODO: Raise with Nidever
