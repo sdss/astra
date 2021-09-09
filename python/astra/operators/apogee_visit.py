@@ -4,7 +4,7 @@ from sqlalchemy import func
 from astra.utils import log
 
 from astra.database import (apogee_drpdb, catalogdb, session)
-from astra.operators.data import DataProductOperator
+from astra.operators.sdss_data_product import DataProductOperator
 from astra.operators.utils import (parse_as_mjd, infer_release)
 
 class ApVisitOperator(DataProductOperator):

@@ -214,12 +214,17 @@ class AstraOperator(BaseOperator):
     def on_kill(self) -> None:
         if self.slurm_kwargs:
             # Cancel the Slurm job.
-            cancel_slurm_job_given_name(self._slurm_label)
+            try:
+                cancel_slurm_job_given_name(self._slurm_label)
+            except AttributeError:
+                log.warning(f"Tried to cancel Slurm job but cannot find the Slurm label!")
+
         else:
             # Kill the subprocess.
             self.subprocess_hook.send_sigterm()
 
-        os.unlink(self.path_to_serialized_pks)
+        if len(self.pks) > 1 and self.path_to_serialized_pks:
+            os.unlink(self.path_to_serialized_pks)
         return None
         
 
@@ -304,9 +309,10 @@ class AstraOperator(BaseOperator):
         with open(stdout_path, "r", newline="\n") as fp:
             stdout = fp.read()
         log.info(f"Contents of {stdout_path}:\n{stdout}")
-        
+
         # TODO: Better parsing for critical errors.
-        if "Error" in stderr.rstrip().split("\n")[-1]:
+        if "Error" in stdout.rstrip().split("\n")[-1] \
+        or "Error" in stderr.rstrip().split("\n")[-1]:
             raise RuntimeError(f"detected exception at task end-point")
 
         # TODO: Get exit codes from squeue

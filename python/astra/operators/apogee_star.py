@@ -4,7 +4,7 @@ from sqlalchemy import and_, func
 from astra.utils import log
 
 from astra.database import (apogee_drpdb, catalogdb, session)
-from astra.operators.data import DataProductOperator
+from astra.operators.sdss_data_product import DataProductOperator
 from astra.operators.utils import (parse_as_mjd, infer_release)
 
 class ApStarOperator(DataProductOperator):
@@ -106,12 +106,20 @@ class ApStarOperator(DataProductOperator):
         :param context:
             The Airflow DAG execution context.
         """ 
-        release = self.release or infer_release(context)
-        if release.lower() in ("dr16", ):
-            yield from self.query_sdss4_dr16_data_model_identifiers_from_database(context)
+        if self.release is not None:
+            releases = [self.release]
         else:
-            yield from self.query_sdss5_data_model_identifiers_from_database(context)
+            releases = self.infer_releases(context)
             
+        for release in releases:
+            if release.upper() == "DR16":
+                yield from self.query_sdss4_dr16_data_model_identifiers_from_database(context)
+            elif release.upper() == "SDSS5":
+                yield from self.query_sdss5_data_model_identifiers_from_database(context)
+            else:
+                log.warning(f"Don't know how to query for data model identifiers for release '{release}'!")
+                continue
+    
 
     def query_sdss4_dr16_data_model_identifiers_from_database(self, context):
         """
