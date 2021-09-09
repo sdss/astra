@@ -1,12 +1,7 @@
 import click
 import os
 import logging
-
-from astra.contrib.apogeenet.cli import apogeenet
-from astra.contrib.classifier.cli import classifier
-from astra.contrib.thepayne.cli import thepayne
-from astra.contrib.doppler.cli import doppler
-from astra.contrib.thepayne_che.cli import thepayne_che
+import sys
 
 # Common options.
 @click.group()
@@ -29,17 +24,78 @@ def cli(context, verbose):
 @click.pass_context
 def run(context):
     pass
+
+
+class FlexiblePrimaryKeyInput(click.Argument):
+
+    def __init__(self, *args, **kwargs):
+        kwargs['nargs'] = -1
+        kwargs['type'] = click.File('r')
+        super().__init__(*args, **kwargs)
+
+    def full_process_value(self, ctx, value):
+        """
+        Parse the input primary key as either being a set of integers, an input filename that
+        contains integers (either as space-separated values, or a JSON-formatted tuple), or
+        from stdin.
+        """
+
+        try:
+            result = tuple(map(int, value))
+            assert len(value) > 0
+        except:
+            # Process as filename.
+            fps = super().process_value(ctx, value or ('-', ))
+            content = fps[0].read()
+
+            try:
+                result = tuple(map(int, content.split()))
+            except:
+                # Try as JSON.
+                import json
+                try:
+                    result = tuple(json.loads(content))
+                except:
+                    raise TypeError("Cannot parse input primary key file")
+
+        return result
+
+
+@click.command(context_settings=dict(ignore_unknown_options=True))
+@click.argument("primary_keys", cls=FlexiblePrimaryKeyInput)
+@click.pass_context
+def execute(context, primary_keys, **kwargs):
+    """
+    Execute a set of task instances.
+    """
+
+    # We're going to assume that they all have the same python_callable!
+    from astra.database import (astradb, session)
+    from astra.operators.utils import string_to_callable
+
+    instance = session.query(astradb.TaskInstance)\
+                      .filter(astradb.TaskInstance.pk == primary_keys[0])\
+                      .one_or_none()
+    if instance is None:
+        raise ValueError(f"Cannot find instance matching primary key {primary_keys[0]}")
     
-# TODO: Figure out how to do lazy-loading of these things.
-run.add_command(apogeenet)
-run.add_command(classifier)
-run.add_command(thepayne)
-run.add_command(doppler)
-run.add_command(thepayne_che)
+    python_callable = instance.parameters.get("python_callable", None)
+    if python_callable is None:
+        raise ValueError(f"No python_callable for instance {instance}")
+    
+    function = string_to_callable(python_callable)
+    
+    if "op_kwargs" in instance.parameters:
+        raise NotImplementedError("Andy needs to do this")
+    
+    result = function(primary_keys)
+
+    print(f"Result from {function} was: {result}")
+    
+    return None
 
 
-cli.add_command(run)
-
+cli.add_command(execute)
 
 if __name__ == "__main__":
     cli(obj=dict())

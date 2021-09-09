@@ -1,4 +1,5 @@
 import inspect
+import importlib
 import os
 import uuid
 from time import sleep, time
@@ -13,6 +14,9 @@ from subprocess import CalledProcessError
 from astra.database.utils import (create_task_instance, serialize_pks_to_path)
 from astra.utils import log, get_scratch_dir
 from astra.utils.slurm import cancel_slurm_job_given_name
+
+from astra.operators.utils import (string_to_callable, callable_to_string)
+
 
 class AstraOperator(BaseOperator):
     """
@@ -54,13 +58,17 @@ class AstraOperator(BaseOperator):
     """
 
     ui_color = "#CCCCCC"
-    template_fields = ("bash_command_kwargs", )
-    template_fields_renderers = {"bash_command_kwargs": "py"}
+    template_fields = ("parameters", "op_kwargs", )
+    template_fields_renderers = {
+        "parameters": "py",
+        "op_kwargs": "py",
+    }
 
     def __init__(
         self,
-        bash_command=None,
-        bash_command_kwargs=None,
+        parameters=None,
+        python_callable=None,
+        op_kwargs=None,
         spectrum_callback=None,
         spectrum_callback_kwargs=None,
         slurm_kwargs=None,
@@ -68,11 +76,12 @@ class AstraOperator(BaseOperator):
         **kwargs
     ):
         super(AstraOperator, self).__init__(**kwargs)
-        self.bash_command = bash_command
-        self.bash_command_kwargs = bash_command_kwargs
+        self.parameters = parameters
+        self.python_callable = python_callable
+        self.op_kwargs = op_kwargs
         self.spectrum_callback = spectrum_callback
-        self.spectrum_callback_kwargs = spectrum_callback_kwargs
-        self.slurm_kwargs = slurm_kwargs
+        self.spectrum_callback_kwargs = spectrum_callback_kwargs 
+        self.slurm_kwargs = slurm_kwargs 
         self._data_model_identifiers = _data_model_identifiers
 
 
@@ -84,67 +93,20 @@ class AstraOperator(BaseOperator):
             The Airflow context dictionary.
         """
 
-        if self.bash_command is None:
-            raise RuntimeError("No bash_command specified")
-
+        if self.python_callable is None:
+            raise RuntimeError("No python_callable specified")
+        
         args = (context["dag"].dag_id, context["task"].task_id, context["run_id"])
 
-        parameters = dict(
-            bash_command=self.bash_command,
-            bash_command_kwargs=self.bash_command_kwargs
-        )
+        # Get a string representation of the python callable to store in the database.
+        parameters = dict(python_callable=callable_to_string(self.python_callable))
+        parameters.update(self.parameters)
         instance = create_task_instance(*args, parameters)
         self.pks = instance.pk
         return None
 
 
-    @property
-    def bash_command_line_arguments(self):
-        """
-        Return the parameters supplied to this task as a string of command line arguments.
-        """
-
-        cla = []
-        for key, value in (self.bash_command_kwargs or dict()).items():
-            cla.append(f"--{key.replace('_', '-')} {value}")
-        return " ".join(cla)
-
-
-    def get_env(self, context):
-        """Builds the set of environment variables to be exposed for the bash command."""
-        env = os.environ.copy()
-
-        airflow_context_vars = context_to_airflow_vars(context, in_env_var_format=True)
-        env.update(airflow_context_vars)
-        return env
-        
-
-    @cached_property
-    def subprocess_hook(self):
-        """Returns hook for running the bash command"""
-        return SubprocessHook()
-
-
-    @cached_property
-    def path_to_serialized_pks(self):
-        if type(self.pks) == int:
-            # TODO: Think of a better way to handle this case where we are using an AstraOperator,
-            #       have only one primary key, and don't need any serialized path for pks to
-            #       construct a bash command.
-            return ""
-        
-        if len(self.pks) == 1:
-            return f"{self.pks[0]}"
-        
-        pks_path = serialize_pks_to_path(
-            self.pks,
-            dir=get_scratch_dir()
-        )
-        log.info(f"Serialized {len(self.pks)} primary keys to {pks_path}")
-        return pks_path
-
-
-    def execute(self, context, directory=None, primary_keys=True, allow_exit_codes=(0, )):
+    def execute(self, context):
         """
         Execute the operator.
 
@@ -152,63 +114,52 @@ class AstraOperator(BaseOperator):
             The Airflow DAG execution context.
         """
 
-        # Use bash command. Maybe in Slurm.
-        if primary_keys:    
-            try:
-                bash_command = f"{self.bash_command} {self.path_to_serialized_pks} {self.bash_command_line_arguments}"
-            except:
-                log.exception(f"Cannot construct bash command")
-                raise
-        else:
-            try:
-                bash_command = f"{self.bash_command} {self.bash_command_line_arguments}"
-            except:
-                log.exception(f"Cannot construct bash command")
-                raise
-
-        log.info(f"Executing bash command:\n{bash_command}")
-
         if self.slurm_kwargs:
+
+            # Serialize the primary keys.
+            if len(self.pks) > 1:
+                primary_key_path = serialize_pks_to_path(self.pks, dir=get_scratch_dir())
+                log.info(f"Serialized {len(self.pks)} primary keys to {primary_key_path}. First 10 primary keys are {self.pks[:10]}")
+                
+                # Store the primary key path, because we will clean up later.
+                self._primary_key_path = primary_key_path
+
+                bash_command = f"astra execute {primary_key_path}"
+            else:   
+                bash_command = f"astra execute {self.pks[0]}"
+
             self.execute_by_slurm(
                 context,
-                bash_command,
-                directory
+                bash_command
             )
+        
         else:
-            # TODO: do something with the directory for directory
-            output_encoding = "utf-8"
-            skip_exit_code = 99
-
-            # TODO: HACK for allowing local development and testing
-            if bash_command.startswith("astra "):
-                bash_command = f"/uufs/chpc.utah.edu/common/home/u6020307/.local/bin/astra {bash_command[6:]}"
-
-            env = self.get_env(context)
-            #command = f"bash -c {bash_command}".split()
-            command = bash_command.split()
-
-
-            result = self.subprocess_hook.run_command(
-                command=command,
-                env=env,
-                output_encoding=output_encoding,
-                cwd=directory
-            )
-            if skip_exit_code is not None and result.exit_code == skip_exit_code:
-                raise AirflowSkipException(f"Bash command returned exit code {skip_exit_code}. Skipping.")
-            elif result.exit_code not in allow_exit_codes:
-                raise AirflowException(
-                    f"Bash command failed. The command returned a non-zero exit code {result.exit_code}."
-                )
+            # This is essentially what "astra execute [PK]" does.
+            function = string_to_callable(self.python_callable)
             
-        # Remove the temporary file.
-        if len(self.pks) > 1 and self.path_to_serialized_pks:
-            try:
-                os.unlink(self.path_to_serialized_pks)
-            except:
-                log.warning(f"Unable to remove path to primary keys '{self.path_to_serialized_pks}'")
-
+            result = function(self.pks, **self.op_kwargs)
+            log.info(f"Result from {function} with op kwargs {self.op_kwargs} was: {result}")
+        
         return self.pks
+
+
+    def post_execute(self, **kwargs):
+        """
+        Clean up after execution.
+        """
+        self._unlink_primary_key_path()
+        return None
+
+
+    def _unlink_primary_key_path(self):
+        try:
+            primary_key_path = self._primary_key_path
+        except AttributeError:
+            None
+        else:
+            log.info(f"Removing temporary file at {primary_key_path}")
+            os.unlink(primary_key_path)
+        return None
 
 
     def on_kill(self) -> None:
@@ -217,14 +168,9 @@ class AstraOperator(BaseOperator):
             try:
                 cancel_slurm_job_given_name(self._slurm_label)
             except AttributeError:
-                log.warning(f"Tried to cancel Slurm job but cannot find the Slurm label!")
+                log.warning(f"Tried to cancel Slurm job but cannot find the Slurm label! Maybe the Slurm job wasn't submitted yet?")
 
-        else:
-            # Kill the subprocess.
-            self.subprocess_hook.send_sigterm()
-
-        if len(self.pks) > 1 and self.path_to_serialized_pks:
-            os.unlink(self.path_to_serialized_pks)
+        self._unlink_primary_key_path()
         return None
         
 

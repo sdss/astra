@@ -5,8 +5,10 @@ from airflow.exceptions import AirflowSkipException
 
 from astra.database.utils import create_task_instance
 from astra.operators.base import AstraOperator
-from astra.operators.utils import prepare_data, parse_as_mjd
+from astra.operators.utils import (prepare_data, parse_as_mjd, callable_to_string)
 from astra.utils import log
+
+from sdss_access import SDSSPath
 
 class DataProductOperator(AstraOperator):
 
@@ -16,7 +18,8 @@ class DataProductOperator(AstraOperator):
 
     def common_task_parameters(
             self, 
-            ignore=("self", "args", "kwargs", "slurm_kwargs"),
+            ignore=("self", "parameters", "args", "kwargs", "slurm_kwargs"),
+            callable_keys=("python_callable", "spectrum_callback"),
             ignore_keywords_with_leading_underscores=True,
             ignore_arguments_with_nones_and_default_values=True,
         ):
@@ -43,6 +46,7 @@ class DataProductOperator(AstraOperator):
         """
 
         common_task_parameters = {}
+        common_task_parameters.update(self.parameters)
         mros = type(self).mro()
         
         for mro in mros[:1 + mros.index(AstraOperator)]:
@@ -58,6 +62,12 @@ class DataProductOperator(AstraOperator):
                 and signature.parameters[parameter].default == getattr(self, parameter):
                     continue
                 common_task_parameters.setdefault(parameter, getattr(self, parameter))
+
+        # Ensure the callables can be serialized.
+        if callable_keys is not None:
+            for key in callable_keys:
+                if key in common_task_parameters:
+                    common_task_parameters[key] = callable_to_string(common_task_parameters[key])
 
         return common_task_parameters
 
@@ -251,7 +261,7 @@ def fulfil_defaults_for_data_model_identifiers(
     """
 
     try:
-        releases = infer_releases(context)
+        releases = infer_releases(context["ds"], context["next_ds"])
     except:
         log.exception(f"Could not infer release from context {context}")
         default_release = None 

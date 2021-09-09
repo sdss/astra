@@ -83,7 +83,6 @@ class ApStarOperator(DataProductOperator):
 
     def __init__(
         self,
-        *,
         release = None,
         # We want to be able to supply these arguments, but we don't want them stored as parameters
         # in the task instances, so we prefix them with '_'.

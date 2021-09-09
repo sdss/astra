@@ -5,7 +5,6 @@ from astra.utils import log
 
 from astra.database import (apogee_drpdb, catalogdb, session)
 from astra.operators.sdss_data_product import DataProductOperator
-from astra.operators.utils import parse_as_mjd
 
 class ApVisitOperator(DataProductOperator):
     """
@@ -80,24 +79,6 @@ class ApVisitOperator(DataProductOperator):
         self._query_filter_by_kwargs = _query_filter_by_kwargs
     
 
-    def query_data_model_identifiers_from_database(self, context):
-        """
-        Query the SDSS database for ApVisit data model identifiers.
-
-        :param context:
-            The Airflow DAG execution context.
-        """ 
-        release = self.release or infer_release(context)
-        mjd_start = parse_as_mjd(context["prev_ds"])
-        mjd_end = parse_as_mjd(context["ds"])
-        log.debug(f"Parsed MJD range as between {mjd_start} and {mjd_end}")
-
-        if release.lower() in ("dr16", ):
-            yield from self.query_sdss4_dr16_data_model_identifiers_from_database(mjd_start, mjd_end)
-        else:
-            yield from self.query_sdss5_data_model_identifiers_from_database(mjd_start, mjd_end)
-
-
     def query_sdss4_dr16_data_model_identifiers_from_database(self, mjd_start, mjd_end):
         """
         Query the SDSS database for SDSS-IV (DR16) ApVisit data model identifiers.
@@ -110,7 +91,7 @@ class ApVisitOperator(DataProductOperator):
             returned if they exist between (start <= time < end).        
         """ 
 
-        release, filetype = (self.release, "apVisit")
+        release, filetype = ("DR16", "apVisit")
 
         columns = (
             func.left(catalogdb.SDSSDR16ApogeeVisit.file, 2).label("prefix"),
@@ -151,7 +132,7 @@ class ApVisitOperator(DataProductOperator):
             returned if they exist between (start <= time < end).
         """
 
-        release, filetype = (self.release, "apVisit")
+        release, filetype = ("SDSS5", "apVisit")
 
         columns = (
             apogee_drpdb.Visit.apogee_id.label("obj"), # TODO: Raise with Nidever
@@ -179,5 +160,3 @@ class ApVisitOperator(DataProductOperator):
         keys = [column.name for column in columns]
         for values in q.yield_per(1):
             yield { **common, **dict(zip(keys, values)) }
-                
-

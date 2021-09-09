@@ -128,38 +128,33 @@ def train_model(
         )
 
 
-def estimate_stellar_labels(
-        pks,
-        model_path,
-    ):
+def estimate_stellar_labels(pks):
     """
     Estimate stellar labels given a single-layer neural network.
 
     :param pks:
         The primary keys of task instances to estimate stellar labels for. The
         task instances include information to identify the source SDSS data product.
-    
-    :param model_path:
-        The path where the pre-trained model is stored.
-    
-    :param analyze_individual_visits: [optional]
-        If `True`, analyze all individual visits in the SDSS data product (default).
-        If `False` it will analyze only the first (zero-th index) spectrum in the 
-        data product, which is usually the stacked spectrum.
     """
-    log.info(f"Loading model from {model_path}")
-    
-    state = test.load_state(model_path)
 
-    label_names = state["label_names"]
-    L = len(label_names)
-    log.info(f"Estimating these {L} label names: {label_names}")
+    states = {}
 
     log.info(f"Estimating stellar labels for task instances")
 
     results = {}
     for instance, path, spectrum in prepare_data(pks):
         if spectrum is None: continue
+
+        model_path = instance.parameters["model_path"]
+        try:
+            state = states[model_path]
+        except KeyError:
+            log.info(f"Loading model from {model_path}")
+            state = states[model_path] = test.load_state(model_path)    
+
+            label_names = state["label_names"]
+            L = len(label_names)
+            log.info(f"Estimating these {L} label names: {label_names}")
 
         # Run optimization.
         p_opt, p_cov, model_flux, meta = test.test(

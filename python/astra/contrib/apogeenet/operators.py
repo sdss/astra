@@ -15,9 +15,8 @@ import torch
 
 def estimate_stellar_labels(
         pks,
-        model_path,
-        num_uncertainty_draws=100,
-        large_error=1e10
+        default_num_uncertainty_draws=100,
+        default_large_error=1e10
     ):
     """
     Estimate the stellar parameters for APOGEE ApStar observations,
@@ -26,32 +25,25 @@ def estimate_stellar_labels(
     :param pks:
         The primary keys of task instances that include information about what
         ApStar observation to load.
-    
-    :param model_path:
-        The disk path of the pre-trained model.
-     
-    :param num_uncertainty_draws: [optional]
+         
+    :param default_num_uncertainty_draws: [optional]
         The number of random draws to make of the flux uncertainties, which will be
         propagated into the estimate of the stellar parameter uncertainties (default: 100).
     
-    :param large_error: [optional]
+    :param default_large_error: [optional]
         An arbitrarily large error value to assign to bad pixels (default: 1e10).
     """
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     log.info(f"Running APOGEENet on device {device} with:")
-    log.info(f"\tmodel_path: {model_path}")
     log.info(f"\tpks: {pks}")
 
     log.debug(f"CUDA_VISIBLE_DEVICES = '{os.environ.get('CUDA_VISIBLE_DEVICES')}'")
 
     log.debug(f"Using torch version {torch.__version__} in {torch.__path__}")
     
-    # Load the model.
-    model = Model(model_path, device)
-
-    log.info(f"Loaded model from {model_path}")
+    models = {}
 
     pks = deserialize_pks(pks, flatten=True)
     total = len(pks)
@@ -60,7 +52,17 @@ def estimate_stellar_labels(
 
     for instance, path, spectrum in tqdm(prepare_data(pks), total=total):
         if spectrum is None: continue
-        
+
+        model_path = instance.parameters["model_path"]
+
+        # Load the model.
+        try:
+            model = models[model_path]
+        except KeyError:
+            log.info(f"Loaded model from {model_path}")
+
+            models[model_path] = model = Model(model_path, device)
+                
         N, P = spectrum.flux.shape
 
         # Build metadata array.
@@ -89,8 +91,12 @@ def estimate_stellar_labels(
             logg=log_g.tolist(),
             fe_h=fe_h.tolist(),
         )
-        
+
+        num_uncertainty_draws = int(instance.parameters.get("num_uncertainty_draws", default_num_uncertainty_draws))
+
         if num_uncertainty_draws > 0:
+            large_error = float(instance.parameters.get("large_error", default_large_error))
+
             flux_error = np.nan_to_num(spectrum.uncertainty.array**-0.5).astype(np.float32).reshape((N, 1, P))
             median_error = 5 * np.median(flux_error, axis=(1, 2))
             

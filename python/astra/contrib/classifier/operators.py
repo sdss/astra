@@ -134,86 +134,37 @@ def train_model(
 
 
 
-class TrainOperator(AstraOperator):
-
-    template_fields = ("output_model_path", )
-    python_callable = train_model
-    bash_command_prefix = "astra run classifier train"
-
-    def __init__(
-        self,
-        *,
-        output_model_path: str,
-        network_factory: str,
-        training_spectra_path: str,
-        training_labels_path: str,
-        validation_spectra_path: str,
-        validation_labels_path: str,
-        test_spectra_path: str,
-        test_labels_path: str,
-        learning_rate=1e-5,
-        weight_decay=1e-5,
-        num_epochs=200,
-        batch_size=100,
-        **kwargs,
-    ) -> None:
-        super().__init__(**kwargs)
-        # TODO: Should this operator just return an output model path, and if it exists,
-        #       it won't actually train?
-        self.output_model_path = output_model_path
-        self.network_factory = network_factory
-        self.training_spectra_path = training_spectra_path
-        self.training_labels_path = training_labels_path
-        self.validation_spectra_path = validation_spectra_path
-        self.validation_labels_path = validation_labels_path
-        self.test_spectra_path = test_spectra_path
-        self.test_labels_path = test_labels_path
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        self.num_epochs = num_epochs
-        self.batch_size = batch_size
-        return None
-
-
-
-
-def classify(
-        pks,
-        model_path,
-        network_factory=None,
-    ):
+def classify(pks):
     """
-    Classify a source given primary keys that reference some partially created task instances.
+    Classify sources given the primary keys of task instances.
 
     :param pks:
         the primary keys of the task instances in the database that need classification
-    
-    :param model_path:
-        the path where the model is stored on disk
-    
-    :param network_factory: [optional]
-        the name of the network factory to use to load the model (e.g., OpticalCNN, NIRCNN)
     """
-    if network_factory is None:
-        network_factory = model_path.split("_")[-2]
 
-
-    print(f"In classify with pks {type(pks)} {pks} {model_path}, {network_factory}")
-    
-    factory = getattr(networks, network_factory)
-    if factory is None:
-        raise ValueError(f"unknown network factory '{network_factory}'")
-    
-    model = utils.read_network(factory, model_path)
-    # Disable dropout for inference.
-    model.eval()
-
+    models = {}    
     results = {}
     for instance, path, spectrum in prepare_data(pks):
         if spectrum is None: continue
 
+        model_path = instance.parameters["model_path"]
+
+        try:
+            model, factory = models[model_path]
+        except KeyError:
+            network_factory = model_path.split("_")[-2]
+            factory = getattr(networks, network_factory)
+
+            log.info(f"Loading model from {model_path} using {factory}")
+            model = utils.read_network(factory, model_path)
+            model.eval()
+
+            models[model_path] = (model, factory)
+
+        flux = torch.from_numpy(spectrum.flux.value.astype(np.float32))
+
         with torch.no_grad():
-            prediction = model.forward(Variable(torch.Tensor(spectrum.flux.value)))
+            prediction = model.forward(flux)#Variable(torch.Tensor(spectrum.flux.value)))
             log_probs = prediction.cpu().numpy().flatten()
                 
         results[instance.pk] = log_probs
@@ -255,45 +206,6 @@ def _prepare_log_prob_result(class_names, log_probs, decimals=3):
 
 
 
-'''
-class ClassifyApStarOperator(ApStarOperator):
-
-    """ Classify an ApStar source given existing classifications on ApVisit data products. """
-
-    def execute(self, context):
-
-        # TODO: get upstream task ID and use that to query results as well.
-        for pk, instance, path, spectrum in self.yield_data():
-
-            # Find all previous classifications of this source that have the same model path.
-            s = session.query(
-                    astradb.Classification,
-                    func.json_object_agg(
-                        astradb.Parameter.parameter_name, 
-                        astradb.Parameter.parameter_value
-                    ).label("parameters")
-                )\
-                .filter(astradb.TaskInstance.dag_id == instance.dag_id)\
-                .filter(astradb.TaskInstance.output_pk == astradb.Classification.output_pk)\
-                .filter(astradb.TaskInstance.pk == astradb.TaskInstanceParameter.ti_pk)\
-                .filter(astradb.TaskInstanceParameter.parameter_pk == astradb.Parameter.pk)\
-                .group_by(astradb.Classification)\
-                .subquery(with_labels=True)
-
-            q = session.query(s)\
-                       .filter(s.c.parameters.op("->>")("apred") == instance.parameters["apred"])\
-                       .filter(s.c.parameters.op("->>")("obj") == instance.parameters["obj"])
-
-            for ea in q.all():
-                print(ea)
-
-
-            # match by obj and apred.
-            # get 
-
-
-            raise a
-'''
 
 
 def classify_apstar(pks, **kwargs):

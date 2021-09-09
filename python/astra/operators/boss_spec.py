@@ -66,7 +66,6 @@ class BossSpecOperator(DataProductOperator):
 
     def __init__(
         self,
-        *,
         release = None,
         # We want to be able to supply these arguments, but we don't want them stored as parameters
         # in the task instances, so we prefix them with '_'.
@@ -82,13 +81,13 @@ class BossSpecOperator(DataProductOperator):
 
     def query_data_model_identifiers_from_database(self, context):
         """
-        Query the SDSS database for BOSS spectrum data model identifiers.
+        Query the SDSS-V database for BOSS spectrum data model identifiers.
 
         :param context:
             The Airflow DAG execution context.
         """ 
 
-        release, filetype = (self.release, "spec")
+        release, filetype = ("SDSS5", "spec")
         
         mjd_start = parse_as_mjd(context["prev_ds"])
         mjd_end = parse_as_mjd(context["ds"])

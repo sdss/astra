@@ -26,7 +26,7 @@ def slice_and_shape(spectrum, slice_args, shape, repeat=None, **kwargs):
 
 
 
-def median(spectrum, axis=1, slice_args=None, shape=None, **kwargs):
+def median(spectrum, axis=None, slice_args=None, shape=None, **kwargs):
     """
     Rectify the spectrum by dividing through the median of (finite) flux values.
     
@@ -43,13 +43,13 @@ def median(spectrum, axis=1, slice_args=None, shape=None, **kwargs):
         Re-shape the spectrum.
     """
 
+    if slice_args is not None or shape is not None:
+        spectrum = slice_and_shape(spectrum, slice_args, shape, **kwargs)
+
     continuum = np.nanmedian(spectrum.flux.value, axis=axis).reshape((-1, 1))
 
     spectrum._data /= continuum
     spectrum._uncertainty.array *= continuum**2 # TODO: check this.
-
-    if slice_args is not None or shape is not None:
-        spectrum = slice_and_shape(spectrum, slice_args, shape, **kwargs)
 
     return spectrum
 

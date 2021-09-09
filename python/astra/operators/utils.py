@@ -1,3 +1,4 @@
+import inspect
 import importlib
 from ast import literal_eval
 from astropy.time import Time
@@ -68,9 +69,7 @@ def prepare_data(pks):
                         raise
 
                     try:
-                        mod_name, func_name = spectrum_callback.rsplit('.',1)
-                        module = importlib.import_module(mod_name)
-                        func = getattr(module, func_name)
+                        func = string_to_callable(spectrum_callback)
 
                         spectrum = func(
                             spectrum=spectrum,
@@ -109,3 +108,24 @@ def parse_as_mjd(mjd):
         except:
             return Time(mjd).mjd
     return mjd
+
+
+def callable_to_string(function):
+    if callable(function):
+        module = inspect.getmodule(function)
+        return f"{module.__name__}.{function.__name__}"
+    elif isinstance(function, str):
+        return function
+    else:
+        raise TypeError(f"function must be a callable, or a string representation of a callable (not {type(function)}: {function})")
+
+def string_to_callable(function_string):
+    if callable(function_string):
+        return function_string
+    elif isinstance(function_string, str):
+        mod_name, func_name = function_string.rsplit('.', 1)
+        module = importlib.import_module(mod_name)
+        return getattr(module, func_name)
+    else:
+        raise TypeError(f"function must be a callable, or a string representation of a callable (not {type(function_string)}: {function_string})s")
+    
