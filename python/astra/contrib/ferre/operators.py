@@ -182,11 +182,7 @@ class FerreOperator(DataProductOperator):
         ferre_kwargs=None,
         **kwargs
     ) -> None:
-        super().__init__(
-            # TODO: Notti!
-            bash_command="/uufs/chpc.utah.edu/common/home/sdss09/software/apogee/Linux/apogee/trunk/bin/ferre.x",
-            **kwargs
-        )
+        super().__init__(**kwargs)        
         self.header_path = header_path
         self.frozen_parameters = frozen_parameters
         self.interpolation_order = interpolation_order
@@ -392,15 +388,16 @@ class FerreOperator(DataProductOperator):
         )
 
         # Execute, either by slurm or whatever.
-        super(FerreOperator, self).execute(
-            context, 
+        log.debug(f"FERRE ready to roll in {directory}")
+        assert self.slurm_kwargs
+        self.execute_by_slurm(
+            context,
+            bash_command="/uufs/chpc.utah.edu/common/home/sdss09/software/apogee/Linux/apogee/trunk/bin/ferre.x",
             directory=directory,
-            primary_keys=False,
-            # Unbelievably, FERRE sends a '1' exit code every time it is executed. Even if it succeeds.
-            # TODO: Ask Carlos or Jon to remove this insanity.
-            allow_exit_codes=(0, 1, ),
         )
-
+        # Unbelievably, FERRE sends a '1' exit code every time it is executed. Even if it succeeds.
+        # TODO: Ask Carlos or Jon to remove this insanity.
+        
         # Parse outputs.
         # TODO: clean up this function
         param, param_err, output_meta = parse_ferre_outputs(directory, self.header_path, *args)

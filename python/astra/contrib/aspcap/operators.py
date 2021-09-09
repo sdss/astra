@@ -175,7 +175,7 @@ class AspcapOperator(ApStarOperator):
     def common_task_parameters(self, **kwargs):
         kwds = kwargs.copy()
         kwds["ignore"] = (
-            "self", "args", "kwargs", "slurm_kwargs",
+            "self", "parameters", "args", "kwargs", "slurm_kwargs",
             # Exclude header_paths from the parameters that are given to each task.
             "header_paths", 
             # We will not accept any spectrum callbacks for this operator!
