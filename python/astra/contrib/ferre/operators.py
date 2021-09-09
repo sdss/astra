@@ -10,7 +10,7 @@ from astra.database import astradb, session
 from astra.database.utils import create_task_output
 from astra.contrib.ferre import utils
 from astra.contrib.ferre.core import (prepare_ferre, parse_ferre_outputs)
-from astra.operators.data import DataProductOperator
+from astra.operators.sdss_data_product import DataProductOperator
 from astra.utils import flatten, get_base_output_path, log
 
 
