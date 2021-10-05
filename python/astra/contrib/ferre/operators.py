@@ -212,7 +212,7 @@ class FerreOperator(DataProductOperator):
         header path.
         """
 
-        pks, task = ([], context["task"])
+        pks, task, ti = ([], context["task"], context["ti"])
         while True:
             for upstream_task in task.upstream_list:
                 log.debug(f"Considering {upstream_task}")
@@ -222,8 +222,10 @@ class FerreOperator(DataProductOperator):
                     task = upstream_task
                     break
 
-                log.debug(f"Using upstream results from {upstream_task}")
-                pks.extend(context["ti"].xcom_pull(task_ids=upstream_task.task_id))
+                log.debug(f"Using upstream results from {upstream_task} ({upstream_task.task_id}) and {ti}")
+                these_pks = ti.xcom_pull(task_ids=upstream_task.task_id)
+                if these_pks is not None:
+                    pks.extend(these_pks)
             else:
                 break
         
