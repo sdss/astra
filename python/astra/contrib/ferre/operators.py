@@ -3,6 +3,7 @@ import json
 import numpy as np
 import pickle
 from airflow.operators.python import BranchPythonOperator
+from airflow.exceptions import AirflowSkipException
 from sdss_access import SDSSPath
 from ast import literal_eval
 
@@ -231,7 +232,9 @@ class FerreOperator(DataProductOperator):
         
         pks = flatten(pks)
         if not pks:
-            raise RuntimeError(f"No upstream primary keys identified.")
+            # This can happen if the BA stellar parameters is executed (because we all all branches to be skipped),
+            # but everything else was skipped.
+            raise AirflowSkipException(f"No upstream primary keys identified.")
             
         log.debug(f"From pks: {pks}")
         log.debug(f"That also match {self.header_path}")
