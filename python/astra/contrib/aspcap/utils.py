@@ -19,10 +19,12 @@ def group_header_paths(header_paths):
     grouped_header_paths = {}
     for header_path in header_paths:
         observatory, lsf, spectral_desc = task_id_parts(header_path)
+        
         grouped_header_paths.setdefault(observatory, {})
         grouped_header_paths[observatory].setdefault(lsf, [])
         grouped_header_paths[observatory][lsf].append((spectral_desc, header_path))
-        all_lsfs.append(lsf)
+        if lsf is not None:
+            all_lsfs.append(lsf)
     all_lsfs = list(set(all_lsfs))
 
     return (grouped_header_paths, all_lsfs)
@@ -34,10 +36,18 @@ def task_id_parts(header_path):
     parts = basename.split("_")
     _ = 4
     gd, spectral_type = (parts[1][_], parts[1][_ + 1:])
-    lsf_telescope_model = "LCO" if parts[3][4:] == "s" else "APO"
-    gd = dict(g="giant", d="dwarf")[gd]
-    lsf = parts[3][3]
-    return [lsf_telescope_model, lsf, f"{spectral_type}-{gd}"]
+    
+    if gd == "B" and spectral_type == "A":
+        # Different string format for BA, since it is not telescope-dependent or fibre-dependent LSF.
+        lsf_telescope_model, lsf = (None, None)
+        desc = "BA"
+    else:
+        lsf_telescope_model = "LCO" if parts[3][4:] == "s" else "APO"
+        gd = dict(g="giant", d="dwarf")[gd]
+        lsf = parts[3][3]
+        desc = f"{spectral_type}-{gd}"
+    return [lsf_telescope_model, lsf, desc]
+
 
 
 def yield_suitable_grids(grid_info, mean_fiber, teff, logg, metals, telescope, **kwargs):
@@ -384,24 +394,42 @@ def get_abundance_keywords(element, header_label_names):
     except:
         raise ValueError(f"no abundance controls known for element '{element}' (available: {tuple(controls.keys())}")
 
-    indv = [get_header_index(label) for label in c["INDV_LABEL"]]
-    ties = c.get("TIES", [])
-
-    ferre_kwds = {
-        # We don't pass INDV here because this will be determined from the
-        # 'frozen_<param>' arguments to the FerreGivenSDSSApStarFile tasks
-        #"INDV": [get_header_index(label) for label in c["INDV_LABEL"]],
-        "NTIE": len(ties),
-        "TYPETIE": 1
-    }
-    for i, (tie_label, ttie0, ttie) in enumerate(ties, start=1):
-        ferre_kwds.update({
-            f"INDTIE({i:.0f})": get_header_index(tie_label),
-            f"TTIE0({i:.0f})": ttie0,
-            # TODO: What if we don't want to tie it back to first INDV element?
-            f"TTIE({i:.0f},{indv[0]:.0f})": ttie
-        })
+    try:
+        indv = [get_header_index(label) for label in c["INDV_LABEL"]]
+    except ValueError:
+        # Cannot tie to a dimension that does not exist.
+        ferre_kwds = {}
     
+    else:
+        ties = c.get("TIES", [])
+
+        ntie = 0
+        ferre_kwds = {
+            # We don't pass INDV here because this will be determined from the
+            # 'frozen_<param>' arguments to the FerreGivenSDSSApStarFile tasks
+            #"INDV": [get_header_index(label) for label in c["INDV_LABEL"]],
+            "TYPETIE": 1,
+            # We set NTIE below based on how many we could actually tie, since
+            # the BA grid does not have as many dimensions.
+            #"NTIE": len(ties),
+        }
+        for i, (tie_label, ttie0, ttie) in enumerate(ties, start=1):
+            try:
+                index = get_header_index(tie_label)
+            except ValueError:
+                # dimension not in this grid, so nothing to tie
+                continue
+            else:
+                ferre_kwds.update({
+                    f"INDTIE({i:.0f})": get_header_index(tie_label),
+                    f"TTIE0({i:.0f})": ttie0,
+                    # TODO: What if we don't want to tie it back to first INDV element?
+                    f"TTIE({i:.0f},{indv[0]:.0f})": ttie
+                })
+                ntie += 1
+            
+        ferre_kwds["NTIE"] = ntie
+
     # Freeze all other labels.
     frozen_parameters = { hln: (hln not in c["INDV_LABEL"]) for hln in header_label_names }
 

@@ -46,7 +46,7 @@ class DataProductOperator(AstraOperator):
         """
 
         common_task_parameters = {}
-        common_task_parameters.update(self.parameters)
+        common_task_parameters.update(self.parameters or dict())
         mros = type(self).mro()
         
         for mro in mros[:1 + mros.index(AstraOperator)]:

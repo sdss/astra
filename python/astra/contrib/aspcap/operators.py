@@ -43,19 +43,45 @@ def branch(task_id_callable, task, ti, **kwargs):
     # Get unique header paths for the primary keys given.
     # TODO: This query could fail if the number of primary keys provided
     #       is yuuge. May consider changing this query.
-    q = session.query(astradb.Parameter.parameter_value)\
-               .distinct(astradb.Parameter.parameter_value)\
+    q = session.query(astradb.TaskInstanceParameter.ti_pk, astradb.Parameter.parameter_value)\
                .join(astradb.TaskInstanceParameter, 
                      astradb.TaskInstanceParameter.parameter_pk == astradb.Parameter.pk)\
                .filter(astradb.Parameter.parameter_name == "header_path")\
                .filter(astradb.TaskInstanceParameter.ti_pk.in_(pks))    
-    header_paths = [row[0] for row in q.all()]
 
-    log.debug(f"Found distinct header paths:")
-    for header_path in header_paths:
-        log.debug(f"\t{header_path}")
+    log.debug(f"Found:")
+    downstream_task_ids = []
+    for pk, header_path in q.all():
+        log.debug(f"\t{pk}: {header_path}")
 
-    downstream_task_ids = list(map(task_id_callable, header_paths))
+        telescope, lsf, spectral_type_desc = utils.task_id_parts(header_path)
+        if telescope is None and lsf is None:
+            # Special hack for BA grids, where telescope/lsf information cannot be found from header path.
+            # TODO: Consider removing this hack entirely. This could be fixed by symbolicly linking the BA grids to locations
+            #       for each telescope/fibre combination.
+
+            instance = session.query(astradb.TaskInstance)\
+                              .filter(astradb.TaskInstance.pk == pk).one_or_none()
+            
+            tree = SDSSPath(release=instance.parameters["release"])
+            path = tree.full(**instance.parameters)
+
+            header = getheader(path)
+            downstream_task_ids.append(
+                task_id_callable(
+                    header_path,
+                    # TODO: This is matching the telescope styling in utils.task_id_parts, but these should have a common place.
+                    telescope=instance.parameters["telescope"].upper()[:3],
+                    lsf=utils.get_lsf_grid_name(header["MEANFIB"])
+                )
+            )
+        else:
+            downstream_task_ids.append(task_id_callable(header_path))
+        log.debug(f"\t\tadded {downstream_task_ids[-1]}")
+
+
+    downstream_task_ids = sorted(set(downstream_task_ids))
+
     log.debug(f"Downstream tasks to execute:")
     for task_id in downstream_task_ids:
         log.debug(f"\t{task_id}")
@@ -94,6 +120,25 @@ def get_best_result(task, ti, **kwargs):
             continue
 
         p = instance.parameters
+
+        # Check that the telescope is the same as what we expect from this task ID.
+        # This is a bit of a hack. Let us explain.
+
+        # The "BA" grid does not have a telescope/fiber model, so you can run LCO and APO
+        # data through the initial-BA grid. And those outputs go to the "get_best_results"
+        # for each of the APO and LCO tasks (e.g., this function).
+        # If there is only APO data, then the LCO "get_best_result" will only have one
+        # input: the BA results. Then it will erroneously think that's the best result
+        # for that source.
+
+        # It's hacky to put this logic in here. It should be in the DAG instead. Same
+        # thing for parsing 'telescope' name in the DAG (eg 'APO') from 'apo25m'.
+        this_telescope_short_name = p["telescope"][:3].upper()
+        expected_telescope_short_name = task.task_id.split(".")[1]
+        log.info(f"For instance {instance} we have {this_telescope_short_name} and {expected_telescope_short_name}")
+        if this_telescope_short_name != expected_telescope_short_name:
+            continue
+
         try:
             tree = trees[p["release"]]                
         except KeyError:
