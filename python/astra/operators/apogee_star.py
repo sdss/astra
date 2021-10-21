@@ -1,11 +1,8 @@
 
 from sqlalchemy import and_, func
-
 from astra.utils import log
-
-from astra.database import (apogee_drpdb, catalogdb, session)
+from astra.database.sdssdb import (apogee_drpdb, catalogdb, session)
 from astra.operators.sdss_data_product import DataProductOperator
-from astra.operators.utils import parse_as_mjd
 
 class ApStarOperator(DataProductOperator):
     """

@@ -7,7 +7,7 @@ from sqlalchemy import func
 from tqdm import tqdm
 
 from astra.utils import log
-from astra.database import (astradb, apogee_drpdb, catalogdb, session)
+from astra.database import (astradb, session)
 
 def export_to_table(output_path, overwrite=True):
     """

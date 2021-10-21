@@ -67,14 +67,14 @@ database = SDSSDatabaseConnection(autoconnect=True)
 # Create a file called ~/.config/sdssdb/sdssdb.yml and put your connection info there.
 
 try:
-    database.set_profile("astra")
+    database.set_profile("astra_sdss")
 
 except AssertionError as e:
     from astra.utils import log
     log.exception(e)
-    log.warning(""" No database profile named 'SDSS' found in ~/.config/sdssdb/sdssdb.yml -- it should look like:
+    log.warning(""" No database profile named 'astra_sdss' found in ~/.config/sdssdb/sdssdb.yml -- it should look like:
 
-        SDSS:
+        astra_sdss:
           user: [SDSSDB_USERNAME]
           host: [SDSSDB_HOSTNAME]
           port: 5432

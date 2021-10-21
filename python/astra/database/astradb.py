@@ -6,7 +6,7 @@ from sqlalchemy.ext.declarative import AbstractConcreteBase, declared_attr
 from sqlalchemy.orm import relationship
 from sqlalchemy_utils import dependent_objects
 
-from astra.database import AstraBase, database, session
+from astra.database.astradb import AstraBase, database, session
 
 
 class Base(AbstractConcreteBase, AstraBase):
