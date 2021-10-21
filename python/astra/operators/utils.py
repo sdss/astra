@@ -11,6 +11,26 @@ from astra.tools.spectrum import Spectrum1D
 from astra.utils import log
 
 
+def get_data_model_path(instance, trees=None, full_output=False):
+    release = instance.parameters["release"]
+    trees = trees or dict()
+    tree = trees.get(release, None)
+    if tree is None:
+        trees[release] = tree = SDSSPath(release=release)
+
+    # Monkey-patch BOSS Spec paths.
+    try:
+        path = tree.full(**instance.parameters)
+    except:
+        if instance.parameters["filetype"] == "spec":
+            from astra.utils import monkey_patch_get_boss_spec_path
+            path = monkey_patch_get_boss_spec_path(**instance.parameters)
+        else:
+            raise
+    
+    return (path, trees) if full_output else path
+
+
 def prepare_data(pks):
     """
     Return the task instance, data model path, and spectrum for each given primary key,

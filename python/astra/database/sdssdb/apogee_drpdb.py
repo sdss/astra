@@ -2,9 +2,9 @@ from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.ext.declarative import AbstractConcreteBase, declared_attr
 from sqlalchemy.orm import relationship
 
-from astra.database import AstraBase, database
+from astra.database.sdssdb import SDSSBase, database
 
-class Base(AbstractConcreteBase, AstraBase):
+class Base(AbstractConcreteBase, SDSSBase):
     __abstract__ = True
     _schema = "apogee_drp"
     _relations = "define_relations"
@@ -15,10 +15,8 @@ class Base(AbstractConcreteBase, AstraBase):
         return { "schema": cls._schema }
 
 
-
 class Visit(Base):
     __tablename__ = "visit"
-
 
 
 class Star(Base):

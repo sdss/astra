@@ -11,13 +11,13 @@ from sdssdb.connection import SQLADatabaseConnection
 from sdssdb.sqlalchemy import BaseModel
 from psycopg2.extensions import register_adapter, AsIs
 
-AstraBase = declarative_base(cls=(DeferredReflection, BaseModel))
+SDSSBase = declarative_base(cls=(DeferredReflection, BaseModel))
 
 
-class AstraDatabaseConnection(SQLADatabaseConnection):
+class SDSSDatabaseConnection(SQLADatabaseConnection):
     
-    dbname = "sdss5db" # TODO: Should this be in the profile?
-    base = AstraBase
+    dbname = "sdss5db"
+    base = SDSSBase
 
     def create_engine(
             self, 
@@ -51,10 +51,6 @@ class AstraDatabaseConnection(SQLADatabaseConnection):
             pool_size=pool_size,
             pool_recycle=pool_recycle,
             pool_pre_ping=pool_pre_ping,
-            #json_serializer=partial(
-            #    json.dumps,
-            #    cls=_DictParamEncoder
-            #),
         )
         self.metadata = MetaData(bind=self.engine)
         self.Session = scoped_session(
@@ -66,23 +62,23 @@ class AstraDatabaseConnection(SQLADatabaseConnection):
         )
 
 
-database = AstraDatabaseConnection(autoconnect=True)
+database = SDSSDatabaseConnection(autoconnect=True)
 # Ignore what the documentation says for sdssdb.
 # Create a file called ~/.config/sdssdb/sdssdb.yml and put your connection info there.
 
 try:
-    database.set_profile("astra")
+    database.set_profile("astra_sdss")
 
 except AssertionError as e:
     from astra.utils import log
     log.exception(e)
-    log.warning(""" No database profile named 'astra' found in ~/.config/sdssdb/sdssdb.yml -- it should look like:
+    log.warning(""" No database profile named 'astra_sdss' found in ~/.config/sdssdb/sdssdb.yml -- it should look like:
 
-        astra:
-          user: [ASTRADB_USERNAME]
-          host: [ASTRADB_HOSTNAME]
+        astra_sdss:
+          user: [SDSSDB_USERNAME]
+          host: [SDSSDB_HOSTNAME]
           port: 5432
-          domain: [ASTRADB_DOMAIN]
+          domain: [SDSSDB_DOMAIN]
 
         See https://sdssdb.readthedocs.io/en/stable/intro.html#supported-profiles for more details. 
         """
@@ -106,7 +102,5 @@ def init_process(database):
     database.engine.dispose()
 
 
-
 register_adapter(numpy.float64, AsIs)
 register_adapter(numpy.float32, AsIs)
-

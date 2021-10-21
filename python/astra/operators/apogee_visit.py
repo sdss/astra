@@ -1,9 +1,7 @@
 
 from sqlalchemy import func
-
 from astra.utils import log
-
-from astra.database import (apogee_drpdb, catalogdb, session)
+from astra.database.sdssdb import (apogee_drpdb, catalogdb, session)
 from astra.operators.sdss_data_product import DataProductOperator
 
 class ApVisitOperator(DataProductOperator):
