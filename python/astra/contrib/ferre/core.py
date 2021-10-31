@@ -15,7 +15,8 @@ from time import sleep, time
 from tqdm import tqdm
 
 from astra.utils import log
-from astra.contrib.ferre import utils, bitmask
+from astra.contrib.ferre import utils
+from astra.contrib.aspcap import bitmask # TODO: clearly a refactor is here
 
 # Cross-check
 # /uufs/chpc.utah.edu/common/home/sdss50/dr17/apogee/spectro/aspcap/dr17/synspec/bundle_apo25m/apo25m_003/ferre/elem_K

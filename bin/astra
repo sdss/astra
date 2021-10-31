@@ -70,6 +70,7 @@ def execute(context, primary_keys, **kwargs):
     """
 
     # We're going to assume that they all have the same python_callable!
+    from astra.utils import log
     from astra.database import (astradb, session)
     from astra.operators.utils import string_to_callable
 
@@ -79,18 +80,21 @@ def execute(context, primary_keys, **kwargs):
     if instance is None:
         raise ValueError(f"Cannot find instance matching primary key {primary_keys[0]}")
     
-    python_callable = instance.parameters.get("python_callable", None)
+    parameters = instance.parameters.copy()
+    python_callable = parameters.pop("python_callable", None)
     if python_callable is None:
         raise ValueError(f"No python_callable for instance {instance}")
     
     function = string_to_callable(python_callable)
     
-    if "op_kwargs" in instance.parameters:
-        raise NotImplementedError("Andy needs to do this")
+    log.info(f"Calling {function} ({python_callable}) with primary keys {primary_keys} and {parameters}")
     
-    result = function(primary_keys)
+    result = function(
+        pks=primary_keys,
+        **parameters
+    )
 
-    print(f"Result from {function} was: {result}")
+    log.info(f"Result from {function} was: {result}")
     
     return None
 

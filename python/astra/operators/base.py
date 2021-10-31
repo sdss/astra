@@ -102,7 +102,7 @@ class AstraOperator(BaseOperator):
         parameters = dict(python_callable=callable_to_string(self.python_callable))
         parameters.update(self.parameters)
         instance = create_task_instance(*args, parameters)
-        self.pks = instance.pk
+        self.pks = (instance.pk, )
         return None
 
 

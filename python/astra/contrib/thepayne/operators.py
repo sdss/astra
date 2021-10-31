@@ -49,6 +49,7 @@ def get_model_path(
         if arg != "kwargs":
             param_dict[arg] = locals()[arg]
     
+    log.debug(f"Hashing {param_dict} for The Payne model path")
     param_hash = hashify(param_dict)
     
     basename = f"thepayne_model_{param_hash}.pkl"
@@ -63,8 +64,8 @@ def get_model_path(
 
 
 def train_model(
-        output_model_path,
         training_set_path,
+        output_model_path=None,
         num_epochs=100_000,
         num_neurons=300,
         weight_decay=0.0,
@@ -95,7 +96,17 @@ def train_model(
     :param learning_rate: (optional)
         The learning rate to use during training (default: 0.001).
     """
-    
+
+    if output_model_path is None:
+        output_model_path = get_model_path(
+            training_set_path=training_set_path,
+            num_epochs=num_epochs,
+            num_neurons=num_neurons,
+            weight_decay=weight_decay,
+            learning_rate=learning_rate,
+            **kwargs
+        )
+
     wavelength, label_names, \
         training_labels, training_spectra, \
         validation_labels, validation_spectra = training.load_training_data(training_set_path)
@@ -106,7 +117,7 @@ def train_model(
         validation_spectra,
         validation_labels,
         label_names,
-        num_neurons=num_neurons,
+        num_neurons=int(num_neurons),
         num_epochs=num_epochs,
         learning_rate=learning_rate,
         weight_decay=weight_decay
@@ -117,7 +128,7 @@ def train_model(
         os.path.dirname(output_model_path),
         exist_ok=True
     )
-
+    log.info(f"Writing model to {output_model_path}")
     with open(output_model_path, "wb") as fp:
         pickle.dump(dict(
                 state=state,
@@ -127,8 +138,18 @@ def train_model(
             fp
         )
 
+    # Try to send xcom result of the output path.
+    try:
+        ti = kwargs["ti"]
+        ti.xcom_push("model_path", output_model_path)
+    except:
+        log.exception("Unable to send `model_path` as xcom variable")
+    else:
+        log.info(f"Passed model_path as {output_model_path}")
 
-def estimate_stellar_labels(pks):
+
+
+def estimate_stellar_labels(pks, **kwargs):
     """
     Estimate stellar labels given a single-layer neural network.
 

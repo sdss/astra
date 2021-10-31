@@ -143,6 +143,7 @@ def _train(training_flux, training_labels, validation_flux, validation_labels, l
            num_neurons, num_epochs, learning_rate, weight_decay, **kwargs):
     
     num_neurons, num_epochs = (int(num_neurons), int(num_epochs))
+    learning_rate, weight_decay = (float(learning_rate), float(weight_decay))
 
     # Normalize.
     whitened_training_labels, whitened_validation_labels, *scales = _whiten_labels(training_labels,

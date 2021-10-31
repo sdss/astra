@@ -24,7 +24,7 @@ def add_meta_to_task_instances_without_meta():
     return None
 
 
-def _query_task_instances_without_meta(sdss5_only=True):
+def _query_task_instances_without_meta(sdss5_only=False):
     stmt = exists().where(astradb.TaskInstance.pk == astradb.TaskInstanceMeta.ti_pk)
     q = astra_session.query(astradb.TaskInstance.pk).filter(~stmt)
     if sdss5_only:
