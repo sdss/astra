@@ -20,6 +20,11 @@ class SDSSDR16ApogeeStar(Base):
 class SDSSDR16ApogeeVisit(Base):
     __tablename__ = "sdss_dr16_apogeevisit"
 
+class CatalogToSDSSDR16ApogeeStar(Base):
+    __tablename__ = "sdss_dr16_apogeeestar"
+
+class SDSSDR16ApogeeStarVisit(Base):
+    __tablename__ = "sdss_dr16_apogeestarvisit"
 
 class SDSSVBossSpall(Base):
     __tablename__ = "sdssv_boss_spall"

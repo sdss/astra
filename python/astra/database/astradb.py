@@ -6,7 +6,7 @@ from sqlalchemy.ext.declarative import AbstractConcreteBase, declared_attr
 from sqlalchemy.orm import relationship
 from sqlalchemy_utils import dependent_objects
 
-from astra.database.astradb import AstraBase, database, session
+from astra.database import AstraBase, database, session
 
 
 class Base(AbstractConcreteBase, AstraBase):
@@ -50,10 +50,20 @@ class TaskInstance(Base):
         
         for instance in dependent_objects(self.output_interface):
             if not isinstance(instance, self.__class__):
-
                 return instance
 
 
+    @property
+    def meta(self):
+        return session.query(TaskInstanceMeta).filter(TaskInstanceMeta.ti_pk == self.pk).one_or_none()
+
+
+
+
+class TaskInstanceMeta(Base):
+    __tablename__ = "ti_meta"
+
+    
 
 class OutputInterface(Base):
     __tablename__ = "output_interface"

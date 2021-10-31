@@ -35,6 +35,30 @@ create table astra.ti (
     foreign key (output_pk) references astra.output_interface(pk) on delete cascade
 );
 
+/* Create a meta table to link to other tables */
+create table astra.ti_meta (
+    ti_pk bigint primary key,
+
+    catalogid bigint,
+    iauname text,
+    ra float,
+    dec float,
+    pmra float,
+    pmdec float,
+    parallax float,
+    catalog_lead text,
+    catalog_version_id int,
+
+    gaia_dr2_source_id bigint,
+    gaia_edr3_source_id bigint,
+    apogee_drp_star_pk bigint,
+    apogee_drp_visit_pks bigint[],
+    catalogdb_sdssv_boss_spall_pkey bigint,
+
+    apogee_drp_visit_naxis1 int[], /* for helping to know which visits were dithered */
+    foreign key (ti_pk) references astra.ti(pk) on delete cascade
+);
+
 /* Create tables for contributed methods */
 
 /* Doppler */
