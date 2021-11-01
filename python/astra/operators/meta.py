@@ -183,9 +183,9 @@ def update_task_instance_meta(ti_pk):
         # Need to get information from elsewhere.
         if is_apogee:
             if filetype == "apVisit":
-                catalogid, = sdssdb_session.query(catalogdb.CatalogToSDSSDR16ApogeeStar.catalogid).filter(
+                catalogid = sdssdb_session.query(catalogdb.CatalogToSDSSDR16ApogeeStar.catalogid).filter(
                     catalogdb.SDSSDR16ApogeeStar.target_id == catalogdb.CatalogToSDSSDR16ApogeeStar.target_id,
-                    catalogdb.SDSSDR16ApogeeStar.target_id == catalogdb.SDSSDR16ApogeeStarVisit.apstar_id,
+                    catalogdb.SDSSDR16ApogeeStar.apstar_id == catalogdb.SDSSDR16ApogeeStarVisit.apstar_id,
                     catalogdb.SDSSDR16ApogeeStarVisit.visit_id == catalogdb.SDSSDR16ApogeeVisit.visit_id,
                     catalogdb.SDSSDR16ApogeeVisit.plate == parameters["plate"],
                     catalogdb.SDSSDR16ApogeeVisit.mjd == parameters["mjd"],
@@ -195,20 +195,24 @@ def update_task_instance_meta(ti_pk):
                 ).first_or_none()
                         
             elif filetype == "apStar":
-                catalogid, = sdssdb_session.query(catalogdb.CatalogToSDSSDR16ApogeeStar.catalogid).filter(
+                catalogid = sdssdb_session.query(catalogdb.CatalogToSDSSDR16ApogeeStar.catalogid).filter(
                     catalogdb.SDSSDR16ApogeeStar.apogee_id.label("obj") == parameters["obj"],
                     catalogdb.SDSSDR16ApogeeStar.field == parameters["field"],
                     catalogdb.SDSSDR16ApogeeStar.telescope == parameters["telescope"],
-                    catalogdb.SDSSDR16ApogeeStar.target_id == catalogdb.CatalogToSDSSDR16ApogeeStar.target_id
+                    catalogdb.SDSSDR16ApogeeStar.apstar_id == catalogdb.CatalogToSDSSDR16ApogeeStar.target_id
                 ).one_or_none()
+                if catalogid is not None:
+                    catalogid, = catalogid
 
             else:
                 raise ValueError(f"Don't know what to do with SDSS-IV APOGEE filetype of '{filetype}'")
 
             if catalogid > 0:
-                gaia_dr2_source_id, = sdssdb_session.query(catalogdb.TICV8.gaia_int)\
-                                                    .filter(catalogdb.TICV8.id == catalogdb.CatalogToTICV8.target_id)\
-                                                    .filter(catalogdb.CatalogToTICV8.catalogid == catalogid).one_or_none()
+                gaia_dr2_source_id = sdssdb_session.query(catalogdb.TICV8.gaia_int)\
+                                                   .filter(catalogdb.TICV8.id == catalogdb.CatalogToTICV8.target_id)\
+                                                   .filter(catalogdb.CatalogToTICV8.catalogid == catalogid).one_or_none()
+                if gaia_dr2_source_id is not None:
+                    gaia_dr2_source_id, = gaia_dr2_source_id
             else:
                 gaia_dr2_source_id = None
 
