@@ -21,7 +21,7 @@ class SDSSDR16ApogeeVisit(Base):
     __tablename__ = "sdss_dr16_apogeevisit"
 
 class CatalogToSDSSDR16ApogeeStar(Base):
-    __tablename__ = "sdss_dr16_apogeeestar"
+    __tablename__ = "catalog_to_sdss_dr16_apogeestar"
 
 class SDSSDR16ApogeeStarVisit(Base):
     __tablename__ = "sdss_dr16_apogeestarvisit"
