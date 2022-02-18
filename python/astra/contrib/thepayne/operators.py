@@ -1,6 +1,8 @@
 import os
 import pickle
 import numpy as np
+import torch
+from time import time
 from tqdm import tqdm
 from sdss_access import SDSSPath
 from inspect import signature
@@ -158,6 +160,12 @@ def estimate_stellar_labels(pks, **kwargs):
         task instances include information to identify the source SDSS data product.
     """
 
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    log.info(f"Running ThePayne on device {device} with:")
+    log.info(f"CUDA_VISIBLE_DEVICES = '{os.environ.get('CUDA_VISIBLE_DEVICES')}'")
+    log.info(f"Using torch version {torch.__version__} in {torch.__path__}")
+
     states = {}
 
     log.info(f"Estimating stellar labels for task instances")
@@ -178,16 +186,18 @@ def estimate_stellar_labels(pks, **kwargs):
             log.info(f"Estimating these {L} label names: {label_names}")
 
         # Run optimization.
+        t_init = time()
         p_opt, p_cov, model_flux, meta = test.test(
             spectrum.wavelength.value,
             spectrum.flux.value,
             spectrum.uncertainty.array,
             **state
         )
+        t_opt = time() - t_init
         
-        log.debug(f"spectrum shape: {spectrum.flux.shape}")
-        log.debug(f"p_opt shape: {p_opt.shape}")
-        log.debug(f"spectrum meta: {spectrum.meta['snr']}")
+        #log.debug(f"spectrum shape: {spectrum.flux.shape}")
+        #log.debug(f"p_opt shape: {p_opt.shape}")
+        #log.debug(f"spectrum meta: {spectrum.meta['snr']}")
 
         # Prepare outputs.
         result = dict(zip(label_names, p_opt.T))
@@ -199,7 +209,7 @@ def estimate_stellar_labels(pks, **kwargs):
         )))
         
         results[instance.pk] = result
-        log.info(f"Result for {instance}: {result}")
+        log.info(f"Result for {instance} took {t_opt} seconds")
 
     # Write database outputs.
     for pk, result in tqdm(results.items(), desc="Writing database outputs"):

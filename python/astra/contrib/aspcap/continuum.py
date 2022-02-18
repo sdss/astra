@@ -7,7 +7,8 @@ import pickle
 from ast import literal_eval
 
 from astra.utils import log
-from astra.contrib.ferre import bitmask, utils
+from astra.contrib.ferre import utils
+from astra.contrib.aspcap import bitmask
 from astra.database import (astradb, session)
 
 from scipy.ndimage.filters import median_filter

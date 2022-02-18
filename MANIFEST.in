@@ -1,2 +1,3 @@
 VERSION
 recursive-include python/astra/etc *
+recursive-include astra/contrib/thepayne_new/data/ *

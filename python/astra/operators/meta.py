@@ -7,6 +7,30 @@ from tqdm import tqdm
 from astra.database import (astradb, session as astra_session)
 from astra.database.sdssdb import (apogee_drpdb, catalogdb, session as sdssdb_session)
 from astra.utils import (log, flatten)
+from astra.database.utils import deserialize_pks
+
+def add_meta_to_new_task_instances_without_meta():
+    """
+    Add meta to new task instances without meta.
+    """
+    pk, = astra_session.query(
+            astradb.TaskInstance.pk
+        ).filter(
+            astradb.TaskInstanceMeta.ti_pk == astradb.TaskInstance.pk
+        ).order_by(
+            astradb.TaskInstance.pk.desc()
+        ).first()
+    
+    stmt = exists().where(astradb.TaskInstance.pk == astradb.TaskInstanceMeta.ti_pk)
+    q = astra_session.query(astradb.TaskInstance.pk).filter(astradb.TaskInstance.pk > pk).filter(~stmt)
+    for pk in tqdm(q.yield_per(1), total=q.count(), desc="Adding metadata to task instances"):
+        try:
+            add_meta_to_task_instance(pk)
+        except:
+            log.exception(f"Unable to add meta to task instance with pk {pk}")
+            continue
+    return None
+
 
 
 def add_meta_to_task_instances_without_meta():
@@ -16,7 +40,7 @@ def add_meta_to_task_instances_without_meta():
     failed, total = (0, count_task_instances_without_meta())
     for pk in tqdm(yield_task_instance_pks_without_meta(), total=total, desc="Adding metadata to task instances"):
         try:
-            update_task_instance_meta(pk)
+            add_meta_to_task_instance(pk)
         except:
             log.exception(f"Unable to add meta to task instance with pk {pk}")
             continue
@@ -48,9 +72,14 @@ def count_task_instances_without_meta():
     return _query_task_instances_without_meta().count()
     
 
+def add_meta_to_task_instances(pks):
+    pks = deserialize_pks(pks, flatten=True)
+    for pk in pks:
+        add_meta_to_task_instance(pk)
+    return pks
 
 
-def update_task_instance_meta(ti_pk):
+def add_meta_to_task_instance(ti_pk):
     """
     Update the task instance meta table for a given task instance.
     """
@@ -64,7 +93,7 @@ def update_task_instance_meta(ti_pk):
     except KeyError:
         raise KeyError(f"Either missing `release` or `filetype` parameter for task instance {ti}")
     
-    if release in ("sdss5", None):
+    if release in ("sdss5", None, "null"):
         is_sdss5 = True
     elif release in ("dr17", "dr16"):
         is_sdss5 = False
@@ -95,11 +124,11 @@ def update_task_instance_meta(ti_pk):
                 visit_pks = sdssdb_session.query(apogee_drpdb.Visit.pk).filter_by(
                     apogee_id=parameters["obj"], # TODO: raise with Nidever
                     telescope=parameters["telescope"],
-                    fiberid=parameters["fiber"],
+                    fiberid=parameters["fiber"], # TODO: raise with Nidever
                     plate=parameters["plate"],
                     field=parameters["field"],
                     mjd=parameters["mjd"],
-                    apred=parameters["apred"]
+                    apred_vers=parameters["apred"] # TODO: raise with Nidever
                 ).one_or_none()
 
                 visit_paths = [tree.full(**parameters)]
@@ -144,6 +173,7 @@ def update_task_instance_meta(ti_pk):
                 try:
                     apogee_drp_visit_naxis1.append(fits.getval(visit_path, "NAXIS1", ext=1))
                 except:
+                    log.exception(f"Could not get NAXIS1 from path {visit_path}")
                     apogee_drp_visit_naxis1.append(-1)
 
             meta.update(

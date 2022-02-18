@@ -10,8 +10,8 @@ from tqdm import tqdm
 
 from astra.contrib.classifier import networks, model, plot_utils, utils
 from astra.database import astradb, session
-from astra.database.utils import (get_or_create_task_instance, create_task_output, serialize_pks_to_path, deserialize_pks, get_or_create_parameter_pk)
-from astra.tools.spectrum import Spectrum1D
+from astra.database.sdssdb import (apogee_drpdb, session as sdss_session)
+from astra.database.utils import (create_task_instance, create_task_output, deserialize_pks)
 from astra.utils import log, get_scratch_dir, hashify, get_base_output_path
 
 from sdss_access import SDSSPath
@@ -134,7 +134,7 @@ def train_model(
 
 
 
-def classify(pks):
+def classify(pks, **kwargs):
     """
     Classify sources given the primary keys of task instances.
 
@@ -208,7 +208,7 @@ def _prepare_log_prob_result(class_names, log_probs, decimals=3):
 
 
 
-def classify_apstar(pks, **kwargs):
+def classify_apstar(pks, dag, task, run_id, **kwargs):
     """
     Classify observations of APOGEE (ApStar) sources, given the existing classifications of the
     individual visits.
@@ -220,105 +220,94 @@ def classify_apstar(pks, **kwargs):
 
     pks = deserialize_pks(pks, flatten=True)
 
-    # Select distinct objects by `obj` and `apred`.
-    distinct_sources = []
-    dag_id, task_id = (None, None)
-    for pk in pks:
-        q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk)
-        instance = q.one_or_none()
-        distinct_sources.append((instance.parameters["obj"], instance.parameters["apred"]))
+    # For each unique apStar object, we need to find all the visits that have been classified.
+    distinct_apogee_drp_star_pk = session.query(
+            distinct(astradb.TaskInstanceMeta.apogee_drp_star_pk)
+        ).filter(
+            astradb.TaskInstance.pk.in_(pks), 
+            astradb.TaskInstanceMeta.ti_pk == astradb.TaskInstance.pk
+        ).all()
 
-        dag_id = dag_id or instance.dag_id
-        task_id = task_id or instance.task_id
+    # We need to make sure that we will only retrieve results on apVisit objects, and not on apStar objects.
+    parameter_pk, = session.query(
+            astradb.Parameter.pk
+        ).filter(
+            astradb.Parameter.parameter_name == "filetype", 
+            astradb.Parameter.parameter_value == "apVisit"
+        ).one_or_none()
     
-    distinct_sources = set(distinct_sources)
-    N = len(distinct_sources)
 
-    try:
-        this_task_id = kwargs["task"].task_id
-    except:
-        this_task_id = "classify_apstar"
-    
-    try:
-        run_id = kwargs["run_id"]
-    except:
-        print(kwargs)
-        raise
+    for star_pk in distinct_apogee_drp_star_pk:
 
-    for i, (obj, apred) in enumerate(distinct_sources):
-        
-        log.info(f"Combining classifications for distinct source {i} / {N}: {obj} ({apred})")
+        results = session.query(astradb.TaskInstance, astradb.TaskInstanceMeta, astradb.Classification).filter(
+            astradb.Classification.output_pk == astradb.TaskInstance.output_pk,
+            astradb.TaskInstance.pk == astradb.TaskInstanceMeta.ti_pk,
+            astradb.TaskInstanceMeta.apogee_drp_star_pk == star_pk,
+            astradb.TaskInstanceParameter.ti_pk == astradb.TaskInstance.pk,
+            astradb.TaskInstanceParameter.parameter_pk == parameter_pk
+        ).all()
 
-        parameter_pks = [
-            get_or_create_parameter_pk("obj", obj)[0],
-            get_or_create_parameter_pk("apred", apred)[0]
-        ]
+        column_func = lambda column_name: column_name.startswith("lp_")
 
-        # Get all task instances matching this obj and apred.
-        s1 = session.query(astradb.TaskInstanceParameter.ti_pk)\
-                    .filter(astradb.TaskInstanceParameter.parameter_pk.in_(parameter_pks))\
-                    .group_by(astradb.TaskInstanceParameter.ti_pk)\
-                    .having(func.count(distinct(astradb.TaskInstanceParameter.parameter_pk)) == len(parameter_pks))\
-                    .subquery()
-
-        s2 = session.query(astradb.TaskInstance)\
-                    .filter(astradb.TaskInstance.dag_id == dag_id)\
-                    .filter(astradb.TaskInstance.task_id == task_id)\
-                    .filter(astradb.TaskInstance.output_pk != None)\
-                    .join(s1, astradb.TaskInstance.pk == s1.c.ti_pk)\
-                    .subquery()
-        
-        s3 = session.query(func.max(astradb.TaskInstance.output_pk).label("latest"))\
-                    .join(astradb.TaskInstanceParameter)\
-                    .join(s2, astradb.TaskInstance.pk == s2.c.pk)\
-                    .group_by(astradb.TaskInstance.dag_id, astradb.TaskInstance.run_id, astradb.TaskInstance.task_id, astradb.TaskInstanceParameter)\
-                    .subquery()
-
-        q = session.query(astradb.TaskInstance)\
-                   .join(s3, astradb.TaskInstance.output_pk == s3.c.latest)\
-                   .join(s2, astradb.TaskInstance.pk == s2.c.pk)
-
-        # Get all these results.
         lps = {}
-        for instance in q.all():
-            if instance.output is None: continue
-            for k, v in instance.output.__dict__.items():
-                if k.startswith("lp_"):
-                    lps.setdefault(k, 0)
-                    lps[k] += np.sum(v)
+        for j, (ti, meta, classification) in enumerate(results):
+            if j == 0:
+                for column_name in classification.__table__.columns.keys():
+                    if column_func(column_name):
+                        lps[column_name] = []
+            
+            for column_name in lps.keys():
+                values = getattr(classification, column_name)
+                if values is None: continue
+                assert len(values) == 1, "We are getting results from apStars and re-adding to apStars!"
+                lps[column_name].append(values[0])
         
-        if not lps:
-            log.warning(f"No results found for {obj} / {apred}!")
-            continue
 
-        class_names = [ea[3:] for ea in lps.keys()]
-        log_probs = list(lps.values())
-        result = _prepare_log_prob_result(class_names, log_probs)
+        # Calculate total log probabilities.
+        joint_lps = np.array([np.sum(lp) for lp in lps.values() if len(lp) > 0])
+        keys = [key for key, lp in lps.items() if len(lp) > 0]
 
-        # NOTE: This won't be enough parameters to identify the apStar file, because we are combining information here
-        #       from visits across multiple telescopes. This might not be what we want to do.
+        # Calculate normalized probabilities.
+        with np.errstate(under="ignore"):
+            relative_log_probs = joint_lps - logsumexp(joint_lps)
+        
+        # Round for PostgreSQL 'real' type.
+        # https://www.postgresql.org/docs/9.1/datatype-numeric.html
+        # and
+        # https://stackoverflow.com/questions/9556586/floating-point-numbers-of-python-float-and-postgresql-double-precision
+        decimals = 3
+        probs = np.round(np.exp(relative_log_probs), decimals)
+
+        joint_result = { k: [float(lp)] for k, lp in zip(keys, joint_lps) }
+        joint_result.update({ k[1:] : [float(v)] for k, v in zip(keys, probs) })
+
+        # Create a task for this classification.
+        # To do that we need to construct the parameters for the task.
+        columns = (
+            apogee_drpdb.Star.apred_vers.label("apred"), # TODO: Raise with Nidever
+            apogee_drpdb.Star.healpix,
+            apogee_drpdb.Star.telescope,
+            apogee_drpdb.Star.apogee_id.label("obj"), # TODO: Raise with Nidever
+        )
+        apred, healpix, telescope, obj = sdss_session.query(*columns).filter(apogee_drpdb.Star.pk == star_pk).one()
         parameters = dict(
-            release=instance.parameters["release"],
             apred=apred,
+            healpix=healpix,
+            telescope=telescope,
             obj=obj,
-            model_path=instance.parameters["model_path"],
+            release="sdss5",
+            filetype="apStar",
+            apstar="stars"
         )
+                
+        args = (dag.dag_id, task.task_id, run_id)
+        
+        # Get a string representation of the python callable to store in the database.
 
-        instance = get_or_create_task_instance(
-            dag_id=dag_id,
-            task_id=this_task_id,
-            run_id=run_id,
-            parameters=parameters
-        )
+        instance = create_task_instance(*args, parameters)
+        output = create_task_output(instance.pk, astradb.Classification, **joint_result)
 
-        create_task_output(
-            instance,
-            astradb.Classification,
-            **result
-        )
-
-        log.debug(f"Created task {instance} with classification {result}")
-    
+        raise a
 
 
 def get_model_path(

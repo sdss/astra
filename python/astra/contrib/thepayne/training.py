@@ -213,7 +213,7 @@ def _train(training_flux, training_labels, validation_flux, validation_labels, l
 
 
 
-def load_training_data(path):
+def load_training_data(path, training_fraction=0.8):
     '''
     read in the default Kurucz training spectra for APOGEE
 
@@ -223,22 +223,17 @@ def load_training_data(path):
     trained using 10000 training spectra.
     '''
 
-    '''
-    tmp = np.load(path)
-    training_labels = (tmp["labels"].T)[:800,:]
-    training_spectra = tmp["spectra"][:800,:]
-    validation_labels = (tmp["labels"].T)[800:,:]
-    validation_spectra = tmp["spectra"][800:,:]
-    tmp.close()
-    '''
-
+    if not (1 > training_fraction > 0):
+        raise ValueError("training fraction must be within (0, 1)")
+        
     with open(path, "rb") as fp:
         contents = pickle.load(fp)
     
-    N = 800
+    N_labels, N_spectra = contents["labels"].shape
+
+    N = int(N_spectra * training_fraction)
     training_labels = contents["labels"].T[:N, :]
     training_spectra = contents["spectra"][:N, :]
     validation_labels = contents["labels"].T[N:, :]
     validation_spectra = contents["spectra"][N:, :]
     return (contents["wavelength"], contents["label_names"], training_labels, training_spectra, validation_labels, validation_spectra)
-

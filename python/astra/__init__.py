@@ -10,7 +10,7 @@ import yaml
 from pkg_resources import parse_version
 from sdsstools.logger import (color_text, get_logger)
 
-__version__ = '0.2.0-dev'
+__version__ = '0.2.1-dev'
 
 def merge(user, default):
     """Merges a user configuration with the default one."""

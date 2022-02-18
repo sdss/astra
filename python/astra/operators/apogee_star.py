@@ -155,7 +155,45 @@ class ApStarOperator(DataProductOperator):
             yield { **common, **dict(zip(keys, values)) }
                         
 
-    def query_sdss5_data_model_identifiers_from_database(self, mjd_start, mjd_end):
+    def query_data_model_identifiers_from_database(self, context):
+        release, filetype, apstar = ("sdss5", "apStar", "stars")
+    
+        prev_ds, ds = (context["prev_ds"], context["ds"])
+        # TODO: Assuming we are only using SDSS-V data here.
+
+        columns = (
+            apogee_drpdb.Star.apred_vers.label("apred"), # TODO: Raise with Nidever
+            apogee_drpdb.Star.healpix,
+            apogee_drpdb.Star.telescope,
+            apogee_drpdb.Star.apogee_id.label("obj"), # TODO: Raise with Nidever
+        )
+
+        q = session.query(*columns).filter(apogee_drpdb.Star.created.between(prev_ds, ds))
+        if self._query_filter_by_kwargs is not None:
+            q = q.filter_by(**self._query_filter_by_kwargs)
+
+        if self._limit is not None:
+            q = q.limit(self._limit)
+
+        log.debug(f"Preparing query {q}")
+        total = q.count()
+        log.debug(f"Retrieved {total} rows between {prev_ds} and {ds}")
+
+
+        keys = [column.name for column in columns]
+
+        for values in q.yield_per(1):
+            d = dict(zip(keys, values))
+            d.update(
+                release=release,
+                filetype=filetype,
+                apstar=apstar,
+            )
+            yield d
+
+
+
+    def __query_sdss5_data_model_identifiers_from_database(self, mjd_start, mjd_end):
         """
         Query the SDSS-V database for ApStar data model identifiers.
         """

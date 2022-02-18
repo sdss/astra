@@ -136,8 +136,8 @@ class AstraOperator(BaseOperator):
         else:
             # This is essentially what "astra execute [PK]" does.
             function = string_to_callable(self.python_callable)
-            
-            result = function(self.pks, **self.op_kwargs)
+
+            result = function(self.pks, **(self.op_kwargs or dict()))
             log.info(f"Result from {function} with op kwargs {self.op_kwargs} was: {result}")
         
         return self.pks

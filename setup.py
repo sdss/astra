@@ -38,6 +38,14 @@ def run(packages, install_requires):
           packages=packages,
           install_requires=install_requires,
           package_dir={'': 'python'},
+          package_data={
+              "astra.contrib.thepayne_new": [
+                "apogee_mask.npz",
+                "apogee_wavelength.npz",
+                "cannon_cont_pixels_apogee.npz",
+                "NN_normalized_spectra.npz"
+            ],
+          },
           scripts=['bin/astra'],
         #entry_points = {
         #    'console_scripts': [
