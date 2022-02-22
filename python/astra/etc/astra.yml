@@ -1,7 +1,18 @@
 ---
 
-database_config:
-  connection_string: sqlite:///astra.db
+# This configuration file allows for the astra database to be different than the SDSS5 database.
+# TODO: Read the database host/user/port/domain directly from here instead of a profile?
+astra_database:
+  dbname: sdss5db
+  profile: astra
+  schema: astra_v03
+
+
+sdss5_database:
+  dbname: sdss5db
+  profile: astra
+
+
 
 
 option1:

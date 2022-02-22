@@ -1,137 +1,132 @@
 import json
-import hashlib
-from sqlalchemy import Column, ForeignKey, Integer, String
-from sqlalchemy.ext.associationproxy import association_proxy
-from sqlalchemy.ext.declarative import AbstractConcreteBase, declared_attr
-from sqlalchemy.orm import relationship
-from sqlalchemy_utils import dependent_objects
+from peewee import AutoField, TextField, ForeignKeyField, DateTimeField
+from sdssdb.connection import PeeweeDatabaseConnection
+from sdssdb.peewee import BaseModel as _BaseModel
+from astra import (config, log)
 
-from astra.database import AstraBase, database, session
+# The database config should always be present, but let's not prevent importing the module because it's missing.
+_database_config = config.get("astra_database", {})
 
-
-class Base(AbstractConcreteBase, AstraBase):
-    __abstract__ = True
-    _schema = "astra"
-    _relations = "define_relations"
-
-
-    @declared_attr
-    def __table_args__(cls):
-        return { "schema": cls._schema }
-
-
-
-class TaskInstance(Base):
-    __tablename__ = "ti"
-
-    output_interface = relationship("OutputInterface", backref="ti")
-
-    def _output_dependent_objects(self):
-        if self.output_interface is not None:
-            yield from dependent_objects(self.output_interface)
-
-
-    def __repr__(self):
-        output_str = f", output_pk={self.output_pk}" if self.output_pk is not None else ""
-        return f"<{self.__class__.__name__} (pk={self.pk:.0f}, dag_id={self.dag_id}, task_id={self.task_id}, run_id={self.run_id}{output_str})>"
-
-
-    @property
-    def parameters(self):
-        q = session.query(Parameter).join(TaskInstanceParameter).filter(TaskInstanceParameter.ti_pk==self.pk)
-        return dict(((p.parameter_name, p.parameter_value) for p in q.all()))
-
+class AstraDatabaseConnection(PeeweeDatabaseConnection):
+    dbname = _database_config.get("dbname", None)
     
-    @property
-    def output(self):
-        # Tasks can only have one database target output. Sorry!
-        if self.output_pk is None:
-            return None
+database = AstraDatabaseConnection(autoconnect=True)
+
+profile = _database_config.get("profile", None)
+if profile is not None:
+    try:
+        database.set_profile(profile)
+    except AssertionError as e:
+        log.exception(e)
+        log.warning(f"""
+        Database profile '{profile}' set in Astra configuration file, but there is no database 
+        profile called '{profile}' found in ~/.config/sdssdb/sdssdb.yml -- it should look like:
         
-        for instance in dependent_objects(self.output_interface):
-            if not isinstance(instance, self.__class__):
-                return instance
+        {profile}:
+            user: [USER]
+            host: [HOST]
+            port: 5432
+            domain: [DOMAIN]
+
+        See https://sdssdb.readthedocs.io/en/stable/intro.html#supported-profiles for more details. 
+        If the profile name '{profile}' is incorrect, you can change the 'database' / 'profile' key 
+        in ~/.astra/astra.yml
+        """)
+
+
+class JSONField(TextField):
+    def db_value(self, value):
+        return json.dumps(value)
+
+    def python_value(self, value):
+        if value is not None:
+            return json.loads(value)
+
+
+class BaseModel(_BaseModel):
+    class Meta:
+        database = database
+        schema = _database_config.get("schema", None)
+        
+
+class DataProduct(BaseModel):
+    pk = AutoField()
+    filetype = TextField()
+    kwargs = JSONField()
+
+    class Meta:
+        indexes = (
+            (("filetype", "kwargs"), True),
+        )
+
+    @property
+    def input_to_tasks(self):
+        return (
+            Task.select()
+                .join(TaskInputDataProducts)
+                .join(DataProduct)
+                .where(DataProduct.pk == self.pk)
+        )
+
+
+class Task(BaseModel):
+    pk = AutoField()
+    name = TextField()
+    parameters = JSONField(null=True)
+
+    git_hash = TextField(null=True)
+    version = TextField(null=True)
+
+    # We want some times to be recorded:
+    # - time taken for common pre-execution time (for all sources)
+    # - time taken for this task pre-execution time 
+    # - time between preparing task for slurm, and actually submitting to slurm
+    # - time between waiting for slurm to get the task, and actually start running the task
+    # - time taken for common execution time (for all sources)
+    # - time taken for this task execution time
+    # - time taken for common post_execution time (for all sources in a bundle)
+    # - time taken for this task post_execution time
 
 
     @property
-    def meta(self):
-        return session.query(TaskInstanceMeta).filter(TaskInstanceMeta.ti_pk == self.pk).one_or_none()
-
-
-
-
-class TaskInstanceMeta(Base):
-    __tablename__ = "ti_meta"
-
-    
-
-class OutputInterface(Base):
-    __tablename__ = "output_interface"
-
+    def input_data_products(self):
+        return (
+            DataProduct.select()
+                       .join(TaskInputDataProducts)
+                       .join(Task)
+                       .where(Task.pk == self.pk)
+        )
 
     @property
-    def referenced_task_instances(self):
-        """ A generator that yields tasks that point to this database output. """
-        for instance in dependent_objects(self):
-            if isinstance(instance, TaskInstance):
-                yield instance
+    def output_data_products(self):
+        return (
+            DataProduct.select()
+                       .join(TaskOutputDataProducts)
+                       .join(Task)
+                       .where(Task.pk == self.pk)
+        )
+
+
+class ExecutionContext(BaseModel):
+    pk = AutoField()
+    status = TextField()
+    meta = JSONField()
 
 
 
-class TaskInstanceParameter(Base):
-    __tablename__ = "ti_parameter"
+class TaskExecutionContext(BaseModel):
+    pk = AutoField()
+    task = ForeignKeyField(Task)
+    execution_context = ForeignKeyField(ExecutionContext)
+
+
+class TaskInputDataProducts(BaseModel):
+    pk = AutoField()
+    task = ForeignKeyField(Task)
+    data_product = ForeignKeyField(DataProduct)
     
 
-class Parameter(Base):
-    __tablename__ = "parameter"
-    
-
-class OutputMixin:
-
-    def get_task_instances(self):
-        return session.query(TaskInstance).filter_by(output_pk=self.output_pk).all()
-
-
-class ApogeeNet(Base, OutputMixin):
-    __tablename__ = "apogeenet"
-
-
-class Doppler(Base, OutputMixin):
-    __tablename__ = "doppler"
-
-
-class TheCannon(Base, OutputMixin):
-    __tablename__ = "thecannon"
-    
-
-class ThePayne(Base, OutputMixin):
-    __tablename__ = "thepayne"
-    
-
-class Ferre(Base, OutputMixin):
-    __tablename__ = "ferre"
-
-class Aspcap(Base, OutputMixin):
-    __tablename__ = "aspcap"
-
-class Classification(Base, OutputMixin):
-    __tablename__ = "classification"
-
-
-class WDClassification(Base, OutputMixin):
-    __tablename__ = "wd_classification"
-
-
-class ThePayneChe(Base, OutputMixin):
-    __tablename__ = "thepayne_che"
-
-def define_relations():    
-    
-    #Task.batch_interface = relationship("BatchInterface", backref="task", foreign_keys="BatchInterface.parent_task_pk")
-    #Task.output_interface = relationship("OutputInterface", backref="task")
-
-
-    pass
-
-
-database.add_base(Base)
+class TaskOutputDataProducts(BaseModel):
+    pk = AutoField()
+    task = ForeignKeyField(Task)
+    data_product = ForeignKeyField(DataProduct)
