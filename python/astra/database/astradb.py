@@ -1,7 +1,7 @@
 import json
 from peewee import AutoField, TextField, ForeignKeyField, DateTimeField
 from sdssdb.connection import PeeweeDatabaseConnection
-from sdssdb.peewee import BaseModel as _BaseModel
+from sdssdb.peewee import BaseModel
 from astra import (config, log)
 
 # The database config should always be present, but let's not prevent importing the module because it's missing.
@@ -34,6 +34,12 @@ if profile is not None:
         """)
 
 
+class AstraBaseModel(BaseModel):
+    class Meta:
+        database = database
+        schema = _database_config.get("schema", None)
+
+
 class JSONField(TextField):
     def db_value(self, value):
         return json.dumps(value)
@@ -41,22 +47,17 @@ class JSONField(TextField):
     def python_value(self, value):
         if value is not None:
             return json.loads(value)
-
-
-class BaseModel(_BaseModel):
-    class Meta:
-        database = database
-        schema = _database_config.get("schema", None)
         
 
-class DataProduct(BaseModel):
+class DataProduct(AstraBaseModel):
     pk = AutoField()
+    release = TextField()
     filetype = TextField()
     kwargs = JSONField()
 
     class Meta:
         indexes = (
-            (("filetype", "kwargs"), True),
+            (("release", "filetype", "kwargs"), True),
         )
 
     @property
@@ -69,7 +70,7 @@ class DataProduct(BaseModel):
         )
 
 
-class Task(BaseModel):
+class Task(AstraBaseModel):
     pk = AutoField()
     name = TextField()
     parameters = JSONField(null=True)
@@ -107,26 +108,35 @@ class Task(BaseModel):
         )
 
 
-class ExecutionContext(BaseModel):
+class ExecutionContext(AstraBaseModel):
     pk = AutoField()
     status = TextField()
     meta = JSONField()
 
 
-
-class TaskExecutionContext(BaseModel):
+class TaskExecutionContext(AstraBaseModel):
     pk = AutoField()
     task = ForeignKeyField(Task)
     execution_context = ForeignKeyField(ExecutionContext)
 
 
-class TaskInputDataProducts(BaseModel):
+class TaskInputDataProducts(AstraBaseModel):
     pk = AutoField()
     task = ForeignKeyField(Task)
     data_product = ForeignKeyField(DataProduct)
     
 
-class TaskOutputDataProducts(BaseModel):
+class TaskOutputDataProducts(AstraBaseModel):
     pk = AutoField()
     task = ForeignKeyField(Task)
     data_product = ForeignKeyField(DataProduct)
+
+
+def create_tables(drop_existing_tables=False):
+    """ Create all tables for the Astra database. """
+    database.connect()
+    models = AstraBaseModel.__subclasses__()
+    if drop_existing_tables:
+        database.drop_tables(models)
+    database.create_tables(models)
+    database.close()
