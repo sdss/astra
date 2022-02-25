@@ -1,8 +1,10 @@
 ---
 
 # This configuration file allows for the astra database to be different than the SDSS5 database.
-# TODO: Read the database host/user/port/domain directly from here instead of a profile?
 astra_database:
+  # Most end-users are running locally. So let's set Sqlite in-memory as the default DB.
+  # The `url` keyword overrides all others. Comment the line below if you want to use a SDSS database profile.
+  url: "sqlite:///:memory:"
   dbname: sdss5db
   profile: astra
   schema: astra_v03
