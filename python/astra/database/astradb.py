@@ -1,10 +1,11 @@
 import json
-from functools import lru_cache
+from functools import (lru_cache, cached_property)
 from sdss_access import SDSSPath
-from peewee import (SqliteDatabase, AutoField, TextField, ForeignKeyField, DateTimeField, BigIntegerField, FloatField, BooleanField)
+from peewee import (SQL, SqliteDatabase, AutoField, TextField, ForeignKeyField, DateTimeField, BigIntegerField, FloatField, BooleanField)
 from sdssdb.connection import PeeweeDatabaseConnection
 from sdssdb.peewee import BaseModel
 from astra import (config, log)
+from astra.utils import flatten
 
 # The database config should always be present, but let's not prevent importing the module because it's missing.
 _database_config = config.get("astra_database", {})
@@ -105,11 +106,13 @@ class DataProduct(AstraBaseModel):
                 .where(DataProduct.pk == self.pk)
         )
 
-    @property
+    @cached_property
     def path(self):
         kwds = self.kwargs.copy()
         if "field" in kwds:
-            kwds["field"] = str(kwds["field"]).strip()
+            if kwds["field"].startswith(" "):
+                log.warning(f"Field name of {self.release} {self.filetype} {self.kwargs} starts with spaces.")
+                kwds["field"] = str(kwds["field"]).strip()
         return _lru_sdsspath(self.release).full(self.filetype, **kwds)
         
 
@@ -129,12 +132,15 @@ class SourceDataProduct(AstraBaseModel):
     data_product = ForeignKeyField(DataProduct)
 
 
+class Output(AstraBaseModel):
+    pk = AutoField()
+
 class Task(AstraBaseModel):
     pk = AutoField()
     name = TextField()
     parameters = JSONField(null=True)
 
-    version = TextField(null=True)
+    version = TextField()
 
     # We want some times to be recorded:
     # - time taken for common pre-execution time (for all sources)
@@ -166,6 +172,44 @@ class Task(AstraBaseModel):
         )
 
 
+    @property
+    def outputs(self):
+        '''
+        q = None
+        # Create a compound union query to retrieve all possible outputs for this task.
+        o = TaskOutput.get(TaskOutput.task == self)
+        for expr, column in o.output.dependencies():
+            if column.model != TaskOutput:
+                sq = column.model.select().where(column.model.task == self)
+                if q is None:
+                    q = sq
+                else:
+                    q += sq
+        # Order by the order they were created.
+        return q#.order_by(SQL("output_id").asc())
+        '''
+        outputs = []
+        o = TaskOutput.get(TaskOutput.task == self)
+        for expr, column in o.output.dependencies():
+            if column.model != TaskOutput:
+                outputs.extend(column.model.select().where(column.model.task == self))
+        return sorted(outputs, key=lambda x: x.output_id)
+    
+
+class TaskOutput(AstraBaseModel):
+    pk = AutoField()
+    task = ForeignKeyField(Task)
+    output = ForeignKeyField(Output)
+
+
+class Bundle(AstraBaseModel):
+    pk = AutoField()
+
+class TaskBundle(AstraBaseModel):
+    task = ForeignKeyField(Task)
+    bundle = ForeignKeyField(Bundle)
+
+
 class ExecutionContext(AstraBaseModel):
     pk = AutoField()
     status = TextField()
@@ -188,6 +232,8 @@ class TaskOutputDataProducts(AstraBaseModel):
     pk = AutoField()
     task = ForeignKeyField(Task)
     data_product = ForeignKeyField(DataProduct)
+
+
 
 
 def create_tables(drop_existing_tables=False):

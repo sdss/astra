@@ -19,6 +19,20 @@ import tempfile
 log = logging.getLogger(__name__.split(".")[0])
 #log.propagate = False
 
+
+class Timer:
+    def __enter__(self):
+        self.t_enter = time()
+    
+    def __exit__(self, type, value, traceback):
+        self.t_exit = time()
+
+    @property
+    def time(self):
+        return self.t_exit - self.t_enter
+
+timer = Timer()
+
 def monkey_patch_get_boss_spec_path(**kwargs):
     #/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/bhm/boss/spectro/redux/v6_0_3/spectra/full/15000p/59146/
     identifier = max(int(kwargs["fiberid"]), int(kwargs["catalogid"]))

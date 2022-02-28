@@ -157,6 +157,7 @@ class ApVisitOperator(BaseApogeeDRPOperator):
             context["ds"],
             Visit,
             "SDSS-V ApVisit",
+            where=(Visit.catalogid > 0),
             headers={
                 "snr": (0, "SNR"),
                 "naxis1": (1, "NAXIS1")
@@ -184,7 +185,7 @@ class ApStarOperator(BaseApogeeDRPOperator):
             context["ds"],
             Star,
             "SDSS-V ApStar",
-            where=Star.ngoodvisits > 0,
+            where=(Star.ngoodvisits > 0) & (Star.catalogid > 0),
             headers={
                 "snr": (0, "SNR"),
             }
