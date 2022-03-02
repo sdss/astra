@@ -1,23 +1,18 @@
 
-import torch
 import numpy as np
+import torch
+from tqdm import tqdm
+
 from astra import log
+from astra.utils import dict_to_list
 from astra.task import ExecutableTask, Parameter
 from astra.database.astradb import Output, TaskOutput
 from astra.tools.spectrum import Spectrum1D
-from astra.utils import timer
 
 from astra.contrib.apogeenet.model import Model
 from astra.contrib.apogeenet.database import ApogeeNet
-from astra.contrib.apogeenet.utils import get_metadata
+from astra.contrib.apogeenet.utils import get_metadata, create_bitmask
 
-
-
-def create_output(model, task, **kwargs):
-    output = Output.create()
-    kwds = dict(task=task, output=output)
-    TaskOutput.create(**kwds)
-    return model.create(**kwds, **kwargs)
 
 
 class StellarParameters(ExecutableTask):
@@ -26,19 +21,15 @@ class StellarParameters(ExecutableTask):
     num_uncertainty_draws = Parameter("num_uncertainty_draws", default=100)
     large_error = Parameter("large_error", default=1e10)
     
-
     def execute(self):
     
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         model = Model(self.model_path, device)
 
-        result = []
-        for i, (task, data_products, parameters) in enumerate(self.iterable()):
+        results = []
+        total = len(self.input_data_products)
+        for i, (task, data_products, parameters) in enumerate(tqdm(self.iterable(), total=total)):
             
-            if i == 1:
-                from time import sleep
-                sleep(2)
-
             assert len(data_products) == 1
 
             spectrum = Spectrum1D.read(data_products[0].path)
@@ -59,9 +50,57 @@ class StellarParameters(ExecutableTask):
             # Replace infinites with non-finite.
             predictions[~np.isfinite(predictions)] = np.nan
 
-            result.append(predictions)
+            flux_error = np.nan_to_num(spectrum.uncertainty.array**-0.5).astype(np.float32).reshape((N, 1, P))
+            median_error = 5 * np.median(flux_error, axis=(1, 2))
             
-        return result
+            for j, value in enumerate(median_error):
+                bad_pixel = (flux_error[j] == self.large_error) | (flux_error[j] >= value)
+                flux_error[j][bad_pixel] = value                
+
+            flux_error = torch.from_numpy(flux_error).to(device)
+
+            inputs = torch.randn((self.num_uncertainty_draws, N, 1, P), device=device) * flux_error + flux
+            inputs = inputs.reshape((self.num_uncertainty_draws * N, 1, P))
+
+            meta_error = meta.repeat(self.num_uncertainty_draws, 1)
+            with torch.set_grad_enabled(False):
+                draws = model.predict_spectra(inputs, meta_error)
+                if device != "cpu":
+                    draws = draws.cpu().data.numpy()
+
+            draws = draws.reshape((self.num_uncertainty_draws, N, -1))
+
+            median_draw_predictions = np.nanmedian(draws, axis=0)
+            std_draw_predictions = np.nanstd(draws, axis=0)
+
+            log_g_median, log_teff_median, fe_h_median = median_draw_predictions.T
+            log_g_std, log_teff_std, fe_h_std = std_draw_predictions.T
+
+            log_g, log_teff, fe_h = predictions.T
+
+            bitmask_flag = create_bitmask(
+                predictions,
+                median_draw_predictions=median_draw_predictions,
+                std_draw_predictions=std_draw_predictions
+            )
+
+            result = {
+                "snr": spectrum.meta["snr"],
+                "teff": 10**log_teff,
+                "logg": log_g,
+                "fe_h": fe_h,
+                "u_teff": 10**log_teff_std,
+                "u_logg": log_g_std,
+                "u_fe_h": fe_h_std,
+                "teff_sample_median": 10**log_teff_median,
+                "logg_sample_median": log_g_median,
+                "fe_h_sample_median": fe_h_median,
+                "bitmask_flag": bitmask_flag
+            }
+
+            results.append(dict_to_list(result))
+            
+        return results
 
 
     def post_execute(self):
@@ -71,29 +110,12 @@ class StellarParameters(ExecutableTask):
             ApogeeNet.create_table()
 
         # Create rows in the database.
-        i = 0
-        for (task, data_products, parameters), result in zip(self.iterable(), self.result):
-            
-            # S/N will be per entry in `result`.
-            N = len(result)
-            snrs = (data_products[0].metadata or {}).get("snr", [-1] * N)
-
-            for snr, row in zip(snrs, result):
-                log_teff, logg, fe_h = row
-                
-                create_output(
-                    ApogeeNet, 
-                    task,
-                    snr=snr,
-                    teff=10**log_teff,
-                    logg=logg,
-                    fe_h=fe_h,
-                    u_teff=1,
-                    u_logg=1,
-                    u_fe_h=1,
-                    teff_sample_median=1,
-                    logg_sample_median=1,
-                    fe_h_sample_median=1,
-                    bitmask_flag=0
+        for (task, data_products, parameters), results in zip(self.iterable(), self.result):
+            for result in results:
+                output = Output.create()
+                TaskOutput.create(task=task, output=output)
+                ApogeeNet.create(
+                    task=task,
+                    output=output,
+                    **result
                 )
-

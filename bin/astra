@@ -12,92 +12,38 @@ def cli(context, verbose):
     context.ensure_object(dict)
     context.obj["verbose"] = verbose
 
-    # TODO: Check this is propagated to:
-    #       [ ] astra
-    #       [ ] airflow
-    #       [ ] sqlalchemy
-    #logging.set_level(logging.DEBUG if verbose else logging.INFO)
-
-
-# Add 'run' sub-commands.
+# Add 'execute' sub-command.
 @click.group()
 @click.pass_context
-def run(context):
+def execute(context):
     pass
 
 
-class FlexiblePrimaryKeyInput(click.Argument):
-
-    def __init__(self, *args, **kwargs):
-        kwargs['nargs'] = -1
-        kwargs['type'] = click.File('r')
-        super().__init__(*args, **kwargs)
-
-    def full_process_value(self, ctx, value):
-        """
-        Parse the input primary key as either being a set of integers, an input filename that
-        contains integers (either as space-separated values, or a JSON-formatted tuple), or
-        from stdin.
-        """
-
-        try:
-            result = tuple(map(int, value))
-            assert len(value) > 0
-        except:
-            # Process as filename.
-            fps = super().process_value(ctx, value or ('-', ))
-            content = fps[0].read()
-
-            try:
-                result = tuple(map(int, content.split()))
-            except:
-                # Try as JSON.
-                import json
-                try:
-                    result = tuple(json.loads(content))
-                except:
-                    raise TypeError("Cannot parse input primary key file")
-
-        return result
 
 
 @click.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("primary_keys", cls=FlexiblePrimaryKeyInput)
+@click.option("--bundle", is_flag=True)
+@click.argument("primary_key")
 @click.pass_context
-def execute(context, primary_keys, **kwargs):
+def execute(context, bundle, primary_key, **kwargs):
     """
-    Execute a set of task instances.
+    Execute a task or task bundle.
     """
 
-    # We're going to assume that they all have the same python_callable!
-    from astra.utils import log
-    from astra.database import (astradb, session)
-    from astra.operators.utils import string_to_callable
+    from astra import log
+    from astra.database.astradb import Task, Bundle, TaskBundle
 
-    instance = session.query(astradb.TaskInstance)\
-                      .filter(astradb.TaskInstance.pk == primary_keys[0])\
-                      .one_or_none()
-    if instance is None:
-        raise ValueError(f"Cannot find instance matching primary key {primary_keys[0]}")
-    
-    parameters = instance.parameters.copy()
-    python_callable = parameters.pop("python_callable", None)
-    if python_callable is None:
-        raise ValueError(f"No python_callable for instance {instance}")
-    
-    function = string_to_callable(python_callable)
-    
-    log.info(f"Calling {function} ({python_callable}) with primary keys {primary_keys} and {parameters}")
-    
-    result = function(
-        pks=primary_keys,
-        **parameters
-    )
+    if bundle:
+        executable = Bundle.get(pk=primary_key).as_executable()
+    else:
+        executable = Task.get(pk=primary_key).as_executable()
 
-    log.info(f"Result from {function} was: {result}")
-    
-    return None
+    log.info(f"Executable: {executable}")
 
+    result = executable.execute()
+    
+    log.info(f"Result: {result}")
+    
 
 cli.add_command(execute)
 

@@ -6,6 +6,8 @@ from sdssdb.connection import PeeweeDatabaseConnection
 from sdssdb.peewee import BaseModel
 from astra import (config, log)
 from astra.utils import flatten
+from astra import __version__
+from importlib import import_module
 
 # The database config should always be present, but let's not prevent importing the module because it's missing.
 _database_config = config.get("astra_database", {})
@@ -152,6 +154,30 @@ class Task(AstraBaseModel):
     # - time taken for common post_execution time (for all sources in a bundle)
     # - time taken for this task post_execution time
 
+    def as_executable(self):
+        if self.version != __version__:
+            log.warning("Task version mismatch for {self}: {} != {}".format(self.version, __version__))
+
+        module_name, class_name = self.name.rsplit(".", 1)
+        module = import_module(module_name)
+        executable_class = getattr(module, class_name)
+
+        input_data_products = list(self.input_data_products)
+
+        # We already have context for this task.
+        context = {
+            "input_data_products": input_data_products,
+            "tasks": [self],
+            "bundle": None, # TODO: What if this task is part of a bundle,..?
+            "iterable": [(self, input_data_products, self.parameters)]
+        }
+        executable = executable_class(
+            input_data_products=input_data_products,
+            context=context,
+            **self.parameters
+        )
+        return executable
+
 
     @property
     def input_data_products(self):
@@ -204,22 +230,65 @@ class TaskOutput(AstraBaseModel):
 
 class Bundle(AstraBaseModel):
     pk = AutoField()
+    status = TextField(default=0)
+    meta = JSONField(null=True)
+
+    def as_executable(self):
+
+        # Get all the tasks in this bundle.
+        tasks = list(
+            Task.select()
+                .join(TaskBundle)
+                .where(TaskBundle.bundle == self)
+        )
+        input_data_products = [task.input_data_products for task in tasks]
+
+        task = tasks[0]
+        if task.version != __version__:
+            log.warning("Task version mismatch for {self}: {} != {}".format(task.version, __version__))
+
+        module_name, class_name = task.name.rsplit(".", 1)
+        module = import_module(module_name)
+        executable_class = getattr(module, class_name)
+
+        context = {
+            "input_data_products": input_data_products,
+            "tasks": tasks,
+            "bundle": self,
+            "iterable": [(task, idp, task.parameters) for task, idp in zip(tasks, input_data_products)]
+        }
+
+        from astra.task import Parameter
+        parameter_names = dict([(k, v.bundled) for k, v in executable_class.__dict__.items() if isinstance(v, Parameter)])
+
+        parameters = {}
+        for i, task in enumerate(tasks):
+            for p, bundled in parameter_names.items():
+                if bundled:
+                    if i == 0:
+                        parameters[p] = task.parameters[p]
+                else:
+                    parameters.setdefault(p, [])
+                    parameters[p].append(task.parameters[p])
+        
+        # Keep it simple.
+        for p, b in parameter_names.items():
+            if not b and len(set(parameters[p])) == 1:
+                parameters[p] = parameters[p][0]
+
+        executable = executable_class(
+            input_data_products=input_data_products,
+            context=context,
+            **parameters
+        )
+        return executable
+
+        
+
 
 class TaskBundle(AstraBaseModel):
     task = ForeignKeyField(Task)
     bundle = ForeignKeyField(Bundle)
-
-
-class ExecutionContext(AstraBaseModel):
-    pk = AutoField()
-    status = TextField()
-    meta = JSONField()
-
-
-class TaskExecutionContext(AstraBaseModel):
-    pk = AutoField()
-    task = ForeignKeyField(Task)
-    execution_context = ForeignKeyField(ExecutionContext)
 
 
 class TaskInputDataProducts(AstraBaseModel):

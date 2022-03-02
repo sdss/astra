@@ -19,6 +19,10 @@ import tempfile
 log = logging.getLogger(__name__.split(".")[0])
 #log.propagate = False
 
+def dict_to_list(DL):
+    return [dict(zip(DL,t)) for t in zip(*DL.values())]
+def list_to_dict(LD):
+    return {k: [dic[k] for dic in LD] for k in LD[0]}
 
 class Timer:
     def __enter__(self):

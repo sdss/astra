@@ -1,6 +1,7 @@
 import abc
 import os
 import inspect
+import json
 from astra import (log, __version__)
 from astra.utils import (flatten, )# timer)
 from astra.database.astradb import (DataProduct, Task, TaskInputDataProducts, Bundle, TaskBundle)
@@ -22,6 +23,37 @@ class ExecutableTaskMeta(abc.ABCMeta):
         # decorate execute() function to do pre/post execute
         new_class.execute = new_class._execute_decorator(new_class.execute)
         return new_class
+
+
+def get_or_create_data_products(iterable):
+    if isinstance(iterable, str):
+        try:
+            iterable = json.loads(iterable)
+        except:
+            pass
+
+    dps = []
+    for dp in iterable:
+        if isinstance(dp, DataProduct) or dp is None:
+            dps.append(dp)
+        elif isinstance(dp, str) and os.path.exists(dp):
+            dp, _ = DataProduct.get_or_create(
+                release=None,
+                filetype="full",
+                kwargs=dict(full=dp)
+            )
+            dps.append(dp)
+        elif isinstance(dp, (list, tuple, set)):
+            dps.append(get_or_create_data_products(dp))
+        else:
+            try:
+                dp = DataProduct.get(pk=int(dp))
+            except:
+                raise TypeError(f"Unknown input data product type ({type(dp)}): {dp}")
+            else:
+                dps.append(dp)
+    
+    return dps
 
 
 
@@ -92,7 +124,7 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
         
 
 
-    def get_or_create_context(self):
+    def get_or_create_context(self, force=False):
         if len(self.context) > 0:
             return self.context
 
@@ -100,35 +132,11 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
         name = f"{module.__name__}.{self.__class__.__name__}"
         
         context = {
-            "input_data_products": [],
+            "input_data_products": get_or_create_data_products(self.input_data_products),
             "tasks": [],
             "bundle": None,
             "iterable": []
         }
-
-        for input_data_products in self.input_data_products:
-            # Flatten per-task.
-            idps = []
-            for idp in flatten(input_data_products):
-                if isinstance(idp, DataProduct) or idp is None:
-                    idps.append(idp)
-                elif isinstance(idp, str) and os.path.exists(idp):
-                    idp, _ = DataProduct.get_or_create(
-                        release=None,
-                        filetype="full",
-                        kwargs=dict(full=idp)
-                    )
-                    idps.append(idp)
-                else:
-                    try:
-                        idp = DataProduct.get(pk=int(idp))
-                    except:
-                        raise TypeError(f"Unknown input data product type ({type(idp)}): {idp}")
-                    else:
-                        idps.append(idp)
-
-            context["input_data_products"].append(idps)
-            
         
         for i, data_products in enumerate(context["input_data_products"]):
             parameters = {}
@@ -153,7 +161,7 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
             context["iterable"].append((task, data_products, parameters))
 
         N = i + 1
-        if N > 1:
+        if N > 1 or force:
             # Create task bundle.
             context["bundle"] = bundle = Bundle.create()
             for task in context["tasks"]:

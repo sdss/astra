@@ -105,7 +105,8 @@ def get_or_create_data_product_from_apogee_drpdb(
     )
     result.update(source=source)
     if with_metadata:
-        data_product.update(metadata=metadata)
+        data_product.metadata = metadata
+        data_product.update(metadata=metadata).execute()
 
     return (True, result)
 
