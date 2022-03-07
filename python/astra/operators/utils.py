@@ -1,12 +1,13 @@
 from email.utils import decode_params
 import os
 import importlib
+import json
 from typing import OrderedDict
 from astropy.io import fits
 from airflow.models.baseoperator import BaseOperator
 from airflow.exceptions import (AirflowFailException, AirflowSkipException)
 
-from astra.database.astradb import DataProduct, Task, TaskInputDataProducts, Bundle, TaskBundle
+from astra.database.astradb import database, DataProduct, Task, TaskInputDataProducts, Bundle, TaskBundle
 from astra.utils import flatten
 from astra import (__version__, log)
 
@@ -23,19 +24,31 @@ def create_task_bundle(executable_task_name, input_data_products, parameters):
 
     executable_class = to_callable(executable_task_name)
 
-    # Create a big task with all things. 
-    executable_task = executable_class(
-        input_data_products=input_data_products,
-        **parameters
-    )
+    if isinstance(input_data_products, str):
+        input_data_products = json.loads(input_data_products)
+    
+    with database.atomic() as txn:
+        bundle = Bundle.create()
 
-    # Create tasks in database, and task bundle.
-    context = executable_task.get_or_create_context(force=True)
+        for i, idp in enumerate(input_data_products):
+            parameters = {k: v for k, (p, v, b, d) in executable_class.parse_parameters(**parameters).items() }
 
-    log.info(f"Created task bundle {context['bundle']} with {len(context['tasks'])} tasks")
-    log.info(f"Complete context: {context}")
+            task = Task.create(
+                name=executable_task_name,
+                parameters=parameters,
+                version=__version__
+            )
+            for data_product_id in flatten(idp):
+                TaskInputDataProducts.create(
+                    task=task,
+                    data_product_id=data_product_id
+                )
+            TaskBundle.create(task=task, bundle=bundle)
+    
+    log.info(f"Created task bundle {bundle} with {i + 1} tasks")
 
-    return context["bundle"].pk
+    return bundle.pk
+
 
 
 def check_task_bundle_outputs(bundle_pk):

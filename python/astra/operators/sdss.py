@@ -11,17 +11,20 @@ from astra import log
 from functools import lru_cache
 
 @lru_cache
+def path_instance(release):
+    return SDSSPath(release=release)
+
+
+@lru_cache
 def lookup_keys(release, filetype):
-    return SDSSPath(release=release).lookup_keys(filetype)
+    return path_instance(release).lookup_keys(filetype)
 
-
+from time import time
+import numpy as np
 def get_or_create_data_product_from_apogee_drpdb(
         origin, 
         release=None,
         filetype=None,
-        with_source=True, 
-        with_metadata=True, 
-        headers=None,
     ):
     """
     Get or create a data product entry in the astra database from an apogee_drpdb origin.
@@ -31,86 +34,50 @@ def get_or_create_data_product_from_apogee_drpdb(
 
     :param filetype: [optional]
         The filetype of the data product. If `None`, this will be read from `origin.filetype`.
-
-    :param with_source: [optional]
-        Get or create a Source origin for this data product.
-    
-    :param with_metadata: [optional]
-        Get or create a Metadata origin for this data product.
-
-    :param headers: [optional]
-        A dictionary of headers to read in and store with the metadata. This should be a 
-        dictionary with metadata names as keys, and the values should be a two length
-        tuple that contains the HDU index (0-index) and the header key. 
     """
+    t_init = time()
 
     release = release or origin.release
     filetype = filetype or origin.filetype
 
-    keys = lookup_keys(release, filetype)
-    data_product, created = DataProduct.get_or_create(
-        release=release,
-        filetype=filetype,
-        kwargs={ k: getattr(origin, k) for k in keys }
-    )
-    error = {
-        "detail": data_product.path,
-        "origin": origin,
-    }
+    kwds = { k: getattr(origin, k) for k in lookup_keys(release, filetype) }
+    t_kwds = time() - t_init
+    t_init = time()
+    path = path_instance(release).full(filetype, **kwds)
+    t_path = time() - t_init
 
-    # Check the file exists.
-    if not os.path.exists(data_product.path):
-        error.update(reason="File does not exist")
-        data_product.delete_instance()
+    t_init = time()
+    if not os.path.exists(path):
+        error = {
+            "detail": path,
+            "origin": origin,
+            "reason": "File does not exist"
+        }        
         return (False, error)
-    
-    result = dict(data_product=data_product)
-    if not with_source:
-        return (True, result)
-        
-    # Load the file.
-    try:
-        image = fits.open(data_product.path)
-    except:
-        log.exception(f"Could not open path {data_product.path}")
-        error.update(reason="Could not open file")
-        data_product.delete_instance()
-        return (False, error)
+    t_check_path = time() - t_init
 
-    # Read headers.
-    header_details = OrderedDict([("catalogid", (0, "CATID"))])
-    header_details.update(headers or {})
+    with database.atomic() as txn:
+        t_init = time()
+        data_product, _ = DataProduct.get_or_create(
+            release=release,
+            filetype=filetype,
+            kwargs=kwds
+        )
+        t_dp = time() - t_init
+        t_init = time()
+        source, _ = Source.get_or_create(catalogid=origin.catalogid)
+        t_source = time() - t_init
+        t_init = time()
+        SourceDataProduct.get_or_create(
+            source=source,
+            data_product=data_product
+        )
+        t_sourcedataproduct = time() - t_init
 
-    metadata = {}
-    for key, (hdu, header) in header_details.items():
-        try:
-            metadata[key] = image[hdu].header[header]
-        except:
-            reason = f"Could not read header {header} in HDU {hdu}"
-            log.exception(f"{reason} of {data_product.path}")
-            error.update(reason=reason)
-            data_product.delete_instance()
-            return (False, error)
-    
-    catalogid = metadata.pop("catalogid")
-    if catalogid <= 0:
-        log.exception(f"CatalogID for {data_product} {data_product.path} is {catalogid}")
-        error.update(reason="CatalogID is not positive")
-        data_product.delete_instance()
-        return (False, error)
+    ts = np.array([t_kwds, t_path, t_check_path, t_dp, t_source, t_sourcedataproduct])
+    print(ts/np.sum(ts))
 
-    source, _ = Source.get_or_create(catalogid=catalogid)
-    SourceDataProduct.get_or_create(
-        source=source,
-        data_product=data_product
-    )
-    result.update(source=source)
-    if with_metadata:
-        data_product.metadata = metadata
-        with database.atomic() as tx:
-            DataProduct.update(metadata=metadata).where(DataProduct.pk == data_product.pk).execute()
-        #data_product.update(metadata=metadata).execute()
-
+    result = dict(data_product=data_product, source=source)
     return (True, result)
 
 
@@ -171,9 +138,9 @@ class BossSpecOperator(BaseOperator):
 
 class BaseApogeeDRPOperator(BaseOperator):
 
-    def get_or_create_data_products(self, prev_ds, ds, model, description, where=None, **kwargs):
+    def get_or_create_data_products(self, prev_ds, ds, model, where=None, **kwargs):
     
-        log.info(f"Looking for {description} products created between {prev_ds} and {ds}")
+        log.info(f"{self} is looking for products created between {prev_ds} and {ds}")
         q = (
             model.select()
                  .where(model.created.between(prev_ds, ds))
@@ -183,7 +150,7 @@ class BaseApogeeDRPOperator(BaseOperator):
 
         N = q.count()
         if N == 0:
-            raise AirflowSkipException(f"No {description} products created between {prev_ds} and {ds}")
+            raise AirflowSkipException(f"No products for {self} created between {prev_ds} and {ds}")
 
         pks = []
         errors = []
@@ -215,12 +182,7 @@ class ApVisitOperator(BaseApogeeDRPOperator):
             context["prev_ds"],
             context["ds"],
             Visit,
-            "SDSS-V ApVisit",
             where=(Visit.catalogid > 0),
-            headers={
-                "snr": (0, "SNR"),
-                "naxis1": (1, "NAXIS1")
-            }
         )
 
 
@@ -243,11 +205,7 @@ class ApStarOperator(BaseApogeeDRPOperator):
             context["prev_ds"],
             context["ds"],
             Star,
-            "SDSS-V ApStar",
             where=(Star.ngoodvisits > 0) & (Star.catalogid > 0),
-            headers={
-                "snr": (0, "SNR"),
-            }
         )
 
 

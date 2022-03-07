@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from astra import log
 from astra.utils import dict_to_list
-from astra.task import ExecutableTask, Parameter
+from astra.base import ExecutableTask, Parameter
 from astra.database.astradb import Output, TaskOutput
 from astra.tools.spectrum import Spectrum1D
 
@@ -110,12 +110,15 @@ class StellarParameters(ExecutableTask):
             ApogeeNet.create_table()
 
         # Create rows in the database.
-        for (task, data_products, parameters), results in zip(self.iterable(), self.result):
-            for result in results:
-                output = Output.create()
-                TaskOutput.create(task=task, output=output)
-                ApogeeNet.create(
-                    task=task,
-                    output=output,
-                    **result
-                )
+        total = sum(map(len, self.result))
+        with tqdm(total=total) as pb:
+            for (task, data_products, parameters), results in zip(self.iterable(), self.result):
+                for result in results:
+                    output = Output.create()
+                    TaskOutput.create(task=task, output=output)
+                    ApogeeNet.create(
+                        task=task,
+                        output=output,
+                        **result
+                    )
+                    pb.update()

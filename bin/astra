@@ -34,15 +34,19 @@ def execute(context, bundle, primary_key, **kwargs):
     from astra.database.astradb import Task, Bundle, TaskBundle
 
     if bundle:
-        executable = Bundle.get(pk=primary_key).as_executable()
+        work = Bundle.get(pk=primary_key)
     else:
-        executable = Task.get(pk=primary_key).as_executable()
+        work = Task.get(pk=primary_key)
+    
+    log.debug(f"Executing {work}")
+    
+    executable = work.as_executable()
 
     log.info(f"Executable: {executable}")
 
     result = executable.execute()
     
-    log.info(f"Result: {result}")
+    log.info(f"Result type: {type(result)} {result}") # Pretty print?
     
 
 cli.add_command(execute)

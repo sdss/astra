@@ -38,7 +38,7 @@ class AstraOperator(BaseOperator):
         executable = executable_class(input_data_products, **self.parameters)
 
         log.info("executing")
-        executable.execute()
+        result = executable.execute()
         log.info("executed")
 
 

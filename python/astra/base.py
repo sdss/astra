@@ -6,7 +6,7 @@ import numpy as np
 from time import time
 from astra import (log, __version__)
 from astra.utils import (flatten, )# timer)
-from astra.database.astradb import (DataProduct, Task, TaskInputDataProducts, Bundle, TaskBundle)
+from astra.database.astradb import (database, DataProduct, Task, TaskInputDataProducts, Bundle, TaskBundle)
 
 class Parameter:
     def __init__(self, name, bundled=False, **kwargs):
@@ -62,15 +62,11 @@ def get_or_create_data_products(iterable):
 
 class ExecutableTask(object, metaclass=ExecutableTaskMeta):
     
-    def __init__(self, input_data_products=None, context=None, **kwargs):                
-
-        self._timing = {}
-        self.input_data_products = input_data_products
-
-        # Set parameters.
-        self._parameters = {}
+    @classmethod
+    def parse_parameters(cls, **kwargs):
+        parameters = {}
         missing_required_parameters = []
-        for key, parameter in self.__class__.__dict__.items():
+        for key, parameter in cls.__dict__.items():
             if not isinstance(parameter, Parameter): continue
             if key in kwargs:
                 # We expected this parameter and we have it.
@@ -88,17 +84,33 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
                     default = True
             
             bundled = parameter.bundled
-            self._parameters[key] = (parameter, value, bundled, default)
-            setattr(self, key, value)
-
+            parameters[key] = (parameter, value, bundled, default)
+        
         if missing_required_parameters:
             M = len(missing_required_parameters)
             raise TypeError(f"__init__() missing {M} required parameter{'s' if M > 1 else ''}: '{', '.join(missing_required_parameters)}'")
 
         # Check for unexpected parameters.
-        unexpected_parameters = set(kwargs.keys()) - set(self._parameters.keys())
+        unexpected_parameters = set(kwargs.keys()) - set(parameters.keys())
         if unexpected_parameters:
             raise TypeError(f"__init__() got unexpected keyword argument{'s' if len(unexpected_parameters) > 1 else ''}: '{', '.join(unexpected_parameters)}'")
+
+        return parameters
+
+
+
+    def __init__(self, input_data_products=None, context=None, **kwargs):                
+
+        self._timing = {}
+        self.input_data_products = input_data_products
+        if isinstance(input_data_products, str):
+            try:
+                self.input_data_products = json.loads(input_data_products)
+            except:
+                None
+
+        # Set parameters.
+        self._parameters = self.parse_parameters(**kwargs)
 
         # Set the executable context.
         self.context = context or {}
@@ -110,11 +122,11 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
         if self.input_data_products is not None:
             # List-ify if needed.
             try:
-                _ = (item for item in input_data_products)
+                _ = (item for item in self.input_data_products)
             except TypeError:
-                input_data_products = [input_data_products]
-
-            N = len(input_data_products)
+                N = 1
+            else:
+                N = len(self.input_data_products)
 
         else:
             Ns = []
@@ -132,23 +144,28 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
 
     def iterable(self):
         # TODO: Hook this in with per-task timing for execution!
-        try:
-            execution_context = inspect.stack()[1].function
-        except:
+        for level in inspect.stack():
+            if level.function in ("pre_execute", "execute", "post_execute"):
+                execution_context = level.function
+                break
+        else:
             execution_context = None
-            log.warning(f"Cannot infer execution context! {inspect.stack()[1]}")
+            log.warning(f"Cannot infer execution context {inspect.stack}")
 
-        times = [time()]
+        self._timing["iterable"] = [time()]
         for item in self.context["iterable"]:
-            yield item
-            times.append(time())
+            try:
+                yield item
+            except:
+                log.exception(f"Exception in {execution_context} for {item}")
+                raise
+            self._timing["iterable"].append(time())
 
-        task_times = np.diff(times)
+        task_times = np.diff(self._timing["iterable"])
 
         key = f"time_{execution_context}_task"
         self._timing.setdefault(key, np.zeros_like(task_times))
         self._timing[key] += task_times
-        log.debug(f"Recorded {execution_context} times of {task_times}")
 
 
     def get_or_create_context(self, force=False):
@@ -167,7 +184,7 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
 
         for i in range(self.infer_task_bundle_size()):
             try:
-                data_products = self.input_data_products[i]
+                data_products = context["input_data_products"][i]
             except:
                 data_products = None
         
@@ -181,13 +198,14 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
                     except:
                         parameters[k] = value
 
-            task = Task.create(
-                name=name,
-                parameters=parameters,
-                version=__version__,
-            )
-            for data_product in flatten(data_products):
-                TaskInputDataProducts.create(task=task, data_product=data_product)
+            with database.atomic() as txn: 
+                task = Task.create(
+                    name=name,
+                    parameters=parameters,
+                    version=__version__,
+                )
+                for data_product in flatten(data_products):
+                    TaskInputDataProducts.create(task=task, data_product=data_product)
 
             context["tasks"].append(task)
             context["iterable"].append((task, data_products, parameters))
@@ -221,13 +239,14 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
 
         time_total = time_pre_execute + time_execute + time_post_execute
 
+        log.debug(f"Updating task timings")
+        
         for i, task in enumerate(self.context["tasks"]):
             kwds = dict(
                 time_total=time_total[i],
                 time_pre_execute=time_pre_execute[i],
                 time_execute=time_execute[i],
                 time_post_execute=time_post_execute[i],
-
                 
                 time_pre_execute_task=time_pre_execute_task[i],
                 time_execute_task=time_execute_task[i],
@@ -253,7 +272,7 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
     @classmethod
     def _execute_decorator(cls, function):
         def do_pre_post(self):
-            log.debug(f"Decorating pre/post_execute {self} {self.context}")
+            log.debug(f"Decorating pre/post_execute {self}")
 
             # Do pre-execution.
             t_init = time()
@@ -276,12 +295,16 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
             try:
                 self.result = function(self)
             except:
-                log.exception(f"Execution failed for {self}:")
-                # TODO: Mark tasks as failed / delete them?
+                # Try to see how far we got.
+                i = len(self._timing["iterable"]) - 1
+                responsible_task = self.context["tasks"][i]
+                log.exception(f"Execution failed for {self}, probably on task {responsible_task}:")
                 raise
 
             self._timing["actual_time_execute"] = time() - t_init
 
+
+            log.debug(f"Post-processing for {self}")
 
             t_init = time()
             try:
@@ -293,7 +316,10 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
                 
             self._timing["actual_time_post_execute"] = time() - t_init
 
+            log.debug(f"Post-processing finished.")
+            log.debug(f"Updating task timings..")
             self._update_task_timings()
+            log.debug(f"Task timings updated.")
 
             return self.result
 

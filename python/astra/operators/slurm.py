@@ -41,12 +41,14 @@ class SlurmOperator(BaseOperator):
         bundle=None,
         slurm_kwargs=None,
         bundles_per_slurm_job=1,
+        implicit_node_sharing=False,
         **kwargs
     ) -> None:
         super().__init__(**kwargs)
         self.bundle = bundle
         self.slurm_kwargs = slurm_kwargs or {}
         self.bundles_per_slurm_job = bundles_per_slurm_job
+        self.implicit_node_sharing = implicit_node_sharing
 
     def execute(self, context):
 
@@ -107,6 +109,15 @@ class SlurmOperator(BaseOperator):
         N = len(tasks)
         log.info(f"There are {N} tasks in queue {q}: {tasks}")
         if N >= self.bundles_per_slurm_job:
+            if self.implicit_node_sharing:
+                if "ppn" not in self.slurm_kwargs and "shared" not in self.slurm_kwargs:
+                    log.info(f"Using implicit node sharing behaviour for {self}. Setting ppn = {N} and shared = True")
+                    q.client.job.ppn = N
+                    q.client.job.shared = True
+                    q.client.job.commit()
+                else:
+                    log.info(f"Implicit node sharing behaviour is enabled, but not doing anything because ppn/shared keywords already set in slurm kwargs")
+        
             log.info(f"Submitting queue {q}")
             q.commit(hard=True, submit=True)
         

@@ -17,6 +17,8 @@ _database_config = config.get("astra_database", {})
 try:
     # Environment variable overrides all, for testing purposes.
     _database_url = os.environ["ASTRA_DATABASE_URL"]
+    if _database_url is not None:
+        log.info(f"Using ASTRA_DATABASE_URL enironment variable")
 except KeyError:
     _database_url = _database_config.get("url", None)
 
@@ -140,9 +142,16 @@ class SourceDataProduct(AstraBaseModel):
     source = ForeignKeyField(Source)
     data_product = ForeignKeyField(DataProduct)
 
+    class Meta:
+        indexes = (
+            (("source", "data_product"), True),
+        )
+
 
 class Output(AstraBaseModel):
     pk = AutoField()
+    created = DateTimeField(default=datetime.datetime.now)
+
 
 class Task(AstraBaseModel):
     pk = AutoField()
@@ -286,7 +295,7 @@ class Bundle(AstraBaseModel):
             "iterable": [(task, idp, task.parameters) for task, idp in zip(tasks, input_data_products)]
         }
 
-        from astra.task import Parameter
+        from astra.base import Parameter
         parameter_names = dict([(k, v.bundled) for k, v in executable_class.__dict__.items() if isinstance(v, Parameter)])
 
         parameters = {}
