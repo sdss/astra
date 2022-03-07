@@ -32,4 +32,4 @@ jobs:
         env:
           ASTRA_DATABASE_URL: 'sqlite://:memory:'
         run: |
-          nosetests --with-coverage --cover-package=astra
+          nosetests python/astra/tests
