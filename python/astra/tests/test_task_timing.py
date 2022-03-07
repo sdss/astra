@@ -1,15 +1,8 @@
-import os
 import unittest
 from time import sleep
-import numpy as np
+
 
 class TestTaskTiming(unittest.TestCase):
-
-    def setUp(self):
-        self.env_var_name = "ASTRA_DATABASE_URL"
-        self.has_original = self.env_var_name in os.environ
-        self.original = os.environ.get(self.env_var_name, None)
-        os.environ["ASTRA_DATABASE_URL"] = "sqlite:///:memory:"
 
     def test_task_timing(self):
 
@@ -29,11 +22,9 @@ class TestTaskTiming(unittest.TestCase):
             sleep_length = Parameter("sleep_length", default=0)
 
             def execute(self):
-                
                 for task, input_data_products, parameters in self.iterable():
                     print(f"In {self} with {task} and sleep={parameters['sleep_length']}")
                     sleep(parameters["sleep_length"])
-
 
             def pre_execute(self):
                 print(f"in pre-execute")
@@ -65,10 +56,3 @@ class TestTaskTiming(unittest.TestCase):
             self.assertEqual(task.time_total, task.time_pre_execute + task.time_execute + task.time_post_execute)
             
         return None
-    
-    def tearDown(self):
-        if self.has_original:
-            os.environ[self.env_var_name] = self.original
-        else:
-            del os.environ[self.env_var_name]
-

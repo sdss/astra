@@ -1,10 +1,36 @@
+from datetime import timedelta
 from getpass import getuser
 from typing import OrderedDict
+import re
+from subprocess import call, Popen, PIPE
+from airflow.exceptions import AirflowRescheduleException
 from airflow.models.baseoperator import BaseOperator
 from airflow.sensors.base import BaseSensorOperator
+from airflow.utils import timezone
 
-from astra import log
+from astra import log, config
 from astra.database.astradb import Bundle
+
+
+def get_slurm_queue():
+    """Get a list of jobs currently in the Slurm queue. """
+
+    pattern = ('(?P<job_id>\d+)+\s+(?P<name>[-\w\d_\.]+)\s+(?P<user>[\w\d]+)\s+(?P<group>\w+)'
+               '\s+(?P<account>[-\w]+)\s+(?P<partition>[-\w]+)\s+(?P<time_limit>[-\d\:]+)\s+'
+               '(?P<time_left>[-\d\:]+)\s+(?P<status>\w*)\s+(?P<nodelist>[\w\d\(\)]+)')
+    process = Popen(
+        [
+            "/uufs/notchpeak.peaks/sys/installdir/slurm/std/bin/squeue",
+            "--account=sdss-np,notchpeak-gpu,sdss-np-fast",
+            '--format="%14i %50j %10u %10g %13a %13P %11l %11L %2t %R"'
+        ],
+        stdin=PIPE, stdout=PIPE, stderr=PIPE, universal_newlines=True
+    )
+    output, error = process.communicate()
+
+    # Parse the output.
+    return [match.groupdict() for match in re.finditer(pattern, output)]
+
 
 class SlurmOperator(BaseOperator):
 
@@ -22,7 +48,6 @@ class SlurmOperator(BaseOperator):
         self.slurm_kwargs = slurm_kwargs or {}
         self.bundles_per_slurm_job = bundles_per_slurm_job
 
-    
     def execute(self, context):
 
         bundle = self.bundle
@@ -94,6 +119,27 @@ class SlurmOperator(BaseOperator):
         return q.key
 
 
+class SlurmQueueSensor(BaseSensorOperator):
+
+    """ Prevents overloading the Slurm queue with jobs. """ 
+
+    def poke(self, context):
+        # First check that we don't have too many jobs submitted/running already.
+        try:
+            max_concurrent_jobs = config["slurm"]["max_concurrent_jobs"]
+        except:
+            log.warning(f"No Astra configuration set for slurm.max_concurrent_jobs")
+            return True
+        else:
+            me = getuser()
+            jobs = [job for job in get_slurm_queue() if job["user"] == me]            
+            N = len(jobs)
+            
+            log.info(f"Found {N} jobs running or queued for user {me}: {jobs}")
+
+            return (N < max_concurrent_jobs)
+
+
 
 class SlurmSensor(BaseSensorOperator):
 
@@ -126,4 +172,7 @@ class SlurmSensor(BaseSensorOperator):
         q = queue(key=self.job_key)
         log.info(f"Job {job} (from key {self.job_key}) is {statuses[job.status]} ({q.get_percent_complete()}% complete)")
         
-        return (job.status >= index)
+        complete = (job.status >= index)
+
+        # If complete, cat the log location.
+        return complete

@@ -16,6 +16,8 @@ sdss5_database:
 
 
 
+slurm:
+  max_concurrent_jobs: 5
 
 option1:
     suboption1: 1

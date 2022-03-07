@@ -38,3 +38,24 @@ def create_task_bundle(executable_task_name, input_data_products, parameters):
     return context["bundle"].pk
 
 
+def check_task_bundle_outputs(bundle_pk):
+    log.info(f"Checking all tasks in bundle {bundle_pk} have outputs")
+
+    bundle = Bundle.get(pk=int(bundle_pk))
+
+    success, error, total = (0, 0, 0)
+    for task in bundle.tasks:
+        N = task.count_outputs()
+        if N == 0:
+            log.error(f"Task {task} has no outputs.")
+            error += 1
+        else:            
+            success += 1
+            total += N
+
+    log.info(f"Recorded {success} tasks with a total of {total} outputs and and {error} tasks without any")
+
+    if error > 0:
+        raise RuntimeError(f"Some tasks had no outputs.")
+
+    return None

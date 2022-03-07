@@ -220,7 +220,7 @@ class Task(AstraBaseModel):
         # Create a compound union query to retrieve all possible outputs for this task.
         o = TaskOutput.get(TaskOutput.task == self)
         for expr, column in o.output.dependencies():
-            if column.model != TaskOutput:
+            if column.model != TaskOutput:def
                 sq = column.model.select().where(column.model.task == self)
                 if q is None:
                     q = sq
@@ -236,6 +236,9 @@ class Task(AstraBaseModel):
                 outputs.extend(column.model.select().where(column.model.task == self))
         return sorted(outputs, key=lambda x: x.output_id)
     
+    def count_outputs(self):
+        return TaskOutput.select().where(TaskOutput.task == self).count()
+
 
 class TaskOutput(AstraBaseModel):
     pk = AutoField()
@@ -247,6 +250,16 @@ class Bundle(AstraBaseModel):
     pk = AutoField()
     status = TextField(default=0)
     meta = JSONField(null=True)
+
+    @property
+    def tasks(self):
+        return (
+            Task.select()
+                .join(TaskBundle)
+                .join(Bundle)
+                .where(Bundle.pk == self.pk)
+        )
+
 
     def as_executable(self):
 
@@ -323,7 +336,8 @@ class TaskOutputDataProducts(AstraBaseModel):
 def create_tables(drop_existing_tables=False):
     """ Create all tables for the Astra database. """
     database.connect(reuse_if_open=True)
-    models = AstraBaseModel.__subclasses__()
+    models = (Source, DataProduct, SourceDataProduct, Output, Task, TaskOutput, Bundle, TaskBundle, TaskInputDataProducts, TaskOutputDataProducts)
     if drop_existing_tables:
         database.drop_tables(models)
     database.create_tables(models)
+
