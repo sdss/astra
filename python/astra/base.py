@@ -2,12 +2,13 @@ import abc
 import os
 import inspect
 import json
+import numpy as np
+from time import time
 from astra import (log, __version__)
 from astra.utils import (flatten, )# timer)
 from astra.database.astradb import (DataProduct, Task, TaskInputDataProducts, Bundle, TaskBundle)
 
 class Parameter:
-    
     def __init__(self, name, bundled=False, **kwargs):
         self.name = name
         self.bundled = bundled
@@ -18,14 +19,15 @@ class Parameter:
 
 class ExecutableTaskMeta(abc.ABCMeta):
     def __new__(cls, *args):
-        print(f"Checking new class {args}")
         new_class = super(ExecutableTaskMeta, cls).__new__(cls, *args)
-        # decorate execute() function to do pre/post execute
         new_class.execute = new_class._execute_decorator(new_class.execute)
         return new_class
 
 
 def get_or_create_data_products(iterable):
+    if iterable is None:
+        return None
+
     if isinstance(iterable, str):
         try:
             iterable = json.loads(iterable)
@@ -57,18 +59,12 @@ def get_or_create_data_products(iterable):
 
 
 
+
 class ExecutableTask(object, metaclass=ExecutableTaskMeta):
     
     def __init__(self, input_data_products=None, context=None, **kwargs):                
-    
-        # List-ify if needed.
-        try:
-            _ = (item for item in input_data_products)
-        except TypeError:
-            input_data_products = [input_data_products]
 
-        N = len(input_data_products)
-
+        self._timing = {}
         self.input_data_products = input_data_products
 
         # Set parameters.
@@ -96,8 +92,8 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
             setattr(self, key, value)
 
         if missing_required_parameters:
-            N = len(missing_required_parameters)
-            raise TypeError(f"__init__() missing {N} required parameter{'s' if N > 1 else ''}: '{', '.join(missing_required_parameters)}'")
+            M = len(missing_required_parameters)
+            raise TypeError(f"__init__() missing {M} required parameter{'s' if M > 1 else ''}: '{', '.join(missing_required_parameters)}'")
 
         # Check for unexpected parameters.
         unexpected_parameters = set(kwargs.keys()) - set(self._parameters.keys())
@@ -108,20 +104,51 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
         self.context = context or {}
 
 
+    def infer_task_bundle_size(self):
+
+        # Figure out how many implied tasks there could be in this bundle.
+        if self.input_data_products is not None:
+            # List-ify if needed.
+            try:
+                _ = (item for item in input_data_products)
+            except TypeError:
+                input_data_products = [input_data_products]
+
+            N = len(input_data_products)
+
+        else:
+            Ns = []
+            for key, parameter in self.__class__.__dict__.items():
+                if isinstance(parameter, Parameter) and not parameter.bundled:
+                    value = getattr(self, key)
+                    if isinstance(value, (list, tuple, set, np.ndarray)):
+                        Ns.append(len(value))                        
+            if len(Ns) == 0:
+                N = 1
+            else:
+                N = max(Ns)
+        return N
+
+
     def iterable(self):
         # TODO: Hook this in with per-task timing for execution!
         try:
-            timing_execution = inspect.stack()[1]["function"]
+            execution_context = inspect.stack()[1].function
         except:
-            timing_execution = None
+            execution_context = None
+            log.warning(f"Cannot infer execution context! {inspect.stack()[1]}")
 
-        #from time import time
-        #times = [time()]
+        times = [time()]
         for item in self.context["iterable"]:
             yield item
-        #    times.append(time())
-        #print(times)
-        
+            times.append(time())
+
+        task_times = np.diff(times)
+
+        key = f"time_{execution_context}_task"
+        self._timing.setdefault(key, np.zeros_like(task_times))
+        self._timing[key] += task_times
+        log.debug(f"Recorded {execution_context} times of {task_times}")
 
 
     def get_or_create_context(self, force=False):
@@ -137,8 +164,13 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
             "bundle": None,
             "iterable": []
         }
+
+        for i in range(self.infer_task_bundle_size()):
+            try:
+                data_products = self.input_data_products[i]
+            except:
+                data_products = None
         
-        for i, data_products in enumerate(context["input_data_products"]):
             parameters = {}
             for k, (parameter, value, bundled, default) in self._parameters.items():
                 if bundled:
@@ -170,6 +202,49 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
         return context
 
 
+    def _update_task_timings(self):
+
+        N = len(self.context["tasks"])
+
+        time_pre_execute_task = self._timing.get("time_pre_execute_task", np.zeros(N))
+        time_execute_task = self._timing.get("time_execute_task", np.zeros(N))
+        time_post_execute_task = self._timing.get("time_post_execute_task", np.zeros(N))
+
+        time_pre_execute_bundle = self._timing["actual_time_pre_execute"] - np.sum(time_pre_execute_task)
+        time_pre_execute = time_pre_execute_bundle / N + time_pre_execute_task
+
+        time_execute_bundle = self._timing["actual_time_execute"] - np.sum(time_execute_task)
+        time_execute = time_execute_bundle / N + time_execute_task
+
+        time_post_execute_bundle = self._timing["actual_time_post_execute"] - np.sum(time_post_execute_task)
+        time_post_execute = time_post_execute_bundle / N + time_post_execute_task
+
+        time_total = time_pre_execute + time_execute + time_post_execute
+
+        for i, task in enumerate(self.context["tasks"]):
+            kwds = dict(
+                time_total=time_total[i],
+                time_pre_execute=time_pre_execute[i],
+                time_execute=time_execute[i],
+                time_post_execute=time_post_execute[i],
+
+                
+                time_pre_execute_task=time_pre_execute_task[i],
+                time_execute_task=time_execute_task[i],
+                time_post_execute_task=time_post_execute_task[i],
+
+                time_pre_execute_bundle=time_pre_execute_bundle,
+                time_execute_bundle=time_execute_bundle,
+                time_post_execute_bundle=time_post_execute_bundle,                
+            )
+            r = (
+                Task.update(**kwds)
+                    .where(Task.pk == task.pk)
+                    .execute()
+            )
+
+        return None
+
 
     @abc.abstractmethod
     def execute(self, *args, **kwargs):
@@ -181,22 +256,23 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
             log.debug(f"Decorating pre/post_execute {self} {self.context}")
 
             # Do pre-execution.
+            t_init = time()
             try:
                 pre_execute = self.pre_execute()
             except:
                 log.exception(f"Pre-execution failed for {self}:")
                 raise
-            
+            self._timing["actual_time_pre_execute"] = time() - t_init
+                
             # Create tasks in database if they weren't already given.
             if len(self.context) == 0:
                 self.context.update(self.get_or_create_context())
+            
             # Update context with pre execution.
-            # TODO: Put the pre-execute in with self.get_or_create_context()
             if pre_execute is not None:
                 self.context.update(pre_execute)
 
-
-            # TODO: record time here for execution
+            t_init = time()
             try:
                 self.result = function(self)
             except:
@@ -204,16 +280,21 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
                 # TODO: Mark tasks as failed / delete them?
                 raise
 
-            # TODO: record time for post-execution
+            self._timing["actual_time_execute"] = time() - t_init
+
+
+            t_init = time()
             try:
                 # This would check context for the output.
                 post_execute = self.post_execute()
             except:
                 log.exception(f"Post-execution failed for {self}:")
                 raise
+                
+            self._timing["actual_time_post_execute"] = time() - t_init
 
-            # Put execution timing in database.
-            
+            self._update_task_timings()
+
             return self.result
 
         return do_pre_post

@@ -5,6 +5,7 @@ from airflow.models.baseoperator import BaseOperator
 from airflow.exceptions import (AirflowFailException, AirflowSkipException)
 from sdss_access import SDSSPath
 from astra.database.apogee_drpdb import Star, Visit
+from astra.database.catalogdb import SDSSVBossSpall
 from astra.database.astradb import (database, DataProduct, Source, SourceDataProduct)
 from astra import log
 from functools import lru_cache
@@ -111,6 +112,61 @@ def get_or_create_data_product_from_apogee_drpdb(
     return (True, result)
 
 
+class BossSpecOperator(BaseOperator):
+    """
+    A base operator for working with SDSS-V BOSS spectrum data products. 
+    
+    This operator will generate task instances based on BOSS spec data products it finds that were
+    *observed* in the operator execution period.
+    """
+
+
+    ui_color = "#A0B9D9"
+    
+    def execute(self, context):
+        raise NotImplementedError("spec still seems to not be in the tree product")
+
+
+    def query_data_model_identifiers_from_database(self, context):
+        """
+        Query the SDSS-V database for BOSS spectrum data model identifiers.
+
+        :param context:
+            The Airflow DAG execution context.
+        """ 
+
+        release, filetype = ("SDSS5", "spec")
+        
+        mjd_start = parse_as_mjd(context["prev_ds"])
+        mjd_end = parse_as_mjd(context["ds"])
+
+        columns = (
+            catalogdb.SDSSVBossSpall.catalogid,
+            catalogdb.SDSSVBossSpall.run2d,
+            catalogdb.SDSSVBossSpall.plate,
+            catalogdb.SDSSVBossSpall.mjd,
+            catalogdb.SDSSVBossSpall.fiberid
+        )
+        q = session.query(*columns).distinct(*columns)
+        q = q.filter(catalogdb.SDSSVBossSpall.mjd >= mjd_start)\
+             .filter(catalogdb.SDSSVBossSpall.mjd < mjd_end)
+
+        if self._query_filter_by_kwargs is not None:
+            q = q.filter_by(**self._query_filter_by_kwargs)
+
+        if self._limit is not None:
+            q = q.limit(self._limit)
+
+        log.debug(f"Found {q.count()} {release} {filetype} files between MJD {mjd_start} and {mjd_end}")
+
+        common = dict(release=release, filetype=filetype)
+        keys = [column.name for column in columns]
+        for values in q.yield_per(1):
+            yield { **common, **dict(zip(keys, values)) }
+
+
+
+
 class BaseApogeeDRPOperator(BaseOperator):
 
     def get_or_create_data_products(self, prev_ds, ds, model, description, where=None, **kwargs):
@@ -191,4 +247,5 @@ class ApStarOperator(BaseApogeeDRPOperator):
                 "snr": (0, "SNR"),
             }
         )
+
 

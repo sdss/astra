@@ -1,4 +1,6 @@
+import datetime
 import json
+import os
 from functools import (lru_cache, cached_property)
 from sdss_access import SDSSPath
 from peewee import (SQL, SqliteDatabase, AutoField, TextField, ForeignKeyField, DateTimeField, BigIntegerField, FloatField, BooleanField)
@@ -12,8 +14,13 @@ from importlib import import_module
 # The database config should always be present, but let's not prevent importing the module because it's missing.
 _database_config = config.get("astra_database", {})
 
+try:
+    # Environment variable overrides all, for testing purposes.
+    _database_url = os.environ["ASTRA_DATABASE_URL"]
+except KeyError:
+    _database_url = _database_config.get("url", None)
+
 # If a URL is given, that overrides all other config settings.
-_database_url = _database_config.get("url", None)
 if _database_url:
     from playhouse.db_url import connect
     database = connect(_database_url)
@@ -144,20 +151,28 @@ class Task(AstraBaseModel):
 
     version = TextField()
 
-    # We want some times to be recorded:
-    # - time taken for common pre-execution time (for all sources)
-    # - time taken for this task pre-execution time 
-    # - time between preparing task for slurm, and actually submitting to slurm
-    # - time between waiting for slurm to get the task, and actually start running the task
-    # - time taken for common execution time (for all sources)
-    # - time taken for this task execution time
-    # - time taken for common post_execution time (for all sources in a bundle)
-    # - time taken for this task post_execution time
+    time_total = FloatField(null=True)
+    time_pre_execute = FloatField(null=True)
+    time_execute = FloatField(null=True)
+    time_post_execute = FloatField(null=True)
+    
+
+    time_pre_execute_bundle = FloatField(null=True)
+    time_pre_execute_task = FloatField(null=True)
+
+    time_execute_bundle = FloatField(null=True)
+    time_execute_task = FloatField(null=True)
+
+    time_post_execute_bundle = FloatField(null=True)
+    time_post_execute_task = FloatField(null=True)
+
+    created = DateTimeField(default=datetime.datetime.now)
+    completed = DateTimeField(null=True)
 
     def as_executable(self):
         if self.version != __version__:
-            log.warning("Task version mismatch for {self}: {} != {}".format(self.version, __version__))
-
+            log.warning(f"Task version mismatch for {self}: {self.version} != {__version__}")
+            
         module_name, class_name = self.name.rsplit(".", 1)
         module = import_module(module_name)
         executable_class = getattr(module, class_name)
@@ -245,8 +260,8 @@ class Bundle(AstraBaseModel):
 
         task = tasks[0]
         if task.version != __version__:
-            log.warning("Task version mismatch for {self}: {} != {}".format(task.version, __version__))
-
+            log.warning(f"Task version mismatch for {self}: {task.version} != {__version__}")
+            
         module_name, class_name = task.name.rsplit(".", 1)
         module = import_module(module_name)
         executable_class = getattr(module, class_name)
