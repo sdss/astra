@@ -110,7 +110,9 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
                 None
 
         # Set parameters.
-        self._parameters = self.parse_parameters(**kwargs)
+        parameters = self.parse_parameters(**kwargs)
+        for parameter_name, (parameter, value, bundled, default) in parameters.items():
+            setattr(self, parameter_name, value)
 
         # Set the executable context.
         self.context = context or {}
@@ -296,9 +298,12 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
                 self.result = function(self)
             except:
                 # Try to see how far we got.
-                i = len(self._timing["iterable"]) - 1
-                responsible_task = self.context["tasks"][i]
-                log.exception(f"Execution failed for {self}, probably on task {responsible_task}:")
+                if "iterable" not in self._timing:
+                    log.exception(f"Execution failed for {self} before we could run first task {self.context['tasks'][0]}:")
+                else:
+                    i = len(self._timing["iterable"]) - 1
+                    responsible_task = self.context["tasks"][i]
+                    log.exception(f"Execution failed for {self}, probably on task {responsible_task}:")
                 raise
 
             self._timing["actual_time_execute"] = time() - t_init
