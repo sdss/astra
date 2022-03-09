@@ -3,7 +3,7 @@ import json
 import os
 from functools import (lru_cache, cached_property)
 from sdss_access import SDSSPath
-from peewee import (SQL, SqliteDatabase, AutoField, TextField, ForeignKeyField, DateTimeField, BigIntegerField, FloatField, BooleanField)
+from peewee import (SQL, SqliteDatabase, BooleanField, AutoField, TextField, ForeignKeyField, DateTimeField, BigIntegerField, FloatField, BooleanField)
 from sdssdb.connection import PeeweeDatabaseConnection
 from sdssdb.peewee import BaseModel
 from astra import (config, log)
@@ -340,12 +340,78 @@ class TaskOutputDataProducts(AstraBaseModel):
     data_product = ForeignKeyField(DataProduct)
 
 
+# Output tables.
+SMALL = -1e-20
+class ClassifierOutput(AstraBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+
+    dithered = BooleanField()
+    snr = FloatField()
+    p_cv = FloatField(default=0)
+    lp_cv = FloatField(default=SMALL)
+    p_fgkm = FloatField(default=0)
+    lp_fgkm = FloatField(default=SMALL)
+    p_hotstar = FloatField(default=0)
+    lp_hotstar = FloatField(default=SMALL)
+    p_wd = FloatField(default=0)
+    lp_wd = FloatField(default=SMALL)
+    p_sb2 = FloatField(default=0)
+    lp_sb2 = FloatField(default=SMALL)
+    p_yso = FloatField(default=0)
+    lp_yso = FloatField(default=SMALL)
+
+
+class ClassifySourceOutput(AstraBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+
+    p_cv = FloatField(default=0)
+    lp_cv = FloatField(default=SMALL)
+    p_fgkm = FloatField(default=0)
+    lp_fgkm = FloatField(default=SMALL)
+    p_hotstar = FloatField(default=0)
+    lp_hotstar = FloatField(default=SMALL)
+    p_wd = FloatField(default=0)
+    lp_wd = FloatField(default=SMALL)
+    p_sb2 = FloatField(default=0)
+    lp_sb2 = FloatField(default=SMALL)
+    p_yso = FloatField(default=0)
+    lp_yso = FloatField(default=SMALL)
+
+
+
+'''
+
+class ApogeeNet(AstraBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+
+    snr = FloatField()
+    teff = FloatField()
+    logg = FloatField()
+    fe_h = FloatField()
+    u_teff = FloatField()
+    u_logg = FloatField()
+    u_fe_h = FloatField()
+    teff_sample_median = FloatField()
+    logg_sample_median = FloatField()
+    fe_h_sample_median = FloatField()
+    bitmask_flag = IntegerField()
+'''
 
 
 def create_tables(drop_existing_tables=False):
     """ Create all tables for the Astra database. """
     database.connect(reuse_if_open=True)
-    models = (Source, DataProduct, SourceDataProduct, Output, Task, TaskOutput, Bundle, TaskBundle, TaskInputDataProducts, TaskOutputDataProducts)
+    models = (
+        Source, DataProduct, SourceDataProduct, Output, Task, TaskOutput, 
+        Bundle, TaskBundle, TaskInputDataProducts, TaskOutputDataProducts,
+        ClassifierOutput
+    )
     if drop_existing_tables:
         database.drop_tables(models)
     database.create_tables(models)

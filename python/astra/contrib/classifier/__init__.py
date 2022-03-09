@@ -1,0 +1,1 @@
+from astra.contrib.classifier.classify import Classify, ClassifySource

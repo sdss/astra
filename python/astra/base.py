@@ -110,8 +110,8 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
                 None
 
         # Set parameters.
-        parameters = self.parse_parameters(**kwargs)
-        for parameter_name, (parameter, value, bundled, default) in parameters.items():
+        self._parameters = self.parse_parameters(**kwargs)
+        for parameter_name, (parameter, value, bundled, default) in self._parameters.items():
             setattr(self, parameter_name, value)
 
         # Set the executable context.
