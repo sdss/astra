@@ -1,69 +1,321 @@
-
-import datetime
 import os
+from tkinter import N
 import numpy as np
 import re
 import subprocess
-import warnings
-
-from collections import OrderedDict
-from inspect import getfullargspec
+from typing import Optional
+from tqdm import tqdm
 
 
-from astra.utils import log, get_base_output_path
+from astra import log
 
-expand_path = lambda path: os.path.expandvars(os.path.expanduser(path))
 
-_base_output_path = get_base_output_path()
-def output_data_product_path(pk, **kwargs):
+def validate_ferre_control_keywords(
+        header_path,
+        frozen_parameters=None,
+        interpolation_order=3,
+        weights_path=None,
+        lsf_shape_path=None,
+        lsf_shape_flag=0,
+        error_algorithm_flag=1,
+        wavelength_interpolation_flag=0,
+        optimization_algorithm_flag=3,
+        continuum_flag=1,
+        continuum_order=4,
+        continuum_segment=None,
+        continuum_reject=0.3,
+        continuum_observations_flag=1,
+        full_covariance=False,
+        pca_project=False,
+        pca_chi=False,
+        n_threads=1,
+        f_access=None,
+        f_format=1,
+        **kwargs
+    ):
     """
-    Temporary function to return an output data product path, until we have a data model
-    for intermediate ASPCAP data products.
-    """
-    # Using warnings.warn here so this does not appear \infinity times in a loop
-    warnings.warn(f"Using temporary function to return output data product path. This will be deprecated.")
+    Validate the FERRE control keywords.
 
-    return os.path.join(
-        _base_output_path,
-        "ferre",
-        "by_task_primary_key",
-        f"{pk / 10_000:.0f}",
-        f"{pk}.pkl"
+    :param header_path:
+        The path of the FERRE header file.
+        
+    :param frozen_parameters: [optional]
+        A dictionary with parameter names (as per the header file) as keys, and either
+        a boolean flag or a float as value. If boolean `True` is given for a parameter,
+        then the value will be fixed at the initial value per spectrum. If a float is
+        given then this value will supercede all initial values given, fixing the
+        dimension for all input spectra regardless of the initial value.
+
+    :param interpolation_order: [optional]
+        Order of interpolation to use (default: 1, as per FERRE).
+        This corresponds to the FERRE keyword `inter`.
+
+        0. nearest neighbour
+        1. linear
+        2. quadratic Bezier
+        3. cubic Bezier
+        4. cubic splines
+
+    :param weights_path: [optional]
+        The location of a weight (or mask) file to apply to the pixels. This corresponds
+        to the FERRE keyword `filterfile`.
+    
+    :para lsf_shape_path: [optional]
+        The location of a file containing describing the line spread function to apply to
+        the observations. This keyword is ignored if `lsf_shape_flag` is anything but 0.
+        This corresponds to the FERRE keyword `lsffile`.
+    
+    :param lsf_shape_flag: [optional]
+        A flag indicating what line spread convolution to perform. This should be one of:
+
+        0. no LSF convolution (default)
+        1. 1D (independent of wavelength), one and the same for all spectra
+        2. 2D (a function of wavelength), one and the same for all
+        3. 1D and Gaussian  (i.e. described by a single parameter, its width), one for all objects
+        4. 2D and Gaussian, one for all objects
+        11. 1D and particular for each spectrum
+        12. 2D and particular for each spectrum
+        13. 1D Gaussian, but particular for each spectrum
+        14. 2D Gaussian and particular for each object.
+
+        If `lsf_shape_flag` is anything but 0, then an `input_lsf_path` keyword argument
+        will also be required, pointing to the location of the LSF file.
+
+    :param error_algorithm_flag: [optional]
+        Choice of algorithm to compute error bars (default: 1, as per FERRE).
+        This corresponds to the FERRE keyword `errbar`.
+
+        0. To adopt the distance from the solution at which $\chi^2$ = min($\chi^2$) + 1
+        1. To invert the curvature matrix
+        2. Perform numerical experiments injecting noise into the data
+
+    :param wavelength_interpolation_flag: [optional]
+        Flag to indicate what to do about wavelength interpolation (default: 0).
+        This is not usually needed as the FERRE grids are computed on the resampled
+        APOGEE grid. This corresponds to the FERRE keyword `winter`.
+
+        0. No interpolation.
+        1. Interpolate observations.
+        2. The FERRE documentation says 'Interpolate fluxes', but it is not clear to the
+           writer how that is any different from Option 1.
+
+    :param optimization_algorithm_flag: [optional]
+        Integer flag to indicate which optimization algorithm to use:
+
+        1. Nelder-Mead
+        2. Boender-Timmer-Rinnoy Kan
+        3. Powell's truncated Newton method
+        4. Nash's truncated Newton method
+
+    :param continuum_flag: [optional]
+        Choice of algorithm to use for continuum fitting (default: 1).
+        This corresponds to the FERRE keyword `cont`, and is related to the
+        FERRE keywords `ncont` and `rejectcont`.
+
+        If `None` is supplied then no continuum keywords will be given to FERRE.
+
+        1. Polynomial fitting using an iterative sigma clipping algrithm (set by
+           `continuum_order` and `continuum_reject` keywords).
+        2. Segmented normalization, where the data are split into `continuum_segment`
+           segments, and the values in each are divided by their mean values.
+        3. The input data are divided by a running mean computed with a window of
+           `continuum_segment` pixels.
+    
+    :param continuum_order: [optional]
+        The order of polynomial fitting to use, if `continuum_flag` is 1.
+        This corresponds to the FERRE keyword `ncont`, if `continuum_flag` is 1.
+        If `continuum_flag` is not 1, this keyword argument is ignored.
+    
+    :param continuum_segment: [optional]
+        Either the number of segments to split the data into for performing normalization,
+        (e.g., when `continuum_flag` = 2), or the window size to use when `continuum_flag`
+        = 3. This corresponds to the FERRE keyword `ncont` if `continuum_flag` is 2 or 3.
+        If `continuum_flag` is not 2 or 3, this keyword argument is ignored.
+
+    :param continuum_reject: [optional]
+        When using polynomial fitting with an iterative sigma clipping algorithm
+        (`continuum_flag` = 1), this sets the relative error where data points will be
+        excluded. Any data points with relative errors larger than `continuum_reject`
+        will be excluded. This corresponds to the FERRE keyword `rejectcont`.
+        If `continuum_flag` is not 1, this keyword argument is ignored.
+    
+    :param continuum_observations_flag: [optional]
+        This corresponds to the FERRE keyword `obscont`. Nothing is written down in the
+        FERRE documentation about this keyword.
+    
+    :param full_covariance: [optional]
+        Return the full covariance matrix from FERRE (default: True). 
+        This corresponds to the FERRE keyword `covprint`.
+    
+    :param pca_project: [optional]
+        Use Principal Component Analysis to compress the spectra (default: False).
+        This corresponds to the FERRE keyword `pcaproject`.
+    
+    :param pca_chi: [optional]
+        Use Principal Component Analysis to compress the spectra when calculating the
+        $\chi^2$ statistic. This corresponds to the FERRE keyword `pcachi`.
+    
+    :param n_threads: [optional]
+        The number of threads to use for FERRE. This corresponds to the FERRE keyword
+        `nthreads`.
+
+    :param f_access: [optional]
+        If `False`, load the entire grid into memory. If `True`, run the interpolation 
+        without loading the entire grid into memory -- this is useful for small numbers 
+        of interpolation. If `None` (default), automatically determine which is faster.
+        This corresponds to the FERRE keyword `f_access`.
+    
+    :param f_format: [optional]
+        File format of the FERRE grid: 0 (ASCII) or 1 (UNF format, default).
+        This corresponds to the FERRE keyword `f_format`.
+    """    
+
+    header_path = expand_path(header_path)
+    kwds = {
+        "synthfile(1)": header_path,
+        "pfile": "parameters.input",
+        "wfile": "wavelengths.input",
+        "ffile": "flux.input",
+        "erfile": "uncertainties.input",
+        "opfile": "parameters.output",
+        "offile": "flux.output",
+        "sffile": "normalized_flux.output"
+    }
+    headers, *segment_headers = read_ferre_headers(header_path)
+    
+    # Parse frozen parameters.
+    parameter_names = sanitise(headers["LABEL"])
+    
+    frozen_parameters = (frozen_parameters or dict())
+    if frozen_parameters:
+        if isinstance(frozen_parameters, (list, tuple, np.ndarray, set)):
+            frozen_parameters = { sanitise(pn): True for pn in frozen_parameters }
+        elif isinstance(frozen_parameters, dict):
+            frozen_parameters = { 
+                sanitise(pn): v for pn, v in frozen_parameters.items() \
+                    if not (isinstance(v, bool) and not v)
+            }
+        else:
+            raise TypeError(f"frozen_parameters must be a list-like or dict-like")
+    
+        unknown_parameters = set(frozen_parameters).difference(parameter_names)
+        if unknown_parameters:
+            raise ValueError(f"Unknown parameters: {unknown_parameters} (available: {parameter_names})")
+        
+        indices = [i for i, pn in enumerate(parameter_names, start=1) if pn not in frozen_parameters]
+        if len(indices) == 0:
+            raise ValueError(f"All parameters frozen?!")
+        
+    else:
+        # No frozen parameters
+        indices = 1 + np.arange(len(parameter_names), dtype=int)
+
+    L = len(indices)
+    kwds.update({
+        "ndim": headers["N_OF_DIM"],
+        "nov": L,
+        "indv": " ".join([f"{i:.0f}" for i in indices]),
+        "init": 0,
+        "indini": " ".join(["1"] * L),
+        "inter": validate_interpolation_order(interpolation_order),
+        "errbar": validate_error_algorithm_flag(error_algorithm_flag),
+        "algor": validate_optimization_algorithm_flag(optimization_algorithm_flag),
+        "pcachi": int(pca_chi),
+        "pcaproject": int(pca_project),
+        "covprint": int(full_covariance),
+        "nthreads": int(n_threads),
+        "f_access": int(f_access or False),
+        "f_format": int(f_format)
+    })
+    wavelength_interpolation_flag = validate_wavelength_interpolation_flag(wavelength_interpolation_flag)
+    if wavelength_interpolation_flag > 0:
+        kwds.update({"winter": wavelength_interpolation_flag})
+
+
+    lsf_shape_flag, lsf_shape_path = validate_lsf_shape_flag_and_lsf_shape_path(lsf_shape_flag, lsf_shape_path)
+    if lsf_shape_flag is not None:
+        kwds.update({
+            "lsf": lsf_shape_flag,
+            "lsffile": lsf_shape_path,
+        })
+    if weights_path is not None:
+        kwds["filterfile"] = validate_weights_path(weights_path)
+
+    # Continuum args.
+    kwds.update(
+        validate_continuum_arguments(
+            continuum_flag=continuum_flag,
+            continuum_order=continuum_order,
+            continuum_segment=continuum_segment,
+            continuum_reject=continuum_reject,
+            continuum_observations_flag=continuum_observations_flag
+        )
     )
 
+    kwds.update(kwargs or dict())
+    return (kwds, headers, segment_headers, frozen_parameters)
 
+def format_ferre_control_keywords(ferre_kwds: dict) -> str:
+    r"""
+    Format control keywords for FERRE to digest.
 
+    :param ferre_kwds:
+        A dictionary of FERRE-recognized keywords, in a suitable order.
 
-# TODO: Put elsewhere
-def _grid_mid_point(headers):
-    return np.mean(
-        np.vstack([
-            headers["LLIMITS"],
-            headers["ULIMITS"]
-        ]),
-        axis=0
+    :returns:
+        String contents for a FERRE input file.
+    """
+
+    preferred_order = (
+        "ndim",
+        "nov",
+        "indv",
+        "synthfile(1)",
+        "pfile",
+        "ffile",
+        "erfile",
+        "opfile",
+        "offile",
+        "obscont",
+        "inter",
+        "errbar",
+        "nruns",
+        "init",
+        "indini",
+        "winter",
+        "algor",
+        "lsf",
+        "nthreads",
+        "covprint",
+        "pcachi",
+        "f_format",
+        "f_access",
     )
 
+    contents = "&LISTA\n"
+    remaining_keys = set(ferre_kwds).difference(preferred_order)
+    keys = list(preferred_order) + list(remaining_keys)
+
+    for key in keys:
+        if key in ferre_kwds:
+            value = ferre_kwds[key]
+            if isinstance(value, str) and key not in ("indv", "indini"):
+                value = f"'{value}'"
+            else:
+                value = f"{value}"
+            contents += f"{key.upper()} = {value}\n"
+
+    contents += "/\n"
+    return contents
 
 
-def _parse_pca_chi(pca_chi, **kwargs):
-    return dict(pcachi=int(pca_chi))
-
-def _parse_pca_project(pca_project, **kwargs):
-    return dict(pcaproject=int(pca_project))
-
-def _parse_full_covariance(full_covariance, **kwargs):
-    return dict(covprint=int(full_covariance))
-
-def _parse_optimization_algorithm_flag(optimization_algorithm_flag, **kwargs):
-    available = (1, 2, 3, 4)
-    optimization_algorithm_flag = int(optimization_algorithm_flag)
-    if optimization_algorithm_flag not in available:
-        raise ValueError(f"optimization_algorithm_flag must be one of {available}")
-    return dict(algor=optimization_algorithm_flag)
+def sanitise(parameter_name):
+    if isinstance(parameter_name, (list, tuple, set, np.ndarray)):
+        return list(map(sanitise, parameter_name))
+    return parameter_name.lower().strip().replace(" ", "_")
 
 
-def _parse_interpolation_order(interpolation_order, **kwargs):
+def validate_interpolation_order(interpolation_order) -> int:
     available = {
         0: "nearest neighbour",
         1: "linear",
@@ -74,10 +326,36 @@ def _parse_interpolation_order(interpolation_order, **kwargs):
     interpolation_order = int(interpolation_order)
     if interpolation_order not in available:
         raise ValueError(f"interpolation_order must be one of {tuple(list(available.keys()))}")
-    return dict(inter=interpolation_order)
+    return interpolation_order 
 
 
-def _parse_error_algorithm_flag(error_algorithm_flag, **kwargs):
+def validate_weights_path(weights_path) -> Optional[str]:
+    if weights_path is not None:
+        weights_path = expand_path(weights_path)
+        if not os.path.exists(weights_path):
+            raise ValueError(f"the weights_path does not exist: {weights_path}")
+        return weights_path
+
+
+def validate_lsf_shape_flag_and_lsf_shape_path(lsf_shape_flag, lsf_shape_path):
+    available = (0, 1, 2, 3, 4, 11, 12, 13, 14)
+    if lsf_shape_flag is not None:    
+        lsf_shape_flag = int(lsf_shape_flag)
+        if lsf_shape_flag not in available:
+            raise ValueError(f"lsf_shape_flag must be one of {available}")
+
+        if lsf_shape_flag != 0:
+            if lsf_shape_path is None:
+                raise ValueError(f"lsf_shape_flag is not 0, so an `lsf_shape_path` is needed")
+
+            lsf_shape_path = expand_path(lsf_shape_path)
+            if not os.path.exists(lsf_shape_path):
+                raise ValueError(f"lsf_shape_path does not exist: {lsf_shape_path}")
+            return (lsf_shape_flag, lsf_shape_path)
+    return (None, None)
+
+
+def validate_error_algorithm_flag(error_algorithm_flag):
     available = {
         0: "adopt distance from the solution at which \chi^2 = min(\chi^2) + 1",
         1: "invert the curvature matrix",
@@ -86,82 +364,35 @@ def _parse_error_algorithm_flag(error_algorithm_flag, **kwargs):
     error_algorithm_flag = int(error_algorithm_flag)    
     if error_algorithm_flag not in available:
         raise ValueError(f"error_algorithm_flag must be one of {tuple(list(available.keys()))}")
-    return dict(errbar=error_algorithm_flag)
+    return error_algorithm_flag
 
 
-def _parse_input_weights_path(input_weights_path, **kwargs):
-    if input_weights_path is not None:
-        input_weights_path = expand_path(input_weights_path)
-        if not os.path.exists(input_weights_path):
-            raise ValueError(f"the input_weights_path does not exist: {input_weights_path}")
-        return dict(filterfile=input_weights_path)
-    
-def _parse_lsf_shape_flag_and_input_lsf_shape_path(input_lsf_shape_path, lsf_shape_flag, **kwargs):
-    available = (0, 1, 2, 3, 4, 11, 12, 13, 14)
-    if lsf_shape_flag is not None:    
-        lsf_shape_flag = int(lsf_shape_flag)
-        if lsf_shape_flag not in available:
-            raise ValueError(f"lsf_shape_flag must be one of {available}")
-
-        if lsf_shape_flag != 0:
-            if input_lsf_shape_path is None:
-                raise ValueError(f"lsf_shape_flag is not 0, so an `input_lsf_shape_path` is needed")
-
-            input_lsf_shape_path = expand_path(input_lsf_shape_path)
-            if not os.path.exists(input_lsf_shape_path):
-                raise ValueError(f"input_lsf_shape_path does not exist: {input_lsf_shape_path}")
-
-            return dict(
-                lsf=lsf_shape_flag,
-                lsffile=input_lsf_shape_path
-            )
-    
-    return None
-
-
-def _parse_wavelength_interpolation_flag(wavelength_interpolation_flag, wavelength, **kwargs):
+def validate_wavelength_interpolation_flag(wavelength_interpolation_flag):
     available = (0, 1, 2)
     wavelength_interpolation_flag = int(wavelength_interpolation_flag or 0)
     if wavelength_interpolation_flag not in available:
         raise ValueError(f"wavelength_interpolation_flag must be one of {available}")
+    #if wavelength_interpolation_flag > 0:
+    #    if wavelength is None:
+    #        raise ValueError("if wavelength_interpolation_flag != 0 then wavelength must be given")
+    #    return dict(winter=wavelength_interpolation_flag)
+    return wavelength_interpolation_flag 
     
-    if wavelength_interpolation_flag > 0:
-        if wavelength is None:
-            raise ValueError("if wavelength_interpolation_flag != 0 then wavelength must be given")
-        return dict(winter=wavelength_interpolation_flag)
+
+def validate_optimization_algorithm_flag(optimization_algorithm_flag):
+    available = (1, 2, 3, 4)
+    optimization_algorithm_flag = int(optimization_algorithm_flag)
+    if optimization_algorithm_flag not in available:
+        raise ValueError(f"optimization_algorithm_flag must be one of {available}")
+    return optimization_algorithm_flag
     
-    return None
 
-def _parse_header_path(header_path, **kwargs):
-    header_path = expand_path(header_path)
-    if not os.path.exists(header_path):
-        raise ValueError(f"header_path does not exist: {header_path}")
-    return dict([("synthfile(1)", header_path)])
-
-def _parse_n_threads(n_threads, **kwargs):
-    return dict(nthreads=int(n_threads))
-
-def _parse_f_access(f_access, **kwargs):
-    if f_access is None:
-        # TODO: Figure out which is faster. For now default to load everything.
-        f_access = False
-    return dict(f_access=int(f_access))
-
-def _parse_f_format(f_format, **kwargs):
-    available = (0, 1)
-    f_format = int(f_format)
-    if f_format not in available:
-        raise ValueError(f"f_format must be one of {available}")
-    return dict(f_format=f_format)
-
-
-def _parse_continuum_args(
+def validate_continuum_arguments(
         continuum_flag,
         continuum_order,
         continuum_segment,
         continuum_reject,
         continuum_observations_flag,
-        **kwargs
     ):
     kwds = dict()
     if continuum_flag is not None:
@@ -176,22 +407,20 @@ def _parse_continuum_args(
                 raise ValueError("continuum_order is required if continuum_flag == 1")
             if continuum_reject is None:
                 raise ValueError("continuum_reject is required if continuum_flag == 1")
-                
+            
             kwds.update(
                 cont=continuum_flag,
                 rejectcont=float(continuum_reject),
                 ncont=int(continuum_order)
             )
-        
+
         elif continuum_flag in (2, 3):
             if continuum_segment is None:
                 raise ValueError("continuum_segment is required if continuum_flag is 2 or 3")
-            
             if continuum_flag == 2:
                 continuum_segment = int(continuum_segment)
             elif continuum_flag == 3:
                 continuum_segment = float(continuum_segment)
-            
             if continuum_segment < 1:
                 raise ValueError(f"continuum_segment must be a positive value")
             
@@ -206,354 +435,10 @@ def _parse_continuum_args(
     return kwds
 
 
-def _parse_ferre_kwargs(ferre_kwargs, **kwargs):
-    return (ferre_kwargs or dict())
+def expand_path(path):
+    return os.path.expandvars(os.path.expanduser(path))
 
 
-def _parse_wavelength_and_flux_and_sigma(
-        wavelength,
-        flux,
-        sigma,
-        wavelength_interpolation_flag,
-        bad_pixel_value=1.0,
-        bad_sigma_value=1e6,
-        **kwargs
-    ):
-
-    # Check flux and sigma
-    try:
-        flux = np.atleast_2d(np.vstack(flux))
-    except ValueError:
-        # the number of pixels changes per observation.
-        P_flux = list(map(len, flux))
-        N_flux = len(flux)
-
-    else:
-        N_flux, P_flux = flux.shape
-        P_flux = np.atleast_1d(P_flux)
-    
-    try:
-        sigma = np.atleast_2d(np.vstack(sigma))
-    except ValueError:
-        P_sigma = list(map(len, sigma))
-        N_sigma = len(sigma)
-    else:
-        N_sigma, P_sigma = sigma.shape
-        P_sigma = np.atleast_1d(P_sigma)
-
-    if N_flux != N_sigma:
-        raise ValueError(f"the number of flux arrays and sigma arrays do not match ({N_flux} != {N_sigma})")
-    
-    if type(P_flux) != type(P_sigma):
-        raise ValueError(f"the flux and sigma arrays are incompatible ({type(flux)} and {type(sigma)})")
-    
-    if not np.all(P_flux == P_sigma):
-        N_mismatches = np.sum(P_flux != P_sigma)
-        raise ValueError(f"different length arrays for flux and sigmas: {N_mismatches} mis-matches with {P_flux} and {P_sigma}")
-
-    # TODO: This will cause problems when the number of pixels change per observation.
-    bad = ~np.isfinite(flux) + ~np.isfinite(sigma) + (sigma == 0)
-    flux[bad] = bad_pixel_value
-    sigma[bad] = bad_sigma_value
-
-    if wavelength_interpolation_flag > 0:
-        # Check the wavelength values.
-        raise NotImplementedError("check wavelength shapes match flux and sigma shapes")
-    
-    assert wavelength is not None
-    wavelength = np.atleast_1d(wavelength)
-
-    return (wavelength, flux, sigma)
-
-
-
-
-def _default_ferre_kwds(**kwargs):
-    return {
-        "pfile": "parameters.input",
-        "wfile": "wavelengths.input",
-        "ffile": "flux.input",
-        "erfile": "uncertainties.input",
-        "opfile": "parameters.output",
-        "offile": "flux.output",
-        "sffile": "normalized_flux.output"
-    }
-
-
-def _parse_names_and_initial_and_frozen_parameters(
-        names,
-        initial_parameters,
-        frozen_parameters,
-        headers,
-        flux,
-        clip_initial_parameters_to_boundary_edges=True,
-        clip_epsilon_percent=1,
-        **kwargs
-    ):
-
-    # Read the labels from the first header path
-    parameter_names = headers["LABEL"]
-
-    # Need the number of spectra, which we will take from the flux array.
-    N = len(flux)
-    mid_point = _grid_mid_point(headers)
-    parsed_initial_parameters = np.tile(mid_point, N).reshape((N, -1))    
-
-    log.debug(f"parsed initial parameters before {parsed_initial_parameters}")
-
-    compare_parameter_names = list(map(sanitise_parameter_name, parameter_names))
-        
-    log.debug(f"Initial parameters passed for parsing {initial_parameters}")
-
-    if initial_parameters is not None:
-        log.debug(f"Comparison names {compare_parameter_names}")
-        for i, (parameter_name, values) in enumerate(initial_parameters.items()):
-            spn = sanitise_parameter_name(parameter_name)
-            log.debug(f"{parameter_name} {values} {spn}")
-            
-            try:
-                index = compare_parameter_names.index(spn)
-            except ValueError:
-                log.warning(f"Ignoring initial parameters for {parameter_name} as they are not in {parameter_names}")
-                log.debug(f"Nothing matched for {spn} {parameter_name} {compare_parameter_names}")
-            else:
-                log.debug(f"Matched to index {index}")
-                # Replace non-finite values with the mid point.
-                finite = np.isfinite(values)
-                if not np.all(finite):
-                    log.warning(f"Missing or non-finite initial values given for {parameter_name}. Defaulting to the grid mid-point.")                    
-
-                values = np.array(values)
-                values[~finite] = mid_point[index]
-
-                log.debug(f"values are {values} {type(values[0])} {finite}")
-                parsed_initial_parameters[:, index] = values 
-                
-    
-    log.debug(f"parsed initial parameters after {parsed_initial_parameters}")
-
-    kwds = dict()
-    frozen_parameters = (frozen_parameters or dict())
-    if frozen_parameters:
-        # Ensure we have a dict-like thing.
-        if isinstance(frozen_parameters, (list, tuple, np.ndarray)):
-            frozen_parameters = { sanitise_parameter_name(k): True for k in frozen_parameters }
-        elif isinstance(frozen_parameters, dict):
-            # Exclude things that have boolean False.
-            frozen_parameters = { 
-                sanitise_parameter_name(k): v for k, v in frozen_parameters.items() \
-                if not (isinstance(v, bool) and not v)
-            }
-        else:
-            raise TypeError(f"frozen_parameters must be list-like or dict-like")
-        
-        unknown_parameters = set(frozen_parameters).difference(compare_parameter_names)
-        if unknown_parameters:
-            raise ValueError(f"unknown parameter(s): {unknown_parameters} (available: {parameter_names})")
-
-        indices = [
-            i for i, pn in enumerate(compare_parameter_names, start=1) if pn not in frozen_parameters
-        ]
-
-        if len(indices) == 0:
-            raise ValueError(f"all parameters frozen?!")
-
-        # Over-ride initial values with the frozen ones if given.
-        for parameter_name, value in frozen_parameters.items():
-            if not isinstance(value, bool):
-                log.debug(f"Over-writing initial values for {parameter_name} with frozen value of {value}")
-                zero_index = compare_parameter_names.index(parameter_name)
-                parsed_initial_parameters[:, zero_index] = value
-    else:
-        # No frozen parameters.
-        indices = 1 + np.arange(len(parameter_names), dtype=int)
-    
-    # Build a frozen parameters dict for result metadata.
-    parsed_frozen_parameters = { pn: (pn in frozen_parameters) for pn in compare_parameter_names }
-
-    L = len(indices)
-    kwds.update(
-        ndim=headers["N_OF_DIM"],
-        nov=L,
-        indv=" ".join([f"{i:.0f}" for i in indices]),
-        # We will always provide an initial guess, even if it is the grid mid point.
-        init=0,
-        indini=" ".join(["1"] * L)
-    )
-
-    # Now deal with names.
-    if names is None:
-        names = [f"{i:.0f}" for i in range(len(parsed_initial_parameters))]
-    else:
-        if len(names) != len(parsed_initial_parameters):
-            raise ValueError(f"names and initial parameters does not match ({len(names)} != {len(parsed_initial_parameters)})")
-
-    # Let's check the initial values are all within the grid boundaries.
-    lower_limit, upper_limit = _get_grid_limits(headers)
-    try:
-        _check_initial_parameters_within_grid_limits(parsed_initial_parameters, lower_limit, upper_limit, parameter_names)
-    except ValueError as e:
-        log.exception(f"Exception when checking initial parameters within grid boundaries:")
-        log.critical(e, exc_info=True)
-
-        if clip_initial_parameters_to_boundary_edges:
-            log.info(f"Clipping initial parameters to boundary edges (use clip_initial_parameters_to_boundary_edges=False to raise exception instead)")
-
-            clip = clip_epsilon_percent * (upper_limit - lower_limit)/100.
-            parsed_initial_parameters = np.round(np.clip(parsed_initial_parameters, lower_limit + clip, upper_limit - clip), 3)
-        else:
-            raise
-        
-    return (kwds, names, parsed_initial_parameters, parsed_frozen_parameters)
-
-
-def _get_grid_limits(headers):
-    """
-    Return a two-length tuple that contains the lower limits of the grid and the upper limits of the grid.
-
-    :param headers:
-        The primary headers from a FERRE grid file.
-    """
-    return (
-        headers["LLIMITS"],
-        headers["LLIMITS"] + headers["STEPS"] * (headers["N_P"] - 1)
-    )
-
-
-def _check_initial_parameters_within_grid_limits(initial_parameters, lower_limit, upper_limit, parameter_names):
-    """
-    Check that the initial parameters are within the boundaries of the FERRE grid.
-
-    :param initial_parameters:
-        A 2D array of shape (N, L) where N is the number of spectra and L is the number of labels in the FERRE grid.
-    
-    :param headers:
-        The primary headers from the FERRE grid file.
-
-    :raise ValueError:
-        If any initial parameter is outside the grid boundary.
-    """
-
-    in_limits = (upper_limit > initial_parameters) * (initial_parameters > lower_limit)
-
-    if not np.all(in_limits):
-
-        message = "Initial_parameters are not all within bounds of the grid. For example:\n"
-
-        bad_parameter_indices = np.where(~np.all(in_limits, axis=0))[0]
-        for j in bad_parameter_indices:
-            i = np.where(~in_limits[:, j])[0]
-            message += f"- {parameter_names[j]} has limits of ({lower_limit[j]:.2f}, {upper_limit[j]:.2f}) but {len(i)} indices ({i}) are outside this range: {initial_parameters[:, j][i]}\n"
-        
-        raise ValueError(message)
-
-    return True
-
-        
-
-
-
-
-def parse_ferre_inputs(**kwargs):
-        
-    parsed_kwds = {}
-
-    headers, *segment_headers = read_ferre_headers(expand_path(kwargs["header_path"]))
-
-    # These two have different outputs than the rest.
-    wavelength, flux, sigma = _parse_wavelength_and_flux_and_sigma(**kwargs)
-
-    # Build wavelength arrays to generate a mask.
-    model_wavelengths = tuple(map(wavelength_array_from_ferre_header, segment_headers))
-
-    # Build from first wavelength array
-    mask = np.zeros(wavelength.shape[1], dtype=bool)
-    for model_wavelength in model_wavelengths:
-        # TODO: Building wavelength mask off just the first wavelength array. Assuming all have the same wavelength array.
-        s_index, e_index = wavelength[0].searchsorted(model_wavelength[[0, -1]])
-        mask[s_index:e_index + 1] = True
-        
-    _kwds, names, initial_parameters, parsed_frozen_parameters = _parse_names_and_initial_and_frozen_parameters(
-        headers=headers, 
-        **kwargs
-    )
-    parsed_kwds.update(_kwds)
-
-
-
-    parsers = (
-        _default_ferre_kwds,
-        _parse_pca_chi,
-        _parse_pca_project,
-        _parse_full_covariance,
-        _parse_optimization_algorithm_flag,
-        _parse_interpolation_order,
-        _parse_error_algorithm_flag,
-        _parse_input_weights_path,
-        _parse_lsf_shape_flag_and_input_lsf_shape_path,
-        _parse_wavelength_interpolation_flag,
-        _parse_header_path,
-        _parse_n_threads,
-        _parse_f_access,
-        _parse_f_format,
-        _parse_continuum_args,
-        _parse_ferre_kwargs,
-    )
-
-    for parser in parsers:
-        _kwds = parser(**kwargs)
-        if _kwds: parsed_kwds.update(_kwds)
-
-    # Create a metadata dict for results.
-    meta = dict(
-        parameter_names=headers["LABEL"],
-        frozen_parameters=parsed_frozen_parameters,
-        initial_parameters=initial_parameters
-    )
-    return (wavelength, flux, sigma, mask, names, initial_parameters, parsed_kwds, meta)
-
-sanitise_parameter_name = lambda pn: pn.lower().strip().replace(" ", "_")
-desanitise_parameter_name = lambda pn: pn.upper().replace("_", " ")
-    
-
-def line_count(filename):
-    return int(subprocess.check_output(['wc', '-l', filename]).split()[0])
-
-
-def wavelength_array_from_ferre_header(header):
-    wave = header["WAVE"][0] + np.arange(header["NPIX"]) * header["WAVE"][1]
-    if header["LOGW"] == 1:
-        wave = 10**wave
-    elif header["LOGW"] == 2:
-        wave = np.exp(wave)
-
-    return wave
-
-
-def write_data_file(data, path, fmt="%.4e", footer="\n", **kwargs):
-    return np.savetxt(
-        path,
-        data,
-        fmt=fmt,
-        footer=footer,
-        **kwargs
-    )
-
-
-def safe_read_header(headers, keys):
-    if not isinstance(keys, (tuple, list)):
-        keys = [keys]
-    
-    for key in keys:
-        try:
-            return headers[key]
-        except KeyError:
-            continue
-    
-    else:
-        raise KeyError(f"no header keyword found among {keys}")
-
-        
 def read_ferre_header(fp):
     """ 
     Read a FERRE library header into a dictionary.
@@ -618,49 +503,218 @@ def read_ferre_headers(path):
 
     try:
         with open(path, "r") as fp:
-
             headers = [read_ferre_header(fp)]
             headers[0]["PATH"] = path
-
             for i in range(headers[0].get("MULTI", 0)):
-                headers.append(read_ferre_header(fp))    
-    
+                headers.append(read_ferre_header(fp))
     except:
         raise
-    
     else:
         return headers
 
 
-def get_grid_boundaries(ferre_grid_header_files, **kwargs):
-    """
-    Get the grid boundaries for the given FERRE grid header files.
+def validate_initial_and_frozen_parameters(
+        headers,
+        initial_parameters,
+        frozen_parameters,
+        clip_initial_parameters_to_boundary_edges=True,
+        clip_epsilon_percent=1,
+    ):
 
-    :param ferre_grid_header_files:
-        A list of FERRE grid paths.
+    N = len(initial_parameters)
+    parameter_names = sanitise(headers["LABEL"])
+
+    mid_point = grid_mid_point(headers)
+    initial_parameters_array = np.tile(mid_point, N).reshape((N, -1))
+
+    for i, ip in enumerate(initial_parameters):
+        for parameter_name, value in ip.items():
+            try:
+                j = parameter_names.index(sanitise(parameter_name))
+            except ValueError:
+                log.warning(f"Ignoring initial parameter '{parameter_name}' as it is not in {parameter_names}")
+                continue
+            else:
+                if np.isfinite(value):
+                    initial_parameters_array[i, j] = value
     
+    # Update with frozen parameters
+    for parameter_name, value in frozen_parameters.items():
+        if not isinstance(value, bool):
+            try:
+                j = parameter_names.index(sanitise(parameter_name))
+            except ValueError:
+                log.warning(f"Ignoring frozen parameter '{parameter_name}' as it is not in {parameter_names}")
+                continue
+            else:
+                log.debug(f"Over-writing initial values for {parameter_name} with frozen value of {value}")                        
+                initial_parameters_array[:, j] = value
+    
+    # Let's check the initial values are all within the grid boundaries.
+    lower_limit, upper_limit = grid_limits(headers)
+    try:
+        check_initial_parameters_within_grid_limits(initial_parameters_array, lower_limit, upper_limit, parameter_names)
+    except ValueError as e:
+        log.exception(f"Exception when checking initial parameters within grid boundaries:")
+        log.critical(e, exc_info=True)
+
+        if clip_initial_parameters_to_boundary_edges:
+            log.info(f"Clipping initial parameters to boundary edges (use clip_initial_parameters_to_boundary_edges=False to raise exception instead)")
+
+            clip = clip_epsilon_percent * (upper_limit - lower_limit)/100.
+            initial_parameters_array = np.round(np.clip(initial_parameters_array, lower_limit + clip, upper_limit - clip), 3)
+        else:
+            raise
+
+    return initial_parameters_array
+
+
+def wavelength_array(header):
+    wave = header["WAVE"][0] + np.arange(header["NPIX"]) * header["WAVE"][1]
+    if header["LOGW"] == 1:
+        wave = 10**wave
+    elif header["LOGW"] == 2:
+        wave = np.exp(wave)
+    return wave
+
+def format_ferre_input_parameters(*p, name="dummy"):
+    r"""
+    Format input parameters for FERRE to digest.
+
     :returns:
-        A dictionary with FERRE grid paths as keys, and each value contains
-        a dictionary of label names as keys and a tuple of (lower, upper)
-        boundary values.
+        String contents for a FERRE input parameter file.
     """
-    boundaries = {}
+    contents = f"{name:40s}"
+    for each in p:
+        contents += f"{each:12.3f}"
+    contents += "\n"
+    return contents
 
-    for path in ferre_grid_header_files:
-        expanded_path = os.path.expandvars(path)
-        primary_header, *headers = read_ferre_headers(expanded_path)
 
-        args = (
-            primary_header["LABEL"],
-            primary_header["LLIMITS"],
-            primary_header["ULIMITS"]
-        )
-        boundaries[expanded_path] = {
-            label_name: (lower, upper) for label_name, lower, upper in zip(*args)
-        }
+def grid_mid_point(headers):
+    return np.mean(
+        np.vstack([
+            headers["LLIMITS"],
+            headers["ULIMITS"]
+        ]),
+        axis=0
+    )
 
-    return boundaries
+def grid_limits(headers):
+    """
+    Return a two-length tuple that contains the lower limits of the grid and the upper limits of the grid.
+
+    :param headers:
+        The primary headers from a FERRE grid file.
+    """
+    return (
+        headers["LLIMITS"],
+        headers["LLIMITS"] + headers["STEPS"] * (headers["N_P"] - 1)
+    )
+
+
+def check_initial_parameters_within_grid_limits(initial_parameters, lower_limit, upper_limit, parameter_names):
+    """
+    Check that the initial parameters are within the boundaries of the FERRE grid.
+
+    :param initial_parameters:
+        A 2D array of shape (N, L) where N is the number of spectra and L is the number of labels in the FERRE grid.
     
+    :param headers:
+        The primary headers from the FERRE grid file.
+
+    :raise ValueError:
+        If any initial parameter is outside the grid boundary.
+    """
+
+    in_limits = (upper_limit > initial_parameters) * (initial_parameters > lower_limit)
+
+    if not np.all(in_limits):
+
+        message = "Initial_parameters are not all within bounds of the grid. For example:\n"
+
+        bad_parameter_indices = np.where(~np.all(in_limits, axis=0))[0]
+        for j in bad_parameter_indices:
+            i = np.where(~in_limits[:, j])[0]
+            message += f"- {parameter_names[j]} has limits of ({lower_limit[j]:.2f}, {upper_limit[j]:.2f}) but {len(i)} indices ({i}) are outside this range: {initial_parameters[:, j][i]}\n"
+        
+        raise ValueError(message)
+
+    return True
+
+
+def read_control_file(path):
+    routes = [
+        ("OFFILE", "OFFILE"),
+        ("OPFILE", "OPFILE"),
+        ("PFILE", "PFILE"),
+        ("NDIM", "NDIM"),
+        ("COVPRINT", "COVPRINT"),
+        ("SYNTHFILE(1)", "SYNTHFILE(1)")
+    ]
+
+    meta = {}
+    with open(path, "r") as fp:
+        for line in fp.readlines():
+            for route, key in routes:
+                if line.startswith(route):
+                    meta[key] = line.split("=")[1].strip(" \n'")
+
+    return meta
+
+
+def wc(path):
+    return int(subprocess.check_output(['wc', '-l', path]).split()[0])
+
+
+def check_ferre_progress(dir, process=None, control_file_basename="input.nml", timeout=30):
+
+    control_kwds = read_control_file(os.path.join(dir, control_file_basename))
+    input_path = control_kwds["PFILE"]
+    output_path = control_kwds["OFFILE"]
+
+    total = wc(os.path.join(dir, input_path))
+
+    stdout, stderr = ("", "")
+
+    total_done, total_errors = (0, 0)
+    with tqdm(total=total, desc="FERRE", unit="spectra") as pb:
+        while total > total_done:
+            if process is not None:  
+                try:
+                    _stdout, _stderr = process.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    None
+                else:
+                    stdout += _stdout
+                    stderr += _stderr
+
+            n_done = wc(os.path.join(dir, output_path))
+            
+            n_errors = stderr.lower().count("error")
+        
+            n_updated = n_done - total_done
+            pb.update(n_updated)
+
+            total_done = n_done
+            total_errors = n_errors
+
+            if n_errors > 0:
+                pb.set_description(f"FERRE ({total_errors:.0f} errors)")
+            pb.refresh()
+
+    if process is not None:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            None
+        else:
+            stdout += stdout
+            stderr += stderr
+            total_errors = stderr.lower().count("error")
+
+    return (stdout, stderr, total_done, total_errors, control_kwds)
+
 
 def read_output_parameter_file(path, n_dimensions, full_covariance, **kwargs):
     """
@@ -672,8 +726,11 @@ def read_output_parameter_file(path, n_dimensions, full_covariance, **kwargs):
     Additional columns with the covariance matrix of the errors can be output setting to 1 the
     keyword COVPRINT.
     """
+    n_dimensions = int(n_dimensions)
+    full_covariance = bool(int(full_covariance))
 
     names = np.loadtxt(path, usecols=(0, ), dtype=str)
+    
     
     N_cols = 2 * n_dimensions + 3
     if full_covariance:
@@ -697,85 +754,10 @@ def read_output_parameter_file(path, n_dimensions, full_covariance, **kwargs):
         cov = cov.reshape((-1, n_dimensions, n_dimensions))
         meta.update(cov=cov)
 
-    return (names, param, param_err, meta)
+    return (names, param, param_err, meta)    
 
 
-def format_ferre_control_keywords(ferre_kwds):
-    r"""
-    Format control keywords for FERRE to digest.
-
-    :param ferre_kwds:
-        A dictionary of FERRE-recognized keywords, in a suitable order.
-
-    :returns:
-        String contents for a FERRE input file.
-    """
-
-    preferred_order = (
-        "ndim",
-        "nov",
-        "indv",
-        "synthfile(1)",
-        "pfile",
-        "ffile",
-        "erfile",
-        "opfile",
-        "offile",
-        "obscont",
-        "inter",
-        "errbar",
-        "nruns",
-        "init",
-        "indini",
-        "winter",
-        "algor",
-        "lsf",
-        "nthreads",
-        "covprint",
-        "pcachi",
-        "f_format",
-        "f_access",
-    )
-
-    contents = "&LISTA\n"
-    remaining_keys = set(ferre_kwds).difference(preferred_order)
-    keys = list(preferred_order) + list(remaining_keys)
-
-    for key in keys:
-        if key in ferre_kwds:
-            value = ferre_kwds[key]
-            if isinstance(value, str) and key not in ("indv", "indini"):
-                value = f"'{value}'"
-            else:
-                value = f"{value}"
-            contents += f"{key.upper()} = {value}\n"
-
-    contents += "/\n"
-    return contents
-
-
-
-
-
-# Note: this old_format_ferre_input_parameters certainly will match the IPF files on the SDSS SAS,
-#       but are giving me FERRE problems right now. Check format later on.
-def format_ferre_input_parameters(*p, name="dummy"):
-    r"""
-    Format input parameters for FERRE to digest.
-
-    :returns:
-        String contents for a FERRE input parameter file.
-    """
-    contents = f"{name:40s}"
-    for each in p:
-        contents += f"{each:12.3f}"
-    contents += "\n"
-    return contents
-
-
-
-
-def get_processing_times(stdout, n_threads):
+def get_processing_times(stdout):
     """
     Get the time taken to analyse spectra and estimate the initial load time.
 
@@ -786,7 +768,13 @@ def get_processing_times(stdout, n_threads):
     if stdout is None or stdout == "":
         return None
 
-    matches = re.findall('ellapsed time:\s+[{0-9}|.]+', stdout)
+    header = re.findall("-{65}\s+f e r r e", stdout)
+    i = stdout[::-1].index(header[0][::-1])
+    use_stdout = stdout[-(i + len(header)):]
+
+    n_threads = int(re.findall("nthreads = \s+[{0-9}+]", use_stdout)[0].split()[-1])
+
+    matches = re.findall('ellapsed time:\s+[{0-9}|.]+', use_stdout)
     load_time, *elapsed_time = [float(match.split()[-1]) for match in matches]
 
     # Offset load time.
@@ -797,7 +785,7 @@ def get_processing_times(stdout, n_threads):
     A = np.hstack([elapsed_time, np.zeros(O)]).reshape((-1, n_threads))
     time_per_spectrum = np.hstack([elapsed_time[:n_threads], np.diff(A, axis=0).flatten()[:-O]])
 
-    object_indices = [int(index.split()[-1]) for index in re.findall('next object #\s+[{0-9}]+', stdout)]
+    object_indices = [int(index.split()[-1]) for index in re.findall('next object #\s+[{0-9}]+', use_stdout)]
 
     # Sort.
     idx = np.argsort(object_indices)
@@ -805,215 +793,7 @@ def get_processing_times(stdout, n_threads):
     
     return dict(
         load_time=load_time,
-        elapsed_time=elapsed_time,
-        indices=idx,
-        time_per_ordered_spectrum=time_per_spectrum
+        elapsed_time=elapsed_time[:-1],
+        indices=idx[:-1],
+        time_per_ordered_spectrum=time_per_spectrum[:-1]
     )
-
-
-
-def get_abundance_keywords(element, header_label_names):
-    """
-    Return a dictionary of task parameters given a chemical element. These are adopted from DR16.
-
-    :param element:
-        The chemical element to measure.
-
-    :param header_label_names:
-        The list of label names in the FERRE header file.
-    """
-
-    # These can be inferred from running the following command on the SAS:
-    # cd /uufs/chpc.utah.edu/common/home/sdss50/dr16/apogee/spectro/aspcap/r12/l33/apo25m/cal_all_apo25m007/ferre
-    # egrep 'INDV|TIE|FILTERFILE' */input.nml
-    
-    controls = {
-        "Al": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]
-        },
-        "Ca": {
-            "INDV_LABEL": ('O Mg Si S Ca Ti', ),
-        },
-        "Ce": {
-            "INDV_LABEL": ('METALS', ),
-        },
-        "CI": {
-            "INDV_LABEL": ('C', ),
-        },
-        "C": {
-            "INDV_LABEL": ('C', ),
-        },
-        "CN": {
-            "INDV_LABEL": ('C', 'O Mg Si S Ca Ti', ),
-        },
-        "Co": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]    
-        },
-        "Cr": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]
-        },
-        "Cu": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]
-        },
-        "Fe": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]
-        },
-        "Ge": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]
-        },
-        "K": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]
-        },
-        "Mg": {
-            "INDV_LABEL": ('O Mg Si S Ca Ti', ),
-        },
-        "Mn": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]
-        },
-        "Na": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]
-        },
-        "Nd": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]
-        },
-        "Ni": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]
-        },
-        "N": {
-            "INDV_LABEL": ('N', ),
-        },
-        "O": {
-            "INDV_LABEL": ('O Mg Si S Ca Ti', ),
-        },
-        "P": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]
-        },
-        "Rb": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]
-        },
-        "Si": {
-            "INDV_LABEL": ('O Mg Si S Ca Ti', ),
-        },
-        "S": {
-            "INDV_LABEL": ('O Mg Si S Ca Ti', ),
-        },
-        "TiII": {
-            "INDV_LABEL": ('O Mg Si S Ca Ti', ),
-        },
-        "Ti": {
-            "INDV_LABEL": ('O Mg Si S Ca Ti', ),
-        },
-        "V": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]
-        },
-        "Yb": {
-            "INDV_LABEL": ('METALS', ),
-            "TIES": [
-                ('C', 0, -1),
-                ('N', 0, -1),
-                ('O Mg Si S Ca Ti', 0, -1)
-            ]
-        }
-    }
-
-    def get_header_index(label):
-        # FERRE uses 1-indexing and Python uses 0-indexing.
-        return 1 + header_label_names.index(label)
-
-    try:
-        c = controls[element]
-    except:
-        raise ValueError(f"no abundance controls known for element '{element}' (available: {tuple(controls.keys())}")
-
-    indv = [get_header_index(label) for label in c["INDV_LABEL"]]
-    ties = c.get("TIES", [])
-
-    ferre_kwds = {
-        # We don't pass INDV here because this will be determined from the
-        # 'frozen_<param>' arguments to the FerreGivenSDSSApStarFile tasks
-        #"INDV": [get_header_index(label) for label in c["INDV_LABEL"]],
-        "NTIE": len(ties),
-        "TYPETIE": 1
-    }
-    for i, (tie_label, ttie0, ttie) in enumerate(ties, start=1):
-        ferre_kwds.update({
-            f"INDTIE({i:.0f})": get_header_index(tie_label),
-            f"TTIE0({i:.0f})": ttie0,
-            # TODO: What if we don't want to tie it back to first INDV element?
-            f"TTIE({i:.0f},{indv[0]:.0f})": ttie
-        })
-    
-    # Freeze all other labels.
-    frozen_parameters = { hln: (hln not in c["INDV_LABEL"]) for hln in header_label_names }
-
-    return (frozen_parameters, ferre_kwds)
