@@ -9,8 +9,10 @@ __version__ = get_package_version(path=__file__, package_name=NAME)
 # ~/.astra/astra.yml
 config = get_config(NAME)
 
-log_level = config.get("logging", {}).get("level", None)
-log = get_logger(NAME, log_level=log_level)
+logger_kwds = {}
+if "logging" in config and "level" in config["logging"]:
+    logger_kwds.update(level=config["logging"]["level"])
+log = get_logger(NAME, **logger_kwds)
 
 warnings.filterwarnings(
     'ignore', 
