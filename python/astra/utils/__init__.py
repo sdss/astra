@@ -8,12 +8,19 @@ import logging
 from time import time
 
 
-
+from importlib import import_module
 import hashlib
 import json
 
 import os
 import tempfile
+
+def executable(name):
+    module_name, class_name = name.rsplit(".", 1)
+    module = import_module(module_name)
+    return getattr(module, class_name)
+
+
 
 #log = get_logger(__name__.split(".")[0])
 log = logging.getLogger(__name__.split(".")[0])
