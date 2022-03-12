@@ -20,7 +20,9 @@ class Parameter:
 class ExecutableTaskMeta(abc.ABCMeta):
     def __new__(cls, *args):
         new_class = super(ExecutableTaskMeta, cls).__new__(cls, *args)
+        new_class.pre_execute = new_class._pre_execute_decorator(new_class.pre_execute)
         new_class.execute = new_class._execute_decorator(new_class.execute)
+        new_class.post_execute = new_class._post_execute_decorator(new_class.post_execute)
         return new_class
 
 
@@ -268,30 +270,47 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
 
 
     @abc.abstractmethod
+    def pre_execute(self, *args, **kwargs):
+        pass
+
+    @abc.abstractmethod
     def execute(self, *args, **kwargs):
         pass
 
+    @abc.abstractmethod
+    def post_execute(self, *args, **kwargs):
+        pass
+
     @classmethod
-    def _execute_decorator(cls, function):
-        def do_pre_post(self):
-            log.debug(f"Decorating pre/post_execute {self}")
+    def _pre_execute_decorator(cls, function):
+        def do_pre_execution(self):
+            log.debug(f"Decorating pre-execute for {self}")
+            
+            # Create tasks in database if they weren't already given.
+            if len(self.context) == 0:
+                self.context.update(self.get_or_create_context())
 
             # Do pre-execution.
             t_init = time()
             try:
-                pre_execute = self.pre_execute()
+                pre_execute = function(self)
             except:
                 log.exception(f"Pre-execution failed for {self}:")
                 raise
             self._timing["actual_time_pre_execute"] = time() - t_init
                 
-            # Create tasks in database if they weren't already given.
-            if len(self.context) == 0:
-                self.context.update(self.get_or_create_context())
-            
             # Update context with pre execution.
             if pre_execute is not None:
                 self.context.update(pre_execute)
+            return pre_execute
+        return do_pre_execution       
+
+
+    @classmethod
+    def _execute_decorator(cls, function):
+        def do_pre_post(self):
+            
+            self.pre_execute()
 
             t_init = time()
             try:
@@ -301,20 +320,30 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
                 if "iterable" not in self._timing:
                     log.exception(f"Execution failed for {self} before we could run first task {self.context['tasks'][0]}:")
                 else:
-                    i = len(self._timing["iterable"]) - 1
+                    i = max(0, len(self._timing["iterable"]) - 2)
                     responsible_task = self.context["tasks"][i]
                     log.exception(f"Execution failed for {self}, probably on task {responsible_task}:")
                 raise
-
             self._timing["actual_time_execute"] = time() - t_init
 
+            self.post_execute()
+
+            return self.result
+
+        return do_pre_post
+     
+
+
+    @classmethod
+    def _post_execute_decorator(cls, function):
+        def do_post_execution(self):
 
             log.debug(f"Post-processing for {self}")
 
             t_init = time()
             try:
                 # This would check context for the output.
-                post_execute = self.post_execute()
+                post_execute = function(self)
             except:
                 log.exception(f"Post-execution failed for {self}:")
                 raise
@@ -326,15 +355,5 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
             self._update_task_timings()
             log.debug(f"Task timings updated.")
 
-            return self.result
-
-        return do_pre_post
-        
-
-    def pre_execute(self, **kwargs):
-        pass
-
-    def post_execute(self, **kwargs):
-        pass
-
-
+            return post_execute
+        return do_post_execution     
