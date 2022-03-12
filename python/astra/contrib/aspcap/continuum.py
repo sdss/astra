@@ -1,6 +1,68 @@
-""" 
-Continuum-normalization utilities.
-"""
+import numpy as np
+from astra.tools.continuum.base import NormalizationBase
+from astra.contrib.aspcap import bitmask
+
+class MedianNormalizationWithErrorInflation(NormalizationBase):
+
+    """
+    Continuum-normalize an input spectrum by the median flux value,
+    and inflate the errors due to skylines and bad pixels.
+    """
+
+    parameter_names = ()
+    
+    def __init__(
+            self, 
+            spectrum, 
+            axis=1,
+            ivar_multiplier_for_sig_skyline=1e-4,
+            ivar_min=0,
+            ivar_max=40_000,
+            bad_pixel_flux=1e-4,
+            bad_pixel_ivar=1e-20,
+        ) -> None:
+        super().__init__(spectrum)
+        self.axis = axis
+        self.ivar_multiplier_for_sig_skyline = ivar_multiplier_for_sig_skyline
+        self.ivar_min = ivar_min
+        self.ivar_max = ivar_max
+        self.bad_pixel_flux = bad_pixel_flux
+        self.bad_pixel_ivar = bad_pixel_ivar
+
+    def __call__(self):
+    
+        pixel_bit_mask = bitmask.PixelBitMask() 
+
+        # Normalize.
+        continuum = np.nanmedian(self.spectrum.flux.value, axis=self.axis).reshape((-1, 1))
+        self.spectrum._data /= continuum
+        self.spectrum._uncertainty.array *= continuum**2 
+
+        # Increase the error around significant skylines.
+        skyline_mask = ((self.spectrum.meta["bitmask"] & pixel_bit_mask.get_value('SIG_SKYLINE')) > 0)
+        self.spectrum._uncertainty.array[skyline_mask] *= self.ivar_multiplier_for_sig_skyline
+
+        # Set bad pixels to have no useful data.
+        bad = ~np.isfinite(self.spectrum.flux.value) \
+            | ~np.isfinite(self.spectrum.uncertainty.array) \
+            | (self.spectrum.flux.value < 0) \
+            | (self.spectrum.uncertainty.array < 0) \
+            | ((self.spectrum.meta["bitmask"] & pixel_bit_mask.get_level_value(1)) > 0)
+        
+        self.spectrum._data[bad] = self.bad_pixel_flux
+        self.spectrum._uncertainty.array[bad] = self.bad_pixel_ivar
+            
+        # Ensure a minimum error.
+        # TODO: This seems like a pretty bad idea!
+        self.spectrum._uncertainty.array = np.clip(
+            self.spectrum._uncertainty.array, 
+            self.ivar_min, 
+            self.ivar_max
+        ) # sigma = 5e-3
+
+        return self.spectrum
+
+'''
 
 import numpy as np
 import pickle
@@ -31,7 +93,7 @@ def median_and_inflate_errors(
     due to skylines and bad pixels.
     """
 
-    pixel_bit_mask = bitmask.PixelBitMask()
+    pixel_bit_mask = bitmask.PixelBitMask() 
 
     # Normalize.
     continuum = np.nanmedian(spectrum.flux.value, axis=axis).reshape((-1, 1))
@@ -165,7 +227,7 @@ def median_filtered_correction(
         A two-length tuple of the pseudo-continuum segments, and the corrected pseudo-continuum-normalised observed flux errors.
     """
 
-    '''
+    """
     if isinstance(wavelength, np.ndarray):
         wavelength = (wavelength, )
     if isinstance(normalised_observed_flux, np.ndarray):
@@ -180,7 +242,7 @@ def median_filtered_correction(
         width = tuple([width] * N)
     if isinstance(bad_minimum_flux, float):
         bad_minimum_flux = tuple([bad_minimum_flux] * N)
-    '''
+    """
     wavelength = np.atleast_1d(wavelength).flatten()
     normalised_observed_flux = np.atleast_1d(normalised_observed_flux).flatten()
     normalised_observed_flux_err = np.atleast_1d(normalised_observed_flux_err).flatten()
@@ -219,7 +281,7 @@ def median_filtered_correction(
 
         continuum[start:end] = median_filter(ratio, [median_filter_width], mode=mode)
 
-        '''
+        """
         err_copy = err.copy() * flux / flux_copy
 
         non_finite = ~np.isfinite(err_copy)
@@ -238,7 +300,7 @@ def median_filtered_correction(
 
         segment_continuum.append(correction)
         segment_errs.append(err_copy)
-        '''
+        """
 
     bad = ~np.isfinite(continuum)
     if valid_continuum_correction_range is not None:
@@ -249,3 +311,4 @@ def median_filtered_correction(
 
     return continuum
 
+'''
