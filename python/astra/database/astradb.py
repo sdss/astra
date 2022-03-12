@@ -3,7 +3,7 @@ import json
 import os
 from functools import (lru_cache, cached_property)
 from sdss_access import SDSSPath
-from peewee import (SQL, SqliteDatabase, BooleanField, AutoField, TextField, ForeignKeyField, DateTimeField, BigIntegerField, FloatField, BooleanField)
+from peewee import (SQL, SqliteDatabase, BooleanField, IntegerField, AutoField, TextField, ForeignKeyField, DateTimeField, BigIntegerField, FloatField, BooleanField)
 from sdssdb.connection import PeeweeDatabaseConnection
 from sdssdb.peewee import BaseModel
 from astra import (config, log)
@@ -71,6 +71,15 @@ class JSONField(TextField):
         if value is not None:
             return json.loads(value)
         
+
+class IntegerArrayField(TextField):
+    def db_value(self, value):
+        return f",".join(map(str, flatten(value)))
+    
+    def python_value(self, value):
+        if value is not None:
+            return list(map(int, value.split(",")))
+
 
 @lru_cache
 def _lru_sdsspath(release):
@@ -382,6 +391,35 @@ class ClassifySourceOutput(AstraBaseModel):
     lp_yso = FloatField(default=SMALL)
 
 
+class FerreOutput(AstraBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+
+    snr = FloatField()
+    teff = FloatField()
+    logg = FloatField()
+    metals = FloatField()
+    log10vdop = FloatField()
+    lgvsini = FloatField()
+    o_mg_si_s_ca_ti = FloatField()
+    c = FloatField()
+    n = FloatField()
+
+    e_teff = FloatField()
+    e_logg = FloatField()
+    e_metals = FloatField()
+    e_log10vdop = FloatField()
+    e_lgvsini = FloatField()
+    e_o_mg_si_s_ca_ti = FloatField()
+    e_c = FloatField()
+    e_n = FloatField()    
+
+    log_chisq_fit = FloatField()
+    log_snr_sq = FloatField()
+    frac_phot_data_points = FloatField(default=0)
+
+    bitmask_flag = IntegerArrayField()
 
 '''
 
@@ -410,7 +448,7 @@ def create_tables(drop_existing_tables=False):
     models = (
         Source, DataProduct, SourceDataProduct, Output, Task, TaskOutput, 
         Bundle, TaskBundle, TaskInputDataProducts, TaskOutputDataProducts,
-        ClassifierOutput
+        ClassifierOutput, FerreOutput, ClassifySourceOutput
     )
     if drop_existing_tables:
         database.drop_tables(models)
