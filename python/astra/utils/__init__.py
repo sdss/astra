@@ -20,6 +20,30 @@ def executable(name):
     module = import_module(module_name)
     return getattr(module, class_name)
 
+def nested_list(ijks):
+    # This could be the worst code I've ever written.
+    nest = []
+    for i, j, k in ijks:
+        while True:
+            try:
+                nest[i]
+            except:
+                nest.append([])
+            else:
+                try:
+                    nest[i][j]
+                except:
+                    nest[i].append([])
+                else:
+                    try:
+                        nest[i][j][k]
+                    except:
+                        nest[i][j].append([])
+                    else:
+                        break
+    return nest
+
+
 
 
 #log = get_logger(__name__.split(".")[0])

@@ -1,3 +1,4 @@
+from mimetypes import knownfiles
 import os
 import numpy as np
 import subprocess
@@ -8,8 +9,7 @@ from astra import log
 from astra.base import ExecutableTask, Parameter
 from astra.tools.spectrum import Spectrum1D
 from astra.contrib.ferre import (bitmask, utils)
-from astra.utils import flatten, executable
-
+from astra.utils import flatten, executable, nested_list
 from astra.database.astradb import (database, Output, TaskOutput, FerreOutput)
 
 class Ferre(ExecutableTask):
@@ -170,6 +170,7 @@ class Ferre(ExecutableTask):
 
     def execute(self):
         """ Execute FERRE """
+        
         dir = self.context["dir"]
 
         try:
@@ -186,39 +187,20 @@ class Ferre(ExecutableTask):
         except subprocess.CalledProcessError:
             log.exception(f"Exception when calling FERRE in {dir}")
             raise
-        else:
-            stdout, stderr, n_done, n_error, control_kwds = utils.check_ferre_progress(dir, process)
-            log.info(f"FERRE finished with {n_done} successful and {n_error} errors.")
 
-            # Update internal timings with those from FERRE.
-            timings = utils.get_processing_times(stdout)
+        stdout, stderr, n_done, n_error, control_kwds = utils.check_ferre_progress(dir, process)
+        log.info(f"FERRE finished with {n_done} successful and {n_error} errors.")
 
-            # We actually have timings per-spectrum but we aggregate this to per-task.
-            # We might want to store the per-data-product and per-spectrum timing elsewhere.
-            names = np.loadtxt(os.path.join(dir, control_kwds["PFILE"]), usecols=0, dtype=str)
-            time_execute_task = np.zeros(len(self.context["tasks"]))
-            for name, t in zip(names, timings["time_per_ordered_spectrum"]):
-                time_execute_task[self.from_name(name)["i"]] += t
-            self._timing["time_execute_task"] = time_execute_task
+        # Update internal timings with those from FERRE.
+        timings = utils.get_processing_times(stdout)
 
-        return {
-            "dir": dir,
-            "stdout": stdout,
-            "stderr": stderr,
-            "n_done": n_done,
-            "n_error": n_error
-        }
-    
-
-    def post_execute(self):
-        """
-        Post-execute hook after FERRE is complete.
-        
-        Read in the output files, create rows in the database, and produce output data products.
-        """
-
-        dir = self.context["dir"]
-        control_kwds = utils.read_control_file(os.path.join(dir, "input.nml"))
+        # We actually have timings per-spectrum but we aggregate this to per-task.
+        # We might want to store the per-data-product and per-spectrum timing elsewhere.
+        names = np.loadtxt(os.path.join(dir, control_kwds["PFILE"]), usecols=0, dtype=str)
+        time_execute_task = np.zeros(len(self.context["tasks"]))
+        for name, t in zip(names, timings["time_per_ordered_spectrum"]):
+            time_execute_task[self.from_name(name)["i"]] += t
+        self._timing["time_execute_task"] = time_execute_task
 
         # Parse the outputs from the FERRE run.
         path = os.path.join(dir, control_kwds["OPFILE"])
@@ -254,29 +236,45 @@ class Ferre(ExecutableTask):
             idx = np.where(np.any(param_bitmask_flags & param_bitmask.get_value("FERRE_FAIL"), axis=1))
             raise ValueError(f"FERRE returned all erroneous values for an entry: {idx} {v}")
 
-        results = {}
-        for i, (name, param, param_err, bitmask_flag) in enumerate(zip(names, params, param_errs, param_bitmask_flags)):
+        results_dict = {}
+        ijks = []
+        for z, (name, param, param_err, bitmask_flag) in enumerate(zip(names, params, param_errs, param_bitmask_flags)):
             parsed = self.from_name(name)
             result = dict(
-                log_chisq_fit=meta["log_chisq_fit"][i],
-                log_snr_sq=meta["log_snr_sq"][i],
-                frac_phot_data_points=meta["frac_phot_data_points"][i],
+                log_chisq_fit=meta["log_chisq_fit"][z],
+                log_snr_sq=meta["log_snr_sq"][z],
+                frac_phot_data_points=meta["frac_phot_data_points"][z],
                 snr=parsed["snr"],
                 bitmask_flag=bitmask_flag,
             )
             result.update(dict(zip(parameter_names, param)))
             result.update(dict(zip([f"e_{pn}" for pn in parameter_names], param_err)))
             
-            ij = (int(parsed["i"]), int(parsed["j"]))
-            results.setdefault(ij, [])
-            results[ij].append(result)
+            i, j, k = (int(parsed[_]) for _ in "ijk")
+            ijks.append((i, j, k))
+            results_dict.setdefault((i, j), [])
+            results_dict[(i, j)].append(result)
+        
+        # List-ify.
+        results = nested_list(ijks)
+        for (i, j), value in results_dict.items():
+            for k, result in enumerate(value):
+                results[i][j][k] = result
+        return results
+
+
+    def post_execute(self):
+        """
+        Post-execute hook after FERRE is complete.
+        
+        Read in the output files, create rows in the database, and produce output data products.
+        """
 
         # Create outputs in the database.
         with database.atomic() as txn:
-            for i, (task, data_products, parameters) in enumerate(self.iterable()):
-                for j, data_product in enumerate(flatten(data_products)):
-                    ij = (i, j)
-                    for k, result in enumerate(results[ij]):
+            for (task, data_products, _), task_results in zip(self.iterable(), self.result):
+                for (_, data_product_results) in zip(flatten(data_products), task_results):
+                    for result in data_product_results:
                         output = Output.create()
                         TaskOutput.create(task=task, output=output)
                         FerreOutput.create(

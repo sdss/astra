@@ -5,7 +5,7 @@ import json
 import numpy as np
 from time import time
 from astra import (log, __version__)
-from astra.utils import (flatten, )# timer)
+from astra.utils import flatten
 from astra.database.astradb import (database, DataProduct, Task, TaskInputDataProducts, Bundle, TaskBundle)
 
 class Parameter:
@@ -15,7 +15,6 @@ class Parameter:
         if "default" in kwargs:
             self.default = kwargs.get("default")
         
-
 
 class ExecutableTaskMeta(abc.ABCMeta):
     def __new__(cls, *args):
@@ -55,11 +54,8 @@ def get_or_create_data_products(iterable):
             except:
                 raise TypeError(f"Unknown input data product type ({type(dp)}): {dp}")
             else:
-                dps.append(dp)
-    
+                dps.append(dp)    
     return dps
-
-
 
 
 class ExecutableTask(object, metaclass=ExecutableTaskMeta):
@@ -96,14 +92,12 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
         unexpected_parameters = set(kwargs.keys()) - set(parameters.keys())
         if unexpected_parameters:
             raise TypeError(f"__init__() got unexpected keyword argument{'s' if len(unexpected_parameters) > 1 else ''}: '{', '.join(unexpected_parameters)}'")
-
         return parameters
 
 
-
-    def __init__(self, input_data_products=None, context=None, **kwargs):                
-
+    def __init__(self, input_data_products=None, context=None, bundle_size=1, **kwargs):
         self._timing = {}
+        self.bundle_size = bundle_size
         self.input_data_products = input_data_products
         if isinstance(input_data_products, str):
             try:
@@ -119,7 +113,7 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
         # Set the executable context.
         self.context = context or {}
 
-
+    '''
     def infer_task_bundle_size(self):
 
         # Figure out how many implied tasks there could be in this bundle.
@@ -144,10 +138,10 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
             else:
                 N = max(Ns)
         return N
+    '''
 
 
     def iterable(self):
-        # TODO: Hook this in with per-task timing for execution!
         for level in inspect.stack():
             if level.function in ("pre_execute", "execute", "post_execute"):
                 execution_context = level.function
@@ -186,7 +180,7 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
             "iterable": []
         }
 
-        for i in range(self.infer_task_bundle_size()):
+        for i in range(self.bundle_size):
             try:
                 data_products = context["input_data_products"][i]
             except:
@@ -197,9 +191,13 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
                 if bundled:
                     parameters[k] = value
                 else:
-                    try:
+                    # Only apply a parameter per-task if it's list-like and has the same length as the bundle.
+                    if (self.bundle_size > 1 
+                        and isinstance(value, (list, tuple, set, np.ndarray)) 
+                        and len(value) == self.bundle_size
+                    ):
                         parameters[k] = value[i]
-                    except:
+                    else:
                         parameters[k] = value
 
             with database.atomic() as txn: 
@@ -214,8 +212,7 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
             context["tasks"].append(task)
             context["iterable"].append((task, data_products, parameters))
 
-        N = i + 1
-        if N > 1 or force:
+        if force or self.bundle_size > 1:
             # Create task bundle.
             context["bundle"] = bundle = Bundle.create()
             for task in context["tasks"]:

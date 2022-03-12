@@ -3,9 +3,7 @@ from collections import OrderedDict
 
 class ParamBitMask(BitFlagNameMap):
 
-    """
-    Bitmask class for FERRE.
-    """
+    """ Bitmask class for FERRE outputs """
     
     GRIDEDGE_BAD = 0, "Parameter within 1/8 grid spacing of grid edge : true value may be off grid"
     CALRANGE_BAD = 1, "Parameter outside valid range of calibration determination"
@@ -31,6 +29,7 @@ class ParamBitMask(BitFlagNameMap):
 
 
 class PixelBitMask(BitFlagNameMap):
+    
     """ Bitmask class for APOGEE pixels """
 
     BADPIX = 0, "Pixel marked as BAD in bad pixel mask or from strong persistence jump"
@@ -54,4 +53,3 @@ class PixelBitMask(BitFlagNameMap):
     levels = OrderedDict([
         [1, ("BADPIX", "CRPIX", "SATPIX", "UNFIXABLE", "BADDARK", "BADFLAT", "BADERR", "NOSKY", "NOT_ENOUGH_PSF")]
     ])
-
