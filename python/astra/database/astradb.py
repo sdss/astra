@@ -41,13 +41,13 @@ class TaskInstance(Base):
         q = session.query(Parameter).join(TaskInstanceParameter).filter(TaskInstanceParameter.ti_pk==self.pk)
         return dict(((p.parameter_name, p.parameter_value) for p in q.all()))
 
-    
+
     @property
     def output(self):
         # Tasks can only have one database target output. Sorry!
         if self.output_pk is None:
             return None
-        
+
         for instance in dependent_objects(self.output_interface):
             if not isinstance(instance, self.__class__):
                 return instance
@@ -63,7 +63,7 @@ class TaskInstance(Base):
 class TaskInstanceMeta(Base):
     __tablename__ = "ti_meta"
 
-    
+
 
 class OutputInterface(Base):
     __tablename__ = "output_interface"
@@ -80,11 +80,11 @@ class OutputInterface(Base):
 
 class TaskInstanceParameter(Base):
     __tablename__ = "ti_parameter"
-    
+
 
 class Parameter(Base):
     __tablename__ = "parameter"
-    
+
 
 class OutputMixin:
 
@@ -102,11 +102,11 @@ class Doppler(Base, OutputMixin):
 
 class TheCannon(Base, OutputMixin):
     __tablename__ = "thecannon"
-    
+
 
 class ThePayne(Base, OutputMixin):
     __tablename__ = "thepayne"
-    
+
 
 class Ferre(Base, OutputMixin):
     __tablename__ = "ferre"
@@ -125,8 +125,11 @@ class WDClassification(Base, OutputMixin):
 class ThePayneChe(Base, OutputMixin):
     __tablename__ = "thepayne_che"
 
-def define_relations():    
-    
+class SLAM(Base, OutputMixin):
+    __tablename__ = "slam"
+
+def define_relations():
+
     #Task.batch_interface = relationship("BatchInterface", backref="task", foreign_keys="BatchInterface.parent_task_pk")
     #Task.output_interface = relationship("OutputInterface", backref="task")
 
