@@ -27,12 +27,12 @@ class AstraOperator(BaseOperator):
 
         # Get data products from primary keys immediately upstream.
         task, ti = (context["task"], context["ti"])
-        pks = ti.xcom_pull(task_ids=[ut.task_id for ut in task.upstream_list])
+        ids = ti.xcom_pull(task_ids=[ut.task_id for ut in task.upstream_list])
 
-        log.info(f"Upstream primary keys: {pks}")
+        log.info(f"Upstream keys: {ids}")
 
         pks = flatten(pks)
-
+        # TODO: use the deserialize funct
         input_data_products = [DataProduct.get(pk=pk) for pk in pks]
 
         executable = executable_class(input_data_products, **self.parameters)

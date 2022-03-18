@@ -1,12 +1,13 @@
 
 #from .logger import log
 
+from dataclasses import is_dataclass
 import json
 import os, tempfile
 import logging
 #from sdsstools.logger import get_logger
 from time import time
-
+from inspect import getmodule
 
 from importlib import import_module
 import hashlib
@@ -15,10 +16,143 @@ import json
 import os
 import tempfile
 
+
+import numpy as np
+from tqdm import tqdm
+
+class logarithmic_tqdm(tqdm):
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        if self.total is not None and self.miniters > 0:
+            self.logarithmic_iters = np.unique(
+                np.logspace(0, np.log10(self.total), self.miniters, dtype=int)
+            )
+            F = self.miniters - self.logarithmic_iters.size
+            if F > 0:
+                # Remove uniques and add mid-points for later iterations.
+                deltas = -0.5 * np.diff(self.logarithmic_iters)[-F:]
+                self.logarithmic_iters = np.sort(
+                    np.hstack([
+                        self.logarithmic_iters, 
+                        self.logarithmic_iters[-F:] + deltas
+                    ])
+                ).astype(int)
+        else:
+            self.logarithmic_iters = None
+        # Keep a decoy internal counter and only update the real counter when we want.
+        self._n = self.n
+        return None
+
+
+    def update(self, n=1):
+        if self.disable:
+            return
+
+        if self.logarithmic_iters is not None:
+            self._n += n
+            index = np.where(self.logarithmic_iters == self._n)[0]
+            if index.size > 0:
+                numer = 1 + index[-1]
+                # tqdm does something on the final refresh that changes .miniters
+                denom = self.miniters if self.miniters > numer else numer
+                self.set_postfix(
+                    dict(log_update=f"{numer}/{denom}"),
+                    refresh=False
+                )
+                return super().update(self._n - self.n)
+        else:
+            return super().update(n)
+
+
+def deserialize(inputs, model):
+    if isinstance(inputs, str):
+        inputs = json.loads(inputs)
+    _inputs = []
+    for each in flatten(inputs):
+        if isinstance(each, model):
+            _inputs.append(each)
+        else:
+            _inputs.append(model.get_by_id(each))
+    return _inputs
+
+    
+def expand_path(path):
+    return os.path.expandvars(os.path.expanduser(path))
+
+
 def executable(name):
     module_name, class_name = name.rsplit(".", 1)
     module = import_module(module_name)
     return getattr(module, class_name)
+
+def serialize_executable(callable):
+    module = getmodule(callable)
+    return f"{module.__name__}.{callable.__name__}"
+
+
+def bundler(tasks, as_primary_keys=False):
+    """
+    Create bundles for tasks that can be executed together.
+
+    :param tasks:
+        The tasks to bundle.
+    """
+
+    from astra.base import Parameter
+    from astra.database.astradb import (database, Task, TaskBundle, Bundle)
+
+    if isinstance(tasks, str):
+        # They will be primary keys.
+        ids = list(map(int, json.loads(tasks)))
+        tasks = list(
+            Task.select()
+                .where(Task.id.in_(ids))
+        )
+
+    # We need to bundle tasks by their name, and what bundled parameters are the same.
+    # We only know the bundle parameters once we load the executable class.
+    executables = { name: executable(name) for name in {task.name for task in tasks}}
+    bundled_parameter_names = {}
+    for task_name, task_executable in executables.items():
+        bundled_parameter_names[task_name] = []
+        for parameter_name, parameter in task_executable.__dict__.items():
+            if isinstance(parameter, Parameter) and parameter.bundled:
+                bundled_parameter_names[task_name].append(parameter_name)
+    
+    # Group tasks together with the same name and bundled parameters.
+    hashes = {}
+    for task in tasks:
+        hash_args = [task.name]
+        for parameter_name in bundled_parameter_names[task.name]:
+            try:
+                value = task.parameters[parameter_name]
+            except:
+                # Get the default value.
+                value = getattr(executables[task.name], parameter_name).default
+            
+            # TODO: If we have a bundled parameter with 1.0 and 1 in two different tasks,
+            #       they won't be bundled together. We'd need typed parameters to do this
+            #       properly, I think. And we might even want to have typed parameters
+            #       for other reasons.
+            hash_args.append(f"{value}")
+
+        task_hash = hash("|".join(hash_args))
+        hashes.setdefault(task_hash, [])
+        hashes[task_hash].append(task)
+    
+    bundled = []
+    with database.atomic() as txn:
+        for _, group in hashes.items():
+            bundle = Bundle.create()
+            for task in group:
+                TaskBundle.create(task=task, bundle=bundle)
+            bundled.append(bundle)
+    
+    if as_primary_keys:
+        return [bundle.id for bundle in bundled]
+    return bundled
 
 def nested_list(ijks):
     # This could be the worst code I've ever written.

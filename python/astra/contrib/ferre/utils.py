@@ -8,13 +8,14 @@ from tqdm import tqdm
 
 
 from astra import log
+from astra.utils import expand_path
 
 
 def validate_ferre_control_keywords(
         header_path,
         frozen_parameters=None,
         interpolation_order=3,
-        weights_path=None,
+        weight_path=None,
         lsf_shape_path=None,
         lsf_shape_flag=0,
         error_algorithm_flag=1,
@@ -56,7 +57,7 @@ def validate_ferre_control_keywords(
         3. cubic Bezier
         4. cubic splines
 
-    :param weights_path: [optional]
+    :param weight_path: [optional]
         The location of a weight (or mask) file to apply to the pixels. This corresponds
         to the FERRE keyword `filterfile`.
     
@@ -238,8 +239,8 @@ def validate_ferre_control_keywords(
             "lsf": lsf_shape_flag,
             "lsffile": lsf_shape_path,
         })
-    if weights_path is not None:
-        kwds["filterfile"] = validate_weights_path(weights_path)
+    if weight_path is not None:
+        kwds["filterfile"] = validate_weight_path(weight_path)
 
     # Continuum args.
     kwds.update(
@@ -329,12 +330,12 @@ def validate_interpolation_order(interpolation_order) -> int:
     return interpolation_order 
 
 
-def validate_weights_path(weights_path) -> Optional[str]:
-    if weights_path is not None:
-        weights_path = expand_path(weights_path)
-        if not os.path.exists(weights_path):
-            raise ValueError(f"the weights_path does not exist: {weights_path}")
-        return weights_path
+def validate_weight_path(weight_path) -> Optional[str]:
+    if weight_path is not None:
+        weight_path = expand_path(weight_path)
+        if not os.path.exists(weight_path):
+            raise ValueError(f"the weight_path does not exist: {weight_path}")
+        return weight_path
 
 
 def validate_lsf_shape_flag_and_lsf_shape_path(lsf_shape_flag, lsf_shape_path):
@@ -434,9 +435,6 @@ def validate_continuum_arguments(
     
     return kwds
 
-
-def expand_path(path):
-    return os.path.expandvars(os.path.expanduser(path))
 
 
 def read_ferre_header(fp):
@@ -645,8 +643,11 @@ def check_initial_parameters_within_grid_limits(initial_parameters, lower_limit,
 
 def read_control_file(path):
     routes = [
+        ("FFILE", "FFILE"),
+        ("ERFILE", "ERFILE"),
         ("OFFILE", "OFFILE"),
         ("OPFILE", "OPFILE"),
+        ("SFFILE", "SFFILE"),
         ("PFILE", "PFILE"),
         ("NDIM", "NDIM"),
         ("COVPRINT", "COVPRINT"),
@@ -665,6 +666,18 @@ def read_control_file(path):
 
 def wc(path):
     return int(subprocess.check_output(['wc', '-l', path]).split()[0])
+
+
+def parse_ferre_output(dir, stdout, stderr, control_file_basename="input.nml"):
+    control_kwds = read_control_file(os.path.join(dir, control_file_basename))
+    input_path = control_kwds["PFILE"]
+    output_path = control_kwds["OFFILE"]
+
+    total = wc(os.path.join(dir, input_path))
+    n_done = wc(os.path.join(dir, output_path))
+    n_errors = stderr.lower().count("error")
+    
+    return (n_done, n_errors, control_kwds)
 
 
 def check_ferre_progress(dir, process=None, control_file_basename="input.nml", timeout=30):
@@ -729,8 +742,7 @@ def read_output_parameter_file(path, n_dimensions, full_covariance, **kwargs):
     n_dimensions = int(n_dimensions)
     full_covariance = bool(int(full_covariance))
 
-    names = np.loadtxt(path, usecols=(0, ), dtype=str)
-    
+    names = np.atleast_1d(np.loadtxt(path, usecols=(0, ), dtype=str))
     
     N_cols = 2 * n_dimensions + 3
     if full_covariance:

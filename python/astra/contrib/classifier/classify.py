@@ -26,7 +26,7 @@ class ClassifySource(ExecutableTask):
                                 .join(Task)
                                 .join(TaskInputDataProducts)
                                 .join(DataProduct)
-                                .where(DataProduct.pk.in_([dp.pk for dp in data_products]))
+                                .where(DataProduct.id.in_([dp.id for dp in data_products]))
             )
             log_probs = sum_log_probs(q)
             results.append(classification_result(log_probs))
@@ -108,7 +108,7 @@ class Classify(ExecutableTask):
 
 
 
-def create_task_bundle_for_source_classification(visit_classification_bundle_pk):
+def create_task_bundle_for_source_classification(visit_classification_bundle_id):
     sources = (
         Source.select()
               .distinct(Source)
@@ -118,14 +118,14 @@ def create_task_bundle_for_source_classification(visit_classification_bundle_pk)
               .join(Task)
               .join(TaskBundle)
               .join(Bundle)
-              .where(Bundle.pk == int(visit_classification_bundle_pk))
+              .where(Bundle.id == int(visit_classification_bundle_id))
     )
 
     # for each source, get the classifier outputs for all visits
-    all_data_product_pks = []
+    all_data_product_ids = []
     for source in sources:
         q = (
-            ClassifierOutput.select(DataProduct.pk)
+            ClassifierOutput.select(DataProduct.id)
                             .join(Task)
                             .join(TaskInputDataProducts)
                             .join(DataProduct)
@@ -136,26 +136,26 @@ def create_task_bundle_for_source_classification(visit_classification_bundle_pk)
         )
         q = flatten(q)
         log.debug(f"Source {source} has {len(q)} data products: {q}")
-        all_data_product_pks.append(flatten(q))
+        all_data_product_ids.append(flatten(q))
         
     with database.atomic() as txn:
         bundle = Bundle.create()
-        for data_product_pks in all_data_product_pks:
+        for data_product_ids in all_data_product_ids:
             task = Task.create(
                 name="astra.contrib.classifier.ClassifySource",
                 parameters={},
                 version=__version__
             )
-            log.debug(f"Created task {task} with {len(data_product_pks)} inputs")
-            for data_product_pk in data_product_pks:
+            log.debug(f"Created task {task} with {len(data_product_ids)} inputs")
+            for data_product_id in data_product_ids:
                 TaskInputDataProducts.create(
                     task=task,
-                    data_product_id=data_product_pk
+                    data_product_id=data_product_id
                 )
             TaskBundle.create(task=task, bundle=bundle)
 
     log.info(f"Created task bundle {bundle}")
-    return bundle.pk
+    return bundle.id
 
 
 def sum_log_probs(iterable):

@@ -3,14 +3,15 @@ import os
 import numpy as np
 import subprocess
 import sys
+import pickle
 from tempfile import mkdtemp
 
-from astra import log
+from astra import log, __version__
 from astra.base import ExecutableTask, Parameter
 from astra.tools.spectrum import Spectrum1D
 from astra.contrib.ferre import (bitmask, utils)
-from astra.utils import flatten, executable, nested_list
-from astra.database.astradb import (database, Output, TaskOutput, FerreOutput)
+from astra.utils import flatten, executable, expand_path, nested_list
+from astra.database.astradb import (database, DataProduct, TaskOutputDataProducts, Output, TaskOutput, FerreOutput)
 
 class Ferre(ExecutableTask):
 
@@ -18,7 +19,7 @@ class Ferre(ExecutableTask):
     initial_parameters = Parameter("initial_parameters", default=None)
     frozen_parameters = Parameter("frozen_parameters", default=None, bundled=True)
     interpolation_order = Parameter("interpolation_order", default=3, bundled=True)
-    weights_path = Parameter("weights_path", default=None, bundled=True)
+    weight_path = Parameter("weight_path", default=None, bundled=True)
     lsf_shape_path = Parameter("lsf_shape_path", default=None, bundled=True)
     lsf_shape_flag = Parameter("lsf_shape_flag", default=0, bundled=True)
     error_algorithm_flag = Parameter("error_algorithm_flag", default=1, bundled=True)
@@ -35,7 +36,7 @@ class Ferre(ExecutableTask):
     f_access = Parameter("f_access", default=None, bundled=True)
     f_format = Parameter("f_format", default=1, bundled=True)
     ferre_kwds = Parameter("ferre_kwds", default=None, bundled=True)
-    mkdtemp_kwds = Parameter("mkdtemp_kwds", default=None, bundled=True)
+    parent_dir = Parameter("parent_dir", default=None, bundled=True)
     n_threads = Parameter("n_threads", default=1, bundled=True)
 
     # For normalization to be made before the FERRE run.
@@ -45,15 +46,18 @@ class Ferre(ExecutableTask):
     # For deciding what rows to use from each data product.
     slice_args = Parameter("slice_args", default=None, bundled=False)
 
+
     @classmethod
     def to_name(cls, i, j, k, data_product, snr, **kwargs):
         obj = data_product.kwargs.get("obj", "NOOBJ")
         return f"{i:.0f}_{j:.0f}_{k:.0f}_{snr:.1f}_{obj}"
 
+
     @classmethod
     def from_name(cls, name):
         i, j, k, snr, *obj = name.split("_")
         return dict(i=int(i), j=int(j), k=int(k), snr=float(snr), obj="_".join(obj))
+
 
     def pre_execute(self):
         
@@ -62,7 +66,30 @@ class Ferre(ExecutableTask):
             return None
 
         # Create a temporary directory.
-        dir = mkdtemp(**(self.mkdtemp_kwds or {}))
+        if self.parent_dir is not None:
+            parent_dir = expand_path(self.parent_dir)
+            bundle = self.context.get("bundle", None)
+            if bundle is None:
+                tasks = self.context.get("tasks", None)
+                if tasks is not None:
+                    if len(tasks) == 1:
+                        descr = f"task_{tasks[0].id}"
+                    else:
+                        if len(tasks) == 2:
+                            first_task, last_task = tasks
+                        else:
+                            first_task, *_, last_task = tasks
+                        descr = f"task_{first_task.id}_to_{last_task.id}"
+                    dir = os.path.join(parent_dir, descr)
+                else:
+                    dir = mkdtemp(dir=parent_dir)
+            else:
+                dir = os.path.join(parent_dir, f"bundle_{bundle.id}")
+        else:
+            dir = mkdtemp()
+
+        os.makedirs(dir, exist_ok=True)
+
         log.info(f"Created directory for FERRE: {dir}")
 
         # Validate the control file keywords.
@@ -70,7 +97,7 @@ class Ferre(ExecutableTask):
             header_path=self.header_path,
             frozen_parameters=self.frozen_parameters,
             interpolation_order=self.interpolation_order,
-            weights_path=self.weights_path,
+            weight_path=self.weight_path,
             lsf_shape_path=self.lsf_shape_path,
             lsf_shape_flag=self.lsf_shape_flag,
             error_algorithm_flag=self.error_algorithm_flag,
@@ -127,13 +154,25 @@ class Ferre(ExecutableTask):
                     spectrum = rectifier()
                 
                 N, P = spectrum.flux.shape
+                initial_parameters = parameters["initial_parameters"]
+                # Allow initital parameters to be a dict (applied to all spectra) or a list of dicts (one per spectra)
+                log.debug(f"There are {N} spectra in {task} {data_product} and initial params is {len(initial_parameters)} long")
+                log.debug(f"And {set(map(type, initial_parameters))}")
+
+                if len(initial_parameters) == N and all(isinstance(_, dict) for _ in initial_parameters):
+                    log.debug(f"Allowing different initial parameters for each {N} spectra on task {task}")
+                    initial_parameters_as_dicts.extend(initial_parameters)
+                else:
+                    if N > 1:
+                        log.debug(f"Using same initial parameters {initial_parameters} for all {N} spectra on task {task}")
+                    initial_parameters_as_dicts.extend([initial_parameters] * N)
+
                 for k in range(N):
                     indices.append((i, j, k))
                     names.append(self.to_name(i=i, j=j, k=k, data_product=data_product, snr=spectrum.meta["snr"][k]))
                     wl.append(spectrum.wavelength)
                     flux.append(spectrum.flux.value[k])
                     sigma.append(spectrum.uncertainty.array[k]**-0.5)
-                    initial_parameters_as_dicts.append(parameters["initial_parameters"])
 
         indices, wl, flux, sigma = (np.array(indices), np.array(wl), np.array(flux), np.array(sigma))
         
@@ -187,20 +226,31 @@ class Ferre(ExecutableTask):
         except subprocess.CalledProcessError:
             log.exception(f"Exception when calling FERRE in {dir}")
             raise
-
-        stdout, stderr, n_done, n_error, control_kwds = utils.check_ferre_progress(dir, process)
+        else:
+            try:
+                stdout, stderr = process.communicate()
+            except subprocess.TimeoutExpired:
+                raise
+            else:
+                log.info(f"FERRE stdout:\n{stdout}")
+                log.error(f"FERRE stderr:\n{stderr}")
+            
+        n_done, n_error, control_kwds = utils.parse_ferre_output(dir, stdout, stderr)
         log.info(f"FERRE finished with {n_done} successful and {n_error} errors.")
-
-        # Update internal timings with those from FERRE.
-        timings = utils.get_processing_times(stdout)
 
         # We actually have timings per-spectrum but we aggregate this to per-task.
         # We might want to store the per-data-product and per-spectrum timing elsewhere.
-        names = np.loadtxt(os.path.join(dir, control_kwds["PFILE"]), usecols=0, dtype=str)
-        time_execute_task = np.zeros(len(self.context["tasks"]))
-        for name, t in zip(names, timings["time_per_ordered_spectrum"]):
-            time_execute_task[self.from_name(name)["i"]] += t
-        self._timing["time_execute_task"] = time_execute_task
+        try:
+            # Update internal timings with those from FERRE.
+            timings = utils.get_processing_times(stdout)
+
+            names = np.loadtxt(os.path.join(dir, control_kwds["PFILE"]), usecols=0, dtype=str)
+            time_execute_task = np.zeros(len(self.context["tasks"]))
+            for name, t in zip(names, timings["time_per_ordered_spectrum"]):
+                time_execute_task[self.from_name(name)["i"]] += t
+            self._timing["time_execute_task"] = time_execute_task
+        except:
+            log.warning(f"Exception when trying to update internal task timings from FERRE.")
 
         # Parse the outputs from the FERRE run.
         path = os.path.join(dir, control_kwds["OPFILE"])
@@ -213,9 +263,45 @@ class Ferre(ExecutableTask):
         except:
             log.exception(f"Exception when parsing FERRE output parameter file {path}")
             raise
-            
-        headers, *segment_headers = utils.read_ferre_headers(self.header_path)
+
+        # Parse flux outputs.
+        try:
+            path = os.path.join(dir, control_kwds["FFILE"])
+            flux = np.atleast_2d(np.loadtxt(path))
+        except:
+            log.exception(f"Failed to load input flux from {path}")
+        
+        try:
+            path = os.path.join(dir, control_kwds["OFFILE"])
+            model_flux = np.atleast_2d(np.loadtxt(path))
+        except:
+            log.exception(f"Failed to load model flux from {path}")
+            raise
+    
+        try:
+            path = os.path.join(dir, control_kwds["ERFILE"])
+            flux_sigma = np.atleast_2d(np.loadtxt(path))
+        except:
+            log.exception(f"Failed to load flux sigma from {path}")
+            raise
+
+        if "SFFILE" in control_kwds:
+            try:
+                path = os.path.join(dir, control_kwds["SFFILE"])
+                normalized_flux = np.atleast_2d(np.loadtxt(path))
+            except:
+                log.exception(f"Failed to load normalized flux from {path}")
+                raise
+            else:
+                continuum = flux / normalized_flux
+        else:
+            continuum = np.ones_like(flux)
+            normalized_flux = flux
+        
+        headers, *segment_headers = utils.read_ferre_headers(utils.expand_path(self.header_path))
         parameter_names = utils.sanitise(headers["LABEL"])
+
+        wavelength = np.hstack(tuple(map(utils.wavelength_array, segment_headers)))            
 
         # Flag things.
         param_bitmask = bitmask.ParamBitMask()
@@ -234,7 +320,7 @@ class Ferre(ExecutableTask):
         if np.any(param_bitmask_flags & param_bitmask.get_value("FERRE_FAIL")):
             v = param_bitmask_flags & param_bitmask.get_value("FERRE_FAIL")
             idx = np.where(np.any(param_bitmask_flags & param_bitmask.get_value("FERRE_FAIL"), axis=1))
-            raise ValueError(f"FERRE returned all erroneous values for an entry: {idx} {v}")
+            log.warning(f"FERRE returned all erroneous values for an entry: {idx} {v}")
 
         results_dict = {}
         ijks = []
@@ -245,11 +331,21 @@ class Ferre(ExecutableTask):
                 log_snr_sq=meta["log_snr_sq"][z],
                 frac_phot_data_points=meta["frac_phot_data_points"][z],
                 snr=parsed["snr"],
-                bitmask_flag=bitmask_flag,
             )
             result.update(dict(zip(parameter_names, param)))
-            result.update(dict(zip([f"e_{pn}" for pn in parameter_names], param_err)))
+            result.update(dict(zip([f"u_{pn}" for pn in parameter_names], param_err)))
+            result.update(dict(zip([f"bitmask_{pn}" for pn in parameter_names], bitmask_flag)))
             
+            # Add spectra.
+            result["data"] = dict(
+                wavelength=wavelength,
+                flux=flux[z],
+                flux_sigma=flux_sigma[z],
+                model_flux=model_flux[z],
+                continuum=continuum[z],
+                normalized_flux=normalized_flux[z],
+            )
+
             i, j, k = (int(parsed[_]) for _ in "ijk")
             ijks.append((i, j, k))
             results_dict.setdefault((i, j), [])
@@ -273,9 +369,32 @@ class Ferre(ExecutableTask):
         # Create outputs in the database.
         with database.atomic() as txn:
             for (task, data_products, _), task_results in zip(self.iterable(), self.result):
-                for (_, data_product_results) in zip(flatten(data_products), task_results):
+                for (data_product, data_product_results) in zip(flatten(data_products), task_results):
+
                     for result in data_product_results:
                         output = Output.create()
+
+                        # Create a data product.
+                        # TODO: This is a temporary hack until we have a data model in place.
+                        path = expand_path(f"$MWM_ASTRA/{__version__}/ferre/task_{task.id}/output_{output.id}.pkl")
+                        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+                        with open(path, "wb") as fp:
+                            pickle.dump(result, fp)
+
+                        output_data_product = DataProduct.create(
+                            release=data_product.release,
+                            filetype="full",
+                            kwargs=dict(full=path)
+                        )
+                        TaskOutputDataProducts.create(
+                            task=task,
+                            data_product=output_data_product
+                        )
+
+                        # Spectra don't belong in the database.
+                        result.pop("data")
+
                         TaskOutput.create(task=task, output=output)
                         FerreOutput.create(
                             task=task,
@@ -283,5 +402,8 @@ class Ferre(ExecutableTask):
                             **result
                         )
 
-        # Create data products.
+                        log.info(f"Created output {output} for task {task} and data product {data_product}")
+                        log.info(f"New output data product: {output_data_product} at {path}")
+                    
         return None
+

@@ -1,7 +1,4 @@
 import click
-import os
-import logging
-import sys
 
 # Common options.
 @click.group()
@@ -11,45 +8,177 @@ import sys
 def cli(context, verbose):
     context.ensure_object(dict)
     context.obj["verbose"] = verbose
-
-# Add 'execute' sub-command.
-@click.group()
-@click.pass_context
-def execute(context):
-    pass
+    print(f"verbose={verbose}")
 
 
-
-
-@click.command(context_settings=dict(ignore_unknown_options=True))
-@click.option("--bundle", is_flag=True)
-@click.argument("primary_key")
-@click.pass_context
-def execute(context, bundle, primary_key, **kwargs):
+@cli.command()
+@click.option("--dry-run", is_flag=True)
+def vacuum(dry_run):
     """
-    Execute a task or task bundle.
+    Vacuum up the database.
     """
 
     from astra import log
-    from astra.database.astradb import Task, Bundle, TaskBundle
+    from peewee import JOIN, fn
+    from time import sleep
+    from astra.database.astradb import Task, Bundle, TaskBundle, TaskOutput, TaskInputDataProducts
 
-    if bundle:
-        work = Bundle.get(pk=primary_key)
+    if not dry_run:
+        log.warning(
+            "This is *not* a dry run. "
+            "We are about to delete things in the database! "
+            "You have 5 seconds to cancel."
+        )
+        sleep(5)
     else:
-        work = Task.get(pk=primary_key)
-    
-    log.debug(f"Executing {work}")
-    
-    executable = work.as_executable()
+        log.info(f"This is a dry run.")
 
-    log.info(f"Executable: {executable}")
+    # Remove tasks that don't have outputs.
+    q_zombie_tasks = (
+        Task.select()
+            .join(TaskOutput, JOIN.LEFT_OUTER)
+            .group_by(Task.pk)
+            .having(fn.count(TaskOutput.pk) == 0)
+    )
+    grouped = {}
+    for task in q_zombie_tasks:
+        #log.debug(f"Task {task} (created {task.created}; {len(task.parameters)} parameters) has no outputs.")
+        grouped.setdefault(task.name, [])
+        grouped[task.name].append(task.pk)
 
-    result = executable.execute()
+    for name, pks in grouped.items():
+        log.info(f"There are {len(pks)} {name} tasks with no outputs that can be deleted.")
     
-    log.info(f"Result type: {type(result)} {result}") # Pretty print?
+    for name, pks in grouped.items():
+        log.info(f"Deleting {name} tasks (N={len(pks)}) with no outputs.")
+
+        # Delete input data product references first.
+        rows = 0 if dry_run else (
+            TaskInputDataProducts.delete()
+                                 .where(TaskInputDataProducts.task_id.in_(pks))
+                                 .execute()
+        )
+        log.info(f"\tDeleted {rows} rows of task input data products")
+
+        # Delete any bundles.
+        rows = 0 if dry_run else (
+            TaskBundle.delete()
+                      .where(TaskBundle.task_id.in_(pks))
+                      .execute()
+        )
+        log.info(f"\tDeleted {rows} rows of task bundles")
+
+        # Delete the tasks.
+        rows = 0 if dry_run else (
+            Task.delete()
+                .where(Task.pk.in_(pks))
+                .execute()
+        )
+        log.info(f"\tDeleted {rows} rows of tasks")
+    
+    # Any empty bundles?
+    q_empty_bundles = (
+        Bundle.select()
+              .join(TaskBundle, JOIN.LEFT_OUTER)
+              .group_by(Bundle)
+              .having(fn.count(TaskBundle) == 0)
+    )
+    log.info(f"There are {len(q_empty_bundles)} empty bundles.")
+    rows = 0 if dry_run else (
+        Bundle.delete()
+              .where(Bundle.pk.in_([bundle.pk for bundle in q_empty_bundles]))
+              .execute()
+    )
+    log.info(f"\tDeleted {rows} rows of empty bundles.")
+
+    # Find tasks with the same input data products, name, version, and parameters.
+    log.info(f"Finding tasks with at least one output that have the same name, version, parameters, and input data")
+    q = (
+        Task.select(
+                fn.max(Task.pk),
+                Task.name,
+                Task.version,
+                Task.parameters,
+                TaskInputDataProducts.data_product_id,
+                fn.count(Task)
+            )
+            .join(TaskInputDataProducts)
+            .switch(Task)
+            .join(TaskOutput)
+            .group_by(
+                TaskInputDataProducts.data_product_id,
+                Task.name,
+                Task.version,
+                Task.parameters
+            )
+            .having(
+                (fn.count(Task) > 1)
+            )
+            .order_by(fn.count(Task).desc())
+            .tuples()
+    )
+    for i, (eg_pk, name, version, parameters, data_product_id, count) in enumerate(q):
+        log.info(f"{i}: {name} {version} on data_product_id={data_product_id} (eg task {eg_pk}) with {count} tasks and {len(parameters)} parameters")
+
+    log.warning(f"Not doing anything about these duplicates yet!")
+
+
+@cli.group()
+def execute():
+    pass
+
+def do_work(ids, is_bundle):
+    from astra import log
+    from astra.utils import deserialize
+    from astra.database.astradb import Task, Bundle
+
+    model = Bundle if is_bundle else Task
+    items = deserialize(ids, model)
+    N = len(items)
+    log.debug(f"Loading {type(ids)} {N} of {ids}")
+
+    for i, item in enumerate(items):
+        log.info(f"Executing item {i}/{N}: {item}")
+        try:
+            result = (
+                item.as_executable()
+                    .execute()
+            )
+        except:
+            log.exception(f"Exception when executing item {item}")
+        else:
+            log.info(f"Result has {len(result)} items of type {type(result)}")
+            
+    return None
+
+
+@execute.command(hidden=True)
+@click.argument("task_ids", type=int, nargs=-1, required=True)
+def tasks(task_ids):
+    """Execute multiple tasks""" 
+    return do_work(task_ids, False)
+
+
+@execute.command()
+@click.argument("task_id", type=int, nargs=1, required=True)
+def task(task_id):
+    """Execute a single task"""
+    return do_work([task_id], False)
+
+
+@execute.command(hidden=True)
+@click.argument("bundle_ids", type=int, nargs=-1, required=True)
+def bundles(bundle_ids):
+    """Execute multiple task bundles""" 
+    return do_work(bundle_ids, True)
     
 
-cli.add_command(execute)
+@execute.command()
+@click.argument("bundle_id", type=int, nargs=1, required=True)
+def bundle(bundle_id):
+    """Execute a task bundle"""
+    return do_work([bundle_id], True)
+
 
 if __name__ == "__main__":
     cli(obj=dict())

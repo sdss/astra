@@ -5,8 +5,7 @@ import json
 import numpy as np
 from time import time
 from astra import (log, __version__)
-from astra.utils import flatten
-from astra.database.astradb import (database, DataProduct, Task, TaskInputDataProducts, Bundle, TaskBundle)
+from astra.database.astradb import (database, DataProduct, Task, Status, TaskInputDataProducts, Bundle, TaskBundle)
 
 class Parameter:
     def __init__(self, name, bundled=False, **kwargs):
@@ -50,7 +49,7 @@ def get_or_create_data_products(iterable):
             dps.append(get_or_create_data_products(dp))
         else:
             try:
-                dp = DataProduct.get(pk=int(dp))
+                dp = DataProduct.get(id=int(dp))
             except:
                 raise TypeError(f"Unknown input data product type ({type(dp)}): {dp}")
             else:
@@ -58,8 +57,23 @@ def get_or_create_data_products(iterable):
     return dps
 
 
+
+    
+
 class ExecutableTask(object, metaclass=ExecutableTaskMeta):
     
+    @classmethod
+    def get_defaults(cls):
+        defaults = {}
+        for key, parameter in cls.__dict__.items():
+            if isinstance(parameter, Parameter):
+                try:
+                    defaults[key] = parameter.default
+                except:
+                    continue
+        return defaults
+        
+
     @classmethod
     def parse_parameters(cls, **kwargs):
         parameters = {}
@@ -179,7 +193,7 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
             "bundle": None,
             "iterable": []
         }
-
+        from astra.utils import flatten
         for i in range(self.bundle_size):
             try:
                 data_products = context["input_data_products"][i]
@@ -206,6 +220,7 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
                     parameters=parameters,
                     version=__version__,
                 )
+                
                 for data_product in flatten(data_products):
                     TaskInputDataProducts.create(task=task, data_product=data_product)
 
@@ -259,7 +274,7 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
             )
             r = (
                 Task.update(**kwds)
-                    .where(Task.pk == task.pk)
+                    .where(Task.id == task.id)
                     .execute()
             )
 
@@ -278,6 +293,33 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
     def post_execute(self, *args, **kwargs):
         pass
 
+
+    def update_status(self, description, items=None):
+        status = Status.get(description=description)
+        N = 0
+        if items is None:    
+            items = []
+            try:
+                items.extend(self.context["tasks"])
+            except:
+                None
+            try:
+                items.append(self.context["bundle"])
+            except:
+                None
+
+        with database.atomic():
+            for item in items:
+                if item is None: continue
+                model = item.__class__
+                N += (
+                    model.update(status=status)
+                        .where(model.id == item.id)
+                        .execute()
+                )
+        return N
+
+
     @classmethod
     def _pre_execute_decorator(cls, function):
         def do_pre_execution(self):
@@ -287,12 +329,16 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
             if len(self.context) == 0:
                 self.context.update(self.get_or_create_context())
 
+            # Set tasks as running.
+            #self.update_status("running")
+
             # Do pre-execution.
             t_init = time()
             try:
                 pre_execute = function(self)
             except:
                 log.exception(f"Pre-execution failed for {self}:")
+                #self.update_status("failed-pre-execution")
                 raise
             self._timing["actual_time_pre_execute"] = time() - t_init
                 
@@ -320,6 +366,8 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
                     i = max(0, len(self._timing["iterable"]) - 2)
                     responsible_task = self.context["tasks"][i]
                     log.exception(f"Execution failed for {self}, probably on task {responsible_task}:")
+                    #self.update_status("failed-execution")
+
                 raise
             self._timing["actual_time_execute"] = time() - t_init
 
@@ -343,6 +391,7 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
                 post_execute = function(self)
             except:
                 log.exception(f"Post-execution failed for {self}:")
+                #self.update_status("failed-post-execution")
                 raise
                 
             self._timing["actual_time_post_execute"] = time() - t_init
@@ -352,5 +401,7 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
             self._update_task_timings()
             log.debug(f"Task timings updated.")
 
+            # Set this task / bundle as finished.
+            #self.update_status("completed")
             return post_execute
         return do_post_execution     

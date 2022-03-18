@@ -79,7 +79,7 @@ def create_bitmask(
     return bitmask
     
 
-def get_metadata(spectrum):
+def get_metadata(spectrum=None, headers=None):
     """
     
     :param spectrum:
@@ -92,10 +92,13 @@ def get_metadata(spectrum):
         APOGEENet model.
     """
     keys = ("PLX", "GMAG", "BPMAG", "RPMAG", "JMAG", "HMAG", "KMAG")
+    if spectrum is not None:
+        headers = spectrum.meta["header"]
+
     metadata = []
     for key in keys:
         try:
-            metadata.append(spectrum.meta["header"][key])
+            metadata.append(headers[key])
         except KeyError:
             metadata.append(np.nan)
     
@@ -112,3 +115,4 @@ def get_metadata(spectrum):
     metadata_norm = ((metadata - mdata_means) / mdata_stddevs).astype(np.float32)
 
     return (keys, metadata, metadata_norm)
+

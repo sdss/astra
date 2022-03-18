@@ -28,12 +28,12 @@ def export_table(model, path=None):
                 DataProduct.release,
                 DataProduct.filetype,
                 DataProduct.kwargs,
-                Task.pk.alias("task_pk"),
+                Task.id.alias("task_id"),
                 Task.version,
                 Task.time_total,
                 Task.created,
                 Task.parameters,
-                Output.pk.alias("output_pk"),
+                Output.id.alias("output_id"),
                 *fields
             )
             .join(TaskInputDataProducts)
@@ -44,7 +44,7 @@ def export_table(model, path=None):
             .join(TaskOutput, JOIN.LEFT_OUTER)
             .join(Output)
             .join(model)
-            .order_by(Task.pk.asc(), Output.pk.asc())
+            .order_by(Task.id.asc(), Output.id.asc())
             .dicts()
     )
 
@@ -56,8 +56,13 @@ def export_table(model, path=None):
     last_kwargs = None
     for N, row in enumerate(q_results, start=1):
         catalogids.add(row["catalogid"])
-        parameter_sets.append(frozenset(row.pop("parameters").items()))
-
+        if "parameters" in row:
+            parameters = row.pop("parameters")
+            try:
+                parameter_sets.append(frozenset(parameters))
+            except:
+                log.warning(f"Failed to serialize parameters: {parameters}")
+            
         row["created"] = row["created"].isoformat()
         last_kwargs = row.pop("kwargs")
         row.update(last_kwargs)
@@ -94,6 +99,7 @@ def export_table(model, path=None):
     )
 
     meta = { row["catalogid"]: row for row in q_meta}
+    missing_metadata = []
 
     names = []
     ignore_names = ("parameters", )
@@ -115,11 +121,28 @@ def export_table(model, path=None):
                 if name not in names and name not in ignore_names:
                     names.append(name)
 
+    M, C = (0, 0)
     for row in results:
+        catalogid = row["catalogid"]
         try:
-            row.update(meta[row["catalogid"]])
+            row.update(meta[catalogid])
         except KeyError:
-            log.warning(f"No metadata found for catalogid {row['catalogid']}!")
+            if catalogid not in missing_metadata:
+                log.warning(f"No metadata found for catalogid {catalogid}!")
+                missing_metadata.append(catalogid)
+            M += 1
+        else:
+            C += 1
+
+    if len(missing_metadata) > 0:
+        log.warning(f"In total there are {len(missing_metadata)} catalog sources without metadata!")
+
+    # If NONE of the rows have metadata, then we will get an error when we try to build a table.
+    # We should fill the first result with empty values.
+    if C == 0:
+        missing_field_names = set(names).difference(results[0])
+        results[0].update({ name: np.nan for name in missing_field_names })
+        log.warning(f"ALL sources are missing metadata!")
 
     table = Table(
         data=results,
@@ -134,7 +157,7 @@ def export_table(model, path=None):
         if dtype == "|O":
             # Objects.
             mask = (table[name] == None)
-            if not any(mask) and len(set(table[name])) == 1:
+            if all(mask) or (not any(mask) and len(set(table[name])) == 1):
                 # All Nones, probably. Delete.
                 del table[name]
             else:
@@ -171,5 +194,5 @@ def export_table(model, path=None):
 
     log.info(f"Created data product {data_product} at {path}")
 
-    return data_product.pk
+    return data_product.id
     """

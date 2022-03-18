@@ -41,6 +41,8 @@ def get_or_create_data_product_from_apogee_drpdb(
     filetype = filetype or origin.filetype
 
     kwds = { k: getattr(origin, k) for k in lookup_keys(release, filetype) }
+    if "field" in kwds:
+        kwds["field"] = kwds["field"].strip()
     t_kwds = time() - t_init
     t_init = time()
     path = path_instance(release).full(filetype, **kwds)
@@ -75,7 +77,7 @@ def get_or_create_data_product_from_apogee_drpdb(
         t_sourcedataproduct = time() - t_init
 
     ts = np.array([t_kwds, t_path, t_check_path, t_dp, t_source, t_sourcedataproduct])
-    print(ts/np.sum(ts))
+    #print(np.round(ts/np.sum(ts), 1))
 
     result = dict(data_product=data_product, source=source)
     return (True, result)
@@ -152,7 +154,7 @@ class BaseApogeeDRPOperator(BaseOperator):
         if N == 0:
             raise AirflowSkipException(f"No products for {self} created between {prev_ds} and {ds}")
 
-        pks = []
+        ids = []
         errors = []
         for origin in q:
             success, result = get_or_create_data_product_from_apogee_drpdb(
@@ -161,17 +163,17 @@ class BaseApogeeDRPOperator(BaseOperator):
             )
             if success:
                 log.info("Data product {data_product} matched to {source}".format(**result))
-                pks.append(result["data_product"].pk)
+                ids.append(result["data_product"].id)
             else:
                 log.warning("{reason} ({detail}) from {origin}".format(**result))
                 errors.append(result)
 
         log.info(f"Found {N} rows.")
-        log.info(f"Created {len(pks)} data products.")
+        log.info(f"Created {len(ids)} data products.")
         log.info(f"Encountered {len(errors)} errors.")
         if len(errors) == N:
             raise AirflowFailException(f"{N}/{N} data products had errors")
-        return pks
+        return ids
 
 
 

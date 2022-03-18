@@ -63,6 +63,9 @@ class AstraBaseModel(BaseModel):
         schema = schema
 
 
+#from playhouse.sqlite_ext import JSONField
+#from playhouse.postgres_ext import JSONField
+
 class JSONField(TextField):
     def db_value(self, value):
         return json.dumps(value)
@@ -71,15 +74,6 @@ class JSONField(TextField):
         if value is not None:
             return json.loads(value)
         
-
-class IntegerArrayField(TextField):
-    def db_value(self, value):
-        return f",".join(map(str, flatten(value)))
-    
-    def python_value(self, value):
-        if value is not None:
-            return list(map(int, value.split(",")))
-
 
 @lru_cache
 def _lru_sdsspath(release):
@@ -105,7 +99,7 @@ class Source(AstraBaseModel):
 
 
 class DataProduct(AstraBaseModel):
-    pk = AutoField()
+    id = AutoField()
     release = TextField()
     filetype = TextField()
     kwargs = JSONField()
@@ -114,6 +108,7 @@ class DataProduct(AstraBaseModel):
 
     class Meta:
         indexes = (
+            # Always remember to put the comma at the end.
             (("release", "filetype", "kwargs"), True),
         )
 
@@ -123,7 +118,7 @@ class DataProduct(AstraBaseModel):
             Task.select()
                 .join(TaskInputDataProducts)
                 .join(DataProduct)
-                .where(DataProduct.pk == self.pk)
+                .where(DataProduct.id == self.id)
         )
 
     @cached_property
@@ -142,28 +137,40 @@ class DataProduct(AstraBaseModel):
             Source.select()
                   .join(SourceDataProduct)
                   .join(DataProduct)
-                  .where(DataProduct.pk == self.pk)
+                  .where(DataProduct.id == self.id)
         )
 
 # DataProducts and Sources should be a many-to-many relationship.
 class SourceDataProduct(AstraBaseModel):
-    pk = AutoField()
+    id = AutoField()
     source = ForeignKeyField(Source)
     data_product = ForeignKeyField(DataProduct)
 
     class Meta:
         indexes = (
+            # Always remember to put the comma at the end.
             (("source", "data_product"), True),
         )
 
 
 class Output(AstraBaseModel):
-    pk = AutoField()
+    id = AutoField()
     created = DateTimeField(default=datetime.datetime.now)
 
 
+class Status(AstraBaseModel):
+    id = AutoField()
+    description = TextField()
+
+    class Meta:
+        indexes = (
+            # Always remember to put the comma at the end.
+            (("id", "description"), True),
+        )
+
+
 class Task(AstraBaseModel):
-    pk = AutoField()
+    id = AutoField()
     name = TextField()
     parameters = JSONField(null=True)
 
@@ -174,7 +181,6 @@ class Task(AstraBaseModel):
     time_execute = FloatField(null=True)
     time_post_execute = FloatField(null=True)
     
-
     time_pre_execute_bundle = FloatField(null=True)
     time_pre_execute_task = FloatField(null=True)
 
@@ -187,9 +193,17 @@ class Task(AstraBaseModel):
     created = DateTimeField(default=datetime.datetime.now)
     completed = DateTimeField(null=True)
 
-    def as_executable(self):
+    status = ForeignKeyField(Status, default=1) # default: 1 is the lowest status level ('created' or similar)
+
+    def as_executable(self, strict=True):
+        """Return an executable representation of this task."""
+
         if self.version != __version__:
-            log.warning(f"Task version mismatch for {self}: {self.version} != {__version__}")
+            message = f"Task version mismatch for {self}: {self.version} != {__version__}"
+            if strict:
+                raise RuntimeError(message)
+            else:
+                log.warning(message)
             
         module_name, class_name = self.name.rsplit(".", 1)
         module = import_module(module_name)
@@ -218,7 +232,7 @@ class Task(AstraBaseModel):
             DataProduct.select()
                        .join(TaskInputDataProducts)
                        .join(Task)
-                       .where(Task.pk == self.pk)
+                       .where(Task.id == self.id)
         )
 
     @property
@@ -227,7 +241,7 @@ class Task(AstraBaseModel):
             DataProduct.select()
                        .join(TaskOutputDataProducts)
                        .join(Task)
-                       .where(Task.pk == self.pk)
+                       .where(Task.id == self.id)
         )
 
 
@@ -259,14 +273,14 @@ class Task(AstraBaseModel):
 
 
 class TaskOutput(AstraBaseModel):
-    pk = AutoField()
+    id = AutoField()
     task = ForeignKeyField(Task)
     output = ForeignKeyField(Output)
 
 
 class Bundle(AstraBaseModel):
-    pk = AutoField()
-    status = TextField(default=0)
+    id = AutoField()
+    status = ForeignKeyField(Status, default=1) # default: 1 is the lowest status level ('created' or similar)
     meta = JSONField(null=True)
 
     @property
@@ -275,11 +289,15 @@ class Bundle(AstraBaseModel):
             Task.select()
                 .join(TaskBundle)
                 .join(Bundle)
-                .where(Bundle.pk == self.pk)
+                .where(Bundle.id == self.id)
         )
+
+    def count_tasks(self):
+        return self.tasks.count()
 
 
     def as_executable(self):
+        # TODO: Refactor some of this with the Task.as_executable
 
         # Get all the tasks in this bundle.
         tasks = list(
@@ -288,7 +306,7 @@ class Bundle(AstraBaseModel):
                 .where(TaskBundle.bundle == self)
         )
         input_data_products = [task.input_data_products for task in tasks]
-
+        
         task = tasks[0]
         if task.version != __version__:
             log.warning(f"Task version mismatch for {self}: {task.version} != {__version__}")
@@ -312,41 +330,41 @@ class Bundle(AstraBaseModel):
             for p, bundled in parameter_names.items():
                 if bundled:
                     if i == 0:
-                        parameters[p] = task.parameters[p]
+                        try:
+                            parameters[p] = task.parameters[p]
+                        except KeyError:
+                            # Give nothing; use default.
+                            continue
                 else:
-                    parameters.setdefault(p, [])
-                    parameters[p].append(task.parameters[p])
-        
-        # Keep it simple.
-        for p, b in parameter_names.items():
-            if not b and len(set(parameters[p])) == 1:
-                parameters[p] = parameters[p][0]
+                    if p in task.parameters:
+                        parameters.setdefault(p, [])
+                        parameters[p].append(task.parameters[p])
 
         executable = executable_class(
             input_data_products=input_data_products,
             context=context,
-            **parameters
+            bundle_size=len(tasks),
+            **parameters,
         )
         return executable
 
-        
-
 
 class TaskBundle(AstraBaseModel):
-    task = ForeignKeyField(Task)
-    bundle = ForeignKeyField(Bundle)
+    id = AutoField()
+    task = ForeignKeyField(Task, on_delete="CASCADE")
+    bundle = ForeignKeyField(Bundle, on_delete="CASCADE")
 
 
 class TaskInputDataProducts(AstraBaseModel):
-    pk = AutoField()
-    task = ForeignKeyField(Task)
-    data_product = ForeignKeyField(DataProduct)
+    id = AutoField()
+    task = ForeignKeyField(Task, on_delete="CASCADE")
+    data_product = ForeignKeyField(DataProduct, on_delete="CASCADE")
     
 
 class TaskOutputDataProducts(AstraBaseModel):
-    pk = AutoField()
-    task = ForeignKeyField(Task)
-    data_product = ForeignKeyField(DataProduct)
+    id = AutoField()
+    task = ForeignKeyField(Task, on_delete="CASCADE")
+    data_product = ForeignKeyField(DataProduct, on_delete="CASCADE")
 
 
 # Output tables.
@@ -401,27 +419,89 @@ class FerreOutput(AstraBaseModel):
     logg = FloatField()
     metals = FloatField()
     log10vdop = FloatField()
-    lgvsini = FloatField()
+    lgvsini = FloatField(null=True)
     o_mg_si_s_ca_ti = FloatField()
     c = FloatField()
     n = FloatField()
 
-    e_teff = FloatField()
-    e_logg = FloatField()
-    e_metals = FloatField()
-    e_log10vdop = FloatField()
-    e_lgvsini = FloatField()
-    e_o_mg_si_s_ca_ti = FloatField()
-    e_c = FloatField()
-    e_n = FloatField()    
+    u_teff = FloatField()
+    u_logg = FloatField()
+    u_metals = FloatField()
+    u_log10vdop = FloatField()
+    u_lgvsini = FloatField(null=True)
+    u_o_mg_si_s_ca_ti = FloatField()
+    u_c = FloatField()
+    u_n = FloatField()
+
+    bitmask_teff = IntegerField(default=0)
+    bitmask_logg = IntegerField(default=0)
+    bitmask_metals = IntegerField(default=0)
+    bitmask_log10vdop = IntegerField(default=0)
+    bitmask_lgvsini = IntegerField(default=0)
+    bitmask_o_mg_si_s_ca_ti = IntegerField(default=0)
+    bitmask_c = IntegerField(default=0)
+    bitmask_n = IntegerField(default=0)   
 
     log_chisq_fit = FloatField()
     log_snr_sq = FloatField()
     frac_phot_data_points = FloatField(default=0)
 
-    bitmask_flag = IntegerArrayField()
+    # This penalized log chisq term is strictly a term defined and used by ASPCAP
+    # and not FERRE, but it is easier to understand what is happening when selecting
+    # the `best` model if we have a penalized \chisq term.
+    penalized_log_chisq_fit = FloatField(null=True)
 
-'''
+    
+class ApogeeNetOutput(AstraBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+
+    snr = FloatField()
+    teff = FloatField()
+    logg = FloatField()
+    fe_h = FloatField()
+    u_teff = FloatField()
+    u_logg = FloatField()
+    u_fe_h = FloatField()
+    teff_sample_median = FloatField()
+    logg_sample_median = FloatField()
+    fe_h_sample_median = FloatField()
+    bitmask_flag = IntegerField(default=0)
+
+
+class AspcapOutput(AstraBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+
+    # Metadata.
+    snr = FloatField()
+
+# Dynamically add many fields to AspcapOutput.
+sp_field_names = ("teff", "logg", "metals", "log10vdop", "o_mg_si_s_ca_ti", "lgvsini", "c", "n")
+null_field_names = ("lgvsini", )
+elements = (
+    "cn", "al", "ca", "ce", "co", "cr", "fe", "k", "mg", "mn",
+    "na", "nd", "ni", "o", "p", "rb", "si", "s", "ti", "v", "yb"
+)
+
+for field_name in sp_field_names:
+    null = field_name in null_field_names
+    AspcapOutput._meta.add_field(field_name, FloatField(null=null))
+    AspcapOutput._meta.add_field(f"u_{field_name}", FloatField(null=null))
+    AspcapOutput._meta.add_field(f"bitmask_{field_name}", IntegerField(default=0))
+
+AspcapOutput._meta.add_field("log_chisq_fit", FloatField())
+AspcapOutput._meta.add_field("log_snr_sq", FloatField())
+
+# All element fields can be null, and they need their own log_chisq_fit 
+for element in elements:
+    AspcapOutput._meta.add_field(f"{element}_h", FloatField(null=True))
+    AspcapOutput._meta.add_field(f"u_{element}_h", FloatField(null=True))
+    AspcapOutput._meta.add_field(f"bitmask_{element}_h", IntegerField(default=0))
+    AspcapOutput._meta.add_field(f"log_chisq_fit_{element}_h", FloatField(null=True))
+
 
 class ApogeeNet(AstraBaseModel):
 
@@ -439,18 +519,45 @@ class ApogeeNet(AstraBaseModel):
     logg_sample_median = FloatField()
     fe_h_sample_median = FloatField()
     bitmask_flag = IntegerField()
-'''
 
 
-def create_tables(drop_existing_tables=False):
-    """ Create all tables for the Astra database. """
-    database.connect(reuse_if_open=True)
-    models = (
-        Source, DataProduct, SourceDataProduct, Output, Task, TaskOutput, 
-        Bundle, TaskBundle, TaskInputDataProducts, TaskOutputDataProducts,
-        ClassifierOutput, FerreOutput, ClassifySourceOutput
-    )
+def create_tables(
+        drop_existing_tables=False, 
+        reuse_if_open=True,
+        insert_status_rows=True,
+    ):
+    """ 
+    Create all tables for the Astra database. 
+    
+    """
+
+    log.info(f"Connecting to database to create tables.")
+    database.connect(reuse_if_open=reuse_if_open)
+    models = AstraBaseModel.__subclasses__()
+    log.info(f"Tables ({len(models)}): {', '.join([model.__name__ for model in models])}")
     if drop_existing_tables:
+        log.info(f"Dropping existing tables..")
         database.drop_tables(models)
+    log.info(f"Creating tables..")
     database.create_tables(models)
+
+    # Put data in for Status
+    if insert_status_rows:
+        log.info(f"Inserting Status rows")
+        # Note that the most important description here is the first one, which should be the
+        # lowest level of the status hierarchy. This is because the default status for a Task
+        # or Bundle is `id=1`, so whichever is the lowest level of the hierarchy.
+        status_descriptions = [
+            "created",
+            "locked",
+            "submitted",
+            "running",
+            "completed",
+            "failed-pre-execution",
+            "failed-execution",
+            "failed-post-execution"
+        ]
+        with database.atomic():
+            for description in status_descriptions:
+                Status.create(description=description)
 

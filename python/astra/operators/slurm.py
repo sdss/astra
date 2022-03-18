@@ -2,14 +2,21 @@ from datetime import timedelta
 from getpass import getuser
 from typing import OrderedDict
 import re
+import json
+import numpy as np
+from more_itertools import set_partitions
 from subprocess import call, Popen, PIPE
 from airflow.exceptions import AirflowRescheduleException
 from airflow.models.baseoperator import BaseOperator
 from airflow.sensors.base import BaseSensorOperator
 from airflow.utils import timezone
+from peewee import fn
+from astra.database.astradb import Task, TaskBundle, Bundle
+
 
 from astra import log, config
-from astra.database.astradb import Bundle
+from astra.utils import flatten
+from astra.database.astradb import (database, Bundle)
 
 
 def get_slurm_queue():
@@ -32,35 +39,63 @@ def get_slurm_queue():
     return [match.groupdict() for match in re.finditer(pattern, output)]
 
 
+
+def partition(items, K, return_indices=False):
+    """
+    Partition items into K semi-equal groups.
+    """
+    groups = [[] for _ in range(K)]
+    N = len(items)
+    sorter = np.argsort(items)
+    if return_indices:
+        sizes = dict(zip(range(N), items))
+        itemizer = list(np.arange(N)[sorter])
+    else:
+        itemizer = list(np.array(items)[sorter])
+    
+    while itemizer:
+        if return_indices:
+            group_index = np.argmin([sum([sizes[idx] for idx in group]) for group in groups])
+        else:
+            group_index = np.argmin(list(map(sum, groups)))
+        groups[group_index].append(itemizer.pop(-1))
+
+    return [group for group in groups if len(group) > 0]
+        
+        
+
+
+    
 class SlurmOperator(BaseOperator):
 
-    template_fields = ("bundle", "slurm_kwargs", "bundles_per_slurm_job")
+    template_fields = ("bundles", "slurm_kwargs", "min_bundles_per_slurm_job", "max_parallel_tasks_per_slurm_job")
 
     def __init__(
         self,
-        bundle=None,
+        bundles=None,
         slurm_kwargs=None,
-        bundles_per_slurm_job=1,
+        get_uncommitted_queue=False,
+        min_bundles_per_slurm_job=1,
+        max_parallel_tasks_per_slurm_job=32,
         implicit_node_sharing=False,
         **kwargs
     ) -> None:
         super().__init__(**kwargs)
-        self.bundle = bundle
+        self.bundles = bundles
         self.slurm_kwargs = slurm_kwargs or {}
-        self.bundles_per_slurm_job = bundles_per_slurm_job
+        self.get_uncommitted_queue = get_uncommitted_queue
+        self.min_bundles_per_slurm_job = min_bundles_per_slurm_job
+        self.max_parallel_tasks_per_slurm_job = max_parallel_tasks_per_slurm_job
         self.implicit_node_sharing = implicit_node_sharing
 
     def execute(self, context):
 
-        bundle = self.bundle
-        if not isinstance(bundle, Bundle):
-            bundle = Bundle.get(pk=int(bundle))
-
-        executable = f"astra execute --bundle {bundle.pk}"
-
-        # Set Slurm kwargs for this bundle.
-        meta = (bundle.meta or {}).copy()
-        meta.update(slurm_kwargs=self.slurm_kwargs)
+        # Load the bundles, which will be an int or list of ints.
+        primary_keys = flatten(json.loads(self.bundles))
+        bundles = (
+            Bundle.select()
+                    .where(Bundle.id.in_(primary_keys))
+        )
 
         # It's bad practice to import here, but the slurm package is
         # not easily installable outside of Utah, and is not a "must-have"
@@ -71,7 +106,7 @@ class SlurmOperator(BaseOperator):
 
         key = None
         verbose = True
-        if self.bundles_per_slurm_job > 1:
+        if self.get_uncommitted_queue:
             # TODO: What's the difference between committed and submitted?
             status = "uncommitted"
 
@@ -101,31 +136,109 @@ class SlurmOperator(BaseOperator):
             log.info(f"Creating queue with {self.slurm_kwargs}")
             q.create(**self.slurm_kwargs)
         
-        q.append(executable)
-        log.info(f"Added '{executable}' to queue {q}")
+        # Load balance the bundles.
+        B = len(bundles)
+        Q = len(q.client.job.all_tasks())
+            
+        Q_free = self.max_parallel_tasks_per_slurm_job - Q
 
+        if 0 >= Q_free:
+            # just run together.
+            group_bundle_ids = [[bundle.id for bundle in bundles]]
+
+        elif B > Q_free:
+            # Estimate the cost of each bundle.
+            bundle_costs = (
+                Bundle.select(
+                        Bundle.id,
+                        fn.COUNT(Bundle.id)
+                    )
+                    .join(TaskBundle)
+                    .join(Task)
+                    .where(Bundle.id.in_(primary_keys))
+                    .group_by(Bundle.id)
+                    .order_by(fn.COUNT(Bundle.id).desc())
+                    .tuples()
+            )
+            # We need to distribute the bundles approximately evenly.
+            # This is known as the 'Partition Problem'.    
+            bundle_costs = np.array(bundle_costs)
+            group_bundle_ids = []
+            group_costs = []
+            for indices in partition(bundle_costs.T[1], Q_free, return_indices=True):
+                group_bundle_ids.append([bundle_costs[i, 0] for i in indices])
+                group_costs.append(np.sum(bundle_costs[indices, 1]))
+
+            log.debug(f"Total bundle cost: {np.sum(bundle_costs.T[1])} split across {Q_free} groups, with costs {group_costs} (max diff: {np.ptp(group_costs)})")
+            log.debug(f"Number per item: {list(map(len, group_bundle_ids))}")
+            
+        else:
+            # Run all bundles in parallel.
+            group_bundle_ids = [[bundle.id] for bundle in bundles]
+
+        # Add executables for each bundle.
+        for group_bundle in group_bundle_ids:
+            group_bundle_str = ' '.join([f"{id:.0f}" for id in group_bundle])
+            executable = f"astra execute bundles {group_bundle_str}"
+            q.append(executable)
+            log.info(f"Added '{executable}' to queue {q}")
+        
+        # Update metadata for all the bundles.
+        with database.atomic() as txn:
+            for bundle in bundles:
+                meta = (bundle.meta or dict()).copy()
+                meta.update(
+                    slurm_kwargs=self.slurm_kwargs,
+                    slurm_job_key=q.key
+                )
+                bundle.update(meta=meta).execute()
+            
         # Check if this should be submitted now.
         tasks = q.client.job.all_tasks()
         N = len(tasks)
-        log.info(f"There are {N} tasks in queue {q}: {tasks}")
-        if N >= self.bundles_per_slurm_job:
+        log.info(f"There are {N} items in queue {q}: {tasks}")
+        ppn = self.max_parallel_tasks_per_slurm_job
+        if N >= self.min_bundles_per_slurm_job:
             if self.implicit_node_sharing:
                 if "ppn" not in self.slurm_kwargs and "shared" not in self.slurm_kwargs:
-                    log.info(f"Using implicit node sharing behaviour for {self}. Setting ppn = {N} and shared = True")
-                    q.client.job.ppn = N
+                    log.info(f"Using implicit node sharing behaviour for {self}. Setting ppn = {ppn} and shared = True")
+                    q.client.job.ppn = ppn
                     q.client.job.shared = True
                     q.client.job.commit()
                 else:
                     log.info(f"Implicit node sharing behaviour is enabled, but not doing anything because ppn/shared keywords already set in slurm kwargs")
+            else:
+                """
+                # Increse n_threads proportionally?
+                n_threads = int(np.ceil(64 / N))
+
+                q_tasks = (
+                    Task.select()
+                        .join(TaskBundle)
+                        .join(Bundle)
+                        .where(Bundle.id.in_(primary_keys))
+                )
+                for task in q_tasks:
+                    if "n_threads" in task.parameters:    
+                        existing_n_threads = task.parameters.get("n_threads", None)
+                        if existing_n_threads != n_threads:
+                            log.debug(f"Increasing n_threads = {n_threads} on {task}")
+                            parameters = task.parameters.copy()
+                            parameters["n_threads"] = n_threads
+                            task.parameters = parameters
+                            n = task.save()
+                            assert n == 1
+                """
         
             log.info(f"Submitting queue {q}")
             q.commit(hard=True, submit=True)
         
         else:
-            log.info(f"Not submitting queue {q} because {N} < {self.bundles_per_slurm_job}")
+            log.info(f"Not submitting queue {q} because {N} < {self.min_bundles_per_slurm_job}")
 
         meta["slurm_job_key"] = q.key
-        bundle.update(meta=meta).execute()
+        bundle.meta = meta
+        bundle.save()
 
         return q.key
 

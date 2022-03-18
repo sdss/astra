@@ -40,8 +40,8 @@ class TestTaskTiming(unittest.TestCase):
         bundled_task = TestTask(sleep_length=sleep_length)
         bundled_task.execute()
 
-        pks = [task.pk for task in bundled_task.context["tasks"]]
-        tasks = Task.select().where(Task.pk.in_(pks))
+        ids = [task.id for task in bundled_task.context["tasks"]]
+        tasks = Task.select().where(Task.id.in_(ids))
 
         # Check timings.    
         places = 1
