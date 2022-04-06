@@ -14,9 +14,10 @@ class TestTaskTiming(unittest.TestCase):
 
         # Create tables if they don't exist.
         if not database.table_exists(Task):
-            models = (Task, Bundle, TaskBundle)
-            database.create_tables(models) 
-            
+            with database.atomic():
+                models = (Task, Bundle, TaskBundle)
+                database.create_tables(models) 
+
         class TestTask(ExecutableTask):
 
             sleep_length = Parameter("sleep_length", default=0)
