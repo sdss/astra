@@ -34,6 +34,9 @@ def get_or_create_data_products(iterable):
         except:
             pass
 
+    if isinstance(iterable, DataProduct):
+        iterable = [iterable]
+        
     dps = []
     for dp in iterable:
         if isinstance(dp, DataProduct) or dp is None:

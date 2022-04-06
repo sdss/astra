@@ -784,13 +784,46 @@ def get_processing_times(stdout):
     i = stdout[::-1].index(header[0][::-1])
     use_stdout = stdout[-(i + len(header)):]
 
-    n_threads = int(re.findall("nthreads = \s+[{0-9}+]", use_stdout)[0].split()[-1])
+    n_threads = int(re.findall("nthreads = \s+[0-9]+", use_stdout)[0].split()[-1])
+    n_obj = int(re.findall("nobj = \s+[0-9]+", use_stdout)[0].split()[-1])
 
-    matches = re.findall('ellapsed time:\s+[{0-9}|.]+', use_stdout)
-    load_time, *elapsed_time = [float(match.split()[-1]) for match in matches]
+
+    # Find the obvious examples first.
+    ellapsed_time_pattern = "ellapsed time:\s+(?P<time>[{0-9}|.]+)"
+    load_time, *all_ellapsed_times = re.findall(ellapsed_time_pattern, stdout)
+    load_time = float(load_time)
+
+    ellapsed_time_with_indices = re.findall(
+        ellapsed_time_pattern + "\s+s\s+next object #\s+(?P<index_plus_one>[0-9]+)", 
+        stdout
+    )
+
+    time_per_spectrum = np.nan * np.ones(n_obj)
+    for time, index_plus_1 in ellapsed_time_with_indices:
+        index = int(index_plus_1) - 2
+        last_time = time_per_spectrum[index - 1]
+        if not np.isfinite(last_time):
+            last_time = load_time
+        time_per_spectrum[index] = float(time) - last_time
+ 
+    # For the remaning n_thread objects we need to use a different pattern
+    sol = " SOL "
+    remaining_elapsed_times = np.array(
+        re.findall(ellapsed_time_pattern, sol.join(stdout.split(sol)[-(n_threads + 1):])),
+        dtype=float
+    )
+
+    # These last timings will be inaccurate because FERRE prints out ellapsed time more times
+    # than there are objects. Let's just do what we can.
+    missing = ~np.isfinite(time_per_spectrum)
+    for time, index in zip(np.where(missing)[0], remaining_elapsed_times[-n_threads:]):
+
+        raise a
+
+    obj_ellapsed_times[missing] = remaining_elapsed_times[-n_threads:]
 
     # Offset load time.
-    elapsed_time = np.array(elapsed_time) - load_time
+    obj_ellapsed_times -= load_time
 
     # Account for number of threads.
     O = n_threads - (elapsed_time.size % n_threads)

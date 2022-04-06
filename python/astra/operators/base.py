@@ -1,45 +1,40 @@
-import importlib
 from airflow.models.baseoperator import BaseOperator
-from astra.database.astradb import DataProduct
-from astra import log
-from astra.utils import flatten
 
+from astra import log
+from astra.operators.utils import to_callable
 
 class AstraOperator(BaseOperator):
 
     def __init__(
         self,
-        executable_class,
-        parameters=None,
+        task_name,
+        task_parameters=None,
+        return_id_kind="task",
         **kwargs
     ) -> None:
         super(AstraOperator, self).__init__(**kwargs)
-        self.executable_class = executable_class
-        self.parameters = parameters or {}
-
+        self.task_name = task_name
+        self.task_parameters = task_parameters or {}
+        self.return_id_kind = f"{return_id_kind}".lower()
+        if self.return_id_kind not in ("task", "data_product"):
+            raise ValueError(f"return_id_kind must be either `task` or `data_product`")
 
     def execute(self, context):
-        log.info(f"Executing task {self} with context {context}")
+        log.info(f"Creating task {self.task_name} with task_parameters {self.task_parameters}")
+        executable_class = to_callable(self.task_name)
+        task = executable_class(**self.task_parameters)
 
-        module_name, class_name = self.executable_class.rsplit(".", 1)
-        module = importlib.import_module(module_name)
-        executable_class = getattr(module, class_name)
-
-        # Get data products from primary keys immediately upstream.
-        task, ti = (context["task"], context["ti"])
-        ids = ti.xcom_pull(task_ids=[ut.task_id for ut in task.upstream_list])
-
-        log.info(f"Upstream keys: {ids}")
-
-        pks = flatten(pks)
-        # TODO: use the deserialize funct
-        input_data_products = [DataProduct.get(pk=pk) for pk in pks]
-
-        executable = executable_class(input_data_products, **self.parameters)
-
-        log.info("executing")
-        result = executable.execute()
-        log.info("executed")
-
-
+        log.info(f"Executing")
+        task.execute()
+        log.info(f"Done")
         
+        if self.return_id_kind == "task":
+            outputs = [task.id for task in task.context["tasks"]]
+        elif self.return_id_kind == "data_product":
+            outputs = []
+            for t in task.context["tasks"]:
+                for dp in t.output_data_products:
+                    outputs.append(dp.id)
+        
+        return outputs
+            

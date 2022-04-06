@@ -238,6 +238,12 @@ class Ferre(ExecutableTask):
         n_done, n_error, control_kwds = utils.parse_ferre_output(dir, stdout, stderr)
         log.info(f"FERRE finished with {n_done} successful and {n_error} errors.")
 
+        # Write stdout and stderr
+        with open(os.path.join(dir, "stdout"), "w") as fp:
+            fp.write(stdout)
+        with open(os.path.join(dir, "stderr"), "w") as fp:
+            fp.write(stderr)
+
         # We actually have timings per-spectrum but we aggregate this to per-task.
         # We might want to store the per-data-product and per-spectrum timing elsewhere.
         try:
