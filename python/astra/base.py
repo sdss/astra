@@ -21,71 +21,30 @@ class TaskStageTimer:
     def __exit__(self, type, value, traceback):
         self.t_exit = time()
         try:
-            self.update_timing(self.t_exit - self.t_enter)
+            self.set_internal_timing(self.t_exit - self.t_enter)
         except:
             log.exception(f"Exception in updating task timing for {self.task} during {self.stage}")
 
         # Handle exception.
         if traceback is not None:
             log.exception(f"Exception in {self.stage} for {self.task}:\n\t\t{type}: {value} {traceback}")
-            # TODO: Update task status?
+            self.task.update_status(description=f"failed-{self.stage.replace('_', '-')}", safe=True)
         return None
 
-    def update_timing(self, time_actual):
+
+    def set_internal_timing(self, time_actual):
         self.task.context.setdefault("timing", {})
 
         # The time per task for this stage is filled by the task.iterable()
         time_per_task = np.array(self.task.context["timing"].get(f"time_{self.stage}_per_task", [0]))
         time_bundle = time_actual - sum(time_per_task) # overhead for bundle
 
-        self.task.context["timing"][f"time_{self.stage}_bundle"] = time_bundle
+        # These should match the database model for Task
+        self.task.context["timing"][f"time_{self.stage}_bundle_overhead"] = time_bundle
         self.task.context["timing"][f"time_{self.stage}"] = time_actual
         self.task.context["timing"]["time_total"] = \
             sum([self.task.context["timing"].get(f"time_{s}", 0) for s in ("pre_execute", "execute", "post_execute")])
         
-        # TODO: When should we make the database calls?
-        '''        
-        [f"actual_time_{self.stage}"] = time_actual
-
-        time_pre_execute_task = self._timing.get("time_pre_execute_task", np.zeros(N))
-        time_execute_task = self._timing.get("time_execute_task", np.zeros(N))
-        time_post_execute_task = self._timing.get("time_post_execute_task", np.zeros(N))
-
-        time_pre_execute_bundle = self._timing["actual_time_pre_execute"] - np.sum(time_pre_execute_task)
-        time_pre_execute = time_pre_execute_bundle / N + time_pre_execute_task
-
-        time_execute_bundle = self._timing["actual_time_execute"] - np.sum(time_execute_task)
-        time_execute = time_execute_bundle / N + time_execute_task
-
-        time_post_execute_bundle = self._timing["actual_time_post_execute"] - np.sum(time_post_execute_task)
-        time_post_execute = time_post_execute_bundle / N + time_post_execute_task
-
-        time_total = time_pre_execute + time_execute + time_post_execute
-
-        log.debug(f"Updating task timings")
-        
-        for i, task in enumerate(self.context["tasks"]):
-            kwds = dict(
-                time_total=time_total[i],
-                time_pre_execute=time_pre_execute[i],
-                time_execute=time_execute[i],
-                time_post_execute=time_post_execute[i],
-                
-                time_pre_execute_task=time_pre_execute_task[i],
-                time_execute_task=time_execute_task[i],
-                time_post_execute_task=time_post_execute_task[i],
-
-                time_pre_execute_bundle=time_pre_execute_bundle,
-                time_execute_bundle=time_execute_bundle,
-                time_post_execute_bundle=time_post_execute_bundle,                
-            )
-            r = (
-                Task.update(**kwds)
-                    .where(Task.id == task.id)
-                    .execute()
-            )
-        '''
-
 
 def decorate_pre_post_execute(f):
     stage = f.__name__
@@ -111,47 +70,47 @@ def decorate_execute(f):
     def wrapper(task, *args, **kwargs):
         
         decorate_pre_execute = kwargs.pop("decorate_pre_execute", True)
-        decorate_execute = kwargs.pop("decorate_execute", True)
+        decorate_execute = kwargs.pop("decorate", True)
         decorate_post_execute = kwargs.pop("decorate_post_execute", True)
+        raise_decorator_exceptions = kwargs.pop("raise_decorator_exceptions", False)
 
         if not decorate_execute:
             return f(task, *args, **kwargs)
 
-        log.debug(f"Decorating execute for {task} with {args} {kwargs}")
+        # Set status as running.
+        task.update_status(description="running", safe=True)
         task.pre_execute(decorate_pre_execute=decorate_pre_execute, **kwargs)
 
+        log.debug(f"Decorating execute for {task} with {args} {kwargs}")
         with TaskStageTimer(task, "execute"):
             result = task.context["execute"] = f(task, *args, **kwargs)
         
         task.post_execute(decorate_post_execute=decorate_post_execute, **kwargs)
 
-        '''
-        ipdb> bundled_task.context["timing"]
-        {'time_pre_execute_bundle_overhead': 3.002795934677124, 'time_pre_execute': 3.002795934677124, 'time_total': 17.039904832839966, 'time_execute_per_task': [4.696846008300781e-05, 1.002716064453125, 5.0031960010528564, 6.003983974456787], 'time_execute_bundle_overhead': 0.02372288703918457, 'time_execute': 12.033665895462036, 'time_post_execute_bundle_overhead': 2.0034430027008057, 'time_post_execute': 2.0034430027008057}
-        # Update timing in database.
-        for i, task in enumerate(task.context["tasks"]):
+        # After post-execute, update the task status and timings.
+        task.update_status(description="completed", safe=True)
 
-            kwds = dict(
-                time_total=time_total[i],
-                time_pre_execute=time_pre_execute[i],
-                time_execute=time_execute[i],
-                time_post_execute=time_post_execute[i],
-                
-                time_pre_execute_task=time_pre_execute_task[i],
-                time_execute_task=time_execute_task[i],
-                time_post_execute_task=time_post_execute_task[i],
+        default = np.zeros(task.bundle_size)
+        try:
+            timing = task.context["timing"].copy()
+            time_pre_execute_per_task = timing.pop("time_pre_execute_per_task", default)
+            time_execute_per_task = timing.pop("time_execute_per_task", default)
+            time_post_execute_per_task = timing.pop("time_post_execute_per_task", default)
+            
+            with database.atomic():
+                for i, item in enumerate(task.context["tasks"]):
+                    item.time_pre_execute_task = time_pre_execute_per_task[i]
+                    item.time_execute_task = time_execute_per_task[i]
+                    item.time_post_execute_task = time_post_execute_per_task[i]
+                    for k, v in timing.items():
+                        setattr(item, k, v)
+                    item.save()
 
-                time_pre_execute_bundle=time_pre_execute_bundle,
-                time_execute_bundle=time_execute_bundle,
-                time_post_execute_bundle=time_post_execute_bundle,                
-            )
-            r = (
-                Task.update(**kwds)
-                    .where(Task.id == task.id)
-                    .execute()
-            )
-        '''
-
+        except:
+            log.exception(f"Exception occurred while updating timings for task {task}")
+            if raise_decorator_exceptions:
+                raise
+        
         return result
 
     return wrapper
@@ -172,11 +131,9 @@ class TupleParameter(Parameter):
 
 class DictParameter(Parameter):
     pass
+ 
 
-
-
-
-class ExecutableTaskMeta(type):
+class TaskInstanceMeta(type):
     def __new__(cls, class_name, bases, attrs):
         # Decorate stages for timing / exception tracking.
         stages = {
@@ -191,7 +148,7 @@ class ExecutableTaskMeta(type):
 
 
 
-class ExecutableTask(object, metaclass=ExecutableTaskMeta):
+class TaskInstance(object, metaclass=TaskInstanceMeta):
     
     @classmethod
     def get_defaults(cls):
@@ -290,10 +247,9 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
         return (bundle_size, parsed)
 
 
-    def __init__(self, input_data_products=None, context=None, bundle_size=1, **kwargs):
-        # Set the execution context.
-        self.context = context or {}
-
+    def __init__(self, input_data_products=None, context=None, **kwargs):
+        self.context = context or {} # Set the execution context.
+        
         # Set parameters.
         self.bundle_size, self._parameters = self.parse_parameters(**kwargs)
         for parameter_name, (parameter, value, *_) in self._parameters.items():
@@ -379,15 +335,12 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
             context["iterable"].append((task, data_products, parameters))
 
         if self.bundle_size > 1:
-            # Create task bundle.
             context["bundle"] = bundle = Bundle.create()
             for task in context["tasks"]:
                 TaskBundle.create(task=task, bundle=bundle)
 
         self.context.update(context)
         return context
-
-
 
     @abc.abstractmethod
     def pre_execute(self, *args, **kwargs):
@@ -401,31 +354,44 @@ class ExecutableTask(object, metaclass=ExecutableTaskMeta):
     def post_execute(self, *args, **kwargs):
         pass
 
-
-    def update_status(self, description, items=None):
-        status = Status.get(description=description)
-        N = 0
-        if items is None:    
-            items = []
+    def update_status(self, description, items=None, safe=False):
+        args = (self, description, items)
+        if safe:
             try:
-                items.extend(self.context["tasks"])
+                N = _update_task_status(*args)
             except:
-                None
-            try:
-                items.append(self.context["bundle"])
-            except:
-                None
+                log.exception(f"Exception in updating status of task {self} to '{description}'")
+                N = 0
+        else:
+            N = _update_task_status(*args)
 
-        with database.atomic():
-            for item in items:
-                if item is None: continue
-                model = item.__class__
-                N += (
-                    model.update(status=status)
-                        .where(model.id == item.id)
-                        .execute()
-                )
         return N
+
+
+def _update_task_status(task, description, items):
+    status = Status.get(description=description)
+    N = 0
+    if items is None:    
+        items = []
+        try:
+            items.extend(task.context["tasks"])
+        except:
+            None
+        try:
+            items.append(task.context["bundle"])
+        except:
+            None
+    with database.atomic():
+        for item in items:
+            if item is None: continue
+            item.status = status
+            item.save()
+            N += 1
+    return N
+        
+
+ExecutableTask = TaskInstance
+
 
 
 

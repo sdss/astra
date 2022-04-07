@@ -1,13 +1,13 @@
 import unittest
-from astra.base import ExecutableTask, Parameter, TupleParameter
+from astra.base import TaskInstance, Parameter, TupleParameter
+from astra.database.astradb import database, Task, Bundle, TaskBundle
 from time import sleep
-
 
 
 class TestTaskBehaviour(unittest.TestCase):
 
     def test_parameter_inheritance(self):
-        class Parent(ExecutableTask):
+        class Parent(TaskInstance):
             A = Parameter()
 
         class Child(Parent):
@@ -18,7 +18,7 @@ class TestTaskBehaviour(unittest.TestCase):
         
         Child(B=1, A=0) # should work
 
-        class Parent(ExecutableTask):
+        class Parent(TaskInstance):
             A = Parameter(default=0)
         
         class Child(Parent):
@@ -37,7 +37,7 @@ class TestTaskBehaviour(unittest.TestCase):
         NUM_PRE_EXECUTIONS = 0
         NUM_POST_EXECUTIONS = 0
 
-        class Parent(ExecutableTask):
+        class Parent(TaskInstance):
             A = Parameter(default=0)
 
             def post_execute(self):
@@ -82,7 +82,7 @@ class TestTaskBehaviour(unittest.TestCase):
 
     def test_skip_pre_execute(self):
 
-        class DummyTask(ExecutableTask):
+        class DummyTask(TaskInstance):
             def pre_execute(self):
                 return 5
             def execute(self):
@@ -100,7 +100,7 @@ class TestTaskBehaviour(unittest.TestCase):
         self.assertNotIn("time_post_execute", B.context["timing"])
 
         # This should be true regardless whether we defined pre/post_execute or not
-        class DummyTask(ExecutableTask):
+        class DummyTask(TaskInstance):
             def execute(self):
                 return 4        
         
@@ -110,13 +110,13 @@ class TestTaskBehaviour(unittest.TestCase):
         self.assertNotIn("time_post_execute", C.context["timing"])
 
         D = DummyTask()
-        D.execute(decorate_execute=False)
+        D.execute(decorate=False)
         self.assertNotIn("timing", D.context)
 
 
     def test_task_bundling(self):
 
-        class DummyTask(ExecutableTask):
+        class DummyTask(TaskInstance):
             A = Parameter()
             B = Parameter(bundled=True)
             C = Parameter(default=None)
@@ -154,38 +154,87 @@ class TestTaskBehaviour(unittest.TestCase):
         self.assertEqual(t.D, (0, 1))
         self.assertEqual(t.E, 10)
 
-'''        
+
+    def test_task_status_handling(self):
+
+        class DummyTask(TaskInstance):
+            A = Parameter()
+
+            def execute(local_self):
+                for i, (item, *_) in enumerate(local_self.iterable()):
+                    self.assertEqual(item.status.description, "running")
+                    sleep(i)
+            
+
+        t = DummyTask(A=(1, 2, ))
+        
+        t.get_or_create_context()
+        self.assertEqual(t.context["bundle"].status.description, "created")
+        for item in t.context["tasks"]:
+            self.assertEqual(item.status.description, "created")
+
+        t.execute()
+
+        self.assertEqual(t.context["bundle"].status.description, "completed")
+        for item in t.context["tasks"]:
+            self.assertEqual(item.status.description, "completed")
+        
+        for item, *_ in t.iterable():
+            self.assertEqual(item.status.description, "completed")
 
 
+    def test_task_timing(self):
 
-import unittest
-from astra.base import ExecutableTask, Parameter, TupleParameter
-from time import sleep
+        pre_execute_sleep_length = 3
+        post_execute_sleep_length = 2
 
-class DummyTask(ExecutableTask):
-    A = Parameter()
-    B = Parameter(bundled=True)
-    C = Parameter(default=None)
+        # Create tables if they don't exist.
+        if not database.table_exists(Task):
+            with database.atomic():
+                models = (Task, Bundle, TaskBundle)
+                database.create_tables(models) 
+
+        class TestTask(TaskInstance):
+
+            sleep_length = Parameter("sleep_length", default=0)
+
+            def execute(self):
+                for task, input_data_products, parameters in self.iterable():
+                    print(f"In {self} with {task} and sleep={parameters['sleep_length']}")
+                    sleep(parameters["sleep_length"])
+
+            def pre_execute(self):
+                print(f"in pre-execute")
+                sleep(pre_execute_sleep_length)
+            
+            def post_execute(self):
+                print(f"in post execute")
+                sleep(post_execute_sleep_length)
 
 
-DummyTask(A=1, B="hello", C=3) # ok
-DummyTask(A=(1, 2), B="hello", C=(3, 3)) # ok, all non-bundled are same length
-foo = DummyTask(A=(1,2,3), B="hello") # ok, 3 tasks, all non-bundled are same length, C gets default
+        sleep_length = [0, 1, 5, 6]
+        N = len(sleep_length)
+        bundled_task = TestTask(sleep_length=sleep_length)
+        bundled_task.execute()
 
-# Not OK, the lengths of A and C are different.
-#with self.assertRaises(ValueError):
-#    DummyTask(A=(1, 2), B="moo", C=(1,2,3))
+        ids = [task.id for task in bundled_task.context["tasks"]]
+        tasks = Task.select().where(Task.id.in_(ids))
 
-class DummyTask2(DummyTask):
-    D = TupleParameter(default=(0, 1))
-    E = TupleParameter(bundled=True)
-# tuple and dict parameters are taken AS-IS. their lengths are not considered
+        # Check timings.    
+        places = 1
+        for task, sl in zip(tasks, sleep_length):
+            self.assertAlmostEqual(task.time_pre_execute_bundle_overhead, pre_execute_sleep_length, places=places)
+            self.assertAlmostEqual(task.time_pre_execute, pre_execute_sleep_length, places=places)
+            self.assertAlmostEqual(task.time_pre_execute_task, 0, places=places)
+            
+            self.assertAlmostEqual(task.time_execute_task, sl, places=places)
+            self.assertAlmostEqual(task.time_execute, sum(sleep_length), places=places)
+            self.assertAlmostEqual(task.time_execute_bundle_overhead, 0, places=places)
+            
+            self.assertAlmostEqual(task.time_post_execute_bundle_overhead, post_execute_sleep_length, places=places)
+            self.assertAlmostEqual(task.time_post_execute, post_execute_sleep_length, places=places)
+            self.assertAlmostEqual(task.time_post_execute_task, 0, places=places)
 
-
-
-# not ok, a bundled param is different length.
-
-#with self.assertRaises(TypeError):
-#    DummyTask(A=(1,2,3), B=("this", "that"), C=(1,2,3)) 
-
-'''
+            self.assertEqual(task.time_total, task.time_pre_execute + task.time_execute + task.time_post_execute)
+            
+        return None

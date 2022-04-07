@@ -181,14 +181,14 @@ class Task(AstraBaseModel):
     time_execute = FloatField(null=True)
     time_post_execute = FloatField(null=True)
     
-    time_pre_execute_bundle = FloatField(null=True)
     time_pre_execute_task = FloatField(null=True)
+    time_pre_execute_bundle_overhead = FloatField(null=True)
 
-    time_execute_bundle = FloatField(null=True)
     time_execute_task = FloatField(null=True)
+    time_execute_bundle_overhead = FloatField(null=True)
 
-    time_post_execute_bundle = FloatField(null=True)
     time_post_execute_task = FloatField(null=True)
+    time_post_execute_bundle_overhead = FloatField(null=True)
 
     created = DateTimeField(default=datetime.datetime.now)
     completed = DateTimeField(null=True)
@@ -196,6 +196,11 @@ class Task(AstraBaseModel):
     status = ForeignKeyField(Status, default=1) # default: 1 is the lowest status level ('created' or similar)
 
     def as_executable(self, strict=True):
+        log.warning(f"as_executable() deprecated -> instance")
+        return self.instance()
+
+
+    def instance(self, strict=True):
         """Return an executable representation of this task."""
 
         if self.version != __version__:
@@ -760,7 +765,7 @@ def create_tables(
     if drop_existing_tables:
         log.info(f"Dropping existing tables..")
         database.drop_tables(models)
-    log.info(f"Creating tables..")
+
     database.create_tables(models)
 
     # Put data in for Status
