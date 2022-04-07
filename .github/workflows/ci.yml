@@ -34,3 +34,8 @@ jobs:
           ASTRA_DATABASE_URL: 'sqlite:///:memory:'
         run: |
           nosetests python/astra/tests
+      - name: Coveralls
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          coveralls --service=github
