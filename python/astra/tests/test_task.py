@@ -1,10 +1,24 @@
+import os
 import unittest
+import json
 from astra.base import TaskInstance, Parameter, TupleParameter
-from astra.database.astradb import database, Task, Bundle, TaskBundle
+from astra.database.astradb import database, create_tables, Task, Bundle, TaskBundle, DataProduct, TaskInputDataProducts
 from time import sleep
+from tempfile import mkstemp
+
+
+
+
+
+
 
 
 class TestTaskBehaviour(unittest.TestCase):
+
+    def setUp(self):
+        # Create tables if they don't exist.
+        if not database.table_exists(Task):
+            create_tables()
 
     def test_parameter_inheritance(self):
         class Parent(TaskInstance):
@@ -178,21 +192,17 @@ class TestTaskBehaviour(unittest.TestCase):
         self.assertEqual(t.context["bundle"].status.description, "completed")
         for item in t.context["tasks"]:
             self.assertEqual(item.status.description, "completed")
+            self.assertIsNotNone(item.completed)
         
         for item, *_ in t.iterable():
             self.assertEqual(item.status.description, "completed")
+            self.assertIsNotNone(item.completed)
 
 
     def test_task_timing(self):
 
         pre_execute_sleep_length = 3
         post_execute_sleep_length = 2
-
-        # Create tables if they don't exist.
-        if not database.table_exists(Task):
-            with database.atomic():
-                models = (Task, Bundle, TaskBundle)
-                database.create_tables(models) 
 
         class TestTask(TaskInstance):
 
@@ -238,3 +248,65 @@ class TestTaskBehaviour(unittest.TestCase):
             self.assertEqual(task.time_total, task.time_pre_execute + task.time_execute + task.time_post_execute)
             
         return None
+
+
+    def test_data_product_parsing(self):
+
+        class DummyTask(TaskInstance):
+            pass
+        
+        # create some temporary paths
+        temp_paths = [mkstemp()[1] for i in range(5)]
+        for temp_path in temp_paths:
+            self.assertIsInstance(temp_path, str)
+            self.assertTrue(os.path.exists(temp_path))
+
+        # Check that these have been created as data products.
+        def checker(task):
+            for (task, data_products, parameters) in task.iterable():
+                for data_product, temp_path in zip(data_products, temp_paths):
+                    self.assertIsInstance(data_product, DataProduct)
+                    self.assertEqual(data_product.path, temp_path)
+                    self.assertEqual(data_product.filetype, "full")
+
+                    self.assertEqual(data_product.kwargs, dict(full=temp_path))
+
+        # Check with paths
+        A = DummyTask(input_data_products=temp_paths)
+        A.execute()
+        checker(A)
+
+        data_products = A.context["input_data_products"]
+
+        # Try with DataProduct
+        B = DummyTask(input_data_products=data_products)
+        B.execute()
+        checker(B)
+
+        # Try with ids
+        ids = [dp.id for dp in data_products]
+        C = DummyTask(input_data_products=ids)
+        C.execute()
+        checker(C)
+
+        # Try with json'ified IDS
+        D = DummyTask(input_data_products=json.dumps(ids))
+        D.execute()
+        checker(D)
+
+        # Check with single path
+        E = DummyTask(input_data_products=temp_paths[0])
+        E.execute()
+        checker(E)
+
+        F = DummyTask(input_data_products=ids[0])
+        F.execute()
+        checker(F)
+
+        G = DummyTask(input_data_products=json.dumps(ids[0]))
+        G.execute()
+        checker(G)
+
+        H = DummyTask(input_data_products=data_products[0])
+        H.execute()
+        checker(H)

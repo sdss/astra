@@ -3,11 +3,14 @@ import os
 import inspect
 import json
 import numpy as np
-from time import time
+import datetime
 from collections.abc import Iterable
-from astra import (log, __version__)
-from astra.database.astradb import (database, DataProduct, Task, Status, TaskInputDataProducts, Bundle, TaskBundle)
+from importlib import import_module
+from time import time
 
+from astra import (log, __version__)
+from astra.utils import flatten
+from astra.database.astradb import (database, DataProduct, Task, Status, TaskInputDataProducts, Bundle, TaskBundle)
 
 class TaskStageTimer:
     def __init__(self, task, stage):
@@ -150,6 +153,63 @@ class TaskInstanceMeta(type):
 
 class TaskInstance(object, metaclass=TaskInstanceMeta):
     
+    def __init__(self, input_data_products=None, context=None, **kwargs):
+        self.context = context or {} # Set the execution context.
+        
+        # Set parameters.
+        self.bundle_size, self._parameters = self.parse_parameters(**kwargs)
+        for parameter_name, (parameter, value, *_) in self._parameters.items():
+            setattr(self, parameter_name, value)
+
+        self.input_data_products = input_data_products
+        if isinstance(input_data_products, str):
+            try:
+                self.input_data_products = json.loads(input_data_products)
+            except:
+                None
+
+
+    @classmethod
+    def from_task(cls, task, strict=True):
+        """
+        Create a TaskInstance from a database task.
+        """
+        if not isinstance(task, Task):
+            raise ValueError("task must be a Task class")
+        
+        if task.version != __version__:
+            message = f"Task version mismatch for {task}: {task.version} != {__version__}"
+            if strict:
+                raise RuntimeError(message)
+            else:
+                log.warning(message)
+        
+        module_name, class_name = task.name.rsplit(".", 1)
+        module = import_module(module_name)
+        klass = getattr(module, class_name)
+
+        input_data_products = list(task.input_data_products)
+        context = {
+            "input_data_products": input_data_products,
+            "tasks": [task],
+            "bundle": None,
+            "iterable": [(task, input_data_products, task.parameters)]
+        }
+        instance = klass(
+            input_data_products=input_data_products,
+            context=context,
+            **task.parameters
+        )
+        return instance
+
+    @classmethod
+    def from_bundle(cls, bundle, strict=True):
+        """
+        Create a TaskInstance from a database bundle.
+        """
+        raise NotImplementedError("not yet")
+
+
     @classmethod
     def get_defaults(cls):
         defaults = {}
@@ -247,21 +307,6 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         return (bundle_size, parsed)
 
 
-    def __init__(self, input_data_products=None, context=None, **kwargs):
-        self.context = context or {} # Set the execution context.
-        
-        # Set parameters.
-        self.bundle_size, self._parameters = self.parse_parameters(**kwargs)
-        for parameter_name, (parameter, value, *_) in self._parameters.items():
-            setattr(self, parameter_name, value)
-
-        self.input_data_products = input_data_products
-        if isinstance(input_data_products, str):
-            try:
-                self.input_data_products = json.loads(input_data_products)
-            except:
-                None
-
 
     def iterable(self, stage=None):
         if stage is None:
@@ -302,37 +347,32 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         module = inspect.getmodule(self)
         name = f"{module.__name__}.{self.__class__.__name__}"
         
+        input_data_products = get_or_create_data_products(self.input_data_products)
         context = {
-            "input_data_products": get_or_create_data_products(self.input_data_products),
+            "input_data_products": input_data_products,
             "tasks": [],
             "bundle": None,
             "iterable": []
         }
 
         for i in range(self.bundle_size):
-            #try:
-            #    data_products = context["input_data_products"][i]
-            #except:
-            #    data_products = None
-            data_products = None
 
             parameters = {}
             for name, (parameter, value, bundled, length, indexed) in self._parameters.items():
                 parameters[name] = (value[i] if indexed else value)
 
-
-            with database.atomic() as txn: 
+            with database.atomic(): 
                 task = Task.create(
                     name=name,
                     parameters=parameters,
                     version=__version__,
                 )
                 
-                #for data_product in flatten(data_products):
-                #    TaskInputDataProducts.create(task=task, data_product=data_product)
+                for data_product in flatten(input_data_products):
+                    TaskInputDataProducts.create(task=task, data_product=data_product)
 
             context["tasks"].append(task)
-            context["iterable"].append((task, data_products, parameters))
+            context["iterable"].append((task, input_data_products, parameters))
 
         if self.bundle_size > 1:
             context["bundle"] = bundle = Bundle.create()
@@ -385,15 +425,14 @@ def _update_task_status(task, description, items):
         for item in items:
             if item is None: continue
             item.status = status
+            if description == "completed":
+                item.completed = datetime.datetime.now()
             item.save()
             N += 1
     return N
         
 
 ExecutableTask = TaskInstance
-
-
-
 
 
 def get_or_create_data_products(iterable):
@@ -404,9 +443,10 @@ def get_or_create_data_products(iterable):
         try:
             iterable = json.loads(iterable)
         except:
-            pass
+            if os.path.exists(iterable):
+                iterable = [iterable]
 
-    if isinstance(iterable, DataProduct):
+    if isinstance(iterable, (DataProduct, int)):
         iterable = [iterable]
         
     dps = []
@@ -415,7 +455,6 @@ def get_or_create_data_products(iterable):
             dps.append(dp)
         elif isinstance(dp, str) and os.path.exists(dp):
             dp, _ = DataProduct.get_or_create(
-                release=None,
                 filetype="full",
                 kwargs=dict(full=dp)
             )

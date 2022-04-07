@@ -100,7 +100,7 @@ class Source(AstraBaseModel):
 
 class DataProduct(AstraBaseModel):
     id = AutoField()
-    release = TextField()
+    release = TextField(default="sdss5") # TODO: Should we make this a configuration setting?
     filetype = TextField()
     kwargs = JSONField()
 
@@ -203,32 +203,9 @@ class Task(AstraBaseModel):
     def instance(self, strict=True):
         """Return an executable representation of this task."""
 
-        if self.version != __version__:
-            message = f"Task version mismatch for {self}: {self.version} != {__version__}"
-            if strict:
-                raise RuntimeError(message)
-            else:
-                log.warning(message)
-            
-        module_name, class_name = self.name.rsplit(".", 1)
-        module = import_module(module_name)
-        executable_class = getattr(module, class_name)
+        from astra.base import TaskInstance
+        return TaskInstance.from_task(self, strict=strict)
 
-        input_data_products = list(self.input_data_products)
-
-        # We already have context for this task.
-        context = {
-            "input_data_products": input_data_products,
-            "tasks": [self],
-            "bundle": None, # TODO: What if this task is part of a bundle,..?
-            "iterable": [(self, input_data_products, self.parameters)]
-        }
-        executable = executable_class(
-            input_data_products=input_data_products,
-            context=context,
-            **self.parameters
-        )
-        return executable
 
 
     @property
@@ -300,8 +277,14 @@ class Bundle(AstraBaseModel):
     def count_tasks(self):
         return self.tasks.count()
 
-
     def as_executable(self):
+        log.warning(f"as_executable() deprecated -> instance")
+        return self.instance()
+
+    def instance(self, strict=True):
+        from astra.base import TaskInstance
+        return TaskInstance.from_bundle(self, strict=strict)
+        '''
         # TODO: Refactor some of this with the Task.as_executable
 
         # Get all the tasks in this bundle.
@@ -352,7 +335,7 @@ class Bundle(AstraBaseModel):
             **parameters,
         )
         return executable
-
+        '''
 
 class TaskBundle(AstraBaseModel):
     id = AutoField()
