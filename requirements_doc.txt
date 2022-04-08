@@ -4,3 +4,4 @@ Sphinx==1.8.5
 sphinx_bootstrap_theme>=0.4.12
 sphinx-autoapi
 sphinxcontrib-bibtex
+furo
