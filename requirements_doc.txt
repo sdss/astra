@@ -4,3 +4,6 @@ sphinx
 sphinx-autoapi
 myst_parser
 furo
+sphinx_copybutton
+sphinx_design
+sphinx_inline_tabs
