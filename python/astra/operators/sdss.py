@@ -58,13 +58,28 @@ def get_or_create_data_product_from_apogee_drpdb(
         return (False, error)
     t_check_path = time() - t_init
 
+    # Try to get a size.
+    try:
+        size = origin.nvisits # apogee_drp.star
+    except:
+        size = 1
+
+    # TODO: If we the data product already exists, check that the size matches
     with database.atomic() as txn:
         t_init = time()
-        data_product, _ = DataProduct.get_or_create(
+        data_product, data_product_created = DataProduct.get_or_create(
             release=release,
             filetype=filetype,
-            kwargs=kwds
+            kwargs=kwds,
+            defaults=dict(size=size)
         )
+        if not data_product_created:
+            # Update the size
+            if data_product.size != size:
+                log.info(f"Updating size of data product {data_product} from {data_product.size} to {size}")
+                data_product.size = size
+                data_product.save()
+
         t_dp = time() - t_init
         t_init = time()
         source, _ = Source.get_or_create(catalogid=origin.catalogid)

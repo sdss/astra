@@ -66,6 +66,7 @@ class logarithmic_tqdm(tqdm):
             return super().update(n)
 
 
+
 def deserialize(inputs, model):
     if isinstance(inputs, str):
         inputs = json.loads(inputs)
@@ -92,7 +93,42 @@ def serialize_executable(callable):
     return f"{module.__name__}.{callable.__name__}"
 
 
-def bundler(tasks, as_primary_keys=False):
+def estimate_relative_cost(bundle):
+    """
+    Estimate the relative cost of executing a bundle.
+    
+    The cost of executing a bundle depends on the kind of task, the bundle parameters, the
+    number of data products provided, and the number of spectra in each data product. We
+    can only really estimate the 'relative' cost, and so here we will estimate the cost
+    based on the:
+    - number of tasks
+    - number of data products
+    - size of each data product
+    - parameters in the task bundle
+    """
+
+    example_task = bundle.tasks.first()
+    klass = executable(example_task.name)
+    try:
+        factors = klass.estimate_relative_cost_factors(example_task.parameters)
+    except:
+        # By default we will scale cost relative to the size of data products.
+        # (which defaults to the number of data products, if size is unavailable)
+        cost = bundle.count_input_data_products_size()
+    else:
+        A = np.array([
+            bundle.count_tasks(),
+            bundle.count_input_data_products(),
+            bundle.count_input_data_products_size()
+        ])
+        cost = np.sum(A * factors)
+    return cost
+
+
+
+
+
+def bundler(tasks, dry_run=False, as_primary_keys=False):
     """
     Create bundles for tasks that can be executed together.
 
@@ -123,6 +159,7 @@ def bundler(tasks, as_primary_keys=False):
     
     # Group tasks together with the same name and bundled parameters.
     hashes = {}
+    hashed_sets = {}
     for task in tasks:
         hash_args = [task.name]
         for parameter_name in bundled_parameter_names[task.name]:
@@ -140,8 +177,12 @@ def bundler(tasks, as_primary_keys=False):
 
         task_hash = hash("|".join(hash_args))
         hashes.setdefault(task_hash, [])
+        hashed_sets[task_hash] = (task.name, dict(zip(bundled_parameter_names[task.name], hash_args[1:])))
         hashes[task_hash].append(task)
     
+    if dry_run:
+        return (hashes, hashed_sets)
+
     bundled = []
     with database.atomic() as txn:
         for _, group in hashes.items():

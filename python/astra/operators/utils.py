@@ -8,7 +8,7 @@ from astropy.io import fits
 from airflow.models.baseoperator import BaseOperator
 from airflow.exceptions import (AirflowFailException, AirflowSkipException)
 
-from peewee import fn
+from peewee import fn, JOIN
 from astra.database.astradb import database, TaskOutput, DataProduct, Task, TaskInputDataProducts, Bundle, TaskBundle, Status
 from astra.utils import flatten, deserialize
 from astra import (__version__, log)
@@ -33,7 +33,8 @@ def create_task_bundle(executable_task_name, input_data_products, parameters):
         bundle = Bundle.create()
 
         for i, idp in enumerate(input_data_products):
-            parameters = {k: v for k, (p, v, b, d) in executable_class.parse_parameters(**parameters).items() }
+            bundle_size, parsed_parameters = executable_class.parse_parameters(**parameters)
+            parameters = {k: v for k, (p, v, *_) in parsed_parameters.items() }
 
             task = Task.create(
                 name=executable_task_name,
@@ -66,7 +67,8 @@ def create_tasks(
     task_ids = []
     with database.atomic() as txn:
         for i, idp in enumerate(input_data_products):
-            parameters = {k: v for k, (p, v, b, d) in executable_class.parse_parameters(**parameters).items() }
+            bundle_size, parsed_parameters = executable_class.parse_parameters(**parameters)
+            parameters = {k: v for k, (p, v, *_) in parsed_parameters.items() }
             task = Task.create(
                 name=executable_task_name,
                 parameters=parameters,
@@ -100,7 +102,8 @@ def get_or_create_bundle(executable_task_name, parameters, status="created"):
 
     # May need to fill in parameters with default values.
     executable_class = to_callable(executable_task_name)    
-    parameters = { k: v for k, (p, v, b, d) in executable_class.parse_parameters(**parameters).items() }
+    bundle_size, parsed_parameters = executable_class.parse_parameters(**parameters)
+    parameters = { k: v for k, (p, v, *_) in parsed_parameters.items() }
 
     q = (
         Bundle.select()
@@ -195,11 +198,11 @@ def check_bundle_outputs(bundles, raise_on_error=True):
 
         q_no_outputs = (
             Task.select(Task.id)
-                .join(TaskOutput)
-                .switch(Task)
                 .join(TaskBundle)
                 .join(Bundle)
                 .where(Bundle.id == bundle.id)
+                .switch(Task)
+                .join(TaskOutput, JOIN.LEFT_OUTER)
                 .group_by(Task)
                 .having(fn.count(TaskOutput) == 0)
                 .tuples()

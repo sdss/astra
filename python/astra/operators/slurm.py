@@ -15,7 +15,7 @@ from astra.database.astradb import Task, TaskBundle, Bundle
 
 
 from astra import log, config
-from astra.utils import flatten
+from astra.utils import flatten, estimate_relative_cost
 from astra.database.astradb import (database, Bundle)
 
 
@@ -147,6 +147,7 @@ class SlurmOperator(BaseOperator):
             group_bundle_ids = [[bundle.id for bundle in bundles]]
 
         elif B > Q_free:
+            '''
             # Estimate the cost of each bundle.
             bundle_costs = (
                 Bundle.select(
@@ -160,9 +161,16 @@ class SlurmOperator(BaseOperator):
                     .order_by(fn.COUNT(Bundle.id).desc())
                     .tuples()
             )
+            '''
+            bundle_costs = np.array([
+                [bundle_id, estimate_relative_cost(Bundle.get(bundle_id))] for bundle_id in primary_keys
+            ])
+            for primary_key, bundle_cost in zip(primary_keys, bundle_costs):
+                log.debug(f"Bundle {primary_key} cost: {bundle_cost}")
+
             # We need to distribute the bundles approximately evenly.
             # This is known as the 'Partition Problem'.    
-            bundle_costs = np.array(bundle_costs)
+           # bundle_costs = np.array(bundle_costs)
             group_bundle_ids = []
             group_costs = []
             for indices in partition(bundle_costs.T[1], Q_free, return_indices=True):
@@ -191,7 +199,8 @@ class SlurmOperator(BaseOperator):
                     slurm_kwargs=self.slurm_kwargs,
                     slurm_job_key=q.key
                 )
-                bundle.update(meta=meta).execute()
+                bundle.meta = meta
+                bundle.save()
             
         # Check if this should be submitted now.
         tasks = q.client.job.all_tasks()
@@ -236,8 +245,8 @@ class SlurmOperator(BaseOperator):
         else:
             log.info(f"Not submitting queue {q} because {N} < {self.min_bundles_per_slurm_job}")
 
-        meta["slurm_job_key"] = q.key
-        bundle.meta = meta
+        #meta["slurm_job_key"] = q.key
+        bundle.meta["slurm_job_key"] = q.key
         bundle.save()
 
         return q.key

@@ -3,13 +3,16 @@ import json
 import os
 from functools import (lru_cache, cached_property)
 from sdss_access import SDSSPath
-from peewee import (SQL, SqliteDatabase, BooleanField, IntegerField, AutoField, TextField, ForeignKeyField, DateTimeField, BigIntegerField, FloatField, BooleanField)
+from peewee import (SQL, fn, SqliteDatabase, BooleanField, IntegerField, AutoField, TextField, ForeignKeyField, DateTimeField, BigIntegerField, FloatField, BooleanField)
 from sdssdb.connection import PeeweeDatabaseConnection
 from sdssdb.peewee import BaseModel
 from astra import (config, log)
 from astra.utils import flatten
 from astra import __version__
+from tqdm import tqdm
+from time import sleep
 from importlib import import_module
+
 
 # The database config should always be present, but let's not prevent importing the module because it's missing.
 _database_config = config.get("astra_database", {})
@@ -105,6 +108,11 @@ class DataProduct(AstraBaseModel):
     kwargs = JSONField()
 
     metadata = JSONField(null=True)
+
+    # A column that could be used to track n_visits, relative cost, etc.
+    # Should only be used when comparing against DataProducts of the same
+    # release and filetype
+    size = IntegerField(null=True)
 
     class Meta:
         indexes = (
@@ -254,6 +262,7 @@ class Task(AstraBaseModel):
         return TaskOutput.select().where(TaskOutput.task == self).count()
 
 
+
 class TaskOutput(AstraBaseModel):
     id = AutoField()
     task = ForeignKeyField(Task)
@@ -274,8 +283,59 @@ class Bundle(AstraBaseModel):
                 .where(Bundle.id == self.id)
         )
 
+    def _watch(self, interval=1):
+        """
+        Watch the progress of this bundle being executed (perhaps by some other executor).
+
+        Progress is measured by the number of tasks with at least one TaskOutput, divided
+        by the total number of tasks.
+        """
+        T = self.count_tasks()
+        N = self.count_tasks_with_outputs()
+        with tqdm(total=T, initial=N) as pb:
+            while True:
+                sleep(interval)
+                M = self.count_tasks_with_outputs()
+                if M > pb.n:
+                    pb.update(M - pb.n)
+                if M >= T:
+                    break
+        return None
+                
+    def count_tasks_with_outputs(self):
+        return (
+            TaskOutput.select()
+                      .distinct(TaskOutput.task)
+                      .where(TaskOutput.task.in_(self.tasks))
+                      .count()
+        )
+
+
     def count_tasks(self):
         return self.tasks.count()
+
+    def count_input_data_products(self):
+        return (
+            DataProduct.select()
+                       .join(TaskInputDataProducts)
+                       .join(Task)
+                       .join(TaskBundle)
+                       .where(TaskBundle.bundle_id == self.id)
+                       .count()
+        )
+
+    def count_input_data_products_size(self):
+        count, = (
+            DataProduct.select(fn.SUM(DataProduct.size))
+                       .join(TaskInputDataProducts)
+                       .join(Task)
+                       .join(TaskBundle)
+                       .join(Bundle)
+                       .where(Bundle.id == self.id)
+                       .tuples()
+                       .first()
+        )
+        return count
 
     def as_executable(self):
         log.warning(f"as_executable() deprecated -> instance")
@@ -284,58 +344,7 @@ class Bundle(AstraBaseModel):
     def instance(self, strict=True):
         from astra.base import TaskInstance
         return TaskInstance.from_bundle(self, strict=strict)
-        '''
-        # TODO: Refactor some of this with the Task.as_executable
 
-        # Get all the tasks in this bundle.
-        tasks = list(
-            Task.select()
-                .join(TaskBundle)
-                .where(TaskBundle.bundle == self)
-        )
-        input_data_products = [task.input_data_products for task in tasks]
-        
-        task = tasks[0]
-        if task.version != __version__:
-            log.warning(f"Task version mismatch for {self}: {task.version} != {__version__}")
-            
-        module_name, class_name = task.name.rsplit(".", 1)
-        module = import_module(module_name)
-        executable_class = getattr(module, class_name)
-
-        context = {
-            "input_data_products": input_data_products,
-            "tasks": tasks,
-            "bundle": self,
-            "iterable": [(task, idp, task.parameters) for task, idp in zip(tasks, input_data_products)]
-        }
-
-        from astra.base import Parameter
-        parameter_names = dict([(k, v.bundled) for k, v in executable_class.__dict__.items() if isinstance(v, Parameter)])
-
-        parameters = {}
-        for i, task in enumerate(tasks):
-            for p, bundled in parameter_names.items():
-                if bundled:
-                    if i == 0:
-                        try:
-                            parameters[p] = task.parameters[p]
-                        except KeyError:
-                            # Give nothing; use default.
-                            continue
-                else:
-                    if p in task.parameters:
-                        parameters.setdefault(p, [])
-                        parameters[p].append(task.parameters[p])
-
-        executable = executable_class(
-            input_data_products=input_data_products,
-            context=context,
-            bundle_size=len(tasks),
-            **parameters,
-        )
-        return executable
-        '''
 
 class TaskBundle(AstraBaseModel):
     id = AutoField()
@@ -406,20 +415,21 @@ class FerreOutput(AstraBaseModel):
     teff = FloatField()
     logg = FloatField()
     metals = FloatField()
-    log10vdop = FloatField()
     lgvsini = FloatField(null=True)
-    o_mg_si_s_ca_ti = FloatField()
-    c = FloatField()
-    n = FloatField()
+    # BA grid doesn't use these:
+    log10vdop = FloatField(null=True) 
+    o_mg_si_s_ca_ti = FloatField(null=True)
+    c = FloatField(null=True) 
+    n = FloatField(null=True)
 
     u_teff = FloatField()
     u_logg = FloatField()
     u_metals = FloatField()
-    u_log10vdop = FloatField()
+    u_log10vdop = FloatField(null=True)
     u_lgvsini = FloatField(null=True)
-    u_o_mg_si_s_ca_ti = FloatField()
-    u_c = FloatField()
-    u_n = FloatField()
+    u_o_mg_si_s_ca_ti = FloatField(null=True)
+    u_c = FloatField(null=True)
+    u_n = FloatField(null=True)
 
     bitmask_teff = IntegerField(default=0)
     bitmask_logg = IntegerField(default=0)
@@ -439,7 +449,20 @@ class FerreOutput(AstraBaseModel):
     # the `best` model if we have a penalized \chisq term.
     penalized_log_chisq_fit = FloatField(null=True)
 
+    # Astra records the time taken *per task*, and infers things like overhead time for each stage
+    # of pre_execute, execute, and post_execute.
+    # But even one task with a single data model could contain many spectra that we analyse with
+    # FERRE, and for performance purposes we want to know the time taken by FERRE.
+    # For these reasons, let's store some metadata here, even if we could infer it from other things.
+    ferre_time_elapsed = FloatField(null=True)
+    ferre_time_load = FloatField(null=True)
+    ferre_n_threads = IntegerField(null=True)
+    ferre_n_obj = IntegerField(null=True)
     
+
+
+
+
 class ApogeeNetOutput(AstraBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
@@ -468,7 +491,7 @@ class AspcapOutput(AstraBaseModel):
 
 # Dynamically add many fields to AspcapOutput.
 sp_field_names = ("teff", "logg", "metals", "log10vdop", "o_mg_si_s_ca_ti", "lgvsini", "c", "n")
-null_field_names = ("lgvsini", )
+null_field_names = ("lgvsini", "log10vdop", "o_mg_si_s_ca_ti", "c", "n")
 elements = (
     "cn", "al", "ca", "ce", "co", "cr", "fe", "k", "mg", "mn",
     "na", "nd", "ni", "o", "p", "rb", "si", "s", "ti", "v", "yb"
@@ -491,23 +514,6 @@ for element in elements:
     AspcapOutput._meta.add_field(f"log_chisq_fit_{element}_h", FloatField(null=True))
 
 
-class ApogeeNet(AstraBaseModel):
-
-    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
-    task = ForeignKeyField(Task)
-
-    snr = FloatField()
-    teff = FloatField()
-    logg = FloatField()
-    fe_h = FloatField()
-    u_teff = FloatField()
-    u_logg = FloatField()
-    u_fe_h = FloatField()
-    teff_sample_median = FloatField()
-    logg_sample_median = FloatField()
-    fe_h_sample_median = FloatField()
-    bitmask_flag = IntegerField()
-
 
 class TheCannonOutput(AstraBaseModel):
 
@@ -516,6 +522,9 @@ class TheCannonOutput(AstraBaseModel):
 
     # Metadata.
     snr = FloatField()
+    bitmask_flag = IntegerField(default=0)
+    chi_sq = FloatField()
+    reduced_chi_sq = FloatField()
 
     teff = FloatField()
     u_teff = FloatField()
@@ -556,7 +565,6 @@ class TheCannonOutput(AstraBaseModel):
     ni_h = FloatField()
     u_ni_h = FloatField()
 
-    bitmask_flag = IntegerField(default=0)
 
     rho_teff_logg = FloatField(default=0)
     rho_teff_fe_h = FloatField(default=0)

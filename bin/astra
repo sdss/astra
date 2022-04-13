@@ -12,6 +12,17 @@ def cli(context, verbose):
 
 
 @cli.command()
+@click.option("--drop-tables", is_flag=True)
+def initdb(drop_tables):
+    from astra.database.astradb import create_tables
+    create_tables(
+        drop_existing_tables=drop_tables,
+        reuse_if_open=True,
+        insert_status_rows=True,
+    )
+    return None
+
+@cli.command()
 @click.option("--dry-run", is_flag=True)
 def vacuum(dry_run):
     """
@@ -122,6 +133,44 @@ def vacuum(dry_run):
 
     log.warning(f"Not doing anything about these duplicates yet!")
 
+
+@cli.command(hidden=True)
+@click.argument("bundle_id", type=int, required=True)
+def more(bundle_id):
+    import os
+    from astra import log
+    from glob import glob
+    from astra.database.astradb import Bundle
+
+    bundle = Bundle.get(bundle_id)
+    
+    # bundle.
+    job_key = bundle.meta["slurm_job_key"]
+    label = bundle.meta["slurm_kwargs"]["label"]
+
+    dir = f"/scratch/general/nfs1/u6020307/pbs/{label}/{job_key}/"
+    '''    
+    found_path, expected_index = None, None
+    for path in glob(os.path.join(dir, "node*_proc*.slurm")):
+        with open(path, "r") as fp:
+            content = fp.readlines()
+        for line in content:
+            if line.startswith("astra execute bundles ") and str(bundle_id) in line.split()[3:]:
+                found_path = path
+                expected_index = line.split()[3:].index(str(bundle_id))
+                break
+    if found_path is None:
+        log.exception(f"Cannot find '{bundle_id}' among slurm files in {dir}")
+        return None
+    '''
+    import subprocess
+    output = subprocess.check_output(f'grep -n "id={bundle_id}$" {dir}/*.e', shell=True)
+    path, line, *_ = output.decode().split(":")
+    
+    os.system(f"more +{line} {path}")
+    
+
+    
 
 @cli.group()
 def execute():

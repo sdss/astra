@@ -787,58 +787,39 @@ def get_processing_times(stdout):
     n_threads = int(re.findall("nthreads = \s+[0-9]+", use_stdout)[0].split()[-1])
     n_obj = int(re.findall("nobj = \s+[0-9]+", use_stdout)[0].split()[-1])
 
-
     # Find the obvious examples first.
-    ellapsed_time_pattern = "ellapsed time:\s+(?P<time>[{0-9}|.]+)"
-    load_time, *all_ellapsed_times = re.findall(ellapsed_time_pattern, stdout)
-    load_time = float(load_time)
+    elapsed_time_pattern = "ellapsed time:\s+(?P<time>[{0-9}|.]+)"
+    next_object_pattern = "next object #\s+(?P<index_plus_one>[0-9]+)"
+    time_load, *time_elapsed_unordered = re.findall(elapsed_time_pattern, stdout)
+    time_elapsed_unordered = np.array(time_elapsed_unordered, dtype=float)
+    time_load = float(time_load)
 
-    ellapsed_time_with_indices = re.findall(
-        ellapsed_time_pattern + "\s+s\s+next object #\s+(?P<index_plus_one>[0-9]+)", 
-        stdout
-    )
+    # object_indices is zero-indexed
+    object_indices = np.array(re.findall(next_object_pattern, stdout), dtype=int) - 1
+
+    # There are many ways to match up the elapsed time per object. Some are more explicit
+    # than others, but to require a more explicit matching means always depending on less
+    # implicit circumstances anyways.
+    elapsed_time_per_spectrum = np.nan * np.ones(n_obj)
+    for index, elapsed_time in zip(object_indices, time_elapsed_unordered):
+        elapsed_time_per_spectrum[index] = elapsed_time
 
     time_per_spectrum = np.nan * np.ones(n_obj)
-    for time, index_plus_1 in ellapsed_time_with_indices:
-        index = int(index_plus_1) - 2
-        last_time = time_per_spectrum[index - 1]
-        if not np.isfinite(last_time):
-            last_time = load_time
-        time_per_spectrum[index] = float(time) - last_time
- 
-    # For the remaning n_thread objects we need to use a different pattern
-    sol = " SOL "
-    remaining_elapsed_times = np.array(
-        re.findall(ellapsed_time_pattern, sol.join(stdout.split(sol)[-(n_threads + 1):])),
-        dtype=float
-    )
+    idx = np.sort(object_indices[:n_threads])
+    for si, ei in np.hstack([0, np.repeat(idx[1:], 2), n_obj]).reshape((-1, 2)):
+        time_per_spectrum[si:ei] = np.diff(np.hstack([time_load, elapsed_time_per_spectrum[si:ei]]))
 
-    # These last timings will be inaccurate because FERRE prints out ellapsed time more times
-    # than there are objects. Let's just do what we can.
-    missing = ~np.isfinite(time_per_spectrum)
-    for time, index in zip(np.where(missing)[0], remaining_elapsed_times[-n_threads:]):
-
-        raise a
-
-    obj_ellapsed_times[missing] = remaining_elapsed_times[-n_threads:]
-
-    # Offset load time.
-    obj_ellapsed_times -= load_time
-
-    # Account for number of threads.
-    O = n_threads - (elapsed_time.size % n_threads)
-    A = np.hstack([elapsed_time, np.zeros(O)]).reshape((-1, n_threads))
-    time_per_spectrum = np.hstack([elapsed_time[:n_threads], np.diff(A, axis=0).flatten()[:-O]])
-
-    object_indices = [int(index.split()[-1]) for index in re.findall('next object #\s+[{0-9}]+', use_stdout)]
-
-    # Sort.
-    idx = np.argsort(object_indices)
-    time_per_spectrum = time_per_spectrum[idx]
-    
+    L, M = (len(time_elapsed_unordered), len(object_indices))
+    if M < n_obj:
+        log.warning(f"Could not find all object indices from FERRE stdout: expected {n_obj} found {M}")
+    if L < n_obj:
+        log.warning(f"Could not find all elapsed times from FERRE stdout: expected {n_obj} found {L}")
+        
     return dict(
-        load_time=load_time,
-        elapsed_time=elapsed_time[:-1],
-        indices=idx[:-1],
-        time_per_ordered_spectrum=time_per_spectrum[:-1]
+        time_load=time_load,
+        time_per_spectrum=time_per_spectrum,
+        object_indices=object_indices,
+        time_elapsed_unordered=time_elapsed_unordered,
+        n_threads=n_threads,
+        n_obj=n_obj
     )

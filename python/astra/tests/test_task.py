@@ -198,6 +198,21 @@ class TestTaskBehaviour(unittest.TestCase):
             self.assertEqual(item.status.description, "completed")
             self.assertIsNotNone(item.completed)
 
+    def test_task_created_and_completed(self):
+
+        class DummyTask(TaskInstance):
+            A = Parameter()
+            B = Parameter(bundled=True)
+            C = Parameter(default=None)
+
+        t = DummyTask(A=(1, 2, 3), B=34, C=(3, 4, 5))
+        t.execute()
+
+        for task in t.context["tasks"]:
+            self.assertEqual(task.name, "__main__.DummyTask")
+            self.assertIsNotNone(task.created)
+            self.assertIsNotNone(task.completed)
+
 
     def test_task_timing(self):
 

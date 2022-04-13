@@ -9,7 +9,7 @@ from importlib import import_module
 from time import time
 
 from astra import (log, __version__)
-from astra.utils import flatten
+from astra.utils import flatten, list_to_dict
 from astra.database.astradb import (database, DataProduct, Task, Status, TaskInputDataProducts, Bundle, TaskBundle)
 
 class TaskStageTimer:
@@ -19,6 +19,13 @@ class TaskStageTimer:
     
     def __enter__(self):
         self.t_enter = time()
+        # before execute, empty the timing dict of any timing info for this stage
+        try:
+            self.task.context.setdefault("timing", {})
+            for k in (f"time_{self.stage}", f"time_{self.stage}_bundle_overhead"):
+                self.task.context["timing"].pop(k, None)
+        except:
+            log.exception(f"Unable to clear timing data before {self.stage} on {self.task}")
         return self
     
     def __exit__(self, type, value, traceback):
@@ -30,7 +37,19 @@ class TaskStageTimer:
 
         # Handle exception.
         if traceback is not None:
-            log.exception(f"Exception in {self.stage} for {self.task}:\n\t\t{type}: {value} {traceback}")
+            try:
+                bundle = self.task.context["bundle"]
+                tasks = self.task.context["tasks"]
+            except:
+                bundle, tasks = (None, None)
+            else:
+                if bundle is not None:
+                    description = f"bundle={bundle}"
+                elif tasks is not None:
+                    description = f"task={tasks[0]} (probably)"
+                else:
+                    description = "unknown"
+            log.exception(f"Exception in {self.stage} for {self.task} ({description}):\n\t\t{type}: {value} {traceback}")
             self.task.update_status(description=f"failed-{self.stage.replace('_', '-')}", safe=True)
         return None
 
@@ -38,13 +57,22 @@ class TaskStageTimer:
     def set_internal_timing(self, time_actual):
         self.task.context.setdefault("timing", {})
 
-        # The time per task for this stage is filled by the task.iterable()
+        # check if the execute() function pre-computed the bundle time and time_per_task for us
+        # if it did, then don't overwrite that,.. use that instead.
         time_per_task = np.array(self.task.context["timing"].get(f"time_{self.stage}_per_task", [0]))
-        time_bundle = time_actual - sum(time_per_task) # overhead for bundle
 
-        # These should match the database model for Task
-        self.task.context["timing"][f"time_{self.stage}_bundle_overhead"] = time_bundle
-        self.task.context["timing"][f"time_{self.stage}"] = time_actual
+        bundle_key = f"time_{self.stage}_bundle_overhead"
+        if bundle_key not in self.task.context["timing"]:
+            # The time per task for this stage is filled by the task.iterable()
+            time_bundle = time_actual - sum(time_per_task) # overhead for bundle
+
+            # These should match the database model for Task
+            self.task.context["timing"][f"time_{self.stage}_bundle_overhead"] = time_bundle
+            self.task.context["timing"][f"time_{self.stage}"] = time_actual
+
+        else:
+            self.task.context["timing"][f"time_{self.stage}"] = sum(time_per_task) + self.task.context["timing"][bundle_key]
+
         self.task.context["timing"]["time_total"] = \
             sum([self.task.context["timing"].get(f"time_{s}", 0) for s in ("pre_execute", "execute", "post_execute")])
         
@@ -174,19 +202,7 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         """
         Create a TaskInstance from a database task.
         """
-        if not isinstance(task, Task):
-            raise ValueError("task must be a Task class")
-        
-        if task.version != __version__:
-            message = f"Task version mismatch for {task}: {task.version} != {__version__}"
-            if strict:
-                raise RuntimeError(message)
-            else:
-                log.warning(message)
-        
-        module_name, class_name = task.name.rsplit(".", 1)
-        module = import_module(module_name)
-        klass = getattr(module, class_name)
+        klass = _get_task_instance_class(task, Task, strict)
 
         input_data_products = list(task.input_data_products)
         context = {
@@ -202,13 +218,40 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         )
         return instance
 
+
+
     @classmethod
     def from_bundle(cls, bundle, strict=True):
         """
         Create a TaskInstance from a database bundle.
         """
-        raise NotImplementedError("not yet")
+        klass = _get_task_instance_class(bundle, Bundle, strict)
 
+        # Create context.
+        tasks = list(bundle.tasks)
+        bundle_size = len(tasks)
+        input_data_products = [tuple(task.input_data_products) for task in tasks]
+        context = {
+            "input_data_products": input_data_products,
+            "tasks": tasks,
+            "bundle": bundle,
+            "iterable": [(task, data_products, task.parameters) for task, data_products in zip(tasks, input_data_products)]
+        }
+        # Need to supply bundle parameters.
+        parameters = {}
+        for k, v in list_to_dict([t.parameters for t in tasks]).items():
+            p = getattr(klass, k)
+            if p.bundled or bundle_size == 1:
+                #assert len(set(v)) == 1, ## will fail for dicts as they're unhashables.
+                parameters[k] = v[0]
+            else:
+                parameters[k] = v
+        
+        return klass(
+            input_data_products=input_data_products,
+            context=context,
+            **parameters
+        )
 
     @classmethod
     def get_defaults(cls):
@@ -278,7 +321,11 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
                 )
 
             # Check the lengths of all non-bundled params.
-            if not parameter.bundled and not default and not isinstance(parameter, iterable_parameter_classes):
+            if (
+                not parameter.bundled and not default 
+                and not isinstance(parameter, iterable_parameter_classes) 
+                and not isinstance(value, str)
+            ):
                 relevant_lengths[name] = length
         
         lengths = set(relevant_lengths.values()).difference({1})
@@ -345,7 +392,7 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
             return self.context
 
         module = inspect.getmodule(self)
-        name = f"{module.__name__}.{self.__class__.__name__}"
+        task_name = f"{module.__name__}.{self.__class__.__name__}"
         
         input_data_products = get_or_create_data_products(self.input_data_products)
         context = {
@@ -363,7 +410,7 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
 
             with database.atomic(): 
                 task = Task.create(
-                    name=name,
+                    name=task_name,
                     parameters=parameters,
                     version=__version__,
                 )
@@ -406,6 +453,28 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
             N = _update_task_status(*args)
 
         return N
+
+
+
+def _get_task_instance_class(item, expected, strict):
+    if not isinstance(item, expected):
+        raise TypeError(f"expected {expected}, not {type(item)}")
+    
+    if isinstance(item, Bundle):
+        check_version = item.tasks.first()
+    else:
+        check_version = item
+
+    if check_version.version != __version__:
+        message = f"Task/bundle version mismatch for {check_version}: {check_version.version} != {__version__}"
+        if strict:
+            raise RuntimeError(message)
+        else:
+            log.warning(message)
+
+    module_name, class_name = check_version.name.rsplit(".", 1)
+    module = import_module(module_name)
+    return getattr(module, class_name)
 
 
 def _update_task_status(task, description, items):

@@ -39,7 +39,16 @@ def initial_guess_doppler(
     if star is None:
         if source is None:
             source, = data_product.sources
-        star = Star.get(catalogid=source.catalogid)
+
+        # Be sure to get the record of the Star with the latest and greatest stack,
+        # and latest and greatest set of Doppler values.
+        star = (
+            Star.select()
+                .where(Star.catalogid == source.catalogid)
+                .order_by(Star.created.desc())
+                .first()
+        )
+
     return dict(
         telescope=data_product.kwargs["telescope"],
         mean_fiber=int(star.meanfib),
@@ -328,6 +337,7 @@ def create_abundance_tasks(
     with open(expand_path(weight_paths), "r") as fp:
         weight_paths = list(map(str.strip, fp.readlines()))
     
+    all_headers = {}
     abundance_keywords = {}
 
     tasks = []
@@ -337,6 +347,7 @@ def create_abundance_tasks(
         if header_path not in abundance_keywords:
             abundance_keywords[header_path] = {}
             headers, *segment_headers = read_ferre_headers(expand_path(header_path))
+            all_headers[header_path] = (headers, *segment_headers)
             for weight_path in weight_paths:
                 element = get_element(weight_path)
                 abundance_keywords[header_path][element] = utils.get_abundance_keywords(element, headers["LABEL"])
@@ -375,6 +386,17 @@ def create_abundance_tasks(
             parameters["ferre_kwds"] = (parameters["ferre_kwds"] or dict())
             parameters["ferre_kwds"].update(ferre_abundance_kwds)
 
+            # Check to see if all parameters are going to be frozen.
+            n_of_dim = all_headers[header_path][0]["N_OF_DIM"]
+            n_frozen_dim = sum(frozen_parameters.values())
+            n_free_dim = n_of_dim - n_frozen_dim
+            if n_free_dim == 0:
+                log.warning(
+                    f"Not creating task {FERRE_TASK_NAME} with weight path {weight_path} from task {task} "
+                    f"because all parameters are frozen (n_of_dim: {n_of_dim}, n_frozen: {n_frozen_dim}):\n{parameters}"
+                )
+                continue
+
             abundance_task = Task.create(
                 name=FERRE_TASK_NAME,
                 version=__version__,
@@ -394,22 +416,12 @@ def create_abundance_tasks(
 
 
 from astra.database.astradb import database, Task, TaskInputDataProducts, AspcapOutput, Output, TaskOutput
-from astra.base import ExecutableTask, Parameter
+from astra.base import ExecutableTask, TupleParameter
 
 class Aspcap(ExecutableTask):
 
-    stellar_parameter_task_ids = Parameter("stellar_parameter_task_ids")
-    abundance_task_ids = Parameter("abundance_task_ids")
-
-    def pre_execute(self):
-        """
-        Relate the input data products from the given stellar parameter task to this task.
-        """ 
-        for task, _, parameters in self.iterable():
-            stellar_parameter_task = Task.get_by_id(int(parameters["stellar_parameter_task_ids"]))
-            for data_product in stellar_parameter_task.input_data_products:
-                TaskInputDataProducts.create(task=task, data_product=data_product)
-
+    stellar_parameter_task_ids = TupleParameter("stellar_parameter_task_ids")
+    abundance_task_ids = TupleParameter("abundance_task_ids")
 
     def execute(self):
 
@@ -418,7 +430,13 @@ class Aspcap(ExecutableTask):
         for task, input_data_products, parameters in self.iterable():
 
             stellar_parameter_task = Task.get_by_id(int(parameters["stellar_parameter_task_ids"]))
+            log.debug(f"ASPCAP task {task} got stellar parameter task {stellar_parameter_task}")
+            for data_product in stellar_parameter_task.input_data_products:
+                log.debug(f"Assigned data product {data_product} to ASPCAP task {task}")
+                TaskInputDataProducts.create(task=task, data_product=data_product)
+
             abundance_tasks = deserialize(parameters["abundance_task_ids"], Task)
+            log.debug(f"ASPCAP task {task} got abundance tasks {abundance_tasks}")
 
             task_results = []
             for output in stellar_parameter_task.outputs:
@@ -436,6 +454,14 @@ class Aspcap(ExecutableTask):
                 task_results.append(result)
             
             for abundance_task in abundance_tasks:
+
+                if abundance_task.count_outputs() == 0:
+                    log.warning(
+                        f"No outputs for abundance task {abundance_task} on stellar parameter task {stellar_parameter_task}. "
+                        "Skipping!"
+                    )
+                    continue
+
                 # get the element
                 element = get_element(abundance_task.parameters["weight_path"])
                 
@@ -449,6 +475,12 @@ class Aspcap(ExecutableTask):
                     log.warning(f"Parameter names thawed: {parameter_name}")
                     parameter_name = parameter_name.difference({"lgvsini"})
                 
+                if len(parameter_name) == 0:
+                    log.warning(f"No free parameters for {abundance_task}")
+                    log.debug(f"initial: {initial}: {abundance_task.parameters['initial_parameters']}")
+                    log.debug(f"frozen: {frozen}: {abundance_task.parameters['frozen_parameters']}")
+                    continue
+
                 assert len(parameter_name) == 1
                 parameter_name, = parameter_name
 
@@ -458,28 +490,20 @@ class Aspcap(ExecutableTask):
                     task_results[i][f"u_{key}"] = getattr(output, f"u_{parameter_name}")
                     task_results[i][f"bitmask_{key}"] = getattr(output, f"bitmask_{parameter_name}")
                     task_results[i][f"log_chisq_fit_{key}"] = output.log_chisq_fit
-                    
-            results.append(task_results)
+            
+            for result in task_results:
+                output = Output.create()
+                TaskOutput.create(task=task, output=output)
+                AspcapOutput.create(
+                    task=task,
+                    output=output,
+                    **result
+                )
 
+            results.append(task_results)
         return results                
 
 
-    def post_execute(self):
-        # TODO: Should we add timings from the individual tasks?
-
-        total = sum(map(len, self.result))
-        with database.atomic() as txn:
-            with tqdm(total=total) as pb:
-                for (task, input_data_products, parameters), results in zip(self.iterable(), self.result):
-                    for result in results:
-                        output = Output.create()
-                        TaskOutput.create(task=task, output=output)
-                        AspcapOutput.create(
-                            task=task,
-                            output=output,
-                            **result
-                        )
-                        pb.update()
 
 
 def create_and_execute_summary_tasks(

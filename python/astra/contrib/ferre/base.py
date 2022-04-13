@@ -7,7 +7,7 @@ import pickle
 from tempfile import mkdtemp
 
 from astra import log, __version__
-from astra.base import ExecutableTask, Parameter
+from astra.base import ExecutableTask, Parameter, TupleParameter, DictParameter
 from astra.tools.spectrum import Spectrum1D
 from astra.contrib.ferre import (bitmask, utils)
 from astra.utils import flatten, executable, expand_path, nested_list
@@ -16,8 +16,8 @@ from astra.database.astradb import (database, DataProduct, TaskOutputDataProduct
 class Ferre(ExecutableTask):
 
     header_path = Parameter("header_path", bundled=True)
-    initial_parameters = Parameter("initial_parameters", default=None)
-    frozen_parameters = Parameter("frozen_parameters", default=None, bundled=True)
+    initial_parameters = DictParameter("initial_parameters", default=None)
+    frozen_parameters = DictParameter("frozen_parameters", default=None, bundled=True)
     interpolation_order = Parameter("interpolation_order", default=3, bundled=True)
     weight_path = Parameter("weight_path", default=None, bundled=True)
     lsf_shape_path = Parameter("lsf_shape_path", default=None, bundled=True)
@@ -35,16 +35,57 @@ class Ferre(ExecutableTask):
     pca_chi = Parameter("pca_chi", default=False, bundled=True)
     f_access = Parameter("f_access", default=None, bundled=True)
     f_format = Parameter("f_format", default=1, bundled=True)
-    ferre_kwds = Parameter("ferre_kwds", default=None, bundled=True)
+    ferre_kwds = DictParameter("ferre_kwds", default=None, bundled=True)
     parent_dir = Parameter("parent_dir", default=None, bundled=True)
     n_threads = Parameter("n_threads", default=1, bundled=True)
 
     # For normalization to be made before the FERRE run.
     normalization_method = Parameter("normalization_method", default=None, bundled=False)
-    normalization_kwds = Parameter("normalization_kwds", default=None, bundled=False)
+    normalization_kwds = DictParameter("normalization_kwds", default=None, bundled=False)
 
     # For deciding what rows to use from each data product.
-    slice_args = Parameter("slice_args", default=None, bundled=False)
+    slice_args = TupleParameter("slice_args", default=None, bundled=False)
+
+    @classmethod
+    def estimate_relative_cost_factors(cls, parameters):
+        """
+        Return a three-length array containing the relative cost per:
+            - task, 
+            - data product, and
+            - size of the data product.
+
+        Here 'relative cost' is relative to other tasks of this type. For example, if one parameter
+        makes the cost of this task twice as long per data product, this method will take that
+        into account. That makes Slurm scheduling more efficient.
+        """
+        # The cost scales significantly with the number of dimensions being solved for.
+        headers, *segment_headers = utils.read_ferre_headers(expand_path(parameters["header_path"]))
+        D = int(headers["N_OF_DIM"] - len(parameters.get("frozen_parameters", {})))
+
+        # some rough scaling from experiments on 20220412
+        scales = {
+            6: 1,
+            7: 2,
+            8: 10
+        }
+        scale = scales.get(D, 1)
+
+        factor_task, factor_data_product, factor_data_product_size = (0, 0, 0)
+
+        # Now we just need to figure out where this scaling should apply.
+        # If we are slicing the data products then the scaling should go as number of data products.
+
+        # If we are not slicing the data products then the scaling should go as the size of the
+        # data products
+        if parameters.get("slice_args", None) is None:
+            factor_data_product_size = scale
+        else:
+            # Estimate the number slicing each time.
+            N = np.ptp(np.array(parameters["slice_args"]).flatten())
+            factor_data_product = N * scale
+        
+        return np.array([factor_task, factor_data_product, factor_data_product_size])
+
 
 
     @classmethod
@@ -62,7 +103,7 @@ class Ferre(ExecutableTask):
     def pre_execute(self):
         
         # Check if the pre-execution has already happened somewhere else.
-        if "dir" in self.context:
+        if "pre_execute" in self.context:
             return None
 
         # Create a temporary directory.
@@ -210,7 +251,10 @@ class Ferre(ExecutableTask):
     def execute(self):
         """ Execute FERRE """
         
-        dir = self.context["dir"]
+        try:
+            dir = self.context["pre_execute"]["dir"]
+        except:
+            raise ValueError(f"No directory prepared by pre-execute in self.context['pre_execute']['dir'] ")
 
         try:
             process = subprocess.Popen(
@@ -251,13 +295,22 @@ class Ferre(ExecutableTask):
             timings = utils.get_processing_times(stdout)
 
             names = np.loadtxt(os.path.join(dir, control_kwds["PFILE"]), usecols=0, dtype=str)
-            time_execute_task = np.zeros(len(self.context["tasks"]))
-            for name, t in zip(names, timings["time_per_ordered_spectrum"]):
-                time_execute_task[self.from_name(name)["i"]] += t
-            self._timing["time_execute_task"] = time_execute_task
+            time_execute_per_task = np.zeros(len(self.context["tasks"]))
+            for name, t in zip(names, timings["time_per_spectrum"]):
+                time_execute_per_task[self.from_name(name)["i"]] += t
+            
+            # And store the FERRE load time as the bundle overhead.
+            # TODO: The only other way around this is to somehow take the number of threads used
+            #       into account when timing a task, but that becomes pretty tricky for all tasks.
+            self.context["timing"]["time_execute_per_task"] = list(time_execute_per_task)
+            self.context["timing"]["time_execute_bundle_overhead"] = timings["time_load"]
         except:
-            log.warning(f"Exception when trying to update internal task timings from FERRE.")
-
+            log.exception(f"Exception when trying to update internal task timings from FERRE.")
+        else:
+            log.debug(f"Timing information from FERRE stdout:")
+            for key, value in timings.items():
+                log.debug(f"\t{key}: {value}")
+            
         # Parse the outputs from the FERRE run.
         path = os.path.join(dir, control_kwds["OPFILE"])
         try:
@@ -338,6 +391,16 @@ class Ferre(ExecutableTask):
                 frac_phot_data_points=meta["frac_phot_data_points"][z],
                 snr=parsed["snr"],
             )
+            try:
+                result.update(
+                    ferre_time_elapsed=timings["time_per_spectrum"][z],
+                    ferre_time_load=timings["time_load"],
+                    ferre_n_obj=timings["n_obj"],
+                    ferre_n_threads=timings["n_threads"],
+                )
+            except:
+                log.exception(f"Exception while trying to include FERRE timing information in the database for {self}")
+
             result.update(dict(zip(parameter_names, param)))
             result.update(dict(zip([f"u_{pn}" for pn in parameter_names], param_err)))
             result.update(dict(zip([f"bitmask_{pn}" for pn in parameter_names], bitmask_flag)))
@@ -372,9 +435,11 @@ class Ferre(ExecutableTask):
         Read in the output files, create rows in the database, and produce output data products.
         """
 
+        results = self.context["execute"]
+
         # Create outputs in the database.
         with database.atomic() as txn:
-            for (task, data_products, _), task_results in zip(self.iterable(), self.result):
+            for (task, data_products, _), task_results in zip(self.iterable(), results):
                 for (data_product, data_product_results) in zip(flatten(data_products), task_results):
 
                     for result in data_product_results:
@@ -413,3 +478,15 @@ class Ferre(ExecutableTask):
                     
         return None
 
+
+'''
+def create_task_output(task, model, **kwargs):
+    output = Output.create()
+    task_output = TaskOutput.create(task=task, output=output)
+    result = model.create(
+        task=task,
+        output=output,
+        **kwargs
+    )
+    return (output, task_output, result)
+'''
