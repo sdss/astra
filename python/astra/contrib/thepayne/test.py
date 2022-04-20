@@ -58,6 +58,18 @@ def load_state(path):
         label_names=contents["label_names"]
     )
 
+def load_apogee_mask(model_path):
+    '''
+    read in the pixel mask with which we will omit bad pixels during spectral fitting
+    The mask is made by comparing the tuned Kurucz models to the observed spectra from Arcturus
+    and the Sun from APOGEE. We mask out pixels that show more than 2% of deviations.
+    '''
+    #path = os.path.join(os.path.dirname(os.path.realpath(__file__)),'other_data/apogee_mask.npz')
+    path = os.path.join(os.path.dirname(model_path),'other_data/apogee_mask.npz')
+    tmp = np.load(path)
+    mask = tmp['apogee_mask']
+    tmp.close()
+    return mask
 
 
 
@@ -65,6 +77,7 @@ def test(
         wavelength,
         flux,
         ivar,
+        mask, 
         neural_network_coefficients, 
         scales, 
         model_wavelength, 
@@ -161,6 +174,9 @@ def test(
         non_finite = ~np.isfinite(y * y_err)
         y[non_finite] = 1
         y_err[non_finite] = LARGE
+
+        # set infinity uncertainty to pixels that we want to omit
+        y_err[mask] = LARGE
 
         kwds = kwargs.copy()
         kwds.update(

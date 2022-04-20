@@ -167,6 +167,7 @@ def estimate_stellar_labels(pks, **kwargs):
     log.info(f"Using torch version {torch.__version__} in {torch.__path__}")
 
     states = {}
+    masks   = {}
 
     log.info(f"Estimating stellar labels for task instances")
 
@@ -177,9 +178,12 @@ def estimate_stellar_labels(pks, **kwargs):
         model_path = instance.parameters["model_path"]
         try:
             state = states[model_path]
+            mask  = masks[model_path]
         except KeyError:
             log.info(f"Loading model from {model_path}")
             state = states[model_path] = test.load_state(model_path)    
+            mask  = masks[model_path] =  test.load_apogee_mask(model_path)
+            #mask  = masks[model_path] =  test.load_apogee_mask("/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/mwm/sandbox/astra/test/song/ThePayne/other_data/apogee_mask.npz")
 
             label_names = state["label_names"]
             L = len(label_names)
@@ -191,6 +195,7 @@ def estimate_stellar_labels(pks, **kwargs):
             spectrum.wavelength.value,
             spectrum.flux.value,
             spectrum.uncertainty.array,
+            mask,
             **state
         )
         t_opt = time() - t_init
