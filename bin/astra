@@ -1,4 +1,5 @@
 import click
+from astra import log
 
 # Common options.
 @click.group()
@@ -8,12 +9,14 @@ import click
 def cli(context, verbose):
     context.ensure_object(dict)
     context.obj["verbose"] = verbose
-    print(f"verbose={verbose}")
+    # Overwrite settings in ~/.astra/astra.yml
+    log.set_level(10 if verbose else 20)
 
 
 @cli.command()
 @click.option("--drop-tables", is_flag=True)
 def initdb(drop_tables):
+    """Initialize the database.""" 
     from astra.database.astradb import create_tables
     create_tables(
         drop_existing_tables=drop_tables,
@@ -28,8 +31,6 @@ def vacuum(dry_run):
     """
     Vacuum up the database.
     """
-
-    from astra import log
     from peewee import JOIN, fn
     from time import sleep
     from astra.database.astradb import Task, Bundle, TaskBundle, TaskOutput, TaskInputDataProducts
@@ -170,10 +171,53 @@ def more(bundle_id):
     os.system(f"more +{line} {path}")
     
 
+@cli.group()
+def status():
+    """Check the status of a task or bundle."""
+    pass
+
+@status.command()
+@click.argument("bundle_ids", type=int, nargs=-1, required=True)
+def bundles(bundle_ids):
+    """Check the status of bundles."""
+    from astra import log
+    from astra.utils import deserialize
+    from astra.database.astradb import Bundle
+
+    N_tasks, N_bundles = (0, 0)
+    statuses = {}
+    tasks_by_status = {}
+    for bundle in Bundle.select().where(Bundle.id.in_(bundle_ids)):
+        description = bundle.status.description
+
+        statuses.setdefault(description, [])
+        tasks_by_status.setdefault(description, 0)
+
+        T = len(bundle.tasks)
+
+        statuses[description].append(bundle)
+
+        N_bundles += 1
+        N_tasks += len(bundle.tasks)
+        tasks_by_status[description] += T
+
     
+    log.info(f"Summary:")
+    for status, bundles in statuses.items():
+        count_bundles = len(bundles)
+        count_tasks = tasks_by_status[status]
+        log.info(f"    {count_bundles} {status} bundles ({100 * count_bundles / N_bundles:.0f}%); {count_tasks} tasks ({100 * count_tasks / N_tasks:.0f}%)")
+
+    log.debug(f"Bundles by status:")
+    for status, bundles in statuses.items():
+        desc = " ".join([f"{bundle.id:.0f}" for bundle in bundles])
+        log.debug(f"    {status}: {desc}")
+
+    return None
 
 @cli.group()
 def execute():
+    """Execute a task or bundle.""" 
     pass
 
 def do_work(ids, is_bundle):
