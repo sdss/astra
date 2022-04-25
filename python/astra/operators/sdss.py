@@ -10,6 +10,8 @@ from astra.database.astradb import (database, DataProduct, Source, SourceDataPro
 from astra import log
 from functools import lru_cache
 
+from peewee import fn
+
 @lru_cache
 def path_instance(release):
     return SDSSPath(release=release)
@@ -153,9 +155,14 @@ class BossSpecOperator(BaseOperator):
 
 
 
-class BaseApogeeDRPOperator(BaseOperator):
 
-    def get_or_create_data_products(self, prev_ds, ds, model, where=None, **kwargs):
+
+class ApVisitOperator(BaseOperator):
+
+    def execute(self, context):
+
+        model, prev_ds, ds = (Visit, context["prev_ds"], context["ds"])
+        where = (Visit.catalogid > 0)
     
         log.info(f"{self} is looking for products created between {prev_ds} and {ds}")
         q = (
@@ -172,10 +179,7 @@ class BaseApogeeDRPOperator(BaseOperator):
         ids = []
         errors = []
         for origin in q:
-            success, result = get_or_create_data_product_from_apogee_drpdb(
-                origin,
-                **kwargs
-            )
+            success, result = get_or_create_data_product_from_apogee_drpdb(origin)
             if success:
                 log.info("Data product {data_product} matched to {source}".format(**result))
                 ids.append(result["data_product"].id)
@@ -192,20 +196,7 @@ class BaseApogeeDRPOperator(BaseOperator):
 
 
 
-class ApVisitOperator(BaseApogeeDRPOperator):
-
-    def execute(self, context):
-        return self.get_or_create_data_products(
-            context["prev_ds"],
-            context["ds"],
-            Visit,
-            where=(Visit.catalogid > 0),
-        )
-
-
-
-
-class ApStarOperator(BaseApogeeDRPOperator):
+class ApStarOperator(BaseOperator):
     """
     Generate data model products in the Astra database for all new ApStar
     files produced since the operator was last executed.
@@ -217,12 +208,65 @@ class ApStarOperator(BaseApogeeDRPOperator):
 
     ui_color = "#ffb09c"
 
-    def execute(self, context):
-        return self.get_or_create_data_products(
-            context["prev_ds"],
-            context["ds"],
-            Star,
-            where=(Star.ngoodvisits > 0) & (Star.catalogid > 0),
-        )
+    def execute(
+        self, 
+        context,
+        where=(Star.ngoodvisits > 0) & (Star.catalogid > 0),
+        latest_only=True
+    ):
+        prev_ds, ds = (context["prev_ds"], context["ds"])
+    
+        log.info(f"{self} is looking for {'only latest' if latest_only else 'any'} ApStar products created between {prev_ds} and {ds}")
+
+        if latest_only:
+            StarAlias = Star.alias()
+            sq = (
+                StarAlias.select(
+                    StarAlias.catalogid, 
+                    fn.MAX(StarAlias.created).alias("max_created")
+                ).group_by(StarAlias.catalogid).alias("sq")
+            )
+            q = (
+                Star.select()
+                    .where(
+                        sq.c.max_created.between(prev_ds, ds)
+                        & where
+                    )
+                    .join(
+                        sq, 
+                        on=(Star.created == sq.c.max_created) 
+                         & (Star.catalogid == sq.c.catalogid)
+                    )
+            )
+        else:
+            q = (
+                Star.select()
+                    .where(
+                        Star.created.between(prev_ds, ds)
+                        & where
+                    )
+            )
+
+        N = q.count()
+        if N == 0:
+            raise AirflowSkipException(f"No products for {self} created between {prev_ds} and {ds}")
+
+        ids = []
+        errors = []
+        for origin in q:
+            success, result = get_or_create_data_product_from_apogee_drpdb(origin)
+            if success:
+                log.info("Data product {data_product} matched to {source}".format(**result))
+                ids.append(result["data_product"].id)
+            else:
+                log.warning("{reason} ({detail}) from {origin}".format(**result))
+                errors.append(result)
+
+        log.info(f"Found {N} rows.")
+        log.info(f"Created {len(ids)} data products.")
+        log.info(f"Encountered {len(errors)} errors.")
+        if len(errors) == N:
+            raise AirflowFailException(f"{N}/{N} data products had errors")
+        return ids
 
 
