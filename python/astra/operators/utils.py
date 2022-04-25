@@ -189,7 +189,7 @@ def check_bundle_outputs(bundles, raise_on_error=True):
     
     bundles = deserialize(bundles, Bundle)
 
-    total, error = (0, 0)
+    total, error, failed_bundles = (0, 0, [])
     for bundle in bundles:
         log.info(f"Checking all tasks in bundle {bundle} have outputs")
 
@@ -208,13 +208,19 @@ def check_bundle_outputs(bundles, raise_on_error=True):
                 .tuples()
         )
         n_no_outputs = q_no_outputs.count()
-        log.info(f"  There are {n_no_outputs} tasks in this bundle without outputs.")
-        for task_id, in q_no_outputs:
-            log.warning(f"    Task {task_id} has no outputs.")
+        if n_no_outputs > 0:
+            log.info(f"  There are {n_no_outputs} tasks in this bundle without outputs.")
+            for task_id, in q_no_outputs:
+                log.warning(f"    Task {task_id} has no outputs.")
+            failed_bundles.append(bundle.id)
 
         total += n_tasks
         error += n_no_outputs
-    
+
+    if failed_bundles:
+        bundle_str = " ".join([f"{bundle_id:.0f}" for bundle_id in failed_bundles])
+        log.warning(f"The following {len(failed_bundles)} bundles have at least one failed task:\n{bundle_str}")
+
     if raise_on_error and error > 0:
         raise RuntimeError(f"There are tasks without outputs.")
     return None
