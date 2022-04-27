@@ -6,7 +6,7 @@ from tqdm import tqdm
 from astra import log
 from astra.utils import dict_to_list, logarithmic_tqdm
 from astra.base import ExecutableTask, Parameter
-from astra.database.astradb import Output, TaskOutput, ApogeeNetOutput
+from astra.database.astradb import database, Output, TaskOutput, ApogeeNetOutput
 from astra.tools.spectrum import Spectrum1D
 
 from astra.contrib.apogeenet.model import Model
@@ -26,7 +26,7 @@ class StellarParameters(ExecutableTask):
 
         model = Model(self.model_path, device)
         
-        results = []
+        all_results = []
         # Since this could be a long process, we update the progress bar only ~100 times on ~pseudo
         # uniform steps in log iterations so that we don't fill the log file with crap.
         with logarithmic_tqdm(total=len(self.context["tasks"]), miniters=100) as pb:
@@ -103,22 +103,20 @@ class StellarParameters(ExecutableTask):
                     "bitmask_flag": bitmask_flag
                 }
 
-                results.append(dict_to_list(result))
+                results = dict_to_list(result)
+
+                # Create rows in the database.
+                with database.atomic():
+                    for result in results:
+                        output = Output.create()
+                        TaskOutput.create(task=task, output=output)
+                        ApogeeNetOutput.create(
+                            task=task,
+                            output=output,
+                            **result
+                        )  
+                                          
                 pb.update()
-            
+                all_results.append(results)
+
         return results
-
-
-    def post_execute(self):
-        # Create rows in the database.
-        with logarithmic_tqdm(total=sum(map(len, self.result)), miniters=100) as pb:
-            for (task, data_products, parameters), results in zip(self.iterable(), self.result):
-                for result in results:
-                    output = Output.create()
-                    TaskOutput.create(task=task, output=output)
-                    ApogeeNetOutput.create(
-                        task=task,
-                        output=output,
-                        **result
-                    )
-                    pb.update()
