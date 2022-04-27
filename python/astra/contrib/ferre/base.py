@@ -46,6 +46,16 @@ class Ferre(ExecutableTask):
     # For deciding what rows to use from each data product.
     slice_args = TupleParameter("slice_args", default=None, bundled=False)
 
+    # FERRE will sometimes hang forever if there is a spike in the data (e.g., a skyline) that
+    # is not represented by the uncertainty array (e.g., it looks 'real').
+
+    # An example of this on Utah is under ~/ferre-death-examples/spike/
+    # To self-preserve FERRE, we do a little adjustment to the uncertainty array.
+    spike_threshold_to_inflate_uncertainty = Parameter(default=5, bundled=True)
+
+    # Maximum timeout in seconds for FERRE
+    timeout = Parameter(default=12*60*60, bundled=True)
+
     @classmethod
     def estimate_relative_cost_factors(cls, parameters):
         """
@@ -120,12 +130,12 @@ class Ferre(ExecutableTask):
                             first_task, last_task = tasks
                         else:
                             first_task, *_, last_task = tasks
-                        descr = f"task_{first_task.id}_to_{last_task.id}"
+                        descr = f"tasks/task_{first_task.id}_to_{last_task.id}"
                     dir = os.path.join(parent_dir, descr)
                 else:
                     dir = mkdtemp(dir=parent_dir)
             else:
-                dir = os.path.join(parent_dir, f"bundle_{bundle.id}")
+                dir = os.path.join(parent_dir, f"bundles/{bundle.id % 100}/{bundle.id}")
         else:
             dir = mkdtemp()
 
@@ -239,8 +249,28 @@ class Ferre(ExecutableTask):
             s_index, e_index = wl[0].searchsorted(model_wavelength[[0, -1]])
             mask[s_index:e_index + 1] = True
 
+        # Sometimes FERRE will run forever 
+        self.spike_threshold_to_inflate_uncertainty = 5
+        if self.spike_threshold_to_inflate_uncertainty > 0:
+            flux_median = np.median(flux[:, mask], axis=1).reshape((-1, 1))
+            flux_stddev = np.std(flux[:, mask], axis=1).reshape((-1, 1))
+            sigma_median = np.median(sigma[:, mask], axis=1).reshape((-1, 1))
+            
+            delta = (flux - flux_median) / flux_stddev
+            is_spike = (delta > self.spike_threshold_to_inflate_uncertainty) \
+                     * (sigma < (self.spike_threshold_to_inflate_uncertainty * sigma_median))
+
+            if np.any(is_spike):
+                fraction = np.sum(is_spike[:, mask]) / is_spike[:, mask].size
+                log.warning(f"Inflating uncertainties for {np.sum(is_spike)} pixels ({100 * fraction:.2f}%) that were identified as spikes.")
+                for i in range(is_spike.shape[0]):
+                    n = np.sum(is_spike[i, mask])
+                    if n > 0:
+                        log.debug(f"  {n} pixels on spectrum index {i}")
+                sigma[is_spike] = 1e10
+                
         # Write data arrays.
-        savetxt_kwds = dict(fmt="%.4e", footer="\n")
+        savetxt_kwds = dict(fmt="%.4e", footer="\n")        
         np.savetxt(os.path.join(dir, control_kwds["ffile"]), flux[:, mask], **savetxt_kwds)
         np.savetxt(os.path.join(dir, control_kwds["erfile"]), sigma[:, mask], **savetxt_kwds)
 
@@ -255,6 +285,33 @@ class Ferre(ExecutableTask):
             dir = self.context["pre_execute"]["dir"]
         except:
             raise ValueError(f"No directory prepared by pre-execute in self.context['pre_execute']['dir'] ")
+        
+        stdout_path = os.path.join(dir, "stdout")
+        stderr_path = os.path.join(dir, "stderr")
+
+        try:
+            with open(stdout_path, "w") as stdout:
+                with open(stderr_path, "w") as stderr:
+                    process = subprocess.run(
+                        ["ferre.x"],
+                        cwd=dir,
+                        stdout=stdout,
+                        stderr=stderr,
+                        check=False,
+                        timeout=24*60*60#self.timeout
+                    )
+        except:
+            log.exception(f"Exception when calling FERRE in {dir}:")
+            raise
+
+        else:
+            with open(stdout_path, "r") as fp:
+                stdout = fp.read()
+            with open(stderr_path, "r") as fp:
+                stderr = fp.read()
+
+        '''
+        # Issues with processes hanging forever, which might be related to pipe buffers being full.
 
         try:
             process = subprocess.Popen(
@@ -278,6 +335,7 @@ class Ferre(ExecutableTask):
             else:
                 log.info(f"FERRE stdout:\n{stdout}")
                 log.error(f"FERRE stderr:\n{stderr}")
+        '''
             
         n_done, n_error, control_kwds = utils.parse_ferre_output(dir, stdout, stderr)
         log.info(f"FERRE finished with {n_done} successful and {n_error} errors.")
@@ -293,7 +351,7 @@ class Ferre(ExecutableTask):
         try:
             # Update internal timings with those from FERRE.
             timings = utils.get_processing_times(stdout)
-
+            '''
             names = np.loadtxt(os.path.join(dir, control_kwds["PFILE"]), usecols=0, dtype=str)
             time_execute_per_task = np.zeros(len(self.context["tasks"]))
             for name, t in zip(names, timings["time_per_spectrum"]):
@@ -304,6 +362,7 @@ class Ferre(ExecutableTask):
             #       into account when timing a task, but that becomes pretty tricky for all tasks.
             self.context["timing"]["time_execute_per_task"] = list(time_execute_per_task)
             self.context["timing"]["time_execute_bundle_overhead"] = timings["time_load"]
+            '''
         except:
             log.exception(f"Exception when trying to update internal task timings from FERRE.")
         else:
@@ -447,7 +506,7 @@ class Ferre(ExecutableTask):
 
                         # Create a data product.
                         # TODO: This is a temporary hack until we have a data model in place.
-                        path = expand_path(f"$MWM_ASTRA/{__version__}/ferre/task_{task.id}/output_{output.id}.pkl")
+                        path = expand_path(f"$MWM_ASTRA/{__version__}/ferre/tasks/{task.id % 100}/{task.id}/output_{output.id}.pkl")
                         os.makedirs(os.path.dirname(path), exist_ok=True)
 
                         with open(path, "wb") as fp:
