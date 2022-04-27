@@ -307,5 +307,13 @@ class SlurmSensor(BaseSensorOperator):
         
         complete = (job.status >= index)
 
+        # If not complete, it may have timed out. Let's at least check we have *A* job running.
+        '''
+        if not complete:
+            q = get_slurm_queue()
+            if len(q) == 0:
+                log.warning(f"There are NO slurm jobs running. This job {self.job_key} must have timed out.")
+                return True
+        '''
         # If complete, cat the log location.
         return complete
