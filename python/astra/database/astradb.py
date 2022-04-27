@@ -71,12 +71,18 @@ class AstraBaseModel(BaseModel):
 
 class JSONField(TextField):
     def db_value(self, value):
-        return json.dumps(value)
+        # Problems with querying, e.g. DataProduct.kwargs.contains("2M034") would be resolved to:
+        #   ... ILIKE '"%2M034%"' 
+        # and the extra quotation marks (from json.dumps) would kill us.
+        #return json.dumps(value)
+        # This change shouldn't screw anything up because we are usually just inserting/updating
+        # with dicts, and not strings directly.
+        if value is not None:
+            return value if isinstance(value, str) else json.dumps(value)
 
     def python_value(self, value):
         if value is not None:
             return json.loads(value)
-        
 
 @lru_cache
 def _lru_sdsspath(release):
@@ -370,8 +376,10 @@ class ClassifierOutput(AstraBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
+    spectrum_pk = BigIntegerField(null=True)   # An optional primary key for the individual spectrum.
 
     dithered = BooleanField()
+
     snr = FloatField()
     p_cv = FloatField(default=0)
     lp_cv = FloatField(default=SMALL)
@@ -391,6 +399,7 @@ class ClassifySourceOutput(AstraBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
+    spectrum_pk = BigIntegerField(null=True)   # An optional primary key for the individual spectrum.
 
     p_cv = FloatField(default=0)
     lp_cv = FloatField(default=SMALL)
@@ -410,6 +419,7 @@ class FerreOutput(AstraBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
+    spectrum_pk = BigIntegerField(null=True)   # An optional primary key for the individual spectrum.
 
     snr = FloatField()
     teff = FloatField()
@@ -460,13 +470,11 @@ class FerreOutput(AstraBaseModel):
     ferre_n_obj = IntegerField(null=True)
     
 
-
-
-
 class ApogeeNetOutput(AstraBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
+    spectrum_pk = BigIntegerField(null=True)   # An optional primary key for the individual spectrum.
 
     snr = FloatField()
     teff = FloatField()
@@ -485,6 +493,7 @@ class AspcapOutput(AstraBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
+    spectrum_pk = BigIntegerField(null=True)   # An optional primary key for the individual spectrum.
 
     # Metadata.
     snr = FloatField()
@@ -519,6 +528,7 @@ class TheCannonOutput(AstraBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
+    spectrum_pk = BigIntegerField(null=True)   # An optional primary key for the individual spectrum.
 
     # Metadata.
     snr = FloatField()
@@ -564,7 +574,6 @@ class TheCannonOutput(AstraBaseModel):
     u_co_h = FloatField()
     ni_h = FloatField()
     u_ni_h = FloatField()
-
 
     rho_teff_logg = FloatField(default=0)
     rho_teff_fe_h = FloatField(default=0)
