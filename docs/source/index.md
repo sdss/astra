@@ -4,11 +4,12 @@ hide-toc: true
 
 
 ```{toctree}
-:caption: Guides
+:caption: User Guide
 :hidden:
 
-user/index
-developer/index
+install
+database
+tutorials/index
 ```
 
 ```{toctree}
@@ -19,6 +20,24 @@ components/index
 api
 cli
 ```
+
+
+```{toctree}
+:caption: Development
+:hidden:
+
+overview
+tasks
+database
+data-products
+operators
+dags
+airflow
+github
+versioning
+tests
+```
+
 
 ```{toctree}
 :caption: Astra & SDSS-V
