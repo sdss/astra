@@ -445,12 +445,13 @@ class Aspcap(ExecutableTask):
                     log_chisq_fit=output.log_chisq_fit,
                     log_snr_sq=output.log_snr_sq,
                     frac_phot_data_points=output.frac_phot_data_points,
+                    meta=output.meta
                 )
                 for key in ("teff", "logg", "metals", "o_mg_si_s_ca_ti", "log10vdop", "lgvsini", "c", "n"):
                     result[key] = getattr(output, key)
                     result[f"u_{key}"] = getattr(output, f"u_{key}")
                     result[f"bitmask_{key}"] = getattr(output, f"bitmask_{key}")
-
+                
                 task_results.append(result)
             
             for abundance_task in abundance_tasks:

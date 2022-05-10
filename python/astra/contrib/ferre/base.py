@@ -12,6 +12,7 @@ from astra.tools.spectrum import Spectrum1D
 from astra.contrib.ferre import (bitmask, utils)
 from astra.utils import flatten, executable, expand_path, nested_list
 from astra.database.astradb import (database, DataProduct, TaskOutputDataProducts, Output, TaskOutput, FerreOutput)
+from astra.operators.sdss import get_apvisit_metadata
 
 class Ferre(ExecutableTask):
 
@@ -175,14 +176,19 @@ class Ferre(ExecutableTask):
         wl, flux, sigma = ([], [], [])
         names, initial_parameters_as_dicts = ([], [])
         indices = []
+        spectrum_metas = []
         for i, (task, data_products, parameters) in enumerate(self.iterable()):
             for j, data_product in enumerate(flatten(data_products)):
                 spectrum = Spectrum1D.read(data_product.path)
+
+                # Get relevant spectrum metadata
+                spectrum_meta = get_apvisit_metadata(data_product)
 
                 # Apply any slicing, if requested.
                 if parameters["slice_args"] is not None:
                     # TODO: Refactor this and put somewhere common.                    
                     slices = tuple([slice(*args) for args in parameters["slice_args"]])
+                    spectrum_meta = spectrum_meta[slices[0]] # TODO: allow for more than 1 slice?
                     spectrum._data = spectrum._data[slices]
                     spectrum._uncertainty.array = spectrum._uncertainty.array[slices]
                     for key in ("bitmask", "snr"):
@@ -218,6 +224,9 @@ class Ferre(ExecutableTask):
                         log.debug(f"Using same initial parameters {initial_parameters} for all {N} spectra on task {task}")
                     initial_parameters_as_dicts.extend([initial_parameters] * N)
 
+                if N != len(spectrum_meta):
+                    log.warning(f"Number of spectra does not match expected from visit metadata: {N} != {len(spectrum_meta)}")
+
                 for k in range(N):
                     indices.append((i, j, k))
                     names.append(self.to_name(i=i, j=j, k=k, data_product=data_product, snr=spectrum.meta["snr"][k]))
@@ -225,6 +234,8 @@ class Ferre(ExecutableTask):
                     flux.append(spectrum.flux.value[k])
                     sigma.append(spectrum.uncertainty.array[k]**-0.5)
 
+                spectrum_metas.extend(spectrum_meta)
+             
         indices, wl, flux, sigma = (np.array(indices), np.array(wl), np.array(flux), np.array(sigma))
         
         # Convert list of dicts of initial parameters to array.
@@ -273,6 +284,10 @@ class Ferre(ExecutableTask):
         savetxt_kwds = dict(fmt="%.4e", footer="\n")        
         np.savetxt(os.path.join(dir, control_kwds["ffile"]), flux[:, mask], **savetxt_kwds)
         np.savetxt(os.path.join(dir, control_kwds["erfile"]), sigma[:, mask], **savetxt_kwds)
+
+        # Write metadata file to pick up later.
+        with open(os.path.join(dir, "spectrum_meta.pkl"), "wb") as fp:
+            pickle.dump(spectrum_metas, fp)
 
         context = dict(dir=dir)
         return context
@@ -440,9 +455,12 @@ class Ferre(ExecutableTask):
             idx = np.where(np.any(param_bitmask_flags & param_bitmask.get_value("FERRE_FAIL"), axis=1))
             log.warning(f"FERRE returned all erroneous values for an entry: {idx} {v}")
 
+        with open(os.path.join(dir, "spectrum_meta.pkl"), "rb") as fp:
+            spectrum_metas = pickle.load(fp)
+
         results_dict = {}
         ijks = []
-        for z, (name, param, param_err, bitmask_flag) in enumerate(zip(names, params, param_errs, param_bitmask_flags)):
+        for z, (name, param, param_err, bitmask_flag, spectrum_meta) in enumerate(zip(names, params, param_errs, param_bitmask_flags, spectrum_metas)):
             parsed = self.from_name(name)
             result = dict(
                 log_chisq_fit=meta["log_chisq_fit"][z],
@@ -450,6 +468,9 @@ class Ferre(ExecutableTask):
                 frac_phot_data_points=meta["frac_phot_data_points"][z],
                 snr=parsed["snr"],
             )
+
+            result["meta"] = spectrum_meta
+
             try:
                 result.update(
                     ferre_time_elapsed=timings["time_per_spectrum"][z],

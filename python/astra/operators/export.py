@@ -17,10 +17,12 @@ def export_table(model, path=None):
     if path is None:
         path = os.path.expandvars(f"$MWM_ASTRA/{__version__}/{model._meta.name}-all.fits")
 
+    # Ignore any `meta` columns for now
     fields = list(filter(
-        lambda c: not isinstance(c, ForeignKeyField), 
+        lambda c: not isinstance(c, ForeignKeyField) and c.name != "meta", 
         model._meta.sorted_fields
     ))
+
 
     q_results = (
         Task.select(

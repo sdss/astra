@@ -2,7 +2,7 @@ import numpy as np
 import os
 import pickle
 from astra import log, __version__
-from astra.base import ExecutableTask, Parameter
+from astra.base import ExecutableTask, Parameter, DictParameter, TupleParameter
 from astra.database.astradb import Task, DataProduct, TaskInputDataProducts, database, TaskOutputDataProducts
 from astropy.table import Table
 
@@ -22,18 +22,18 @@ class CreateLabelledSetFromTable(ExecutableTask):
     path = Parameter("path", bundled=True)
     hdu = Parameter("hdu", default=1, bundled=True)
 
-    label_names = Parameter("label_names", bundled=True)
-    limits = Parameter("limits", default=None, bundled=True)
+    label_names = TupleParameter("label_names", bundled=True)
+    limits = DictParameter("limits", default=None, bundled=True)
 
     release = Parameter("release", default=None, bundled=True)
     filetype = Parameter("filetype", default=None, bundled=True)
 
-    translate = Parameter("translate", default=None, bundled=True)
-    defaults = Parameter("defaults", default=None, bundled=True)
+    translate = DictParameter("translate", default=None, bundled=True)
+    defaults = DictParameter("defaults", default=None, bundled=True)
 
     normalization_method = Parameter("normalization_method", default=None, bundled=True)
-    normalization_kwds = Parameter("normalization_kwds", default=None, bundled=True)
-    slice_args = Parameter("slice_args", default=None, bundled=True)
+    normalization_kwds = DictParameter("normalization_kwds", default=None, bundled=True)
+    slice_args = TupleParameter("slice_args", default=None, bundled=True)
 
     auto_translations = {
         "prefix": lambda c: np.array([f"{ea}".lstrip()[:2] for ea in c("file")]),
