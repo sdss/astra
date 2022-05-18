@@ -65,7 +65,7 @@ def load_apogee_mask(model_path):
     and the Sun from APOGEE. We mask out pixels that show more than 2% of deviations.
     '''
     #path = os.path.join(os.path.dirname(os.path.realpath(__file__)),'other_data/apogee_mask.npz')
-    path = os.path.join(os.path.dirname(model_path),'other_data/apogee_mask.npz')
+    path = os.path.join(os.path.dirname(model_path),'apogee_mask.npz')
     tmp = np.load(path)
     mask = tmp['apogee_mask']
     tmp.close()
