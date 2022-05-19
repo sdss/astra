@@ -369,14 +369,13 @@ class TaskOutputDataProducts(AstraBaseModel):
     task = ForeignKeyField(Task, on_delete="CASCADE")
     data_product = ForeignKeyField(DataProduct, on_delete="CASCADE")
 
-
 # Output tables.
 SMALL = -1e-20
 class ClassifierOutput(AstraBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
-    spectrum_pk = BigIntegerField(null=True)   # An optional primary key for the individual spectrum.
+    meta = JSONField(null=True)
 
     dithered = BooleanField()
 
@@ -399,7 +398,7 @@ class ClassifySourceOutput(AstraBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
-    spectrum_pk = BigIntegerField(null=True)   # An optional primary key for the individual spectrum.
+    meta = JSONField(null=True)
 
     p_cv = FloatField(default=0)
     lp_cv = FloatField(default=SMALL)
@@ -419,7 +418,7 @@ class FerreOutput(AstraBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
-    spectrum_pk = BigIntegerField(null=True)   # An optional primary key for the individual spectrum.
+    meta = JSONField(null=True)
 
     snr = FloatField()
     teff = FloatField()
@@ -474,7 +473,7 @@ class ApogeeNetOutput(AstraBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
-    spectrum_pk = BigIntegerField(null=True)   # An optional primary key for the individual spectrum.
+    meta = JSONField(null=True)
 
     snr = FloatField()
     teff = FloatField()
@@ -493,7 +492,7 @@ class AspcapOutput(AstraBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
-    spectrum_pk = BigIntegerField(null=True)   # An optional primary key for the individual spectrum.
+    meta = JSONField(null=True)
 
     # Metadata.
     snr = FloatField()
@@ -528,7 +527,7 @@ class TheCannonOutput(AstraBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
-    spectrum_pk = BigIntegerField(null=True)   # An optional primary key for the individual spectrum.
+    meta = JSONField(null=True)
 
     # Metadata.
     snr = FloatField()

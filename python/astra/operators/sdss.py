@@ -100,6 +100,42 @@ def get_or_create_data_product_from_apogee_drpdb(
     return (True, result)
 
 
+def get_apvisit_metadata(apstar_data_product):
+    # It's stupid to open the file for this, but I can't yet seem to find the magic to
+    # match visits to apstar files in apogee_drpdb because visits are excluded from the
+    # stack for a variety of reasons.
+    apogee_id = apstar_data_product.kwargs["obj"]
+    meta = []
+    with fits.open(apstar_data_product.path) as image:
+        N, P = image[1].data.shape
+        if N > 2:
+            meta.extend([{"note": "stacked_0"}, {"note": "stacked_1"}])
+            indices = range(1, N - 1)
+        else:
+            indices = [1]
+
+        for i in indices:
+            # get visit pk
+            visit = Visit.select().where(
+                    (Visit.apogee_id == apogee_id)
+                &   (Visit.dateobs == image[0].header[f"DATE{i:.0f}"])
+            ).first()
+            meta.append({
+                "visit_pk": visit.pk,
+                "fiber": image[0].header[f"FIBER{i:.0f}"],
+                "date_obs": image[0].header[f"DATE{i:.0f}"],
+                "jd": image[0].header[f"JD{i:.0f}"],
+                "bc": image[0].header[f"BC{i:.0f}"],
+                "vrad": image[0].header[f"VRAD{i:.0f}"],
+                "vhbary": image[0].header[f"VHBARY{i:.0f}"],
+                # 2022-04-28: STARFLAG is not present in all ApStar files
+                #"starflag": image[0].header[f"STARFLAG{i:.0f}"]
+            })
+    
+    return meta
+
+
+
 class BossSpecOperator(BaseOperator):
     """
     A base operator for working with SDSS-V BOSS spectrum data products. 

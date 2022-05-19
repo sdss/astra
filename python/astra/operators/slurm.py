@@ -6,7 +6,7 @@ import json
 import numpy as np
 from more_itertools import set_partitions
 from subprocess import call, Popen, PIPE
-from airflow.exceptions import AirflowRescheduleException
+from airflow.exceptions import AirflowRescheduleException, AirflowSkipException
 from airflow.models.baseoperator import BaseOperator
 from airflow.sensors.base import BaseSensorOperator
 from airflow.utils import timezone
@@ -206,6 +206,9 @@ class SlurmOperator(BaseOperator):
         tasks = q.client.job.all_tasks()
         N = len(tasks)
         log.info(f"There are {N} items in queue {q}: {tasks}")
+        if N == 0:
+            raise AirflowSkipException("No tasks in queue")
+
         ppn = self.max_parallel_tasks_per_slurm_job
         if N >= self.min_bundles_per_slurm_job:
             if self.implicit_node_sharing:
