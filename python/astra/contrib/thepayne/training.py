@@ -1,11 +1,4 @@
-# encoding: utf-8
-
-
-from __future__ import (absolute_import, division, print_function, unicode_literals)
-
 import numpy as np
-import sys
-import os
 import pickle
 from tqdm import trange
 
@@ -14,7 +7,7 @@ from astropy.table import Table
 import torch
 from torch.autograd import Variable
 
-from astra.utils import log
+from astra import log
 
 # Check for CUDA support.
 try:

@@ -71,6 +71,7 @@ def test(
         label_names, 
         initial_labels=None, 
         radial_velocity_tolerance=None, 
+        mask=None,
         **kwargs
     ):
     r"""
@@ -100,6 +101,9 @@ def test(
         is given then no radial velocity will be fit. If a float/integer is given then any radial
         velocity +/- that value will be considered. Alternatively, a (lower, upper) bound can be
         given.
+
+    :param mask: [optional]
+        An boolean mask to apply when fitting. If `None` is given then no masking will be applied.
 
     :returns:
         A three-length tuple containing the optimized parameters, the covariance matrix, and a
@@ -152,6 +156,9 @@ def test(
         y_original = flux[i].reshape(wavelength.shape)
         # TODO: Assuming an inverse variance array (likely true).
         y_err_original = ivar[i].reshape(wavelength.shape)**-0.5
+        if mask is not None:
+            y_err_original[mask] = 999
+
 
         # Interpolate data onto model -- not The Right Thing to do!
         y = np.interp(model_wavelength, wavelength, y_original) 
@@ -190,7 +197,6 @@ def test(
             chi_sq, r_chi_sq = get_chi_sq(y_pred, y, y_err, L)
 
             p_opts[i, :] = (x_max - x_min) * (p_opt + 0.5) + x_min
-            # TODO: YST does this but I am not yet convinced that it is correct!
             p_covs[i, :, :] = p_cov * (x_max - x_min)
             model_fluxes[i, :] = np.interp(
                 wavelength,
