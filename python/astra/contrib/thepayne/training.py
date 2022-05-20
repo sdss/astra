@@ -10,19 +10,16 @@ from torch.autograd import Variable
 from astra import log
 
 # Check for CUDA support.
-try:
-    torch.set_default_tensor_type(torch.cuda.FloatTensor)
-
-except TypeError:
-    log.exception("Torch not compiled with CUDA support")
-    CUDA_AVAILABLE = False
+if torch.cuda.is_available():
+    device = torch.device("cuda:0")
+    default_tensor_type = torch.cuda.FloatTensor
 
 else:
-    CUDA_AVAILABLE = True
+    device = "cpu"
+    default_tensor_type = torch.FloatTensor
+    log.exception("Torch not compiled with CUDA support")
 
-default_tensor_type = torch.cuda.FloatTensor if CUDA_AVAILABLE else torch.FloatTensor
 torch.set_default_tensor_type(default_tensor_type)
-
 
 
 def _prepare_data(training_spectra, training_labels, validation_spectra, validation_labels,
@@ -153,7 +150,7 @@ def _train(training_flux, training_labels, validation_flux, validation_labels, l
         torch.nn.Sigmoid(),
         torch.nn.Linear(num_neurons, n_pixels)
     )
-    if CUDA_AVAILABLE:
+    if torch.cuda.is_available():
         model.cuda()
 
     # L2 loss
@@ -190,8 +187,10 @@ def _train(training_flux, training_labels, validation_flux, validation_labels, l
 
             # Update progress bar.
             pb.set_description(f"Step {1 + step}")
-            pb.set_postfix(train_loss=training_loss[step],
-                           valid_loss=validation_loss[step])
+            pb.set_postfix(
+                train_loss=training_loss[step],
+                valid_loss=validation_loss[step]
+            )
             pb.update()
 
     state = dict(epoch=1 + step, model_state=model.state_dict(), scales=scales,

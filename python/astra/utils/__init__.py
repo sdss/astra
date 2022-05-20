@@ -20,6 +20,16 @@ import tempfile
 import numpy as np
 from tqdm import tqdm
 
+def transfer_mask(original_wavelength, original_mask, new_wavelength):
+    """
+    Convert a boolean mask on some original wavelength array to a boolean mask on a
+    new wavelength array.
+    """
+    new_mask = np.ones(new_wavelength.size, dtype=bool)
+    new_mask[new_wavelength.searchsorted(original_wavelength[~original_mask])] = False
+    return new_mask
+
+
 class logarithmic_tqdm(tqdm):
 
     def __init__(self, **kwargs):

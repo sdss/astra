@@ -6,6 +6,7 @@ from __future__ import (absolute_import, division, print_function, unicode_liter
 import numpy as np
 import sys
 import os
+import torch
 from tqdm import trange
 import pickle
 
@@ -16,6 +17,13 @@ from collections import OrderedDict
 
 from astra.utils import log
 
+# TODO: put this elsewhere
+# Check for CUDA support.
+if torch.cuda.is_available():
+    device = torch.device("cuda:0") 
+else:
+    device = "cpu"
+    log.exception("Torch not compiled with CUDA support")
 
 LARGE = 1e3
 
@@ -42,7 +50,7 @@ def _redshift(dispersion, flux, radial_velocity):
 
 def load_state(path):
     with open(path, "rb") as fp:
-        contents = pickle.load(fp)
+        contents = torch.load(fp, map_location=device)
 
     state = contents["state"]
 
@@ -139,6 +147,7 @@ def test(
     p_opts = np.nan * np.ones((N, L))
     p_covs = np.nan * np.ones((N, L, L))
     model_fluxes = np.nan * np.ones((N, P))
+    flux_sigma = np.nan * np.ones((N, P))
     meta = []
 
     x_min, x_max = scales
@@ -187,14 +196,14 @@ def test(
             log.exception(f"Error occurred fitting spectrum {i}:")
             meta.append(dict(
                 chi_sq=np.nan,
-                r_chi_sq=np.nan
+                reduced_chi_sq=np.nan
             ))
 
         else:
             y_pred = objective_function(model_wavelength, *p_opt)
             
             # Calculate summary statistics.
-            chi_sq, r_chi_sq = get_chi_sq(y_pred, y, y_err, L)
+            chi_sq, reduced_chi_sq = get_chi_sq(y_pred, y, y_err, L)
 
             p_opts[i, :] = (x_max - x_min) * (p_opt + 0.5) + x_min
             p_covs[i, :, :] = p_cov * (x_max - x_min)
@@ -203,10 +212,9 @@ def test(
                 model_wavelength,
                 y_pred,
             )
-
             meta.append(dict(
                 chi_sq=chi_sq,
-                r_chi_sq=r_chi_sq
+                reduced_chi_sq=reduced_chi_sq,
             ))    
     
     return (p_opts, p_covs, model_fluxes, meta)
