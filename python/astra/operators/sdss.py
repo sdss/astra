@@ -8,6 +8,7 @@ from astra.database.apogee_drpdb import Star, Visit
 from astra.database.catalogdb import SDSSVBossSpall
 from astra.database.astradb import (database, DataProduct, Source, SourceDataProduct)
 from astra import log
+from astropy.time import Time
 from functools import lru_cache
 
 from peewee import fn
@@ -136,7 +137,7 @@ def get_apvisit_metadata(apstar_data_product):
 
 
 
-class BossSpecOperator(BaseOperator):
+class BossSpecLiteOperator(BaseOperator):
     """
     A base operator for working with SDSS-V BOSS spectrum data products. 
     
@@ -144,51 +145,68 @@ class BossSpecOperator(BaseOperator):
     *observed* in the operator execution period.
     """
 
-
     ui_color = "#A0B9D9"
-    
+
     def execute(self, context):
-        raise NotImplementedError("spec still seems to not be in the tree product")
+        release, filetype = ("sdss5", "specLite")
 
+        prev_ds, ds = (context["prev_ds"], context["ds"])
+        mjd_start, mjd_end = list(map(lambda x: Time(x).mjd, (prev_ds, ds)))
 
-    def query_data_model_identifiers_from_database(self, context):
-        """
-        Query the SDSS-V database for BOSS spectrum data model identifiers.
+        # Unbelievably, this is still not stored in the database.
+        from astropy.table import Table
+        from astra.utils import expand_path
+        data = Table.read(expand_path("$BOSS_SPECTRO_REDUX/master/spAll-master.fits"))
+        mask = (mjd_end > data["MJD"]) * (data["MJD"] >= mjd_start)
 
-        :param context:
-            The Airflow DAG execution context.
-        """ 
+        N = sum(mask)
+        if N == 0:
+            raise AirflowSkipException(f"No products for {self} created between {prev_ds} and {ds}")
 
-        release, filetype = ("SDSS5", "spec")
-        
-        mjd_start = parse_as_mjd(context["prev_ds"])
-        mjd_end = parse_as_mjd(context["ds"])
+        errors = []
+        ids = []
+        for row in data[mask]:
+            catalogid = row["CATALOGID"]
+            kwds = dict(
+                # TODO: remove this when the path is fixed in sdss_access
+                fieldid=f"{row['FIELD']:0>6.0f}",
+                mjd=int(row["MJD"]),
+                catalogid=int(catalogid),
+                run2d=row["RUN2D"],
+                isplate=""
+            )
+            path = path_instance(release).full(filetype, **kwds)
+            if not os.path.exists(path):
+                error = {
+                    "detail": path,
+                    "origin": row,
+                    "reason": "File does not exist"
+                }
+                errors.append(error)
+                continue
+                
+            with database.atomic() as txn:
+                data_product, _ = DataProduct.get_or_create(
+                    release=release,
+                    filetype=filetype,
+                    kwargs=kwds,
+                )
+                source, _ = Source.get_or_create(catalogid=catalogid)
+                SourceDataProduct.get_or_create(
+                    source=source,
+                    data_product=data_product
+                )
+            
+            log.info(f"Data product {data_product} matched to {source}")
+            ids.append(data_product.id)
 
-        columns = (
-            catalogdb.SDSSVBossSpall.catalogid,
-            catalogdb.SDSSVBossSpall.run2d,
-            catalogdb.SDSSVBossSpall.plate,
-            catalogdb.SDSSVBossSpall.mjd,
-            catalogdb.SDSSVBossSpall.fiberid
-        )
-        q = session.query(*columns).distinct(*columns)
-        q = q.filter(catalogdb.SDSSVBossSpall.mjd >= mjd_start)\
-             .filter(catalogdb.SDSSVBossSpall.mjd < mjd_end)
-
-        if self._query_filter_by_kwargs is not None:
-            q = q.filter_by(**self._query_filter_by_kwargs)
-
-        if self._limit is not None:
-            q = q.limit(self._limit)
-
-        log.debug(f"Found {q.count()} {release} {filetype} files between MJD {mjd_start} and {mjd_end}")
-
-        common = dict(release=release, filetype=filetype)
-        keys = [column.name for column in columns]
-        for values in q.yield_per(1):
-            yield { **common, **dict(zip(keys, values)) }
-
-
+        N = sum(mask)
+        log.info(f"Found {N} rows.")
+        log.info(f"Created {len(ids)} data products.")
+        log.info(f"Encountered {len(errors)} errors.")
+        if len(errors) == N:
+            raise AirflowFailException(f"{N}/{N} data products had errors")
+        return ids
 
 
 

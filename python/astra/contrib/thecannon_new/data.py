@@ -219,6 +219,27 @@ class CreateLabelledSetFromTable(ExecutableTask):
                 )
             )
         )
+
+        # Create output data product, and write to disk.
+        task, = self.context["tasks"]
+        path = expand_path(f"$MWM_ASTRA/{__version__}/thecannon/labelled-set-task-{task.id}.pkl")
+        log.info(f"Writing labelled set to {path}")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        with open(path, "wb") as fp:
+            pickle.dump(labelled_set, fp)
+
+        log.info(f"Created labelled set at {path}")
+        
+        # Create and assign data product.
+        data_product = DataProduct.create(
+            release=self.release,
+            filetype="full",
+            kwargs=dict(full=path)
+        )
+        TaskOutputDataProducts.create(task=task, data_product=data_product)
+        log.info(f"Created data product {data_product} and assigned it as output to task {task}")
+
         return labelled_set
 
 
@@ -249,26 +270,6 @@ class CreateLabelledSetFromTable(ExecutableTask):
         else:
             return spectrum
 
-    def post_execute(self):
-        # Create output data product, and write to disk.
-        task, = self.context["tasks"]
-        path = expand_path(f"$MWM_ASTRA/{__version__}/thecannon/labelled-set-task-{task.id}.pkl")
-        log.info(f"Writing labelled set to {path}")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
-        with open(path, "wb") as fp:
-            pickle.dump(self.result, fp)
-
-        log.info(f"Created labelled set at {path}")
-        
-        # Create and assign data product.
-        data_product = DataProduct.create(
-            release=self.release,
-            filetype="full",
-            kwargs=dict(full=path)
-        )
-        TaskOutputDataProducts.create(task=task, data_product=data_product)
-        log.info(f"Created data product {data_product} and assigned it as output to task {task}")
 
 
 

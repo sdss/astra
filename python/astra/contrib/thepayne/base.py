@@ -68,9 +68,9 @@ class ThePayne(ExecutableTask):
     model_path = Parameter(bundled=True)
     mask_path = Parameter(default=None, bundled=True)
 
-    slice_args = TupleParameter("slice_args", default=None, bundled=False)
-    normalization_method = Parameter("normalization_method", default=None, bundled=False)
-    normalization_kwds = DictParameter("normalization_kwds", default=None, bundled=False)
+    slice_args = TupleParameter("slice_args", default=None, bundled=True)
+    normalization_method = Parameter("normalization_method", default=None, bundled=True)
+    normalization_kwds = DictParameter("normalization_kwds", default=None, bundled=True)
 
     def execute(self):
 
@@ -147,7 +147,10 @@ class ThePayne(ExecutableTask):
         return results
 
     
-    def slice_and_normalize_spectrum(self, data_product):
+    def slice_and_normalize_spectrum(
+            self, 
+            data_product,
+        ):
 
         spectrum = Spectrum1D.read(data_product.path)
         if self.slice_args is not None:
