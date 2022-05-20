@@ -46,12 +46,13 @@ class ClassifySource(ExecutableTask):
                     )
                     pb.update()
 
-class Classify(ExecutableTask):
 
-    # TODO: Replace this to be a model data product?
+
+class ClassifyApVisit(ExecutableTask):
+
     model_path = Parameter("model_path", bundled=True)
 
-    def execute(self, context=None):
+    def execute(self):
 
         log.info(f"Loading model from {self.model_path}")
 
@@ -88,12 +89,7 @@ class Classify(ExecutableTask):
             )
             results.append(result)
 
-        return results
-            
-
-    def post_execute(self):
-
-        total = len(self.result)
+        total = len(results)
         with tqdm(total=total) as pb:
             for (task, *_), result in zip(self.iterable(), self.result):
                 with database.atomic() as tx:
@@ -106,7 +102,55 @@ class Classify(ExecutableTask):
                     )
                     pb.update()
 
+        return results
+            
 
+class ClassifySpecLite(ExecutableTask):
+    model_path = Parameter("model_path", bundled=True)
+
+    def execute(self):
+
+        log.info(f"Loading model from {self.model_path}")
+
+        factory = getattr(networks, self.model_path.split("_")[-2])
+        model = utils.read_network(factory, self.model_path)
+        model.eval()
+
+        results = []
+        for task, data_products, parameters in self.iterable():
+            
+            assert len(data_products) == 1
+            spectrum = Spectrum1D.read(data_products[0].path)
+            flux = spectrum.flux[0, 0:3800]
+            
+            continuum = np.nanmedian(flux)
+            normalized_flux = torch.from_numpy((flux / continuum).astype(np.float32))
+
+            with torch.no_grad():
+                prediction = model.forward(normalized_flux)
+                log_probs = prediction.cpu().numpy()
+
+            result = classification_result(log_probs, model.class_names)
+            result.update(
+                snr=spectrum.meta["snr"],
+            )
+            results.append(result)
+
+        total = len(results)
+        with tqdm(total=total) as pb:
+            for (task, *_), result in zip(self.iterable(), self.result):
+                with database.atomic() as tx:
+                    output = Output.create()
+                    TaskOutput.create(output=output, task=task)
+                    ClassifierOutput.create(
+                        task=task,
+                        output=output,
+                        **result
+                    )
+                    pb.update()
+
+        return results
+            
 
 def create_task_bundle_for_source_classification(visit_classification_bundle_id):
     sources = (

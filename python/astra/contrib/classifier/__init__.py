@@ -1,1 +1,1 @@
-from astra.contrib.classifier.classify import Classify, ClassifySource
+from astra.contrib.classifier.base import ClassifyApVisit, ClassifySpecLite, ClassifySource
