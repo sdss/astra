@@ -8,6 +8,7 @@ from astra.database import astradb
 from astra.tools.spectrum import Spectrum1D
 from scipy.interpolate import interp1d
 
+from astra.utils import expand_path
 from astra.contrib.slam.slam.slam3 import Slam3 as Slam
 from astra.contrib.slam.slam.normalization import normalize_spectra_block
 
@@ -60,7 +61,7 @@ class EstimateStellarLabels(ExecutableTask):
 
     def execute(self):
 
-        model = Slam.load_dump(self.model_path)
+        model = Slam.load_dump(expand_path(self.model_path))
         wave_interp = model.wave
 
         log.info(f"Loaded model from {self.model_path}")

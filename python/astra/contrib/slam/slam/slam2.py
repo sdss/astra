@@ -525,11 +525,11 @@ class Slam2(object):
         # determine sample_weight
         assert sample_weight_scheme in ("alleven", "bool", "ivar")
 
-        if sample_weight_scheme is "alleven":
+        if sample_weight_scheme == "alleven":
             # all even (some bad pixels do disturb!)
             sample_weight = np.ones_like(self.tr_flux_scaled)
 
-        elif sample_weight_scheme is "bool":
+        elif sample_weight_scheme == "bool":
             # 0|1 scheme for training flux (recommended)
             sample_weight = self.tr_mask.astype(np.float)
             ind_all_bad = np.sum(sample_weight, axis=0) < 1.
@@ -540,7 +540,7 @@ class Slam2(object):
                     sample_weight[:, i_pix] = 1.
             self.ind_all_bad = ind_all_bad
 
-        elif sample_weight_scheme is "ivar":
+        elif sample_weight_scheme == "ivar":
             # according to ivar (may cause bias due to sampling)
             sample_weight = self.tr_ivar_scaled
 
@@ -1028,7 +1028,7 @@ class Slam2(object):
             mask = np.logical_and(mask, test_flux > flux_eps)
         else:
             mask = np.logical_and(mask, test_ivar > 0.)
-        print("@SLAM: The spectra with fewest pixels unmasked is "
+        print("@SLAM: The spectra with fewest pixels unmasked == "
               "[{}/{}]".format(np.min(np.sum(mask, axis=1)), self.n_pix))
 
         # 7. test_ivar normalization
@@ -1184,7 +1184,7 @@ class Slam2(object):
             mask = np.logical_and(mask, test_flux > flux_eps)
         else:
             mask = np.logical_and(mask, test_ivar > 0.)
-        print("@SLAM: The spectra with fewest pixels unmasked is "
+        print("@SLAM: The spectra with fewest pixels unmasked == "
               "[{}/{}]".format(np.min(np.sum(mask, axis=1)), self.n_pix))
 
         # 7. test_ivar normalization --> not necessary
@@ -1386,9 +1386,9 @@ class Slam2(object):
                                 diag_dim=(0, 1),
                                 labels_scaler="default",
                                 flux_scaler="default"):
-        if labels_scaler is "default":
+        if labels_scaler == "default":
             labels_scaler = self.tr_labels_scaler
-        if flux_scaler is "default":
+        if flux_scaler == "default":
             flux_scaler = self.tr_flux_scaler
 
         return single_pixel_diagnostic(self.sms,
