@@ -5,6 +5,8 @@ from astra.operators.utils import to_callable
 
 class AstraOperator(BaseOperator):
 
+    template_fields = ("task_parameters", )
+
     def __init__(
         self,
         task_name,
