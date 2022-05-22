@@ -121,8 +121,10 @@ def get_apvisit_metadata(apstar_data_product):
                     (Visit.apogee_id == apogee_id)
                 &   (Visit.dateobs == image[0].header[f"DATE{i:.0f}"])
             ).first()
+            
+            visit_pk = None if visit is None else visit.pk
             meta.append({
-                "visit_pk": visit.pk,
+                "visit_pk": visit_pk,
                 "fiber": image[0].header[f"FIBER{i:.0f}"],
                 "date_obs": image[0].header[f"DATE{i:.0f}"],
                 "jd": image[0].header[f"JD{i:.0f}"],
