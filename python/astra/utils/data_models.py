@@ -11,6 +11,10 @@ __dsi_path_descriptors = [
     # https://data.sdss.org/datamodel/files/APOGEE_REDUX/APRED_VERS/TELESCOPE/PLATE_ID/MJD5/apVisit.html
     ("apVisit", r".+\/(?P<_APRED_VERS>[\w\d]+)\/(?P<TELESCOPE>\w{3}\d{1,2}m)\/(?P<_PLATE>\d+)\/(?P<_MJD>\d+)\/apVisit-(?P<APRED_VERS>[\w\d]+)-(?P<PLATE>[0-9]{4})-(?P<MJD>[0-9]{5})-(?P<FIBER>[0-9]{3})\.fits?$"),
 
+    # SDSSPath("sdss5").templates["apVisit"]
+    # '$APOGEE_REDUX/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/apVisit-{apred}-{telescope}-{plate}-{mjd}-{fiber:0>3}.fits'    
+    ("apVisit", r".+\/(?P<_APRED_VERS>.+)\/visit\/(?P<_TELESCOPE>\w{3}\d{1,2}m)\/(?P<FIELD>.+)\/(?P<_MJD>\d+)\/apVisit-(?P<APRED_VERS>.+)-(?P<TELESCOPE>\w{3}\d{1,2}m)-(?P<PLATE>[0-9]{4})-(?P<MJD>[0-9]{5})-(?P<FIBER>[0-9]{3})\.fits?$"),
+
     # SDSS-V
     #$APOGEE_REDUX/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/{prefix}Visit-{apred}-{plate}-{mjd}-{fiber:0>3}.fits
     #$APOGEE_REDUX/daily/visit/apo25m/RM_XMM-LSS/15002/59146/apVisit-daily-apo25m-15002-59146-008.fits
