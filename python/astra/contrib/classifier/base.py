@@ -7,7 +7,7 @@ from astra import log, __version__
 from astra.utils import flatten
 from astra.database.astradb import database, Source,ClassifySourceOutput,  SourceDataProduct, Task, TaskBundle, Bundle, TaskInputDataProducts, DataProduct, TaskOutput, Output, ClassifierOutput
 from astra.base import ExecutableTask, Parameter
-from astra.tools.spectrum import Spectrum1D
+from astra.tools.spectrum import Spectrum1D, calculate_snr
 from tqdm import tqdm
 
 from astra.contrib.classifier import (networks, utils)
@@ -119,24 +119,35 @@ class ClassifySpecLite(ExecutableTask):
         model.to(device)
         model.eval()
 
+        slice_pixels = slice(0, 3800) # MAGIC: same done in training
+
         results = []
-        for task, data_products, parameters in self.iterable():
+        for task, data_products, *_ in self.iterable():
             
             assert len(data_products) == 1
             spectrum = Spectrum1D.read(data_products[0].path)
-            flux = spectrum.flux[0, 0:3800]
+            
+            flux = spectrum.flux[0, slice_pixels]
             
             continuum = np.nanmedian(flux)
-            normalized_flux = torch.from_numpy((flux / continuum).astype(np.float32)).to(device)
+            normalized_flux = (
+                torch.from_numpy(
+                        (flux / continuum).astype(np.float32)
+                    )
+                    .reshape((1, 1, -1)) # 1 spectrum, 1 in batch, -1 pixels
+                    .to(device)
+            )
 
             with torch.no_grad():
                 prediction = model.forward(normalized_flux)
                 log_probs = prediction.cpu().numpy()
 
             result = classification_result(log_probs, model.class_names)
-            result.update(
-                snr=spectrum.meta["snr"],
-            )
+
+            # Calculate a S/N ratio.
+            # TODO: put this elsewhere so it's common for all BOSS spectra,
+            #       maybe in the loading function for BOSS spectra?
+            result.update(snr=calculate_snr(spectrum))
             results.append(result)
 
         total = len(results)
