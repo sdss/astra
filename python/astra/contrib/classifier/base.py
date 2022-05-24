@@ -59,52 +59,59 @@ class ClassifyApVisit(ExecutableTask):
 
     def execute(self):
 
+        total = len(self.context["tasks"]) # TODO: fix bundle size.
+        shape = (3, 4096)
+        batch = np.empty((total, *shape), dtype=np.float32)
+        dithereds = np.empty(total, dtype=bool)
+        snrs = np.empty(total, dtype=float)
+        
+        iterable = tqdm(self.iterable(), total=self.bundle_size, desc="Loading data")
+        for i, (task, data_products, _) in enumerate(iterable):
+
+            with fits.open(data_products[0].path) as image:
+                flux = image[1].data
+                snrs[i] = image[0].header["SNR"]
+            
+            try:
+                flux = flux.reshape(shape)
+            except:
+                dithereds[i] = False
+                flux = np.repeat(flux, 2).reshape(shape)
+            else:
+                dithereds[i] = True
+            
+            continuum = np.nanmedian(flux, axis=1)
+            batch[i] = flux / continuum.reshape((-1, 1))
+
         log.info(f"Loading model from {self.model_path}")
-
         log.info(f"Using {device}")
-
         factory = getattr(networks, self.model_path.split("_")[-2])
         model = utils.read_network(factory, self.model_path)
         model.to(device)
         model.eval()
+        batch = torch.from_numpy(batch).to(device)
+
+        log.info(f"Making predictions")
+        with torch.no_grad():
+            prediction = model.forward(batch)
+        
+        log_probs = prediction.cpu().numpy()
 
         results = []
-        for task, data_products, _ in tqdm(self.iterable(), total=self.bundle_size):
-            
-            assert len(data_products) == 1
-            spectrum = Spectrum1D.read(data_products[0].path)
-            flux = spectrum.flux.value
-
-            try:
-                flux = flux.reshape((1, 3, 4096))
-            except:
-                dithered = False
-                flux = np.repeat(flux, 2).reshape((1, 3, 4096))
-            else:
-                dithered = True
-                
-            continuum = np.nanmedian(flux, axis=2).reshape((-1, 1))
-            normalized_flux = torch.from_numpy((flux / continuum).astype(np.float32)).to(device)
-
-            with torch.no_grad():
-                prediction = model.forward(normalized_flux)
-                log_probs = prediction.cpu().numpy()
-
-            result = classification_result(log_probs, model.class_names)
+        for i, (task, *_) in enumerate(tqdm(self.iterable(), total=total, desc="Updating database")):
+            result = classification_result(log_probs[i], model.class_names)
             result.update(
-                snr=spectrum.meta["snr"],
-                dithered=dithered,                
+                snr=snrs[i],
+                dithered=dithereds[i]
+            )
+            output = Output.create()
+            TaskOutput.create(output=output, task=task)
+            ClassifierOutput.create(
+                task=task,
+                output=output,
+                **result
             )
             results.append(result)
-
-            with database.atomic():                    
-                output = Output.create()
-                TaskOutput.create(output=output, task=task)
-                ClassifierOutput.create(
-                    task=task,
-                    output=output,
-                    **result
-                )
 
         return results
             
