@@ -156,7 +156,6 @@ def export_table(model, path=None):
         int: -1,
     }
 
-
     try:
         table = Table(
             data=results,
