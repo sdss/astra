@@ -8,9 +8,12 @@ from astra.utils import flatten
 from astra.database.astradb import database, Source,ClassifySourceOutput,  SourceDataProduct, Task, TaskBundle, Bundle, TaskInputDataProducts, DataProduct, TaskOutput, Output, ClassifierOutput
 from astra.base import ExecutableTask, Parameter
 from astra.tools.spectrum import Spectrum1D
+from tqdm import tqdm
 
 from astra.contrib.classifier import (networks, utils)
 
+CUDA_AVAILABLE = torch.cuda.is_available()
+device = torch.device("cuda:0") if CUDA_AVAILABLE else torch.device("cpu")
 
 
 class ClassifySource(ExecutableTask):
@@ -56,12 +59,15 @@ class ClassifyApVisit(ExecutableTask):
 
         log.info(f"Loading model from {self.model_path}")
 
+        log.info(f"Using {device}")
+
         factory = getattr(networks, self.model_path.split("_")[-2])
         model = utils.read_network(factory, self.model_path)
+        model.to(device)
         model.eval()
 
         results = []
-        for task, data_products, parameters in self.iterable():
+        for task, data_products, _ in tqdm(self.iterable(), total=self.bundle_size):
             
             assert len(data_products) == 1
             spectrum = Spectrum1D.read(data_products[0].path)
@@ -76,7 +82,7 @@ class ClassifyApVisit(ExecutableTask):
                 dithered = True
                 
             continuum = np.nanmedian(flux, axis=2).reshape((-1, 1))
-            normalized_flux = torch.from_numpy((flux / continuum).astype(np.float32))
+            normalized_flux = torch.from_numpy((flux / continuum).astype(np.float32)).to(device)
 
             with torch.no_grad():
                 prediction = model.forward(normalized_flux)
@@ -89,18 +95,14 @@ class ClassifyApVisit(ExecutableTask):
             )
             results.append(result)
 
-        total = len(results)
-        with tqdm(total=total) as pb:
-            for (task, *_), result in zip(self.iterable(), self.result):
-                with database.atomic() as tx:
-                    output = Output.create()
-                    TaskOutput.create(output=output, task=task)
-                    ClassifierOutput.create(
-                        task=task,
-                        output=output,
-                        **result
-                    )
-                    pb.update()
+            with database.atomic():                    
+                output = Output.create()
+                TaskOutput.create(output=output, task=task)
+                ClassifierOutput.create(
+                    task=task,
+                    output=output,
+                    **result
+                )
 
         return results
             
@@ -114,6 +116,7 @@ class ClassifySpecLite(ExecutableTask):
 
         factory = getattr(networks, self.model_path.split("_")[-2])
         model = utils.read_network(factory, self.model_path)
+        model.to(device)
         model.eval()
 
         results = []
@@ -124,7 +127,7 @@ class ClassifySpecLite(ExecutableTask):
             flux = spectrum.flux[0, 0:3800]
             
             continuum = np.nanmedian(flux)
-            normalized_flux = torch.from_numpy((flux / continuum).astype(np.float32))
+            normalized_flux = torch.from_numpy((flux / continuum).astype(np.float32)).to(device)
 
             with torch.no_grad():
                 prediction = model.forward(normalized_flux)

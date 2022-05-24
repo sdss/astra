@@ -1,5 +1,7 @@
 import numpy as np
 import torch
+device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+
 
 def load_data(spectra_path, labels_path):
     """
@@ -61,5 +63,5 @@ def read_network(network_class, path):
         The loaded neural network.
     """
     network = network_class()
-    network.load_state_dict(torch.load(path))
+    network.load_state_dict(torch.load(path, map_location=device))
     return network

@@ -11,9 +11,9 @@ from torch import nn
 from torch.autograd import Variable
 
 # Check for CUDA support.
-device = torch.device("cuda:0" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu")
 
 CUDA_AVAILABLE = torch.cuda.is_available()
+device = torch.device("cuda:0") if CUDA_AVAILABLE else torch.device("cpu")
 
 def train(
         network_factory,
