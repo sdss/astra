@@ -209,7 +209,7 @@ class BossSpecLiteOperator(BaseOperator):
         log.info(f"Created {len(ids)} data products.")
         log.info(f"Encountered {len(errors)} errors.")
         if len(errors) == N:
-            raise AirflowFailException(f"{N}/{N} data products had errors")
+            raise AirflowSkipException(f"{N}/{N} data products had errors")
         return ids
 
 
@@ -249,7 +249,7 @@ class ApVisitOperator(BaseOperator):
         log.info(f"Created {len(ids)} data products.")
         log.info(f"Encountered {len(errors)} errors.")
         if len(errors) == N:
-            raise AirflowFailException(f"{N}/{N} data products had errors")
+            raise AirflowSkipException(f"{N}/{N} data products had errors")
         return ids
 
 
