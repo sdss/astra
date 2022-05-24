@@ -352,6 +352,31 @@ class Bundle(AstraBaseModel):
         return TaskInstance.from_bundle(self, strict=strict)
 
 
+    def split(self, N):
+        N = int(N)
+        if N < 2:
+            raise ValueError(f"N > 1")
+            
+        tasks = list(self.tasks)
+        T = len(tasks)
+        new_bundle_size = 1 + int(T / N)
+        log.debug(f"Splitting bundle {self} into {N} smaller bundles")
+        
+        new_bundles = []
+        for i in range(N):
+            si = i * new_bundle_size
+            ei = (i + 1) * new_bundle_size
+
+            bundle = Bundle.create()
+            for task in tasks[si:ei]:
+                TaskBundle.create(task=task, bundle=bundle)
+            new_bundles.append(bundle)
+        return new_bundles
+
+
+
+
+
 class TaskBundle(AstraBaseModel):
     id = AutoField()
     task = ForeignKeyField(Task, on_delete="CASCADE")
