@@ -118,10 +118,12 @@ def export_table(model, path=None):
 
             if name == "kwargs":
                 for name in last_kwargs.keys():
-                    names.append(name)
+                    if name not in names:
+                        names.append(name)
             else:
                 if name not in names and name not in ignore_names:
-                    names.append(name)
+                    if name not in names:
+                        names.append(name)
 
     M, C = (0, 0)
     for row in results:
@@ -145,6 +147,38 @@ def export_table(model, path=None):
         missing_field_names = set(names).difference(results[0])
         results[0].update({ name: np.nan for name in missing_field_names })
         log.warning(f"ALL sources are missing metadata!")
+    
+    # If we are combining results from multiple data products, then the columns will be different.
+    # We should find incomplete columns and a default value (type) for each.
+    default_values_by_type = {
+        str: "",
+        float: np.nan,
+        int: -1,
+    }
+
+
+    try:
+        table = Table(
+            data=results,
+            names=names
+        )
+    except ValueError:
+        log.exception(f"Exception when first creating table. Trying to fill in missing values.")
+        sometimes_missing = {}
+        for row in results:
+            for key in set(row).difference(names):
+                if key in sometimes_missing: continue
+
+                missing_type = type(row[key])
+                sometimes_missing[key] = default_values_by_type[missing_type]
+
+        log.info(f"Adding defaults for these columns: {sometimes_missing}")
+        for row in results:
+            for key in set(sometimes_missing).difference(row):
+                row[key] = sometimes_missing[key]
+
+        for key in sometimes_missing.keys():
+            names.insert(names.index("task_id"), key)
 
     table = Table(
         data=results,

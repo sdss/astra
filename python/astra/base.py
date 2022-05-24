@@ -109,7 +109,8 @@ def decorate_execute(f):
             return f(task, *args, **kwargs)
 
         # Set status as running.
-        task.update_status(description="running", safe=True)
+        # TODO: too slow, make faster.
+        #task.update_status(description="running", safe=True)
         task.pre_execute(decorate_pre_execute=decorate_pre_execute, **kwargs)
 
         log.debug(f"Decorating execute for {task} with {args} {kwargs}")
@@ -205,6 +206,7 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         klass = _get_task_instance_class(task, Task, strict)
 
         input_data_products = list(task.input_data_products)
+
         context = {
             "input_data_products": input_data_products,
             "tasks": [task],
@@ -228,9 +230,11 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         klass = _get_task_instance_class(bundle, Bundle, strict)
 
         # Create context.
+        # TODO: rewrite this query so it is faster when you hvae ~500,000 tasks in one bundle
+        
         tasks = list(bundle.tasks)
         bundle_size = len(tasks)
-        input_data_products = [tuple(task.input_data_products) for task in tasks]
+        input_data_products = [list(task.input_data_products) for task in tasks]
         context = {
             "input_data_products": input_data_products,
             "tasks": tasks,

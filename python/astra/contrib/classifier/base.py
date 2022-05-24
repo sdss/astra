@@ -5,6 +5,7 @@ from scipy.special import logsumexp
 from tqdm import tqdm
 from astra import log, __version__
 from astra.utils import flatten
+from astropy.io import fits
 from astra.database.astradb import database, Source,ClassifySourceOutput,  SourceDataProduct, Task, TaskBundle, Bundle, TaskInputDataProducts, DataProduct, TaskOutput, Output, ClassifierOutput
 from astra.base import ExecutableTask, Parameter
 from astra.tools.spectrum import Spectrum1D, calculate_snr
@@ -32,13 +33,13 @@ class ClassifySource(ExecutableTask):
                                 .where(DataProduct.id.in_([dp.id for dp in data_products]))
             )
             log_probs = sum_log_probs(q)
-            results.append(classification_result(log_probs))
-        return results
+            result = classification_result(log_probs)
+            log.info(f"Task {task} with data product {data_products} has result {result}")
+            results.append(result)
 
-    def post_execute(self):
-        total = len(self.result)
+        total = len(results)
         with tqdm(total=total) as pb:
-            for (task, *_), result in zip(self.iterable(), self.result):
+            for (task, *_), result in zip(self.iterable(), results):
                 with database.atomic() as tx:
                     output = Output.create()
                     TaskOutput.create(output=output, task=task)
@@ -49,6 +50,7 @@ class ClassifySource(ExecutableTask):
                     )
                     pb.update()
 
+        return results
 
 
 class ClassifyApVisit(ExecutableTask):
@@ -108,9 +110,15 @@ class ClassifyApVisit(ExecutableTask):
             
 
 class ClassifySpecLite(ExecutableTask):
+
     model_path = Parameter("model_path", bundled=True)
 
-    def execute(self):
+    def execute(self, **kwargs):
+
+        # TODO: make the spectrum1d loaders fast enough that we don't have to
+        #       do this,.. or have some option for the 1D loader so that we
+        #       can select just the things we need (in this case, a flux array)
+        use_spectrum1d_loader = kwargs.get("use_spectrum1d_loader", False) # MAGIC
 
         log.info(f"Loading model from {self.model_path}")
 
@@ -119,50 +127,52 @@ class ClassifySpecLite(ExecutableTask):
         model.to(device)
         model.eval()
 
-        slice_pixels = slice(0, 3800) # MAGIC: same done in training
+        si, ei = (0, 3800) # MAGIC: same done in training
 
-        results = []
-        for task, data_products, *_ in self.iterable():
-            
+        log.info(f"Using device {device}")
+        
+        total = len(self.context["tasks"]) # TODO: fix bundle size.
+        batch = np.empty((total, 1, ei - si), dtype=np.float32)
+
+        iterable = tqdm(self.iterable(), total=total, desc="Loading data")
+
+        for i, (task, data_products, *_) in enumerate(iterable):
             assert len(data_products) == 1
-            spectrum = Spectrum1D.read(data_products[0].path)
+            if use_spectrum1d_loader:
+                spectrum = Spectrum1D.read(data_products[0].path)
+                flux = spectrum.flux.value[0, si:ei]        
+                continuum = np.nanmedian(flux)
+            else:
+                with fits.open(data_products[0].path) as image:
+                    flux = image[1].data["flux"][si:ei]
+                continuum = np.nanmedian(flux)
             
-            flux = spectrum.flux[0, slice_pixels]
-            
-            continuum = np.nanmedian(flux)
-            normalized_flux = (
-                torch.from_numpy(
-                        (flux / continuum).astype(np.float32)
-                    )
-                    .reshape((1, 1, -1)) # 1 spectrum, 1 in batch, -1 pixels
-                    .to(device)
+            batch[i, 0, :] = flux/continuum
+
+        log.debug(f"Formatting data")
+        batch = torch.from_numpy(batch).to(device)
+
+        log.debug(f"Making predictions")
+        with torch.no_grad():
+            prediction = model.forward(batch)
+        log_probs = prediction.cpu().numpy()
+
+        log.debug("Updating database")
+        results = []
+        for (task, *_), log_prob in tqdm(zip(self.iterable(), log_probs), total=total):
+            result = classification_result(log_prob, model.class_names)
+            result.update(
+                snr=-1,         # no S/N measured here, and none in BOSS headers
+                dithered=False, # not relevant for BOSS spectra
             )
-
-            with torch.no_grad():
-                prediction = model.forward(normalized_flux)
-                log_probs = prediction.cpu().numpy()
-
-            result = classification_result(log_probs, model.class_names)
-
-            # Calculate a S/N ratio.
-            # TODO: put this elsewhere so it's common for all BOSS spectra,
-            #       maybe in the loading function for BOSS spectra?
-            result.update(snr=calculate_snr(spectrum))
+            output = Output.create()
+            TaskOutput.create(output=output, task=task)
+            ClassifierOutput.create(
+                task=task,
+                output=output,
+                **result
+            )
             results.append(result)
-
-        total = len(results)
-        with tqdm(total=total) as pb:
-            for (task, *_), result in zip(self.iterable(), self.result):
-                with database.atomic() as tx:
-                    output = Output.create()
-                    TaskOutput.create(output=output, task=task)
-                    ClassifierOutput.create(
-                        task=task,
-                        output=output,
-                        **result
-                    )
-                    pb.update()
-
         return results
             
 

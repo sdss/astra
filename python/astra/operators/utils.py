@@ -60,6 +60,8 @@ def create_tasks(
         parameters
     ):
 
+    log.debug(f"Creating tasks for {executable_task_name} with {parameters} and {input_data_products} ({type(input_data_products)}")
+
     executable_class = to_callable(executable_task_name)
     if isinstance(input_data_products, str):
         input_data_products = json.loads(input_data_products)

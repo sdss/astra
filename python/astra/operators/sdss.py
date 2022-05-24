@@ -159,7 +159,9 @@ class BossSpecLiteOperator(BaseOperator):
         from astropy.table import Table
         from astra.utils import expand_path
         data = Table.read(expand_path("$BOSS_SPECTRO_REDUX/master/spAll-master.fits"))
-        mask = (mjd_end > data["MJD"]) * (data["MJD"] >= mjd_start)
+        is_mwm = np.array([pg.strip().startswith("mwm_") or fc.strip().startswith("mwm_") for pg, fc in zip(data["PROGRAMNAME"], data["FIRSTCARTON"])])
+        in_mjd_range = (mjd_end > data["MJD"]) & (data["MJD"] >= mjd_start)
+        mask = is_mwm * in_mjd_range
 
         N = sum(mask)
         if N == 0:
