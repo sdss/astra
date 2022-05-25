@@ -446,7 +446,7 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
             try:
                 return _update_status(self, description, tasks_where)
             except:
-                log.exception(f"Unable to update status on {self} to {description}")
+                log.warning(f"Unable to update status on {self} to {description}")
                 return False
         else:
             return _update_status(self, description, tasks_where)
@@ -486,6 +486,8 @@ def _update_status(instance, description, tasks_where):
     # If the instance has a bundle, update everything in the bundle.
     context = getattr(instance, "context", {})
     bundle = context.get("bundle", None)
+    tasks = context.get("tasks", [])
+
     if bundle is not None:
         with database.atomic():
             # Update the bundle itself.
@@ -504,24 +506,22 @@ def _update_status(instance, description, tasks_where):
                         status=status, 
                         completed=completed
                     )
-                    .from_(TaskBundle)
                     .where(
-                        (Task.id == TaskBundle.task_id) 
-                    &   (TaskBundle.bundle_id == bundle.id)
+                        (Task.id << [task.id for task in tasks])
                     &   tasks_where
                     )
                     .execute()
             )
         # Update the tasks in context.
-        for task in context.get("tasks", []):
+        for task in tasks:
             task.status = status
             task.completed = completed
 
         count = B + T
     else:
-        task, = context.get("tasks", [None])
-        if task is None:
+        if not tasks:
             raise ValueError(f"No context found on instance {instance}. Cannot update status.")
+        task, = tasks
         with database.atomic():
             task.status = status
             if description == "completed":

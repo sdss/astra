@@ -1,7 +1,7 @@
 name: astra
 channels:
-  - defaults
   - conda-forge
+  - defaults
   - pytorch
 dependencies:
     - python=3.8.5
@@ -23,8 +23,13 @@ dependencies:
     - torchaudio 
     # For sm_86 support, which some notchpeak GPUs require. 
     # See https://github.com/pytorch/pytorch/issues/45028
-    - cudatoolkit=11.1
+    #- cudatoolkit=11
     - ipython
+    - PyYAML
+    - requests
+    - scikit-learn
+    - scipy
+    - ipyparallel # for slam
     - pip
     - pip:
         # Doppler requires: emcee, corner
