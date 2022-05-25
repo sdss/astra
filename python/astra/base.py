@@ -205,16 +205,14 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         """
         klass = _get_task_instance_class(task, Task, strict)
 
-        input_data_products = list(task.input_data_products)
-
         context = {
-            "input_data_products": input_data_products,
+            "input_data_products": task.input_data_products,
             "tasks": [task],
             "bundle": None,
-            "iterable": [(task, input_data_products, task.parameters)]
+            "iterable": [(task, task.input_data_products, task.parameters)]
         }
         instance = klass(
-            input_data_products=input_data_products,
+            input_data_products=task.input_data_products,
             context=context,
             **task.parameters
         )
@@ -234,12 +232,11 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         
         tasks = list(bundle.tasks)
         bundle_size = len(tasks)
-        input_data_products = [list(task.input_data_products) for task in tasks]
         context = {
-            "input_data_products": input_data_products,
+            "input_data_products": [task.input_data_products for task in tasks],
             "tasks": tasks,
             "bundle": bundle,
-            "iterable": [(task, data_products, task.parameters) for task, data_products in zip(tasks, input_data_products)]
+            "iterable": [(task, task.input_data_products, task.parameters) for task in tasks]
         }
         # Need to supply bundle parameters.
         parameters = {}
@@ -252,7 +249,7 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
                 parameters[k] = v
         
         return klass(
-            input_data_products=input_data_products,
+            input_data_products=[task.input_data_products for task in tasks],
             context=context,
             **parameters
         )
