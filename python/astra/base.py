@@ -109,8 +109,7 @@ def decorate_execute(f):
             return f(task, *args, **kwargs)
 
         # Set status as running.
-        # TODO: too slow, make faster.
-        #task.update_status(description="running", safe=True)
+        task.update_status(description="running", safe=True)
         task.pre_execute(decorate_pre_execute=decorate_pre_execute, **kwargs)
 
         log.debug(f"Decorating execute for {task} with {args} {kwargs}")
@@ -442,19 +441,16 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
     def post_execute(self, *args, **kwargs):
         pass
 
-    def update_status(self, description, items=None, safe=False):
-        args = (self, description, items)
+    def update_status(self, description, tasks_where=None, safe=False):
         if safe:
             try:
-                N = _update_task_status(*args)
+                return _update_status(self, description, tasks_where)
             except:
-                log.exception(f"Exception in updating status of task {self} to '{description}'")
-                N = 0
+                log.exception(f"Unable to update status on {self} to {description}")
+                return False
         else:
-            N = _update_task_status(*args)
-
-        return N
-
+            return _update_status(self, description, tasks_where)
+        
 
 
 def _get_task_instance_class(item, expected, strict):
@@ -473,34 +469,71 @@ def _get_task_instance_class(item, expected, strict):
         else:
             log.warning(message)
 
-    module_name, class_name = check_version.name.rsplit(".", 1)
+    if "." not in check_version.name:
+        module_name, class_name = ("__main__", check_version.name)
+    else:
+        module_name, class_name = check_version.name.rsplit(".", 1)
     module = import_module(module_name)
     return getattr(module, class_name)
 
 
-def _update_task_status(task, description, items):
+def _update_status(instance, description, tasks_where):
+
     status = Status.get(description=description)
-    N = 0
-    if items is None:    
-        items = []
-        try:
-            items.extend(task.context["tasks"])
-        except:
-            None
-        try:
-            items.append(task.context["bundle"])
-        except:
-            None
-    with database.atomic():
-        for item in items:
-            if item is None: continue
-            item.status = status
+
+    completed = datetime.datetime.now()
+
+    # If the instance has a bundle, update everything in the bundle.
+    context = getattr(instance, "context", {})
+    bundle = context.get("bundle", None)
+    if bundle is not None:
+        with database.atomic():
+            # Update the bundle itself.
+            B = (
+                Bundle.update(status=status)
+                    .where(Bundle.id == bundle.id)
+                    .execute()
+            )
+        # Update the context.
+        bundle.status = status
+
+        # Update all tasks in the bundle.
+        with database.atomic():
+            T = (
+                Task.update(
+                        status=status, 
+                        completed=completed
+                    )
+                    .from_(TaskBundle)
+                    .where(
+                        (Task.id == TaskBundle.task_id) 
+                    &   (TaskBundle.bundle_id == bundle.id)
+                    &   tasks_where
+                    )
+                    .execute()
+            )
+        # Update the tasks in context.
+        for task in context.get("tasks", []):
+            task.status = status
+            task.completed = completed
+
+        count = B + T
+    else:
+        task, = context.get("tasks", [None])
+        if task is None:
+            raise ValueError(f"No context found on instance {instance}. Cannot update status.")
+        with database.atomic():
+            task.status = status
             if description == "completed":
-                item.completed = datetime.datetime.now()
-            item.save()
-            N += 1
-    return N
-        
+                task.completed == completed
+            task.save()
+
+        count = 1
+
+    return count
+
+
+
 
 ExecutableTask = TaskInstance
 

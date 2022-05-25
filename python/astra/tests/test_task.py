@@ -209,7 +209,7 @@ class TestTaskBehaviour(unittest.TestCase):
         t.execute()
 
         for task in t.context["tasks"]:
-            self.assertEqual(task.name, "__main__.DummyTask")
+            self.assertEqual(task.name, "astra.tests.test_task.DummyTask")
             self.assertIsNotNone(task.created)
             self.assertIsNotNone(task.completed)
 
