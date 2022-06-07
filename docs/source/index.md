@@ -23,19 +23,12 @@ cli
 
 
 ```{toctree}
-:caption: Development
+:caption: Developer Guide
 :hidden:
 
-overview
-tasks
-database
-data-products
-operators
-dags
-airflow
-github
-versioning
-tests
+developer/index
+developer/airflow-index
+developer/software-index
 ```
 
 
