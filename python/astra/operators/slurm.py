@@ -4,7 +4,6 @@ from typing import OrderedDict
 import re
 import json
 import numpy as np
-from more_itertools import set_partitions
 from subprocess import call, Popen, PIPE
 from airflow.exceptions import AirflowRescheduleException, AirflowSkipException
 from airflow.models.baseoperator import BaseOperator

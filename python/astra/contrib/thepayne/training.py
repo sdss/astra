@@ -17,7 +17,7 @@ if torch.cuda.is_available():
 else:
     device = "cpu"
     default_tensor_type = torch.FloatTensor
-    log.exception("Torch not compiled with CUDA support")
+    log.warning("Torch not compiled with CUDA support")
 
 torch.set_default_tensor_type(default_tensor_type)
 

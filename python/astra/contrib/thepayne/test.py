@@ -23,7 +23,7 @@ if torch.cuda.is_available():
     device = torch.device("cuda:0") 
 else:
     device = "cpu"
-    log.exception("Torch not compiled with CUDA support")
+    log.warning("Torch not compiled with CUDA support")
 
 LARGE = 1e3
 
