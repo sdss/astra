@@ -92,7 +92,6 @@ def _lru_sdsspath(release):
 class Source(AstraBaseModel):
     catalogid = BigIntegerField(primary_key=True)
 
-    # TODO: Include things like Gaia / 2MASS photometry?
     # TODO: Do we even need these two?
     sdssv_target0 = BigIntegerField(null=True)
     sdssv_first_carton_name = TextField(null=True)
@@ -394,9 +393,24 @@ class TaskOutputDataProducts(AstraBaseModel):
     task = ForeignKeyField(Task, on_delete="CASCADE")
     data_product = ForeignKeyField(DataProduct, on_delete="CASCADE")
 
+
+class AstraOutputBaseModel(AstraBaseModel):
+
+    """ A base class for output data models. """
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+
+    # Most Outputs will be associated with a single Source
+    # This is a convenience reference to avoid us having to join between:
+    # xxxOutput -> Task -> TaskInputDataProducts -> DataProduct -> Source
+    source = ForeignKeyField(Source, on_delete="CASCADE", null=True)
+
+
 # Output tables.
 SMALL = -1e-20
-class ClassifierOutput(AstraBaseModel):
+class ClassifierOutput(AstraOutputBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
@@ -419,7 +433,7 @@ class ClassifierOutput(AstraBaseModel):
     lp_yso = FloatField(default=SMALL)
 
 
-class ClassifySourceOutput(AstraBaseModel):
+class ClassifySourceOutput(AstraOutputBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
@@ -439,11 +453,7 @@ class ClassifySourceOutput(AstraBaseModel):
     lp_yso = FloatField(default=SMALL)
 
 
-class FerreOutput(AstraBaseModel):
-
-    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
-    task = ForeignKeyField(Task)
-    meta = JSONField(null=True)
+class FerreOutput(AstraOutputBaseModel):
 
     snr = FloatField()
     teff = FloatField()
@@ -494,11 +504,7 @@ class FerreOutput(AstraBaseModel):
     ferre_n_obj = IntegerField(null=True)
     
 
-class ApogeeNetOutput(AstraBaseModel):
-
-    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
-    task = ForeignKeyField(Task)
-    meta = JSONField(null=True)
+class ApogeeNetOutput(AstraOutputBaseModel):
 
     snr = FloatField()
     teff = FloatField()
@@ -513,11 +519,7 @@ class ApogeeNetOutput(AstraBaseModel):
     bitmask_flag = IntegerField(default=0)
 
 
-class AspcapOutput(AstraBaseModel):
-
-    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
-    task = ForeignKeyField(Task)
-    meta = JSONField(null=True)
+class AspcapOutput(AstraOutputBaseModel):
 
     # Metadata.
     snr = FloatField()
@@ -548,11 +550,7 @@ for element in elements:
 
 
 
-class TheCannonOutput(AstraBaseModel):
-
-    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
-    task = ForeignKeyField(Task)
-    meta = JSONField(null=True)
+class TheCannonOutput(AstraOutputBaseModel):
 
     # Metadata.
     snr = FloatField()
@@ -772,11 +770,7 @@ class TheCannonOutput(AstraBaseModel):
     rho_co_h_ni_h = FloatField(default=0)
 
 
-class ThePayneOutput(AstraBaseModel):
-
-    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
-    task = ForeignKeyField(Task)
-    meta = JSONField(null=True)
+class ThePayneOutput(AstraOutputBaseModel):
 
     snr = FloatField()
     teff = FloatField()
