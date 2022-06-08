@@ -10,8 +10,6 @@ The expected audience has experience with Python, and falls into one or more of 
 - wants to create or update a directed acyclic graph (DAG) for using Astra and Airflow; or
 - intends to contribute to the general Astra source code.
 
-
-
 This guide starts with the fundamentals of Astra. 
 A [task is introduced](tasks) as a reproducible unit of work, with different [parameters](parameters) that might change the expected output. We'll describe how tasks with common overheads are [bundled together](bundles) for efficiency, and how all tasks can be reproduced because the input [data products](data-products) and [summary outputs](outputs) are [saved to a database](database), mostly automatically. This allows us to create summary tables of results, compare outputs from different analysis methods, or code versions.
 
@@ -23,11 +21,10 @@ An individual task represents the smallest unit of work in Astra. Usually you wa
 ### Contents
 
 ```{toctree}
-overview
 tasks
 parameters
-bundles
-database
 data-products
 outputs
+bundles
+database
 ```
