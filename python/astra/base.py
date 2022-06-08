@@ -1,3 +1,5 @@
+""" Base classes for task instances, parameters, and bundles. """
+
 import abc
 import os
 import inspect
@@ -10,7 +12,7 @@ from time import time
 
 from astra import (log, __version__)
 from astra.utils import flatten, list_to_dict
-from astra.database.astradb import (database, DataProduct, Task, Status, TaskInputDataProducts, Bundle, TaskBundle)
+from astra.database.astradb import (database, Output, TaskOutput, DataProduct, Task, Status, TaskInputDataProducts, Bundle, TaskBundle)
 
 class TaskStageTimer:
     def __init__(self, task, stage):
@@ -150,6 +152,7 @@ def decorate_execute(f):
 
 
 class Parameter:
+    """A task parameter."""
     def __init__(self, name=None, bundled=False, **kwargs):
         self.name = name
         self.bundled = bundled
@@ -158,9 +161,11 @@ class Parameter:
 
 
 class TupleParameter(Parameter):
+    """A task parameter that expects a tuple as input."""
     pass
 
 class DictParameter(Parameter):
+    """A task parameter that expects a dictionary as input."""
     pass
  
 
@@ -181,6 +186,8 @@ class TaskInstanceMeta(type):
 
 class TaskInstance(object, metaclass=TaskInstanceMeta):
     
+    """An abstract task instance to define a unit of work."""
+
     def __init__(self, input_data_products=None, context=None, **kwargs):
         self.context = context or {} # Set the execution context.
         
@@ -450,7 +457,7 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
                 return False
         else:
             return _update_status(self, description, tasks_where)
-        
+    
 
 
 def _get_task_instance_class(item, expected, strict):
