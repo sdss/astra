@@ -363,6 +363,12 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
 
 
     def iterable(self, stage=None):
+        """
+        Iterate over the tasks in the bundle.
+
+        This generator yields tuples of `(task, input_data_products, parameters)`
+        for each task in the bundle, even if it is a single task (not in any bundle).
+        """
         if stage is None:
             for level in inspect.stack():
                 if level.function in ("pre_execute", "execute", "post_execute"):

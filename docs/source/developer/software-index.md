@@ -5,6 +5,7 @@ hide-toc: true
 # Software guidelines
 
 ```{toctree}
+structure
 github
 versioning
 tests
