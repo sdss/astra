@@ -12,18 +12,14 @@ from tqdm import tqdm
 
 from sklearn.exceptions import ConvergenceWarning
 
-#from astra import log
-#from astra.utils import expand_path
-import os
-expand_path = lambda p: os.path.abspath(os.path.expanduser(os.path.expandvars(p)))
+from astra.utils import expand_path
 
 class CannonModel:
     
     """
     A second-order polynomial Cannon model.
     
-    For example, the generative model for two labels (teff, logg) might look something
-    like:
+    The generative model for two labels (teff, logg) might look something like:
     
         f(\theta) = \theta_0 
                   + (\theta_1 * teff) 
@@ -41,17 +37,22 @@ class CannonModel:
         label_names,
         dispersion=None,
         regularization=0,
-        n_threads=-1,
         **kwargs
     ) -> None:
-        self.training_labels, self.training_flux, self.training_ivar, self.offsets, self.scales \
-            = _check_inputs(label_names, training_labels, training_flux, training_ivar, **kwargs)
-        self.label_names = label_names
+        self.label_names, \
+        self.training_labels, \
+        self.training_flux, \
+        self.training_ivar, \
+        self.offsets, \
+        self.scales = _check_inputs(
+            label_names, 
+            training_labels, 
+            training_flux, 
+            training_ivar, 
+            **kwargs
+        )
         self.dispersion = dispersion
         self.regularization = regularization
-        self.n_threads = n_threads or 1
-        if self.n_threads < 0:
-            self.n_threads = os.cpu_count()
 
         # If we are loading from a pre-trained model.
         self.theta = kwargs.get("theta", None)
@@ -59,11 +60,85 @@ class CannonModel:
         self.meta = kwargs.get("meta", {})
         return None
 
+
+    @property
+    def design_matrix(self):
+        return _design_matrix(
+            _normalize(self.training_labels, self.offsets, self.scales),
+            self._design_matrix_indices
+        )
+
+    @cached_property
+    def _design_matrix_indices(self):
+        return _design_matrix_indices(len(self.label_names))
+
+
+    def train(self, hide_warnings=True, tqdm_kwds=None, n_threads=-1, prefer="processes", **kwargs):
+        """
+        Train the model.
+        
+        :param hide_warnings: [optional]
+            Hide convergence warnings (default: True). Any convergence warnings will be recorded in
+            `model.meta['warnings']`, which can be accessed after training.
+
+        :param tqdm_kwds: [optional]
+            Keyword arguments to pass to `tqdm` (default: None).
+        """
+
+        # Calculate design matrix without bias term, using normalized labels
+        X = self.design_matrix[:, 1:]
+        flux, ivar = self.training_flux, self.training_ivar
+        N, L = X.shape
+        N, P = flux.shape
+
+        _tqdm_kwds = dict(total=P, desc="Training")
+        _tqdm_kwds.update(tqdm_kwds or {})
+
+        n_threads = _evaluate_n_threads(n_threads)
+        args = (X, self.regularization, hide_warnings)
+
+        t_init = time()
+        results = Parallel(n_threads, prefer=prefer)(
+            delayed(_fit_pixel)(p, Y, W, *args, **kwargs) 
+               for p, (Y, W) in tqdm(enumerate(zip(flux.T, ivar.T)), **_tqdm_kwds)
+        )
+        t_train = time() - t_init
+        self.theta = np.zeros((1 + L, P))
+        self.meta.update(
+            t_train=t_train, 
+            train_warning=np.zeros(P, dtype=bool),
+            n_iter=np.zeros(P, dtype=int),
+            dual_gap=np.zeros(P, dtype=float)
+        )
+        for index, pixel_theta, meta in results:
+            self.theta[:, index] = pixel_theta
+            self.meta["train_warning"][index] = meta.get("warning", False)
+            self.meta["n_iter"][index] = meta.get("n_iter", -1)
+            self.meta["dual_gap"][index] = meta.get("dual_gap", np.nan)
+
+        # Calculate the model variance given the trained coefficients.
+        self.s2 = self._calculate_s2()
+        return self
+
+
+    def _calculate_s2(self, SMALL=1e-12):
+        """ Calculate the model variance (s^2). """
+
+        L2 = (self.training_flux - self.predict(self.training_labels))**2
+        mask = self.training_ivar > 0
+        inv_W = np.zeros_like(self.training_ivar)
+        inv_W[mask] = 1 / self.training_ivar[mask]
+        inv_W[~mask] = SMALL
+        # You want the mean, not the median.
+        return np.clip(np.mean(L2 - inv_W, axis=0), 0, np.inf)
+    
+
     @property
     def trained(self):
         """ Boolean property defining whether the model is trained. """
         return self.theta is not None and self.s2 is not None
         
+
     def write(self, path, save_training_set=False, overwrite=False):
         """
         Write the model to disk.
@@ -82,7 +157,7 @@ class CannonModel:
         if not save_training_set and not self.trained:
             raise ValueError("Nothing to save: model not trained and save_training_set is False")
 
-        keys = ["theta", "s2", "dispersion", "regularization", "n_threads", "label_names", "meta", "offsets", "scales"]
+        keys = ["theta", "s2", "meta", "dispersion", "regularization", "label_names", "offsets", "scales"]
         if save_training_set:
             keys += ["training_labels", "training_flux", "training_ivar"]
     
@@ -104,11 +179,10 @@ class CannonModel:
             state.setdefault(k, None)
         return cls(**state)
 
+
     @property
     def term_descriptions(self):
-        """
-        Return descriptions for all the terms in the design matrix.
-        """
+        """ Return descriptions for all the terms in the design matrix. """
         js, ks = _design_matrix_indices(len(self.label_names))
         terms = []
         for j, k in zip(js, ks):
@@ -122,6 +196,7 @@ class CannonModel:
                     term.append(self.label_names[k - 1])
                 terms.append(tuple(term))
         return terms
+
 
     @property
     def term_type_indices(self):
@@ -147,78 +222,15 @@ class CannonModel:
                 indices[2].append(i)
         return indices
 
-    @cached_property
-    def _design_matrix_indices(self):
-        return _design_matrix_indices(len(self.label_names))
-
-    def train(self, hide_warnings=True, tqdm_kwds=None, prefer="processes", **kwargs):
-        """
-        Train the model.
-        
-        :param hide_warnings: [optional]
-            Hide convergence warnings (default: True). Any convergence warnings will be recorded in
-            `model.meta['warnings']`, which can be accessed after training.
-
-        :param tqdm_kwds: [optional]
-            Keyword arguments to pass to `tqdm` (default: None).
-        """
-
-        # Calculate design matrix without bias term, using normalized labels
-        X = _design_matrix(
-            _normalize(self.training_labels, self.offsets, self.scales),
-            self._design_matrix_indices
-        )[:, 1:]
-        flux, ivar = self.training_flux, self.training_ivar
-        N, L = X.shape
-        N, P = flux.shape
-
-        _tqdm_kwds = dict(total=P, desc="Training")
-        _tqdm_kwds.update(tqdm_kwds or {})
-
-        args = (X, self.regularization, hide_warnings)
-        t_init = time()
-        results = Parallel(self.n_threads, prefer=prefer)(
-            delayed(_fit_pixel)(p, Y, W, *args, **kwargs) 
-               for p, (Y, W) in tqdm(enumerate(zip(flux.T, ivar.T)), **_tqdm_kwds)
-        )
-        t_train = time() - t_init
-
-        self.theta = np.zeros((1 + L, P))
-        self.meta.update(
-            t_train=t_train, 
-            train_warning=np.zeros(P, dtype=bool),
-            n_iter=np.zeros(P, dtype=int),
-            dual_gap=np.zeros(P, dtype=float)
-        )
-        for index, pixel_theta, meta in results:
-            self.theta[:, index] = pixel_theta
-            self.meta["train_warning"][index] = meta.get("warning", False)
-            self.meta["n_iter"][index] = meta.get("n_iter", -1)
-            self.meta["dual_gap"][index] = meta.get("dual_gap", np.nan)
-
-        self.s2 = self._calculate_s2()
-        
-        return self
-
-    def _calculate_s2(self, SMALL=1e-12):    
-        L2 = (self.training_flux - self.predict(self.training_labels))**2
-
-        mask = self.training_ivar > 0
-        inv_W = np.zeros_like(self.training_ivar)
-        inv_W[mask] = 1 / self.training_ivar[mask]
-        inv_W[~mask] = SMALL
-        # change from median to mean
-        return np.clip(np.mean(L2 - inv_W, axis=0), 0, np.inf)
-
-
-    
 
     def predict(self, labels):
         """
         Predict spectra, given some labels.
         """
-        labels = np.atleast_2d(labels)
-
+        try:
+            N, L = labels.shape
+        except:
+            labels = np.atleast_2d(labels)
         L = _normalize(labels, self.offsets, self.scales)
         return _design_matrix(L, self._design_matrix_indices) @ self.theta
 
@@ -246,9 +258,16 @@ class CannonModel:
         return self.chi_sq(labels, flux, ivar, aggregate) / nu
 
 
-
-
-    def fit_spectrum(self, flux, ivar, x0=None, frozen=None, continuum_order=-1, tqdm_kwds=None, n_threads=None, prefer="processes"):
+    def fit_spectrum(self, 
+            flux, 
+            ivar, 
+            x0=None, 
+            frozen=None, 
+            continuum_order=-1, 
+            n_threads=None,
+            prefer="processes",
+            tqdm_kwds=None,     
+        ):
         """
         Return the stellar labels given the observed flux and inverse variance.
 
@@ -272,11 +291,6 @@ class CannonModel:
         :param tqdm_kwds: [optional]
             Keyword arguments to pass to `tqdm` (default: None).
         """
-
-        #flux, ivar = np.atleast_2d(flux), np.atleast_2d(ivar)
-        #sigma = (ivar / (1. + ivar * self.s2))**-0.5
-        #N, P = flux.shape
-        print(f"gettin shapes")
         P = self.s2.size
         try:
             N, P = flux.shape
@@ -291,14 +305,10 @@ class CannonModel:
         _tqdm_kwds = dict(total=N, desc="Fitting")
         _tqdm_kwds.update(tqdm_kwds or {})
 
-        # NOTE: Here we pre-calculate the tril_indices for the design matrix calculation.
-        #       This should match exactly what is done elsewhere for the design matrix, or
-        #       you're fired!
-
-        print("building args")
         if x0 is None:
             x0 = cycle([None])
 
+        # Freeze values as necessary.
         frozen_values = np.nan * np.ones((N, L))
         if frozen is not None:
             for label_name, values in frozen.items():
@@ -307,27 +317,77 @@ class CannonModel:
 
         args = (self.theta, self._design_matrix_indices, self.s2, self.offsets, self.scales, continuum_order)
 
-
-        print(f"Creating iterable")
         iterable = tqdm(zip(flux, ivar, x0, frozen_values), **_tqdm_kwds)
 
-        n_threads = n_threads or os.cpu_count()
-        print(f'fitting')
-        if N == 1 or n_threads in (1, None):
+        n_threads = _evaluate_n_threads(n_threads)
+        if N == 1 or n_threads in (0, 1, None):
             results = [_fit_spectrum(*data, *args) for data in iterable]
         else:
-            results = Parallel(self.n_threads, prefer=prefer)(
+            results = Parallel(n_threads, prefer=prefer)(
                 delayed(_fit_spectrum)(*data, *args) for data in iterable
             )
-        return results
+        
+        # Aggregate nicely.
+        K = L
+        if continuum_order > -1:
+            K += 1 + continuum_order
+        
+        all_labels = np.empty((N, K))
+        all_cov = np.empty((N, K, K))
+        all_meta = []
+        for i, (labels, cov, meta) in enumerate(results):
+            all_labels[i, :] = labels
+            all_cov[i, :] = cov
+            all_meta.append(meta)
+            
+        return (all_labels, all_cov, all_meta)
 
 
-    def initial_guess(self, flux):
-        return _initial_guess(flux, self.theta, self._design_matrix_indices, self.offsets, self.scales)
+    def initial_estimate(self, flux, only_labels=None, clip_sigma=None):
+        """
+        Return an initial guess of the labels given a spectrum.
+
+        :param flux:
+            A (N, P) shape array of N spectra with P pixels.
+        
+        :param only_labels: [optional]
+            A tuple containing label names to estimate labels for. If given, estimates will only be 
+            made for these label names. 
+            
+            The resulting array will be ordered in the same order given by this tuple. 
+            For example, if your model has label names in the order ('teff', 'logg', 'fe_h') 
+            and you provide N spectra and give `only_labels=('fe_h', 'logg')` then you will
+            get a Nx2 array of labels, where the first column is 'fe_h' and the second is 'logg'.
+        """
+        P = self.s2.size
+        B = (flux - self.theta[0]).T
+        # The 1: index here is to ignore the bias term.
+        linear_term_indices = np.where((self._design_matrix_indices[1] == 0)[1:])[0]
+        offsets = np.copy(self.offsets)
+        scales = np.copy(self.scales)
+        if only_labels is not None:
+            theta_mask = np.array([
+                (term != 1) and all([t in only_labels for t in term])
+                for term in self.term_descriptions
+            ])
+            A = self.theta[theta_mask].T
+            idx_label = np.array([self.label_names.index(ln) for ln in only_labels])
+            offsets, scales = (offsets[idx_label], scales[idx_label])
+            linear_term_indices = linear_term_indices[idx_label]
+        else:
+            A = self.theta[1:].T
+
+        return __initial_estimate(
+            A,
+            B,
+            linear_term_indices,
+            offsets,
+            scales,
+            clip_sigma,
+            normalize=False
+        )
 
 
-BIG = 1
-SMALL = 1e-12
 
 def _design_matrix_indices(L):
     return np.tril_indices(1 + L)
@@ -337,34 +397,33 @@ def _design_matrix(labels, idx):
     #idx = _design_matrix_indices(L)
     iterable = np.hstack([np.ones((N, 1)), labels])[:, np.newaxis]
     return np.vstack([l.T.dot(l)[idx] for l in iterable])
-        
 
-def _initial_guess(flux, theta, idx=None, offsets=0, scales=1, clip_sigma=3, normalize=False):
-    #use = np.all(np.isfinite(sigma), axis=0)
-    # Solve for AX = B where B = flux - theta_0 and A is the design matrix (except bias)  
-    A = theta[1:].T
+def _initial_guess(flux, theta, idx, offsets, scales, **kwargs):
     B = (flux - theta[0]).T
+    A = theta[1:].T
+    linear_term_indices = np.where((idx[1] == 0)[1:])[0]
+    return __initial_estimate(A, B, linear_term_indices, offsets, scales, **kwargs)
+       
+def __initial_estimate(
+        A,
+        B,
+        linear_term_indices,
+        offsets,
+        scales,
+        clip_sigma=None,
+        normalize=False
+    ):
     try:
         X, residuals, rank, singular = np.linalg.lstsq(A, B, rcond=-1)
     except np.linalg.LinAlgError:
-        # start at central value
-        return offsets
+        warnings.warn("Unable to make initial label estimate.")
+        return np.zeros_like(offsets) if normalize else offsets 
     else:
-        if idx is None:
-            # Solve for the number of labels we expect (ignore the negative root)
-            # The number of items in a lower triangular matrix is X = N(N+1)/2 -> -2(X + 1) + N + N^2 = 0
-            # (The X + 1) here arises because we exclude the theta_0 term and solve for Y - \theta_0.
-            L = int(np.max(np.polynomial.Polynomial([-2*(X.size + 1), 1, 1]).roots())) - 1
-            idx = _design_matrix_indices(L)
-
-        # Need the indices of the linear terms.
-        x0 = X[(idx[1] == 0)[1:]].T # offset by 1 to skip missing bias term
+        x0 = X[linear_term_indices].T # offset by 1 to skip missing bias term
         if clip_sigma is not None:
             x0 = np.clip(x0, -clip_sigma, +clip_sigma)
-
-        return x0 if normalize else _denormalize(x0, offsets, scales) 
-
-
+        return x0 if normalize else _denormalize(x0, offsets, scales)
+    
 def _get_continuum_x(F):
     S = -int(F/2)
     return np.arange(S, S + F)
@@ -494,7 +553,7 @@ def _fit_pixel(index, Y, W, X, alpha, hide_warnings=True, **kwargs):
         lm = LinearRegression(**kwds)
     else:
         # defaults:
-        kwds = dict(normalize=False, max_iter=20_000, tol=1e-10, precompute=True)
+        kwds = dict(max_iter=20_000, tol=1e-10, precompute=True)
         kwds.update(**kwargs) # defaults
         lm = Lasso(alpha=alpha, **kwds)
 
@@ -523,13 +582,17 @@ def _fit_pixel(index, Y, W, X, alpha, hide_warnings=True, **kwargs):
 
 
 def _check_inputs(label_names, labels, flux, ivar, offsets=None, scales=None, **kwargs):
+    label_names = list(label_names)
+    if len(label_names) > len(set(label_names)):
+        raise ValueError(f"Label names must be unique!")
+        
     if labels is None and flux is None and ivar is None:
         # Try to get offsets and scales from kwargs
         #offsets, scales = (.get(k, None) for k in ("offsets", "scales"))
         if offsets is None or scales is None:
             print(f"No training set labels given, and no offsets or scales provided!")
             offsets, scales = (0, 1)
-        return (labels, flux, ivar, offsets, scales)
+        return (label_names, labels, flux, ivar, offsets, scales)
     L = len(label_names)
     labels = np.atleast_2d(labels)
     flux = np.atleast_2d(flux)
@@ -573,7 +636,7 @@ def _check_inputs(label_names, labels, flux, ivar, offsets=None, scales=None, **
     if len(scales) != L:
         raise ValueError(f"{len(scales)} scales given but {L} are needed")
 
-    return (labels, flux, ivar, offsets, scales)
+    return (label_names, labels, flux, ivar, offsets, scales)
 
 
 def _offsets_and_scales(labels):
@@ -584,3 +647,10 @@ def _normalize(labels, offsets, scales):
 
 def _denormalize(labels, offsets, scales):
     return labels * scales + offsets
+
+def _evaluate_n_threads(given_n_threads):
+    n_threads = given_n_threads or 1
+    if n_threads < 0:
+        n_threads = os.cpu_count()
+    return n_threads
+        
