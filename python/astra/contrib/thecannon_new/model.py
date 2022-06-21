@@ -12,8 +12,10 @@ from tqdm import tqdm
 
 from sklearn.exceptions import ConvergenceWarning
 
-from astra import log
-from astra.utils import expand_path
+#from astra import log
+#from astra.utils import expand_path
+import os
+expand_path = lambda p: os.path.abspath(os.path.expanduser(os.path.expandvars(p)))
 
 class CannonModel:
     
@@ -87,8 +89,6 @@ class CannonModel:
         state = { k: getattr(self, k) for k in keys }
         with open(path, "wb") as fp:
             pickle.dump(state, fp)
-        log.info(f"Wrote model to {path}")
-
         return True
     
     
@@ -151,7 +151,7 @@ class CannonModel:
     def _design_matrix_indices(self):
         return _design_matrix_indices(len(self.label_names))
 
-    def train(self, hide_warnings=True, tqdm_kwds=None, **kwargs):
+    def train(self, hide_warnings=True, tqdm_kwds=None, prefer="processes", **kwargs):
         """
         Train the model.
         
@@ -177,13 +177,12 @@ class CannonModel:
 
         args = (X, self.regularization, hide_warnings)
         t_init = time()
-        results = Parallel(self.n_threads, prefer="processes")(
+        results = Parallel(self.n_threads, prefer=prefer)(
             delayed(_fit_pixel)(p, Y, W, *args, **kwargs) 
                for p, (Y, W) in tqdm(enumerate(zip(flux.T, ivar.T)), **_tqdm_kwds)
         )
         t_train = time() - t_init
 
-        self.s2 = np.zeros(P)
         self.theta = np.zeros((1 + L, P))
         self.meta.update(
             t_train=t_train, 
@@ -191,20 +190,36 @@ class CannonModel:
             n_iter=np.zeros(P, dtype=int),
             dual_gap=np.zeros(P, dtype=float)
         )
-        for index, pixel_theta, pixel_s2, meta in results:
-            self.s2[index] = pixel_s2
+        for index, pixel_theta, meta in results:
             self.theta[:, index] = pixel_theta
             self.meta["train_warning"][index] = meta.get("warning", False)
             self.meta["n_iter"][index] = meta.get("n_iter", -1)
             self.meta["dual_gap"][index] = meta.get("dual_gap", np.nan)
+
+        self.s2 = self._calculate_s2()
+        
         return self
 
+    def _calculate_s2(self, SMALL=1e-12):    
+        L2 = (self.training_flux - self.predict(self.training_labels))**2
+
+        mask = self.training_ivar > 0
+        inv_W = np.zeros_like(self.training_ivar)
+        inv_W[mask] = 1 / self.training_ivar[mask]
+        inv_W[~mask] = SMALL
+        # change from median to mean
+        return np.clip(np.mean(L2 - inv_W, axis=0), 0, np.inf)
+
+
     
+
     def predict(self, labels):
         """
         Predict spectra, given some labels.
         """
-        L = _normalize(np.atleast_2d(labels), self.offsets, self.scales)
+        labels = np.atleast_2d(labels)
+
+        L = _normalize(labels, self.offsets, self.scales)
         return _design_matrix(L, self._design_matrix_indices) @ self.theta
 
 
@@ -233,7 +248,7 @@ class CannonModel:
 
 
 
-    def fit_spectrum(self, flux, ivar, x0=None, tqdm_kwds=None, n_threads=None, prefer="processes"):
+    def fit_spectrum(self, flux, ivar, x0=None, frozen=None, continuum_order=-1, tqdm_kwds=None, n_threads=None, prefer="processes"):
         """
         Return the stellar labels given the observed flux and inverse variance.
 
@@ -247,13 +262,30 @@ class CannonModel:
             An array of initial values for the stellar labels with shape `(n_spectra, n_labels)`. If `None`
             is given (default) then the initial guess will be estimated by linear algebra.
 
+        :param frozen: [optional]
+            A dictionary with labels as keys and values of arrays that indicate the value to be frozen for each
+            spectrum. For example, if `frozen = {"Teff": [0.5, 1.5]}` then the Teff label will be fixed to 0.5
+            for the first spectrum and 1.5 for the second spectrum. If you supply `frozen`, then it is assumed
+            that you will freeze the given variables for every spectrum. In other words, don't freeze a label
+            for 9 spectra and hope to leave one free. Instead, just make a second call to this function.
+
         :param tqdm_kwds: [optional]
             Keyword arguments to pass to `tqdm` (default: None).
         """
 
-        flux, ivar = np.atleast_2d(flux), np.atleast_2d(ivar)
-        sigma = (ivar / (1. + ivar * self.s2))**-0.5
-        N, P = flux.shape
+        #flux, ivar = np.atleast_2d(flux), np.atleast_2d(ivar)
+        #sigma = (ivar / (1. + ivar * self.s2))**-0.5
+        #N, P = flux.shape
+        print(f"gettin shapes")
+        P = self.s2.size
+        try:
+            N, P = flux.shape
+        except:
+            try:
+                N = int(flux.size / P)
+            except:
+                N = len(flux)
+        
         L = len(self.label_names)
 
         _tqdm_kwds = dict(total=N, desc="Fitting")
@@ -262,15 +294,25 @@ class CannonModel:
         # NOTE: Here we pre-calculate the tril_indices for the design matrix calculation.
         #       This should match exactly what is done elsewhere for the design matrix, or
         #       you're fired!
-        args = (self.theta, self._design_matrix_indices, self.offsets, self.scales)
+
+        print("building args")
         if x0 is None:
-            x0 = _initial_guess(flux, sigma, *args)
-        else:
-            x0 = np.atleast_2d(x0)
-            
-        iterable = tqdm(zip(flux, sigma, x0), **_tqdm_kwds)
+            x0 = cycle([None])
+
+        frozen_values = np.nan * np.ones((N, L))
+        if frozen is not None:
+            for label_name, values in frozen.items():
+                index = self.label_names.index(label_name)
+                frozen_values[:, index] = values
+
+        args = (self.theta, self._design_matrix_indices, self.s2, self.offsets, self.scales, continuum_order)
+
+
+        print(f"Creating iterable")
+        iterable = tqdm(zip(flux, ivar, x0, frozen_values), **_tqdm_kwds)
 
         n_threads = n_threads or os.cpu_count()
+        print(f'fitting')
         if N == 1 or n_threads in (1, None):
             results = [_fit_spectrum(*data, *args) for data in iterable]
         else:
@@ -278,6 +320,10 @@ class CannonModel:
                 delayed(_fit_spectrum)(*data, *args) for data in iterable
             )
         return results
+
+
+    def initial_guess(self, flux):
+        return _initial_guess(flux, self.theta, self._design_matrix_indices, self.offsets, self.scales)
 
 
 BIG = 1
@@ -293,11 +339,11 @@ def _design_matrix(labels, idx):
     return np.vstack([l.T.dot(l)[idx] for l in iterable])
         
 
-def _initial_guess(flux, sigma, theta, idx=None, offsets=0, scales=1, clip_sigma=3):
-    use = np.all(np.isfinite(sigma), axis=0)
+def _initial_guess(flux, theta, idx=None, offsets=0, scales=1, clip_sigma=3, normalize=False):
+    #use = np.all(np.isfinite(sigma), axis=0)
     # Solve for AX = B where B = flux - theta_0 and A is the design matrix (except bias)  
-    A = theta[1:, use].T
-    B = (flux[:, use] - theta[0, use]).T
+    A = theta[1:].T
+    B = (flux - theta[0]).T
     try:
         X, residuals, rank, singular = np.linalg.lstsq(A, B, rcond=-1)
     except np.linalg.LinAlgError:
@@ -316,51 +362,123 @@ def _initial_guess(flux, sigma, theta, idx=None, offsets=0, scales=1, clip_sigma
         if clip_sigma is not None:
             x0 = np.clip(x0, -clip_sigma, +clip_sigma)
 
-        return _denormalize(x0, offsets, scales)
+        return x0 if normalize else _denormalize(x0, offsets, scales) 
 
 
-def _fit_spectrum(flux, sigma, x0, theta, idx, offsets=0, scales=1, clip_sigma=3):
+def _get_continuum_x(F):
+    S = -int(F/2)
+    return np.arange(S, S + F)
+
+
+def _predict_flux(x, parameters, continuum_order, theta, idx, normalized_frozen_values, is_frozen, any_frozen):
+    if continuum_order >= 0:
+        thawed_labels = parameters[:-(continuum_order + 1)]
+        continuum = np.polyval(parameters[-(continuum_order + 1):], x)
+    else:
+        thawed_labels = parameters
+        continuum = 1
+    
+    if any_frozen:
+        labels = np.copy(normalized_frozen_values)
+        labels[~is_frozen] = parameters[:sum(~is_frozen)]
+    else:
+        labels = thawed_labels
+    
+    l = np.atleast_2d(np.hstack([1, labels]))
+    A = l.T.dot(l)[idx][np.newaxis]
+    return continuum * (A @ theta)[0]
+
+
+def _fit_spectrum(flux, ivar, x0, frozen_values, theta, idx, s2, offsets, scales, continuum_order=-1):
+
     # NOTE: Here the design matrix is calculated with *DIFFERENT CODE* than what is used
     #       to construct the design matrix during training. The result should be exactly
     #       the same, but here we are taking advantage of not having to call np.tril_indices
     #       with every log likelihood evaluation.
-    def f(_, *labels):
-        l = np.atleast_2d(np.hstack([1, labels]))
-        A = l.T.dot(l)[idx][np.newaxis]
-        return (A @ theta)[0]
+    K = continuum_order + 1
+    x = _get_continuum_x(flux.size)
+    L = offsets.size
 
-    L = len(x0)
+    is_frozen = np.isfinite(frozen_values)
+    normalized_frozen_values = _normalize(frozen_values, offsets, scales)
+    any_frozen = np.any(is_frozen)
+
+    args = (continuum_order, theta, idx, normalized_frozen_values, is_frozen, any_frozen)
+    sigma = (ivar / (1. + ivar * s2))**-0.5
+
+    meta = dict()
+    if x0 is None:
+        # no continuum for initial values
+        # use combinations_with_replacement to sample (-1, 0, 1)?
+        x0_normalized_trials = [
+            np.zeros(L),
+            +np.ones(L),
+            -np.ones(L),
+            _initial_guess(flux, theta, idx, offsets, scales, normalize=True)
+        ]
+        chi_sqs = []
+        for x0_trial in x0_normalized_trials:
+            x0_ = x0_trial[~is_frozen]
+            chi_sqs.append(np.sum(((_predict_flux(x, x0_, -1, *args[1:]) - flux) / sigma)**2))
+        x0_normalized = x0_normalized_trials[np.argmin(chi_sqs)]
+        x0 = _denormalize(x0_normalized, offsets, scales)
+        meta["trial_x0"] = np.array(x0_normalized_trials) * scales + offsets
+        meta["trial_chisq"] = np.array(chi_sqs)
+    else:
+        x0_normalized = _normalize(x0, offsets, scales)
+
+    meta["x0"] =np.copy(frozen_values)
+    meta["x0"][~is_frozen] = x0[~is_frozen]
+
+    p0 = x0_normalized[~is_frozen]
+
+    if continuum_order >= 0:
+        p0 = np.hstack([p0, np.zeros(1 + continuum_order)])
+        p0[-1] = 1
+
     try:
-        p_opt_norm, cov_norm = op.curve_fit(
-            f,
-            None,
+        p_opt_all, cov_norm = op.curve_fit(
+            lambda x, *parameters: _predict_flux(x, parameters, *args),
+            x,
             flux,
-            p0=_normalize(x0, offsets, scales),
+            p0=p0,
             sigma=sigma,
             absolute_sigma=True,
             maxfev=10_000
         )
-        model_flux = f(None, *p_opt_norm)
+        model_flux = _predict_flux(x, p_opt_all, *args)
     except:
         N, P = np.atleast_2d(flux).shape
         p_opt = np.nan * np.ones(L)
         cov = np.nan * np.ones((L, L))
-        meta = dict(
+        meta.update(
             chi_sq=np.nan,
             reduced_chi_sq=np.nan,
+            model_flux=np.nan * np.ones(P)
         )
     else:
-        p_opt = _denormalize(p_opt_norm, offsets, scales)
-        cov = cov_norm * scales**2 # TODO: define this with _normalize somehow
+        if continuum_order >= 0:
+            p_opt_norm = p_opt_all[:-K]
+        else:
+            p_opt_norm = p_opt_all
+        p_opt = np.copy(frozen_values)
+        p_opt[~is_frozen] = _denormalize(p_opt_norm, offsets[~is_frozen], scales[~is_frozen])
 
-        # NOTE: Here we are calculating chi-sq with *DIFFERENT CODE* than what is used elsewhere.
-        chi_sq = np.sum((flux - model_flux)**2 / sigma**2)
+        if any_frozen:
+            cov = np.nan * np.ones((L, L)) # TODO: deal with freezing
+        else:
+            cov = cov_norm[:L, :L] * scales**2 # TODO: define this with _normalize somehow
+            
+        # WARNING: Here we are calculating chi-sq with *DIFFERENT CODE* than what is used elsewhere.
+        chi_sq = np.sum(((flux - model_flux) / sigma)**2)
         nu = np.sum(np.isfinite(sigma)) - L
         reduced_chi_sq = chi_sq / nu
-        meta = dict(
+        meta.update(
             chi_sq=chi_sq,
             reduced_chi_sq=reduced_chi_sq,
-            p_opt_norm=p_opt_norm
+            p_opt_norm=p_opt_norm,
+            p_opt_cont=p_opt_all[-K:],
+            model_flux=model_flux
         )
     finally:
         return (p_opt, cov, meta)
@@ -376,7 +494,7 @@ def _fit_pixel(index, Y, W, X, alpha, hide_warnings=True, **kwargs):
         lm = LinearRegression(**kwds)
     else:
         # defaults:
-        kwds = dict(normalize=False, max_iter=10_000, tol=1e-4, precompute=True)
+        kwds = dict(normalize=False, max_iter=20_000, tol=1e-10, precompute=True)
         kwds.update(**kwargs) # defaults
         lm = Lasso(alpha=alpha, **kwds)
 
@@ -401,22 +519,15 @@ def _fit_pixel(index, Y, W, X, alpha, hide_warnings=True, **kwargs):
     if "n_iter" in meta:
         meta["warning"] = meta["n_iter"] >= lm.max_iter
 
-    l2 = (Y - lm.predict(X))**2
-    mask = W > 0
-    inv_W = np.zeros_like(W)
-    inv_W[mask] = 1 / W[mask]
-    inv_W[~mask] = BIG
-    s2 = max(0, np.median(l2 - inv_W, axis=0))
-
-    return (index, theta, s2, meta)
+    return (index, theta, meta)
 
 
-def _check_inputs(label_names, labels, flux, ivar, **kwargs):
+def _check_inputs(label_names, labels, flux, ivar, offsets=None, scales=None, **kwargs):
     if labels is None and flux is None and ivar is None:
         # Try to get offsets and scales from kwargs
-        offsets, scales = (kwargs.get(k, None) for k in ("offsets", "scales"))
+        #offsets, scales = (.get(k, None) for k in ("offsets", "scales"))
         if offsets is None or scales is None:
-            log.warning(f"No training set labels given, and no offsets or scales provided!")
+            print(f"No training set labels given, and no offsets or scales provided!")
             offsets, scales = (0, 1)
         return (labels, flux, ivar, offsets, scales)
     L = len(label_names)
@@ -446,9 +557,9 @@ def _check_inputs(label_names, labels, flux, ivar, **kwargs):
         raise ValueError(f"I don't believe that you have more labels than spectra")
 
     # Restrict to things that are fully sampled.
-    good = np.all(ivar > 0, axis=0)
-    ivar = np.copy(ivar)
-    ivar[:, ~good] = 0
+    #good = np.all(ivar > 0, axis=0)
+    #ivar = np.copy(ivar)
+    #ivar[:, ~good] = 0
 
     # Calculate offsets and scales.
     offsets, scales = _offsets_and_scales(labels)
