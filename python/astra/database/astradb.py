@@ -832,6 +832,19 @@ class ThePayneOutput(AstraOutputBaseModel):
     bitmask_flag = IntegerField(default=0)
 
 
+class WhiteDwarfOutput(AstraOutputBaseModel):
+
+    wd_type = TextField()
+    snr = FloatField()
+    teff = FloatField()
+    u_teff = FloatField()
+    logg = FloatField()
+    u_logg = FloatField()
+
+    conditioned_on_parallax = FloatField(null=True)
+    conditioned_on_absolute_G_mag = FloatField(null=True)
+    
+
 def create_tables(
         drop_existing_tables=False, 
         reuse_if_open=True,
@@ -845,6 +858,7 @@ def create_tables(
     log.info(f"Connecting to database to create tables.")
     database.connect(reuse_if_open=reuse_if_open)
     models = AstraBaseModel.__subclasses__()
+    models.extend(AstraOutputBaseModel.__subclasses__())
     log.info(f"Tables ({len(models)}): {', '.join([model.__name__ for model in models])}")
     if drop_existing_tables:
         log.info(f"Dropping existing tables..")

@@ -400,6 +400,36 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         # fin
 
     
+    def create_output(self, data_model, result):
+        """
+        Create a result row in the database for this task.
+        
+        :param data_model:
+            The data model for the database table.
+        
+        :param result:
+            A dictionary with columns as keys and values as ... values.
+        """
+        try:
+            task, *_ = self.context["tasks"]
+        except:
+            raise ValueError(f"Cannot get database task record")
+        else:
+            if len(_) > 0:
+                raise ValueError("TaskInstance.create_output() can only be used for non-bundled tasks")
+        
+        output = Output.create()
+        TaskOutput.create(task=task, output=output)
+        table_output = data_model.create(
+            task=task,
+            output=output,
+            **result
+        )  
+        return (output, table_output)
+
+
+
+    
     def get_or_create_context(self):
         if "iterable" in self.context: # TODO: think of a better way to do this
             return self.context
