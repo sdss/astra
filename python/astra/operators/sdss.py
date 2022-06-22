@@ -5,13 +5,13 @@ from airflow.models.baseoperator import BaseOperator
 from airflow.exceptions import (AirflowFailException, AirflowSkipException)
 from sdss_access import SDSSPath
 from astra.database.apogee_drpdb import Star, Visit
-from astra.database.catalogdb import SDSSVBossSpall
+from astra.database.catalogdb import (Catalog, CatalogToTIC_v8, TIC_v8, Gaia_DR2, SDSSVBossSpall)
 from astra.database.astradb import (database, DataProduct, Source, SourceDataProduct)
 from astra import log
 from astropy.time import Time
 from functools import lru_cache
 
-from peewee import fn
+from peewee import fn, JOIN
 
 @lru_cache
 def path_instance(release):
@@ -21,6 +21,8 @@ def path_instance(release):
 @lru_cache
 def lookup_keys(release, filetype):
     return path_instance(release).lookup_keys(filetype)
+
+
 
 from time import time
 import numpy as np
@@ -252,6 +254,25 @@ class ApVisitOperator(BaseOperator):
             raise AirflowSkipException(f"{N}/{N} data products had errors")
         return ids
 
+
+class CartonOperator(BaseOperator):
+    """
+    Filter upstream data model products and only keep those that are matched to a specific SDSS-V carton.
+
+    This operator requires a data model operator directly preceeding it in a DAG (e.g., an ApStarOperator).
+    """
+
+    ui_color = "#FEA83A"
+
+    def execute(
+        self,
+        context,
+        carton,
+    ):
+    
+        print(f"Context:")
+        for k, v in context.items():
+            print(f"{k}: {v}")
 
 
 class ApStarOperator(BaseOperator):
