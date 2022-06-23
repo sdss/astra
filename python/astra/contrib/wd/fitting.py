@@ -4,8 +4,9 @@ import os
 from scipy.integrate import simps
 from scipy import interpolate
 from astropy.convolution import convolve, Gaussian1DKernel
+from astra.utils import expand_path
 
-data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "data/")
+data_dir = expand_path("$MWM_ASTRA/component_data/wd/")
 
 
 def norm_models(quick=True, model="da2014", testing=False):

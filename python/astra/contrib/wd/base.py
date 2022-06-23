@@ -2,7 +2,8 @@ import numpy as np
 import os
 import scipy.optimize as op
 
-from astra import log
+from astra import log, __version__
+from astra.utils import expand_path
 from astra.base import ExecutableTask, Parameter
 from astra.database.astradb import database, Output, TaskOutput, WhiteDwarfOutput
 from astra.tools.spectrum import Spectrum1D
@@ -16,6 +17,8 @@ from astra.contrib.wd.fitting import (
     err_func,
     hot_vs_cold,
 )
+
+data_dir = expand_path("$MWM_ASTRA/component_data/wd/")
 
 
 class WhiteDwarfStellarParameters(ExecutableTask):
@@ -45,13 +48,11 @@ class WhiteDwarfStellarParameters(ExecutableTask):
             absolute_G_mag = absolute_G_mag \
                 or (gaia["phot_g_mean_mag"] + 5 * np.log10(gaia["parallax"]/100))
 
+
         log.info(f"{self} on {data_product} using parallax = {parallax:.2f} and absolute_G_mag = {absolute_G_mag:.2f}")
 
-        data_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "data/")
 
         spectrum = Spectrum1D.read(data_product.path)
-
-        # Get Gaia (absolute) G magnitude and parallax.
 
         # TODO: some better classifier
         wd_type = "DA"
@@ -268,9 +269,16 @@ class WhiteDwarfStellarParameters(ExecutableTask):
             fls = spectrum.flux.value[0, m]
 
             ax2.set_xlim(3000, 10_000)
-            ax2.set_ylim(0, 1.2 * np.percentile(fls, 99.9))
+            ax2.set_ylim(0, 2 * np.median(fls))
 
             ax2.set_ylabel(r'F$_{\lambda}$ [erg cm$^{-2}$ s$^{-1} \AA^{-1}$]',fontsize=12)
             ax2.set_xlabel(r'Wavelength $(\AA)$',fontsize=12)
+            fig.tight_layout()
+            
+            basename = os.path.basename(data_product.path[:-5])
+            fig_path = expand_path(f"$MWM_ASTRA/{__version__}/wd/{basename}.png")
+            os.makedirs(os.path.dirname(fig_path), exist_ok=True)
+            fig.savefig(fig_path)
+            log.info(f"Created figure {fig_path}")
 
-            raise a 
+            del fig
