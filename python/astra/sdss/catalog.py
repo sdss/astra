@@ -8,6 +8,17 @@ from sdssdb.peewee.sdss5db.targetdb import (Target, CartonToTarget, Carton)
 
 from astra.utils import flatten
 
+def get_sky_position(catalogid):
+    return (
+        Catalog.select(
+                    Catalog.ra,
+                    Catalog.dec
+                )
+                .where(Catalog.catalogid == catalogid)
+                .tuples()
+                .first()
+    )
+
 def get_gaia_dr2_photometry(catalogid):
     """
     Return the Gaia DR2 photometry given a SDSS-V catalog identifier.
