@@ -845,6 +845,21 @@ class WhiteDwarfOutput(AstraOutputBaseModel):
     conditioned_on_absolute_G_mag = FloatField(null=True)
     
 
+class SlamOutput(AstraOutputBaseModel):
+
+    snr = FloatField()
+    teff = FloatField()
+    u_teff = FloatField()
+    logg = FloatField()
+    u_logg = FloatField()
+    fe_h = FloatField()
+    u_fe_h = FloatField()
+    alpha_fe = FloatField(null=True)
+    u_alpha_fe = FloatField(null=True)
+
+    reduced_chi_sq = FloatField()
+
+
 def create_tables(
         drop_existing_tables=False, 
         reuse_if_open=True,

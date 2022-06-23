@@ -230,7 +230,7 @@ def do_work(ids, is_bundle):
     N = len(items)
     log.debug(f"Loading {type(ids)} {N} of {ids}")
 
-    for i, item in enumerate(items):
+    for i, item in enumerate(items, start=1):
         log.info(f"Executing item {i}/{N}: {item}")
         try:
             result = (
@@ -240,7 +240,7 @@ def do_work(ids, is_bundle):
         except:
             log.exception(f"Exception when executing item {item}")
         else:
-            log.info(f"Result has {len(result)} items of type {type(result)}")
+            log.info(f"Completed item {i}/{N}: {item}")
             
     return None
 

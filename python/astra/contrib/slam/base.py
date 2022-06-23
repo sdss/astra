@@ -2,23 +2,25 @@
 
 import numpy as np
 import os        
-from tqdm import tqdm
 from astra import log
-from astra.database import astradb
 from astra.tools.spectrum import Spectrum1D
+from astra.utils import dict_to_list
 from scipy.interpolate import interp1d
 
 from astra.utils import expand_path
 from astra.contrib.slam.slam.slam3 import Slam3 as Slam
 from astra.contrib.slam.slam.normalization import normalize_spectra_block
-
+from astra.database.astradb import (database, Output, TaskOutput, SlamOutput)
 
 from astra.base import (ExecutableTask, Parameter, TupleParameter, DictParameter)
 
 class EstimateStellarLabels(ExecutableTask):
 
-    model_path = Parameter(bundled=True)
-    dwav = Parameter(default=10.0)
+    model_path = Parameter(
+        default="$MWM_ASTRA/component_data/slam/ASPCAP_DR16_astra.dump",
+        bundled=True
+    )
+    dwave = Parameter(default=10.0)
     p = TupleParameter(default=(1E-8, 1E-7))
     q = Parameter(default=0.7)
     ivar_block = TupleParameter(default=None)
@@ -71,7 +73,7 @@ class EstimateStellarLabels(ExecutableTask):
 
                 spectrum = Spectrum1D.read(data_product.path)
             
-                wave   = spectrum.spectral_axis
+                wave   = spectrum.spectral_axis.value
                 fluxes = spectrum.flux.value
                 invars = spectrum.uncertainty.array
 
@@ -79,7 +81,7 @@ class EstimateStellarLabels(ExecutableTask):
                 
                 fluxes_resamp, invars_resamp = [], []
                 for i in range(N):
-                    fluxes_temp, invars_temp = resample(wave[i], fluxes[i], invars[i], wave_interp)
+                    fluxes_temp, invars_temp = resample(wave, fluxes[i], invars[i], wave_interp)
                     fluxes_resamp += [fluxes_temp]
                     invars_resamp += [invars_temp]
                 fluxes_resamp, invars_resamp = np.array(fluxes_resamp), np.array(invars_resamp)
@@ -88,7 +90,7 @@ class EstimateStellarLabels(ExecutableTask):
                     wave_interp,
                     fluxes_resamp,
                     (6147., 8910.),
-                    dwav=parameters['dwav'],
+                    dwave=parameters['dwave'],
                     p=parameters['p'],
                     q=parameters['q'],
                     ivar_block=parameters['ivar_block'],
@@ -107,32 +109,56 @@ class EstimateStellarLabels(ExecutableTask):
                 results_pred = model.predict_labels_multi(label_init, fluxes_norm, invars_norm)
                 label_pred = np.array([label['x'] for label in results_pred])
                 std_pred   = np.array([label['pstd'] for label in results_pred])
+                N_, L = label_pred.shape
 
-                ### modify the following block for SLAM style
                 # Create results array.
-                ### log_g, log_teff, fe_h = predictions.T
-                ### teff = 10**log_teff
                 teff    = label_pred[:,0]
-                m_h     = label_pred[:,1]
-                log_g   = label_pred[:,2]
-                alpha_m = label_pred[:,3]
                 u_teff    = std_pred[:,0]
-                u_m_h     = std_pred[:,1]
-                u_log_g   = std_pred[:,2]
-                u_alpha_m = std_pred[:,3]
-                result = dict(
-                    snr=spectrum.meta["snr"],
+                log_g   = label_pred[:,1]
+                u_log_g   = std_pred[:,1]
+                fe_h     = label_pred[:,2]
+                u_fe_h     = std_pred[:,2]
+                #alpha_m = label_pred[:,3]
+                #u_alpha_m = std_pred[:,3]
+
+                snr = fluxes * np.sqrt(invars)
+                snr[snr <= 0] = np.nan
+                snr = np.nanmean(snr, axis=1)
+                
+                # TODO: use 'pcov' covariance matrix and store correlation coefficients?
+                #       Store cost? or any other things about fitting?
+                
+                model_flux = model.predict_spectra(label_pred)
+                chi_sq = (model_flux - fluxes_norm)**2 * invars_norm
+                reduced_chi_sq = np.sum(chi_sq, axis=1) / (P - L - 1)
+
+                results = dict(
+                    snr=snr.tolist(),
                     teff=teff.tolist(),
-                    m_h=m_h.tolist(),
-                    logg=log_g.tolist(),
-                    alpha_m=alpha_m.tolist(),
                     u_teff=u_teff.tolist(),
-                    u_m_h=u_m_h.tolist(),
+                    fe_h=fe_h.tolist(),
+                    u_fe_h=u_fe_h.tolist(),
+                    logg=log_g.tolist(),
                     u_logg=u_log_g.tolist(),
-                    u_alpha_m=u_alpha_m.tolist(),
+                    reduced_chi_sq=reduced_chi_sq.tolist()
+                    #alpha_m=alpha_m.tolist(),
+                    #u_alpha_m=u_alpha_m.tolist(),
                 )
 
-                raise a
+                with database.atomic():
+                    for result in dict_to_list(results):
+                        output = Output.create()
+                        TaskOutput.create(task=task, output=output)
+                        table_output = SlamOutput.create(
+                            task=task,
+                            output=output,
+                            **result
+                        )  
+
+                    log.info(f"Created outputs {output} and {table_output} with {result}")
+
+                # TODO: Create astraStar file
+
 
 
 def resample(wave, flux, err, wave_resamp):

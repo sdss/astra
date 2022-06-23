@@ -1,7 +1,15 @@
+import json
+import os
+from airflow.compat.functools import cached_property
+from airflow.hooks.subprocess import SubprocessHook
 from airflow.models.baseoperator import BaseOperator
+from airflow.utils.operator_helpers import context_to_airflow_vars
 
 from astra import log
+from astra.utils import (deserialize, flatten)
 from astra.operators.utils import to_callable
+from astra.database.astradb import Task
+        
 
 class AstraOperator(BaseOperator):
 
@@ -41,3 +49,35 @@ class AstraOperator(BaseOperator):
         return outputs
     
 
+
+class TaskExecutor(BaseOperator):
+
+    template_fields = ("execute_task_ids", )
+
+    def __init__(
+        self,
+        execute_task_ids,
+        **kwargs,
+    ) -> None:
+        super(TaskExecutor, self).__init__(**kwargs)
+        self.execute_task_ids = execute_task_ids
+        return None
+
+
+    def execute(self, context):
+
+        tasks = deserialize(self.execute_task_ids, Task)
+        N = len(tasks)
+
+        log.info(f"Executing {N} tasks.")
+
+        for i, task in enumerate(tasks, start=1):
+            log.info(f"Executing item {i}/{N}: {task}")
+            try:
+                result = task.instance().execute()
+            except:
+                log.exception(f"Exception when executing item {task}")
+            else:
+                log.info(f"Completed task {task}")
+                
+        return None
