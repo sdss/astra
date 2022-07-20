@@ -61,3 +61,9 @@ class Visit(ApogeeDRPBaseModel):
     @hybrid_property
     def filetype(self):
         return "apVisit"
+
+class RvVisit(ApogeeDRPBaseModel):
+    class Meta:
+        table_name = "rv_visit"
+    
+    
