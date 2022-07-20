@@ -13,6 +13,7 @@ from astra.contrib.slam.slam.normalization import normalize_spectra_block
 from astra.database.astradb import (database, Output, TaskOutput, SlamOutput)
 
 from astra.base import (ExecutableTask, Parameter, TupleParameter, DictParameter)
+from astra.sdss.datamodels import create_AstraStar_product
 
 class EstimateStellarLabels(ExecutableTask):
 
@@ -128,8 +129,8 @@ class EstimateStellarLabels(ExecutableTask):
                 # TODO: use 'pcov' covariance matrix and store correlation coefficients?
                 #       Store cost? or any other things about fitting?
                 
-                model_flux = model.predict_spectra(label_pred)
-                chi_sq = (model_flux - fluxes_norm)**2 * invars_norm
+                prediction = model.predict_spectra(label_pred)
+                chi_sq = (prediction - fluxes_norm)**2 * invars_norm
                 reduced_chi_sq = np.sum(chi_sq, axis=1) / (P - L - 1)
 
                 results = dict(
@@ -144,7 +145,8 @@ class EstimateStellarLabels(ExecutableTask):
                     #alpha_m=alpha_m.tolist(),
                     #u_alpha_m=u_alpha_m.tolist(),
                 )
-
+                
+                # Create database records first, because these will be populated into the AstraStar product.
                 with database.atomic():
                     for result in dict_to_list(results):
                         output = Output.create()
@@ -157,13 +159,37 @@ class EstimateStellarLabels(ExecutableTask):
 
                     log.info(f"Created outputs {output} and {table_output} with {result}")
 
-                # TODO: Create astraStar file
+                # Create AstraStar product.
+                continuum = fluxes_temp/fluxes_norm
+
+                # Re-sample the predicted spectra back to the observed frame.
+                f = interp1d(wave_interp, prediction[0], kind='cubic', bounds_error=False)
+                c = interp1d(wave_interp, continuum[0], kind="cubic", bounds_error=False)
+
+                rectified_flux = f(wave)
+                model_flux = rectified_flux * c(wave)
+                model_ivar = np.zeros_like(model_flux)
+
+                crval = spectrum.meta["header"]["CRVAL1"]
+                cdelt = spectrum.meta["header"]["CD1_1"]
+                crpix = spectrum.meta["header"]["CRPIX1"]
+
+                output_product = create_AstraStar_product(
+                    task,
+                    model_flux=model_flux,
+                    model_ivar=model_ivar,
+                    rectified_flux=rectified_flux,
+                    crval=crval,
+                    cdelt=cdelt,
+                    crpix=crpix
+                )
+
+        
 
 
-
-def resample(wave, flux, err, wave_resamp):
-    f1 = interp1d(wave, flux, kind='cubic')
-    f2 = interp1d(wave, err,  kind='cubic')
+def resample(wave, flux, err, wave_resamp, bounds_error=None):
+    f1 = interp1d(wave, flux, kind='cubic', bounds_error=bounds_error)
+    f2 = interp1d(wave, err,  kind='cubic', bounds_error=bounds_error)
     re_flux = f1(wave_resamp)
     re_err = f2(wave_resamp)
     return np.array(re_flux), np.array(re_err)                
