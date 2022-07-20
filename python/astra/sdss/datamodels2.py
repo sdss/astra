@@ -21,7 +21,7 @@ from astra.sdss.apogee_bitmask import PixelBitMask # TODO: put elsewhere
 from .catalog import get_sky_position
 
 C_KM_S = c.to(u.km / u.s).value
-
+BLANK_CARD = (None, None, None)
 
 class CreateMilkyWayMapperDataProducts(ExecutableTask):
 
@@ -38,23 +38,6 @@ class CreateMilkyWayMapperDataProducts(ExecutableTask):
             #lco25m_visits_hdu, lco25m_resampled = create_apogee_visits_hdu(fdp(input_data_products, "apVisit", "lco25m"))
 
 
-
-# Resample all spectra.
-
-# Stack spectra.
-
-# Create header card
-'''
-return (
-    include_visits, 
-    v_rad, 
-    resampled_wavelength, 
-    resampled_flux, 
-    resampled_flux_error, 
-    resampled_pseudo_cont, 
-    resampled_bitmask
-)
-'''
 
 _filter_data_products = lambda idp, filetype, telescope=None: filter(idp, lambda dp: (dp.filetype == filetype) and ((telescope is None) or (telescope == dp.kwargs["telescope"])))
 
@@ -190,6 +173,155 @@ def create_apogee_visits_hdu(
     return (hdu, resampled)
 
 
+def get_catalog_identifier(source: Union[Source, int]):
+    """
+    Return a catalog identifer given either a source, or catalog identifier (as string or int).
+    
+    :param source:
+        The astronomical source, or the SDSS-V catalog identifier.
+    """
+    return source.catalogid if isinstance(source, Source) else int(source)
+
+
+
+def get_cartons_and_programs(source: Union[Source, int]):
+    """
+    Return the name of cartons and programs that this source is matched to.
+
+    :param source:
+        The astronomical source, or the SDSS-V catalog identifier.
+
+    :returns:
+        A two-length tuple containing a list of carton names (e.g., `mwm_snc_250pc`)
+        and a list of program names (e.g., `mwm_snc`).
+    """
+    
+    catalogid = get_catalog_identifier(source)
+    from peewee import fn
+    from sdssdb.peewee.sdss5db import database as sdss5_database
+    sdss5_database.set_profile("operations") # TODO: HOW CAN WE SET THIS AS DEFAULT!?!
+
+    from sdssdb.peewee.sdss5db.targetdb import (Target, CartonToTarget, Carton)
+
+    sq = (
+        Carton.select(
+            Target.catalogid, 
+            Carton.carton,
+            Carton.program
+        )
+        .distinct()
+        .join(CartonToTarget)
+        .join(Target)
+        .where(Target.catalogid == catalogid)
+        .alias("distinct_cartons")
+    )
+
+    q_cartons = (
+        Target.select(
+            Target.catalogid, 
+            fn.STRING_AGG(sq.c.carton, ",").alias("cartons"),
+            fn.STRING_AGG(sq.c.program, ",").alias("programs"),
+        )
+        .join(sq, on=(sq.c.catalogid == Target.catalogid))
+        .group_by(Target.catalogid)
+        .tuples()
+    )
+    _, cartons, programs = q_cartons.first()
+    return (cartons.split(","), programs.split(","))
+
+
+def get_auxiliary_source_data(source: Union[Source, int]):
+    """
+    Return auxiliary data (e.g., photometry) for a given SDSS-V source.
+
+    :param source:
+        The astronomical source, or the SDSS-V catalog identifier.
+    """
+    from peewee import Alias, JOIN
+    from sdssdb.peewee.sdss5db import database as sdss5_database
+    sdss5_database.set_profile("operations") # TODO: HOW CAN WE SET THIS AS DEFAULT!?!
+
+    from sdssdb.peewee.sdss5db.catalogdb import (Catalog, CatalogToTIC_v8, TIC_v8 as TIC, TwoMassPSC)
+
+    from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR2 as Gaia
+
+    catalogid = get_catalog_identifier(source)
+    tic_dr = TIC.__name__.split("_")[-1]
+    gaia_dr = Gaia.__name__.split("_")[-1]
+
+    ignore = lambda c: c is None or isinstance(c, str)
+
+    # Define the columns and associated comments.
+    field_descriptors = [
+        BLANK_CARD,
+        ("",            "IDENTIFIERS",                  None),
+        ("SDSS_ID",     Catalog.catalogid,              f"SDSS-V catalog identifier"),
+        ("TIC_ID",      TIC.id.alias("tic_id"),         f"TESS Input Catalog ({tic_dr}) identifier"),
+        ("GAIA_ID",     Gaia.source_id,                 f"Gaia {gaia_dr} source identifier"),
+        BLANK_CARD,
+        ("",            "ASTROMETRY",                   None),
+        ("RA",          Catalog.ra,                     "SDSS-V catalog right ascension (J2000) [deg]"),
+        ("DEC",         Catalog.dec,                    "SDSS-V catalog declination (J2000) [deg]"),
+        ("GAIA_RA",     Gaia.ra,                        f"Gaia {gaia_dr} right ascension [deg]"),
+        ("GAIA_DEC",    Gaia.dec,                       f"Gaia {gaia_dr} declination [deg]"),        
+        ("PLX",         Gaia.parallax,                  f"Gaia {gaia_dr} parallax [mas]"),
+        ("E_PLX",       Gaia.parallax_error,            f"Gaia {gaia_dr} parallax error [mas]"),
+        ("PMRA",        Gaia.pmra,                      f"Gaia {gaia_dr} proper motion in RA [mas/yr]"),
+        ("E_PMRA",      Gaia.pmra_error,                f"Gaia {gaia_dr} proper motion in RA error [mas/yr]"),
+        ("PMDE",        Gaia.pmdec,                     f"Gaia {gaia_dr} proper motion in DEC [mas/yr]"),
+        ("E_PMDE",      Gaia.pmdec_error,               f"Gaia {gaia_dr} proper motion in DEC error [mas/yr]"),
+        ("VRAD",        Gaia.radial_velocity,           f"Gaia {gaia_dr} radial velocity [km/s]"),
+        ("E_VRAD",      Gaia.radial_velocity_error,     f"Gaia {gaia_dr} radial velocity error [km/s]"),
+        BLANK_CARD,
+        ("",            "PHOTOMETRY",                   None),
+        ("G_MAG",       Gaia.phot_g_mean_mag,           f"Gaia {gaia_dr} mean apparent G magnitude [mag]"),
+        ("BP_MAG",      Gaia.phot_bp_mean_mag,          f"Gaia {gaia_dr} mean apparent BP magnitude [mag]"),
+        ("RP_MAG",      Gaia.phot_rp_mean_mag,          f"Gaia {gaia_dr} mean apparent RP magnitude [mag]"),
+        ("J_MAG",       TwoMassPSC.j_m,                 f"2MASS mean apparent J magnitude [mag]"),
+        ("E_J_MAG",     TwoMassPSC.j_cmsig,             f"2MASS mean apparent J magnitude error [mag]"),
+        ("H_MAG",       TwoMassPSC.h_m,                 f"2MASS mean apparent H magnitude [mag]"),        
+        ("E_H_MAG",     TwoMassPSC.h_cmsig,             f"2MASS mean apparent H magnitude error [mag]"),
+        ("K_MAG",       TwoMassPSC.k_m,                 f"2MASS mean apparent K magnitude [mag]"),
+        ("E_K_MAG",     TwoMassPSC.k_cmsig,             f"2MASS mean apparent K magnitude error [mag]"),
+    ]
+
+    q = (
+        Catalog.select(*[c for k, c, comment in field_descriptors if not ignore(c)])
+               .distinct(Catalog.catalogid)
+               .join(CatalogToTIC_v8, JOIN.LEFT_OUTER)
+               .join(TIC)
+               .join(Gaia, JOIN.LEFT_OUTER)
+               .switch(TIC)
+               .join(TwoMassPSC, JOIN.LEFT_OUTER)
+               .where(Catalog.catalogid == catalogid)
+               .dicts()
+    )
+    row = q.first()
+
+    # Return as a list of entries suitable for a FITS header card.
+    data = []
+    for key, field, comment in field_descriptors:
+        if ignore(field):
+            data.append((key, field, comment))
+        else:
+            data.append((
+                key,
+                row[field._alias if isinstance(field, Alias) else field.name],
+                comment
+            ))
+
+    # Add carton and target information
+    cartons, programs = get_cartons_and_programs(source)
+    data.extend([
+        BLANK_CARD,
+        ("",            "TARGETING",        None),
+        ("CARTONS",     ",".join(cartons),  f"Comma-separated SDSS-V carton names"),
+        ("PROGRAMS",    ",".join(programs), f"Comma-separated SDSS-V program names")
+    ])
+    return data
+
+
+
 def create_primary_hdu(source: Union[Source, int]) -> fits.PrimaryHDU:
     """
     Create primary HDU (headers only) for a Milky Way Mapper data product, given some source.
@@ -197,48 +329,39 @@ def create_primary_hdu(source: Union[Source, int]) -> fits.PrimaryHDU:
     :param source:
         The astronomical source, or the SDSS-V catalog identifier.
     """
-    catalogid = source.catalogid if isinstance(source, Source) else int(source)
-
+    catalogid = get_catalog_identifier(source)
+    
     # Sky position.
     ra, dec = get_sky_position(catalogid)
-    healpix = ang2pix(128, ra, dec, lonlat=True)
+    nside = 128
+    healpix = ang2pix(nside, ra, dec, lonlat=True)
 
-    return fits.PrimaryHDU(
-        header=fits.Header(
-            [
-                (
-                    "DATE", 
-                    datetime.datetime.utcnow().strftime("%Y-%m-%d"),
-                    "File creation date (UTC)"
-                ),
-                (   
-                    "ASTRAVER", 
-                    astra_version,
-                    "Software version of Astra"
-                ),
-                (
-                    "CATID", 
-                    catalogid,
-                    "SDSS-V catalog identifier"
-                ),
-                (
-                    "RA",
-                    ra,
-                    "RA (J2000)"
-                ),
-                (
-                    "DEC",
-                    dec,
-                    "DEC (J2000)" 
-                ),
-                (
-                    "HEALPIX",
-                    healpix,
-                    "HEALPix location"
-                ),
-            ]
-        )
-    )
+    # I would like to use .isoformat(), but it is too long and makes headers look disorganised.
+    # Even %Y-%m-%d %H:%M:%S is one character too long! ARGH!
+    datetime_fmt = "%y-%m-%d %H:%M:%S"
+    created = datetime.datetime.utcnow().strftime(datetime_fmt)
+    
+    cards = [
+        BLANK_CARD,
+        ("",        "METADATA",     None),
+        ("ASTRA",   astra_version,  f"Astra version"),
+        ("CREATED", created,        f"File creation time (UTC {datetime_fmt})"),
+        ("HEALPIX", healpix,        f"Healpix location ({nside} sides)")
+    ]
+    # Get photometry and other auxiliary data.
+    cards.extend(get_auxiliary_source_data(source))
+
+    cards.extend([
+        BLANK_CARD,
+        ("",        "HDU DESCRIPTIONS",     None),
+        ("COMMENT", "HDU 0: Source information only",  None),
+        ("COMMENT", "HDU 1: BOSS data from Apache Point Observatory"),
+        ("COMMENT", "HDU 2: BOSS data from Las Campanas Observatory"),
+        ("COMMENT", "HDU 3: APOGEE data from Apache Point Observatory"),
+        ("COMMENT", "HDU 4: APOGEE data from Las Campanas Observatory"),
+    ])
+    
+    return fits.PrimaryHDU(header=fits.Header(cards))
 
 
 
