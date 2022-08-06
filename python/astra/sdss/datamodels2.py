@@ -6,6 +6,7 @@ from astropy.io import fits
 from astropy.constants import c
 from astropy import units as u
 from healpy import ang2pix
+from functools import partial
 
 from astra import (log, __version__ as astra_version)
 from astra.utils import flatten
@@ -17,112 +18,370 @@ from scipy.ndimage.filters import median_filter, gaussian_filter
 
 from astra.sdss.apogee_bitmask import PixelBitMask # TODO: put elsewhere
 
+'''
+from astra.sdss.datamodels2 import *
+from astra.database.astradb import Source
+
+
+source = Source.get(catalogid=27021597917837494)
+foo = create_mwm_data_product(source)
+
+hdu, resampled = create_boss_visits_hdu(source.data_products)
+'''
+
+    
 
 from .catalog import get_sky_position
 
 C_KM_S = c.to(u.km / u.s).value
 BLANK_CARD = (None, None, None)
+FILLER_CARD = (FILLER_CARD_KEY, *_) = ("TTYPE0", "Water cuggle", None)
 
-class CreateMilkyWayMapperDataProducts(ExecutableTask):
+GLOSSARY = {
+    #           "*****************************************************"
+    "INSTRMNT": "Instrument name",
+    "TELESCOP": "Telescope name",
+    # Observing conditions
+    "ALT": "Telescope altitude [deg]",
+    "AZ": "Telescope azimuth [deg]",
+    "EXPTIME":  "Total exposure time [s]",
+    "NEXP":     "Number of exposures taken",
+    "AIRMASS": "Mean airmass",
+    "AIRTEMP": "Air temperature [C]",
+    "DEWPOINT": "Dew point temperature [C]",
+    "HUMIDITY": "Humidity [%]",
+    "PRESSURE": "Air pressure [inch Hg?]", # TODO
+    "MOON_PHASE_MEAN": "Mean phase of the moon",
+    "MOON_DIST_MEAN": "Mean sky distance to the moon [deg]",
+    "SEEING": "Median seeing conditions [arcsecond]",
+    "GUSTD": "Wind gust direction [deg]",
+    "GUSTS": "Wind gust speed [km/s]",
+    "WINDD": "Wind direction [deg]",
+    "WINDS": "Wind speed [km/s]",
+    "TAI-BEG": "MJD (TAI) at start of integrations [s]",
+    "TAI-END": "MJD (TAI) at end of integrations [s]",
+    "NGUIDE": "Number of guider frames during integration",
 
-    def execute(self):
-        
+    # Stacking
+    "V_HELIO": "Heliocentric velocity correction [km/s]",
+    "V_SHIFT": "Radial velocity shift used for stacking [km/s]",
+    "IN_STACK": "Was this spectrum used in the stack?",
 
-        for task, input_data_products, _ in self.iterable():
+    # Metadata related to sinc interpolation and stacking
+    "NRES":     "Sinc bandlimit [pixel/resolution element]",
+    "FILTSIZE": "Median filter size for pseudo-continuum [pixel]",
+    "NORMSIZE": "Gaussian width for pseudo-continuum [pixel]",
+    "CONSCALE": "Scale by pseudo-continuum when stacking",
+    "STACK_VRAD": "Radial velocity used when stacking spectra [km/s]",
 
-            source = input_data_products[0].source
+    # BOSS data reduction pipeline
+    "V_BOSS": "Version of the BOSS ICC",
+    "VJAEGER": "Version of Jaeger",
+    "VKAIJU": "Version of Kaiju",
+    "VCOORDIO": "Version of coordIO",
+    "VCALIBS": "Version of FPS calibrations",
+    "VERSREAD": "Version of idlspec2d for processing raw data",
+    "VERSIDL": "Version of IDL",
+    "VERSUTIL": "Version of idlutils",
+    "VERS2D": "Version of idlspec2d for 2D reduction",
+    "VERSCOMB": "Version of idlspec2d for combining exposures",
+    "VERSLOG": "Version of SPECLOG product",
+    "VERSFLAT": "Version of SPECFLAT product",
+    "DIDFLUSH": "Was CCD flushed before integration",
+    "CARTID": "Cartridge identifier",
+    "PSFSKY":   "Order of PSF sky subtraction",
+    "PREJECT":  "Profile area rejection threshold",
+    "LOWREJ":   "Extraction: low rejection",
+    "HIGHREJ":  "Extraction: high rejection",
+    "SCATPOLY": "Extraction: Order of scattered light polynomial",
+    "PROFTYPE": "Extraction profile: 1=Gaussian",
+    "NFITPOLY": "Extraction: Number of profile parameters",
+    "RDNOISE0": "CCD read noise amp 0 [electrons]",
+    "SKYCHI2": "Mean \chi^2 of sky subtraction",
+    "SCHI2MIN": "Minimum \chi^2 of sky subtraction",
+    "SCHI2MAX": "Maximum \chi^2 of sky subtraction",
 
-            primary_hdu = create_primary_hdu(source)
-            #boss_visits_hdu, boss_resampled = create_boss_visits_hdu(fdp(source.data)_pinput_data_products, "specLite"))
-            #apo25m_visits_hdu, apo25m_resampled = create_apogee_visits_hdu(fdp(input_data_products, "apVisit", "apo25m"))
-            #lco25m_visits_hdu, lco25m_resampled = create_apogee_visits_hdu(fdp(input_data_products, "apVisit", "lco25m"))
+    # APOGEE data reduction pipeline
+    "DATE-OBS": "Observation date (UTC)",
+    "JD-MID": "Julian date at mid-point of visit",
+    "UT-MID": "Date at mid-point of visit",
+    "FLUXFLAM": "ADU to flux unit conversion factor [ergs/s/cm^2/A]",
+    "NPAIRS": "Number of dither pairs combined",
+
+    # XCSAO
+    "XCSAO_RV": "Radial velocity from XCSAO [km/s]",
+    "XCSAO_ERV": "Error in radial velocity from XCSAO [km/s]",
+    #"XCSAO_RXC": 
+    "XCSAO_TEFF": "Effective temperature from XCSAO [K]",
+    "XCSAO_ETEFF": "Error in effective temperature from XCSAO [K]",
+    "XCSAO_LOGG": "Surface gravity from XCSAO",
+    "XCSAO_ELOGG": "Error in surface gravity from XCSAO",
+    "XCSAO_FEH": "Metallicity from XCSAO",
+    "XCSAO_EFEH": "Error in metallicity from XCSAO",
+
+    # Data things
+    "FLUX": "Source flux",
+    "FLUX_ERROR": "Standard deviation of source flux",
+    "SNR": "Mean signal-to-noise ratio",
+
+    # Wavelength solution
+    "CRVAL1": "Log(10) wavelength of first pixel [Angstrom]",
+    "CDELT1": "Log(10) delta wavelength per pixel [Angstrom]",
+    "CRPIX1": "Pixel offset from the first pixel",
+    "CTYPE1": "Wavelength solution description",
+    "DC-FLAG": "Wavelength solution flag",
+
+    # BOSS data model keywords
+    "RUN2D":    "Spectro-2D reduction name",
+    "FIELDID": "Field identifier",
+    "MJD": "Modified Julian Date of the observations",
+    "CATALOGID": "SDSS-V catalog identifier",
+    "ISPLATE": "Whether the data were taken with plates",
+
+    # APOGEE data model keywords
+    "FIBER": "Fiber number",
+    "TELESCOPE": "Telescope name",
+    "PLATE": "Plate number",
+    "FIELD": "Field number",
+    "APRED": "APOGEE reduction tag",
+}
+for key, comment in GLOSSARY.items():
+    if len(comment) > 80:
+        log.warning(
+            f"Glossary term {key} has a comment that is longer than 80 characters. "
+            f"It will be truncated from:\n{comment}\nTo:\n{comment[:80]}"
+        )
 
 
-
-_filter_data_products = lambda idp, filetype, telescope=None: filter(idp, lambda dp: (dp.filetype == filetype) and ((telescope is None) or (telescope == dp.kwargs["telescope"])))
+_filter_data_products = lambda idp, filetype, telescope=None: filter(
+    lambda dp: (dp.filetype == filetype) and ((telescope is None) or (telescope == dp.kwargs["telescope"])),
+    idp
+)
 
 
 def create_mwm_data_product(source):
     
     primary_hdu = create_primary_hdu(source)
-    boss_visits_hdu, boss_resampled = create_boss_visits_hdu(_filter_data_products(source.data_products, "specLite"))
-    apo25m_hdu, apo25m_resampled = create_apogee_visits_hdu(
-        _filter_data_products(source.data_products, "apVisit", "apo25m"),
-        description_suffix="-North"
-    )
-    lco25m_hdu, lco25m_resampled = create_apogee_visits_hdu(
-        _filter_data_products(source.data_products, "apVisit", "lco25m"),
-        description_suffix="-South"
+
+    # BOSS
+    boss_north, boss_resampled = create_boss_visits_hdu(
+        list(_filter_data_products(source.data_products, "specLite")),
     )
 
-    raise a
+    # APOGEE
+    apogee_north, apo25m_resampled = create_apogee_visits_hdu(
+        list(_filter_data_products(source.data_products, "apVisit", "apo25m")),
+    )
+    apogee_south, lco25m_resampled = create_apogee_visits_hdu(
+        list(_filter_data_products(source.data_products, "apVisit", "lco25m")),
+    )
+
+    hdul = fits.HDUList([
+        primary_hdu,
+        boss_north,
+        boss_north,
+        apogee_north,
+        apogee_south,
+    ])
+    return hdul
 
 
-def create_boss_visits_hdu(data_products: List[Union[DataProduct, str]], **kwargs):
+
+def create_boss_visits_hdu(data_products: List[Union[DataProduct, str]], telescope=None, **kwargs):
     """
     Create a binary table HDU containing all BOSS visit spectra.
 
     :param data_products:
         A list of SpecLite data products.
     """
+    cards = [
+        BLANK_CARD,
+        ("", "METADATA"),
+        ("TELESCOP", telescope), 
+        ("INSTRMNT", "BOSS"),
+    ]    
 
     data_products_used, vrad, wavelength, flux, flux_error, cont, bitmask, meta = resampled = resample_boss_visit_spectra(
         data_products,
         **kwargs
     )
-    header = fits.Header([
-        ("DESCR", "BOSS visits resampled to rest-frame vacuum wavelengths"),
-        ("CRVAL1", meta["crval"]),
-        ("CDELT1", meta["cdelt"]),
-        ("CRPIX1", 1),
-        ("CTYPE1", "LOG-LINEAR"),
-        ("NAXIS1", meta["num_pixels"]),
-        ("DC-FLAG", 1)
-    ])
-    
-    #visit_basenames = [os.path.basename(dp.path if isinstance(dp, DataProduct) else dp) for dp in data_products_used]
-    
-    # https://docs.astropy.org/en/stable/io/fits/usage/table.html#column-creation
-    
-    S = flux.size
-    V, P = flux.shape
+    if len(data_products_used) == 0:
+        return (fits.BinTableHDU(header=fits.Header(cards)), resampled)
     snr = np.nanmean(flux / flux_error, axis=1)
-    flux_unit = "10^-17 erg/s/cm^2/Ang"
-    columns = [
-        fits.Column(name="flux", array=flux, format=f"{S:.0f}E", dim=f"({P}, )", unit=flux_unit),
-        fits.Column(name="flux_error", array=flux_error, format=f"{S:.0f}E", dim=f"({P}, )", unit=flux_unit),
-        fits.Column(name="bitmask", array=bitmask, format=f"{S:.0f}K", dim=f"({P}, )"),
-        fits.Column(name="snr", array=snr, format="E"),
-        fits.Column(name="v_rad", array=vrad, format="E", unit="km/s"),
-        # TODO: Add other metadata that we retrieved from the visit files.
+
+
+    cards.extend([
+        BLANK_CARD,
+        ("",   "BOSS DATA REDUCTION PIPELINE"),
+    ])
+    drp_keys = (
+        "V_BOSS", 
+        "VJAEGER", 
+        "VKAIJU",
+        "VCOORDIO",
+        "VCALIBS",
+        "VERSIDL",
+        "VERSUTIL",
+        "VERSREAD",
+        "VERS2D",
+        "VERSCOMB",
+        "VERSLOG",
+        "VERSFLAT",
+        "DIDFLUSH", "CARTID", 
+        "PSFSKY", "PREJECT", "LOWREJ", "HIGHREJ", "SCATPOLY", "PROFTYPE", "NFITPOLY",
+        "SKYCHI2", "SCHI2MIN", "SCHI2MAX",
+        ("HELIO_RV", "V_HELIO"),
+        "RDNOISE0"
+    )
+
+    with fits.open(data_products_used[0].path) as image:
+        for key in drp_keys:
+            if isinstance(key, tuple):
+                old_key, new_key = key
+            else:
+                old_key = new_key = key
+            try:
+                value = image[0].header[old_key]
+                comment = image[0].header.comments[old_key]
+            except KeyError:
+                log.warning(f"No {old_key} header of HDU 0 in {data_products_used[0].path}")
+                value = comment = None
+
+            cards.append((
+                new_key, 
+                value, 
+                GLOSSARY.get(new_key, comment)
+            ))
+
+    cards.extend([
+        BLANK_CARD,
+        ("", "SPECTRUM SAMPLING AND STACKING"),
+        ("NRES",        meta["num_pixels_per_resolution_element"]),
+        ("FILTSIZE",    meta["median_filter_size"]),
+        ("NORMSIZE",    meta["gaussian_filter_size"]),
+        ("CONSCALE",    meta["scale_by_pseudo_continuum"]),
+
+        BLANK_CARD,
+        ("", "WAVELENGTH INFORMATION (VACUUM)", None),
+        ("CRVAL1", meta["crval"], None),
+        ("CDELT1", meta["cdelt"], None),
+        ("CTYPE1", "LOG-LINEAR", None),
+        ("CRPIX1", 1, None),
+        ("DC-FLAG", 1, None),
+        ("NAXIS1", meta["num_pixels"], "Number of pixels per spectrum"),
+
+        FILLER_CARD
+    ])
+
+    header = fits.Header(cards)
+    mappings = [
+        # key, function
+        ("SPECTRAL DATA", None),
+        ("FLUX", flux),
+        ("FLUX_ERROR", flux_error),
+        ("BITMASK", bitmask),
+        ("SNR", snr),
+
+        ("INPUT DATA MODEL KEYWORDS", None),   
+        # https://stackoverflow.com/questions/6076270/lambda-function-in-list-comprehensions
+        *[(k.upper(), partial(lambda dp, image, _k: dp.kwargs[_k], _k=k)) for k in data_products_used[0].kwargs.keys()],
+        ("OBSERVING CONDITIONS", None),
+        ("ALT", lambda dp, image: image[0].header["ALT"]),
+        ("AZ", lambda dp, image: image[0].header["AZ"]),
+        ("SEEING", lambda dp, image: image[2].data["SEEING50"][0]),
+        ("AIRMASS", lambda dp, image: image[2].data["AIRMASS"][0]),
+        ("AIRTEMP", lambda dp, image: image[0].header["AIRTEMP"]),
+        ("DEWPOINT", lambda dp, image: image[0].header["DEWPOINT"]),
+        ("HUMIDITY", lambda dp, image: image[0].header["HUMIDITY"]),
+        ("PRESSURE", lambda dp, image: image[0].header["PRESSURE"]),
+        ("GUSTD", lambda dp, image: image[0].header["GUSTD"]),
+        ("GUSTS", lambda dp, image: image[0].header["GUSTS"]),
+        ("WINDD", lambda dp, image: image[0].header["WINDD"]),
+        ("WINDS", lambda dp, image: image[0].header["WINDS"]),
+        ("MOON_DIST_MEAN", lambda dp, image: np.mean(list(map(float, image[2].data["MOON_DIST"][0][0].split(" "))))),
+        ("MOON_PHASE_MEAN", lambda dp, image: np.mean(list(map(float, image[2].data["MOON_PHASE"][0][0].split(" "))))),
+        ("EXPTIME", lambda dp, image: image[2].data["EXPTIME"][0]),
+        ("NEXP", lambda dp, image: image[2].data["NEXP"][0]),
+        ("NGUIDE", lambda dp, image: image[0].header["NGUIDE"]),
+        ("TAI-BEG", lambda dp, image: image[0].header["TAI-BEG"]),
+        ("TAI-END", lambda dp, image: image[0].header["TAI-END"]),
+
+
+        ("XCSAO RESULTS", None),
+        ("XCSAO_RV", lambda dp, image: image[2].data["XCSAO_RV"][0]),
+        ("XCSAO_ERV", lambda dp, image: image[2].data["XCSAO_ERV"][0]),
+        ("XCSAO_RXC", lambda dp, image: image[2].data["XCSAO_RXC"][0]),
+        ("XCSAO_TEFF", lambda dp, image: image[2].data["XCSAO_TEFF"][0]),
+        ("XCSAO_ETEFF", lambda dp, image: image[2].data["XCSAO_ETEFF"][0]),
+        ("XCSAO_LOGG", lambda dp, image: image[2].data["XCSAO_LOGG"][0]),
+        ("XCSAO_ELOGG", lambda dp, image: image[2].data["XCSAO_ELOGG"][0]),
+        ("XCSAO_FEH", lambda dp, image: image[2].data["XCSAO_FEH"][0]),
+        ("XCSAO_EFEH", lambda dp, image: image[2].data["XCSAO_EFEH"][0]),
+
+        ("SPECTRUM SAMPLING AND STACKING", None),
+        ("V_SHIFT",     vrad),
+        # TODO: have some criteria for whether we use all in the stack or not
+        ("IN_STACK",    np.ones(len(data_products_used), dtype=bool)),
+        
     ]
 
-    try:
-        for key in data_products_used[0].kwargs.keys():
-            values = [v.kwargs[key] for v in data_products_used]
-            columns.append(
-                fits.Column(name=key, array=values, format=fits_format_string(values))
-            )
-    except:
-        log.exception(f"Unable to add visit meta columns for BOSS HDU")
+    table_category_headers = []
+    values = {} 
+    for j, data_product in enumerate(data_products_used):
+        with fits.open(data_product.path) as image:
+            for i, (key, function) in enumerate(mappings):
+                if j == 0 and function is None:
+                    table_category_headers.append((mappings[i + 1][0], key))
+                else:
+                    values.setdefault(key, [])
+                    if callable(function):
+                        try:
+                            value = function(data_product, image)
+                        except KeyError:
+                            log.warning(f"No {key} found in {data_product.path}")
+                            value = None
+                        values[key].append(value)
+                    else:
+                        values[key] = function
 
+    columns = []
+    for key, function in mappings:
+        if function is None: continue
+        columns.append(
+            fits.Column(
+                name=key,
+                array=values[key],
+                unit=None, 
+                **fits_column_kwargs(values[key])
+            )
+        )
+    
     hdu = fits.BinTableHDU.from_columns(columns, header=header)
+    for dtype_name, category_header in table_category_headers:
+        index = 1 + hdu.data.dtype.names.index(dtype_name)
+        key = f"TTYPE{index}"
+        hdu.header.insert(key, BLANK_CARD)
+        hdu.header.insert(key, ("", category_header))
+        
+    # Add explanatory things from glossary
+    for key in hdu.header.keys():
+        hdu.header.comments[key] = GLOSSARY.get(key, None)
+    for i, key in enumerate(hdu.data.dtype.names, start=1):
+        hdu.header.comments[f"TTYPE{i}"] = GLOSSARY.get(key, None)
+    if FILLER_CARD_KEY is not None:
+        try:
+            del hdu.header[FILLER_CARD_KEY]
+        except:
+            None
+        
     return (hdu, resampled)
 
 
-'''
-from astra.sdss.datamodels2 import create_boss_visits_hdu
-from astra.database.astradb import Source
 
-source = Source.get(catalogid=27021597917837494)
-hdu, resampled = create_boss_visits_hdu(source.data_products)
-'''
-
-    
 
 def create_apogee_visits_hdu(
     data_products: List[Union[DataProduct, str]], 
-    description_suffix: Optional[str] = None,
+    telescope: Optional[str] = None,
     **kwargs
 ):
     """
@@ -131,45 +390,166 @@ def create_apogee_visits_hdu(
     :param data_products:
         A list of ApVisit data products.
     """
-
+    cards = [
+        BLANK_CARD,
+        ("", "METADATA"),
+        ("TELESCOP", telescope), 
+        ("INSTRMNT", "BOSS"),
+    ]
     data_products_used, vrad, wavelength, flux, flux_error, cont, bitmask, meta = resampled = resample_apogee_visit_spectra(
         data_products,
         **kwargs
     )
-    header = fits.Header([
-        ("DESCR", f"APOGEE{description_suffix or ''} visits resampled to rest-frame vacuum wavelengths"),
-        ("CRVAL1", meta["crval"]),
-        ("CDELT1", meta["cdelt"]),
-        ("CRPIX1", 1),
-        ("CTYPE1", "LOG-LINEAR"),
-        ("NAXIS1", meta["num_pixels"]),
-        ("DC-FLAG", 1)
+    if len(data_products_used) == 0:
+        return (fits.BinTableHDU(header=fits.Header(cards)), resampled)
+
+    snr = np.nanmean(flux / flux_error, axis=1)
+    
+
+    cards.extend([
+        BLANK_CARD,
+        ("",   "APOGEE DATA REDUCTION PIPELINE"),
+    ])
+    drp_keys = (
+        "V_APRED", 
+    )
+    # MEANFIB and SIGFIB are in ApStar, but we are using ApVisits..
+    
+    with fits.open(data_products_used[0].path) as image:
+        for key in drp_keys:
+            if isinstance(key, tuple):
+                old_key, new_key = key
+            else:
+                old_key = new_key = key
+            try:
+                value = image[0].header[old_key]
+                comment = image[0].header.comments[old_key]
+            except KeyError:
+                log.warning(f"No {old_key} header of HDU 0 in {data_products_used[0].path}")
+                value = comment = None
+
+            cards.append((
+                new_key, 
+                value, 
+                GLOSSARY.get(new_key, comment)
+            ))
+
+    cards.extend([
+        BLANK_CARD,
+        ("", "SPECTRUM SAMPLING AND STACKING"),
+        ("NRES",        " ".join(map(str, meta["num_pixels_per_resolution_element"]))),
+        ("FILTSIZE",    meta["median_filter_size"]),
+        ("NORMSIZE",    meta["gaussian_filter_size"]),
+        ("CONSCALE",    meta["scale_by_pseudo_continuum"]),
+
+        BLANK_CARD,
+        ("", "WAVELENGTH INFORMATION (VACUUM)", None),
+        ("CRVAL1", meta["crval"], None),
+        ("CDELT1", meta["cdelt"], None),
+        ("CTYPE1", "LOG-LINEAR", None),
+        ("CRPIX1", 1, None),
+        ("DC-FLAG", 1, None),
+        ("NAXIS1", meta["num_pixels"], "Number of pixels per spectrum"),
+        FILLER_CARD
     ])
 
-    S = flux.size
-    V, P = flux.shape
-    snr = np.nanmean(flux / flux_error, axis=1)
-    flux_unit = "10^-17 erg/s/cm^2/Ang"
-    columns = [
-        fits.Column(name="flux", array=flux, format=f"{S:.0f}E", dim=f"({P}, )", unit=flux_unit),
-        fits.Column(name="flux_error", array=flux_error, format=f"{S:.0f}E", dim=f"({P}, )", unit=flux_unit),
-        fits.Column(name="bitmask", array=bitmask, format=f"{S:.0f}K", dim=f"({P}, )"),
-        fits.Column(name="snr", array=snr, format="E"),
-        fits.Column(name="v_rad", array=vrad, format="E", unit="km/s"),
-        # TODO: Add other metadata that we retrieved from the visit files.
+    header = fits.Header(cards)
+
+    mappings = [
+        # key, function
+        ("SPECTRAL DATA", None),
+        ("FLUX", flux),
+        ("FLUX_ERROR", flux_error),
+        ("BITMASK", bitmask),
+        ("SNR", snr),
+
+        ("INPUT DATA MODEL KEYWORDS", None),   
+        # https://stackoverflow.com/questions/6076270/lambda-function-in-list-comprehensions
+        *[(k.upper(), partial(lambda dp, image, _k: dp.kwargs[_k], _k=k)) for k in data_products_used[0].kwargs.keys()],
+        ("OBSERVING CONDITIONS", None),
+        #TODO: DATE_OBS? OBS_DATE?
+        ("DATE-OBS", lambda dp, image: image[0].header["DATE-OBS"]), 
+        ("EXPTIME", lambda dp, image: image[0].header["EXPTIME"]),
+        # TODO: homogenise with TAI-BEG, TAI-END with BOSS?
+        ("JD-MID", lambda dp, image: image[0].header["JD-MID"]),
+        ("UT-MID", lambda dp, image: image[0].header["UT-MID"]),
+        ("FLUXFLAM", lambda dp, image: image[0].header["FLUXFLAM"]),
+        ("NPAIRS", lambda dp, image: image[0].header["NPAIRS"]),
+        # TODO Is NCOMBINE same as NEXP for BOSS? --> make consistent naming?
+        ("NEXP", lambda dp, image: image[0].header["NCOMBINE"]),
+
+        ("SPECTRUM SAMPLING AND STACKING", None),
+        ("V_SHIFT",     vrad),
+        # TODO: have some criteria for whether we use all in the stack or not
+        ("IN_STACK",    np.ones(len(data_products_used), dtype=bool)),
+
+        ("SDSS_ID", lambda dp, image: image[0].header["CATID"]),
+        # RADIAL VELOCITIES
+        #VHBARY (S/N weighted mean barycentric RV)
+        # VSCATTER (standard deviation of visit RVs)
+        # RV_TEFF
+        # RV_LOGG
+        # RV_FEH
+        # BC
+        # CHISQ
+        # VREAD
+        # VHBARY
+        # SNR
+        # FLAG
+        
     ]
 
-    # TODO: DRY
-    try:
-        for key in data_products_used[0].kwargs.keys():
-            values = [v.kwargs[key] for v in data_products_used]
-            columns.append(
-                fits.Column(name=key, array=values, format=fits_format_string(values))
+    table_category_headers = []
+    values = {} 
+    for j, data_product in enumerate(data_products_used):
+        with fits.open(data_product.path) as image:
+            for i, (key, function) in enumerate(mappings):
+                if j == 0 and function is None:
+                    table_category_headers.append((mappings[i + 1][0], key))
+                else:
+                    values.setdefault(key, [])
+                    if callable(function):
+                        try:
+                            value = function(data_product, image)
+                        except KeyError:
+                            log.warning(f"No {key} found in {data_product.path}")
+                            value = None
+                        values[key].append(value)
+                    else:
+                        values[key] = function
+
+    print(values["SDSS_ID"], type(values["SDSS_ID"][0]))
+
+    columns = []
+    for key, function in mappings:
+        if function is None: continue
+        columns.append(
+            fits.Column(
+                name=key,
+                array=values[key],
+                unit=None, 
+                **fits_column_kwargs(values[key])
             )
-    except:
-        log.exception(f"Unable to add visit meta columns for APOGEE visits")
+        )
 
     hdu = fits.BinTableHDU.from_columns(columns, header=header)
+    for dtype_name, category_header in table_category_headers:
+        index = 1 + hdu.data.dtype.names.index(dtype_name)
+        key = f"TTYPE{index}"
+        hdu.header.insert(key, BLANK_CARD)
+        hdu.header.insert(key, ("", category_header))
+        
+    # Add explanatory things from glossary
+    for key in hdu.header.keys():
+        hdu.header.comments[key] = GLOSSARY.get(key, None)
+    for i, key in enumerate(hdu.data.dtype.names, start=1):
+        hdu.header.comments[f"TTYPE{i}"] = GLOSSARY.get(key, None)
+    if FILLER_CARD_KEY is not None:
+        try:
+            del hdu.header[FILLER_CARD_KEY]
+        except:
+            None
+
     return (hdu, resampled)
 
 
@@ -181,7 +561,6 @@ def get_catalog_identifier(source: Union[Source, int]):
         The astronomical source, or the SDSS-V catalog identifier.
     """
     return source.catalogid if isinstance(source, Source) else int(source)
-
 
 
 def get_cartons_and_programs(source: Union[Source, int]):
@@ -243,7 +622,11 @@ def get_auxiliary_source_data(source: Union[Source, int]):
 
     from sdssdb.peewee.sdss5db.catalogdb import (Catalog, CatalogToTIC_v8, TIC_v8 as TIC, TwoMassPSC)
 
-    from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR2 as Gaia
+    try:
+        from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR3 as Gaia
+    except ImportError:
+        from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR2 as Gaia
+        log.warning(f"Gaia DR3 not yet available in sdssdb.peewee.sdss5db.catalogdb. Using Gaia DR2.")
 
     catalogid = get_catalog_identifier(source)
     tic_dr = TIC.__name__.split("_")[-1]
@@ -251,7 +634,7 @@ def get_auxiliary_source_data(source: Union[Source, int]):
 
     ignore = lambda c: c is None or isinstance(c, str)
 
-    # Define the columns and associated comments.
+    # Define the columns and associated comments.    
     field_descriptors = [
         BLANK_CARD,
         ("",            "IDENTIFIERS",                  None),
@@ -315,8 +698,9 @@ def get_auxiliary_source_data(source: Union[Source, int]):
     data.extend([
         BLANK_CARD,
         ("",            "TARGETING",        None),
-        ("CARTONS",     ",".join(cartons),  f"Comma-separated SDSS-V carton names"),
-        ("PROGRAMS",    ",".join(programs), f"Comma-separated SDSS-V program names")
+        ("CARTONS",     ",".join(cartons), f"Comma-separated SDSS-V program names"),
+        ("PROGRAMS",    ",".join(programs), f"Comma-separated SDSS-V carton names"),
+        ("MAPPERS",     ",".join([p.split("_")[0] for p in programs]), f"Comma-separated SDSS-V Mappers")
     ])
     return data
 
@@ -351,17 +735,25 @@ def create_primary_hdu(source: Union[Source, int]) -> fits.PrimaryHDU:
     # Get photometry and other auxiliary data.
     cards.extend(get_auxiliary_source_data(source))
 
+    hdu_descriptions = ["Source information only"]
+    instruments_and_observatories = [
+        ("BOSS", "Apache Point Observatory"),
+        ("BOSS", "Las Campanas Observatory"),
+        ("APOGEE", "Apache Point Observatory"),
+        ("APOGEE", "Las Campanas Observatory")
+    ]
+    for instrument, observatory in instruments_and_observatories:
+        hdu_descriptions.append(f"{instrument} spectra from {observatory}")
+
     cards.extend([
         BLANK_CARD,
         ("",        "HDU DESCRIPTIONS",     None),
-        ("COMMENT", "HDU 0: Source information only",  None),
-        ("COMMENT", "HDU 1: BOSS data from Apache Point Observatory"),
-        ("COMMENT", "HDU 2: BOSS data from Las Campanas Observatory"),
-        ("COMMENT", "HDU 3: APOGEE data from Apache Point Observatory"),
-        ("COMMENT", "HDU 4: APOGEE data from Las Campanas Observatory"),
+        *[(f"COMMENT", f"HDU {i}: {desc}", None) for i, desc in enumerate(hdu_descriptions)]
     ])
     
     return fits.PrimaryHDU(header=fits.Header(cards))
+
+
 
 
 
@@ -381,7 +773,6 @@ def resample_visit_spectra(
 ):
     """
     Resample visit spectra onto a common wavelength array.
-
 
     :param scale_by_pseudo_continuum: [optional]
         Optionally scale each visit spectrum by its pseudo-continuum (a gaussian median filter) when
@@ -586,10 +977,17 @@ def resample_boss_visit_spectra(
     # Which is why `use_smooth_filtered_spectrum_for_bad_pixels` is not an option here 
     # because we have no bad pixel mask anyways. The user can supply these through kwargs.
     resampled_bitmask = np.zeros(resampled_flux.shape, dtype=int) 
+
+    # TODO: have resample_visit_spectra return this so we dont repeat ourselves
     meta = dict(
         crval=crval,
         cdelt=cdelt,
-        num_pixels=num_pixels
+        num_pixels=num_pixels,
+        num_pixels_per_resolution_element=num_pixels_per_resolution_element,
+        median_filter_size=median_filter_size,
+        median_filter_mode=median_filter_mode,
+        gaussian_filter_size=gaussian_filter_size,
+        scale_by_pseudo_continuum=scale_by_pseudo_continuum,
     )
 
     return (
@@ -602,6 +1000,128 @@ def resample_boss_visit_spectra(
         resampled_bitmask,
         meta
     )
+
+
+def get_apogee_visit_metadata(
+    image: fits.hdu.hdulist.HDUList,
+):
+
+    # Things that are only relevant to APOGEE, but not for a particular visit:
+
+    # Headers:
+    # OBJ       Object name
+    # HEALPIX   Healpix location
+    # TELESCOP  Telescope name
+    # APRED     APOGEE reduction pipeline version
+    # APSTAR 
+
+    # Radial velocity:
+    # V_BARY
+    # V_SCATTER
+    # N_COMP
+
+    # Stellar parameters from Doppler
+    # TEFF
+    # LOGG
+    # FEH
+
+    # Line spread function:
+    # FIB_MEAN  S/N weighted mean fiber number
+    # N_RES     # number of pixels per resolution element
+    
+
+    # FLUXFLAM 
+    # HPLUS
+    # HMINUS
+    
+    
+    # Things that are relevant to individual visits:
+    # FIELD
+    # MJD
+    # APRED
+    # FIBER
+    # TELESCOPE
+    # PLATE
+
+
+    # DATE-OBS
+    # EXPTIME
+    # NCOMBINE
+    # FRAME1
+    # FRAME2
+    # NPAIRS
+
+
+    #  RADIAL VELOCITY
+    # JD
+    # V_BC
+    # V_RAD
+    # V_BARY
+    # SNR
+    # CHI_SQ
+    # STARFLAG
+
+
+
+
+    fields = [
+        ("LOCID", "LOC_ID"),
+        ("PLATE", "PLATE"),
+        ("TELESCOP", "TELESCOP"),
+        ("MJD5", "MJD"),
+        ("FIBERID", "FIBER_ID"),
+        ("DATE-OBS", None),
+        ("EXPTIME", "EXPTIME"),
+        ("JD-MID", None),
+        ("UT-MID", None),
+        ("NCOMBINE", "NCOMBINE"),
+        ("FRAME1", "FRAME1")
+    ]
+
+
+    fields = [
+        (0, "TELESCOP", "TELESCOP", None),
+        (0, "PLATE", "PLATE", None),
+        # TODO: How are location ID and plate ID different?
+        (0, "LOCID", "LOC_ID", None), 
+    ]
+
+    # visit data for th etable:
+
+    #MJD5, "MJD",
+    
+
+    return get_visit_metadata(image, fields)
+
+def get_visit_metadata(
+    image: fits.hdu.hdulist.HDUList,
+    fields: List
+):
+    """
+    Return metadata fields for a given FITS image.
+    This will return a list of fields (key, value, comment) suitable for
+    a new FITS header.
+
+    :param image:
+        The FITS image of the ApVisit data product.
+    
+    :param fields:
+        A list of 4-length tuples that each contain:
+            - 0-indexed HDU where to access the header in the ApVisit file
+            - Existing header key in the ApVisit file
+            - Header key to use for the new data product
+            - Comment to use in the new data product
+    """    
+    metadata = []
+    for (hdu, key, new_key, comment) in fields:
+        if hdu is None:
+            metadata.append((new_key, comment, None))
+        else:
+            value = image[hdu].header[key]
+            metadata.append((new_key, value, comment))
+    return metadata
+
+
 
 
 def get_apogee_radial_velocity(
@@ -726,9 +1246,7 @@ def resample_apogee_visit_spectra(
             flux_error.append(image[hdu_flux_error].data)
             # We resample the bitmasks, and we provide a bad pixel mask.
             bitmasks.append(image[hdu_bitmask].data)
-            bad_pixel_mask.append(
-                np.where(bitmasks[-1] & pixel_mask.badval())[0]
-            )
+            bad_pixel_mask.append((bitmasks[-1] & pixel_mask.badval()) > 0)
 
         include_visits.append(visit)
 
@@ -751,6 +1269,18 @@ def resample_apogee_visit_spectra(
         flux_error,
         **kwds
     )
+    # TODO: have resample_visit_spectra return this so we dont repeat ourselves
+    meta = dict(
+        crval=crval,
+        cdelt=cdelt,
+        num_pixels=num_pixels,
+        num_pixels_per_resolution_element=num_pixels_per_resolution_element,
+        median_filter_size=median_filter_size,
+        median_filter_mode=median_filter_mode,
+        gaussian_filter_size=gaussian_filter_size,
+        scale_by_pseudo_continuum=scale_by_pseudo_continuum,
+    )
+
     resampled_bitmask, *_ = resample_visit_spectra(*args, bitmasks)
     return (
         include_visits, 
@@ -759,7 +1289,8 @@ def resample_apogee_visit_spectra(
         resampled_flux, 
         resampled_flux_error, 
         resampled_pseudo_cont, 
-        resampled_bitmask
+        resampled_bitmask,
+        meta
     )
 
 
@@ -806,17 +1337,55 @@ def combine_spectra(
     return (stacked_flux, stacked_flux_error, cont, stacked_bitmask)
 
 
-def fits_format_string(values):
+def fits_column_kwargs(values):
     if all(isinstance(v, str) for v in values):
         max_len = max(map(len, values))
-        return f"{max_len}A"
-    
-    first_type = type(values[0])
-    return {
-        int: "J", # 32 bit
-        float: "E", # 32 bit
-        bool: "L"
-    }.get(first_type)
+        return dict(format=f"{max_len}A")
+
+    """
+    FITS format code         Description                     8-bit bytes
+
+    L                        logical (Boolean)               1
+    X                        bit                             *
+    B                        Unsigned byte                   1
+    I                        16-bit integer                  2
+    J                        32-bit integer                  4
+    K                        64-bit integer                  8
+    A                        character                       1
+    E                        single precision float (32-bit) 4
+    D                        double precision float (64-bit) 8
+    C                        single precision complex        8
+    M                        double precision complex        16
+    P                        array descriptor                8
+    Q                        array descriptor                16
+    """
+
+    mappings = [
+        ("E", lambda v: isinstance(v[0], (float, np.floating))), # all 32-bit
+        ("J", lambda v: isinstance(v[0], (int, np.integer)) and (int(max(v) >> 32) == 0)), # 32-bit integers
+        ("K", lambda v: isinstance(v[0], (int, np.integer)) and (int(max(v) >> 32) > 0)), # 64-bit integers
+        ("L", lambda v: isinstance(v[0], (bool, np.bool_))), # bools
+    ]
+    flat_values = np.array(values).flatten()
+    for format_code, check in mappings:
+        if check(flat_values):
+            break
+    else:
+        return {}
+
+    kwds = {}
+    if isinstance(values, np.ndarray):
+        #S = values.size
+        V, P = np.atleast_2d(values).shape
+        if values.ndim == 2:
+            kwds["format"] = f"{P:.0f}{format_code}"
+            kwds["dim"] = f"({P}, )"
+        else:
+            kwds["format"] = f"{format_code}"
+
+    else:
+        kwds["format"] = format_code
+    return kwds
 
 
 

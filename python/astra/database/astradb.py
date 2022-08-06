@@ -259,7 +259,7 @@ class Task(AstraBaseModel):
         outputs = []
         o = TaskOutput.get(TaskOutput.task == self)
         for expr, column in o.output.dependencies():
-            if column.model != TaskOutput:
+            if column.model not in (TaskOutput, AstraOutputBaseModel):
                 outputs.extend(column.model.select().where(column.model.task == self))
         return sorted(outputs, key=lambda x: x.output_id)
     
@@ -405,7 +405,8 @@ class AstraOutputBaseModel(AstraBaseModel):
     # Most Outputs will be associated with a single Source
     # This is a convenience reference to avoid us having to join between:
     # xxxOutput -> Task -> TaskInputDataProducts -> DataProduct -> Source
-    source = ForeignKeyField(Source, on_delete="CASCADE", null=True)
+    # TODO: update existing schema to reflect this
+    #source = ForeignKeyField(Source, on_delete="CASCADE", null=True)
 
 
 # Output tables.

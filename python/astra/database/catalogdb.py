@@ -21,6 +21,10 @@ class GaiaDR2Source(CatalogBaseModel):
     class Meta:
         table_name = "gaia_dr2_source"
 
+class GaiaDR3Source(CatalogBaseModel):
+    class Meta:
+        table_name = "gaia_dr3_source"
+
 class SDSSApogeeAllStarMergeR13(CatalogBaseModel):
     class Meta:
         table_name = "sdss_apogeeallstarmerge_r13"
@@ -44,3 +48,4 @@ class SDSSVBossSpall(CatalogBaseModel):
 class TICV8(CatalogBaseModel):
     class Meta:
         table_name = "tic_v8"
+
