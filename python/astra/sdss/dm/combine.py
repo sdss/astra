@@ -25,7 +25,11 @@ def pixel_weighted_spectrum(flux, flux_error, continuum, bitmask):
     stacked_flux = np.sum(flux * resampled_ivar, axis=0) / stacked_ivar * cont
     stacked_flux_error = np.sqrt(1.0/stacked_ivar) * cont
 
-    return (stacked_flux, stacked_flux_error, bitmask)
+    #stacked_flux = np.atleast_2d(stacked_flux)
+    #stacked_flux_error = np.atleast_2d(stacked_flux_error)
+    #bitmask = np.atleast_2d(bitmask)
+    stacked_bitmask = np.zeros_like(stacked_flux)
+    return (stacked_flux, stacked_flux_error, stacked_bitmask)
 
 
 

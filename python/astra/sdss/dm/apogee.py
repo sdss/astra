@@ -21,21 +21,25 @@ def create_apogee_hdus(
     cdelt: float = 6e-6,
     num_pixels: int = 8_575,
     num_pixels_per_resolution_element=(5, 4.25, 3.5),
+    observatory: Optional[str] = None,
     **kwargs
 ) -> Tuple[fits.BinTableHDU]:
 
     instrument = "APOGEE"
-    try:
-        telescope = ",".join(list(set([dp.kwargs["telescope"] for dp in data_products])))
-    except:
-        telescope = None
+    if observatory is None:
+        try:
+            observatory = ",".join(list(set(
+                [dp.kwargs["telescope"][:3].upper() for dp in data_products]
+            )))
+        except:
+            observatory = None
 
     common_headers = (
         ("APOGEE DATA REDUCTION PIPELINE", None),
         "V_APRED", 
     )
     if len(data_products) == 0:
-        empty_hdu = base.create_empty_hdu(telescope, instrument),            
+        empty_hdu = base.create_empty_hdu(observatory, instrument)
         return (empty_hdu, empty_hdu)
 
     # Data reduction pipeline keywords
@@ -76,16 +80,17 @@ def create_apogee_hdus(
         ("FLUX", combined_flux),
         ("E_FLUX", combined_flux_error),
         ("BITMASK", combined_bitmask),
-        ("SNR", np.array([snr_star]))
     ]    
     visit_mappings = [
         DATA_HEADER_CARD,
+        ("SNR", snr_visit), 
         ("FLUX", flux),
         ("E_FLUX", flux_error),
         ("BITMASK", bitmask),
-        ("SNR", snr_visit), 
 
         ("INPUT DATA MODEL KEYWORDS", None),   
+        ("RELEASE", lambda dp, image: dp.release),
+        ("FILETYPE", lambda dp, image: dp.filetype),
         # https://stackoverflow.com/questions/6076270/lambda-function-in-list-comprehensions
         *[(k.upper(), partial(lambda dp, image, _k: dp.kwargs[_k], _k=k)) for k in data_products[0].kwargs.keys()],
         ("OBSERVING CONDITIONS", None),
@@ -137,7 +142,7 @@ def create_apogee_hdus(
 
     # These cards will be common to visit and star data products.
     header = fits.Header([
-        *base.metadata_cards(telescope, instrument),
+        *base.metadata_cards(observatory, instrument),
         *drp_cards,
         *spectrum_sampling_cards,
         *doppler_cards,
@@ -148,7 +153,13 @@ def create_apogee_hdus(
     hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, header)
     hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, header)
 
+    # Add S/N for the stacked spectrum.
+    hdu_star.header.insert("TTYPE1", "SNR")
+    hdu_star.header["SNR"] = snr_star
+    hdu_star.header.comments["SNR"] = base.GLOSSARY.get("SNR", None)
+
     return (hdu_visit, hdu_star)
+
 
 def get_apogee_visit_radial_velocity(data_product: DataProduct):
     """

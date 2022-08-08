@@ -10,12 +10,14 @@ from astra.sdss.dm import base
 from .util import (calculate_snr, log_lambda_dispersion)
 from .combine import resample_visit_spectra, pixel_weighted_spectrum
 
+
 def create_boss_hdus(
     data_products: List[DataProduct], 
     crval: float = 3.5523,
     cdelt: float = 1e-4,
     num_pixels: int = 4_648,
     num_pixels_per_resolution_element: int = 5,
+    observatory: Optional[str] = "APO",
     **kwargs
 ) -> Tuple[fits.BinTableHDU]:
     """
@@ -38,7 +40,7 @@ def create_boss_hdus(
         The number of pixels per resolution element assumed when performing sinc interpolation.
     """
 
-    telescope, instrument = ("apo25m", "BOSS")
+    instrument = "BOSS"
     common_headers = (
         ("BOSS DATA REDUCTION PIPELINE", None),
         "V_BOSS", 
@@ -59,9 +61,8 @@ def create_boss_hdus(
         ("HELIO_RV", "V_HELIO"),
         "RDNOISE0"    
     )
-
     if len(data_products) == 0:
-        empty_hdu = base.create_empty_hdu(telescope, instrument),            
+        empty_hdu = base.create_empty_hdu(observatory, instrument)
         return (empty_hdu, empty_hdu)
 
     # Data reduction pipeline keywords
@@ -87,7 +88,6 @@ def create_boss_hdus(
         pixel_weighted_spectrum(flux, flux_error, continuum, bitmask)
 
     snr_star = calculate_snr(combined_flux, combined_flux_error, axis=None)
-    raise a
 
     DATA_HEADER_CARD = ("SPECTRAL DATA", None)
     star_mappings = [
@@ -95,18 +95,20 @@ def create_boss_hdus(
         ("FLUX", combined_flux),
         ("E_FLUX", combined_flux_error),
         ("BITMASK", combined_bitmask),
-        ("SNR", np.array([snr_star]))
     ]    
     visit_mappings = [
         DATA_HEADER_CARD,
+        ("SNR", snr_visit),
         ("FLUX", flux),
         ("E_FLUX", flux_error),
         ("BITMASK", bitmask),
-        ("SNR", snr_visit), 
 
         ("INPUT DATA MODEL KEYWORDS", None),   
+        ("RELEASE", lambda dp, image: dp.release),
+        ("FILETYPE", lambda dp, image: dp.filetype),
         # https://stackoverflow.com/questions/6076270/lambda-function-in-list-comprehensions
         *[(k.upper(), partial(lambda dp, image, _k: dp.kwargs[_k], _k=k)) for k in data_products[0].kwargs.keys()],
+        
         ("OBSERVING CONDITIONS", None),
         ("ALT", lambda dp, image: image[0].header["ALT"]),
         ("AZ", lambda dp, image: image[0].header["AZ"]),
@@ -150,7 +152,7 @@ def create_boss_hdus(
 
     # These cards will be common to visit and star data products.
     header = fits.Header([
-        *base.metadata_cards(telescope, instrument),
+        *base.metadata_cards(observatory, instrument),
         *drp_cards,
         *spectrum_sampling_cards,
         *wavelength_cards,
@@ -160,6 +162,11 @@ def create_boss_hdus(
     hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, header)
     hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, header)
     
+    # Add S/N for the stacked spectrum.
+    hdu_star.header.insert("TTYPE1", "SNR")
+    hdu_star.header["SNR"] = snr_star
+    hdu_star.header.comments["SNR"] = base.GLOSSARY.get("SNR", None)
+
     return (hdu_visit, hdu_star)
 
 

@@ -1,8 +1,13 @@
+import datetime
 import numpy as np
 from typing import Union, List, Callable, Optional, Dict
 from astropy.io import fits
-from astra import log
+from astra import (log, __version__ as astra_version)
 from astra.database.astradb import Source
+
+from .catalog import get_sky_position
+
+from healpy import ang2pix
 
 BLANK_CARD = (None, None, None)
 FILLER_CARD = (FILLER_CARD_KEY, *_) = ("TTYPE0", "Water cuggle", None)
@@ -10,7 +15,7 @@ FILLER_CARD = (FILLER_CARD_KEY, *_) = ("TTYPE0", "Water cuggle", None)
 GLOSSARY = {
     #           "*****************************************************"
     "INSTRMNT": "Instrument name",
-    "TELESCOP": "Telescope name",
+    "OBSRVTRY": "Observatory name",
     # Observing conditions
     "ALT": "Telescope altitude [deg]",
     "AZ": "Telescope azimuth [deg]",
@@ -99,6 +104,9 @@ GLOSSARY = {
     "CRPIX1": "Pixel offset from the first pixel",
     "CTYPE1": "Wavelength solution description",
     "DC-FLAG": "Wavelength solution flag",
+
+    "RELEASE": "SDSS data release name",
+    "FILETYPE": "SDSS data model filetype",
 
     # BOSS data model keywords
     "RUN2D":    "Spectro-2D reduction name",
@@ -305,12 +313,12 @@ def create_empty_hdu(telescope: str, instrument: str) -> fits.BinTableHDU:
     return fits.BinTableHDU(header=fits.Header(metadata_cards(telescope, instrument)))
 
 
-def metadata_cards(telescope: str, instrument: str) -> List:
+def metadata_cards(observatory: str, instrument: str) -> List:
     return [
         BLANK_CARD,
         ("", "METADATA"),
-        ("TELESCOP", telescope),
-        ("INSTRUME", instrument),
+        ("OBSRVTRY", observatory),
+        ("INSTRMNT", instrument),
     ]
 
 def spectrum_sampling_cards(
@@ -449,6 +457,52 @@ def headers_as_cards(data_product, input_header_keys):
                 GLOSSARY.get(new_key, comment)
             ))
     return cards
+
+
+def create_primary_hdu(
+    source: Union[Source, int],
+    hdu_descriptions: Optional[List[str]] = None
+) -> fits.PrimaryHDU:
+    """
+    Create primary HDU (headers only) for a Milky Way Mapper data product, given some source.
+    
+    :param source:
+        The astronomical source, or the SDSS-V catalog identifier.
+
+    :param hdu_descriptions: [optional]
+        A list of strings describing all HDUs.
+    """
+    catalogid = get_catalog_identifier(source)
+    
+    # Sky position.
+    ra, dec = get_sky_position(catalogid)
+    nside = 128
+    healpix = ang2pix(nside, ra, dec, lonlat=True)
+
+    # I would like to use .isoformat(), but it is too long and makes headers look disorganised.
+    # Even %Y-%m-%d %H:%M:%S is one character too long! ARGH!
+    datetime_fmt = "%y-%m-%d %H:%M:%S"
+    created = datetime.datetime.utcnow().strftime(datetime_fmt)
+    
+    cards = [
+        BLANK_CARD,
+        ("",        "METADATA",     None),
+        ("ASTRA",   astra_version,  f"Astra version"),
+        ("CREATED", created,        f"File creation time (UTC {datetime_fmt})"),
+        ("HEALPIX", healpix,        f"Healpix location ({nside} sides)")
+    ]
+    # Get photometry and other auxiliary data.
+    cards.extend(get_auxiliary_source_data(source))
+
+    if hdu_descriptions is not None:
+        cards.extend([
+            BLANK_CARD,
+            ("",        "HDU DESCRIPTIONS",     None),
+            *[(f"COMMENT", f"HDU {i}: {desc}", None) for i, desc in enumerate(hdu_descriptions)]
+        ])
+        
+    return fits.PrimaryHDU(header=fits.Header(cards))
+
 
 
 
