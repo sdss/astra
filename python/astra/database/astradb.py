@@ -90,11 +90,8 @@ def _lru_sdsspath(release):
 
 
 class Source(AstraBaseModel):
+    
     catalogid = BigIntegerField(primary_key=True)
-
-    # TODO: Do we even need these two?
-    sdssv_target0 = BigIntegerField(null=True)
-    sdssv_first_carton_name = TextField(null=True)
 
     @property
     def data_products(self):
