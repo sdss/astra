@@ -1,19 +1,13 @@
 import numpy as np
 from astropy.io import fits
-from typing import Union, List, Callable, Optional, Dict, Tuple
 from functools import partial
-from collections import defaultdict
+from typing import Union, List, Callable, Optional, Dict, Tuple
 
-from astra.database.astradb import Source, DataProduct
-
+from astra.database.astradb import DataProduct
 from astra.utils import log, list_to_dict
-from astra.sdss.dm import base
-from .util import (calculate_snr, log_lambda_dispersion)
-from .combine import resample_visit_spectra, pixel_weighted_spectrum
-
+from astra.sdss.dm import (base, combine, util)
 
 from astra.sdss.apogee_bitmask import PixelBitMask # TODO: put elsewhere
-
 
 def create_apogee_hdus(
     data_products: List[DataProduct],
@@ -24,6 +18,30 @@ def create_apogee_hdus(
     observatory: Optional[str] = None,
     **kwargs
 ) -> Tuple[fits.BinTableHDU]:
+    """
+    Create a HDU for resampled APOGEE visits, and a HDU for a stacked APOGEE spectrum, given the input APOGEE data products.
+
+    :param data_products:
+        A list of ApVisit data products.
+
+    :param crval: [optional]
+        The log10(lambda) of the wavelength of the first pixel to resample to.
+    
+    :param cdelt: [optional]
+        The log (base 10) of the wavelength spacing to use when resampling.
+    
+    :param num_pixels: [optional]
+        The number of pixels to use for the resampled array.
+
+    :param num_pixels_per_resolution_element: [optional]
+        The number of pixels per resolution element assumed when performing sinc interpolation. 
+        
+        If a list-like is given, this is assumed to be a value per chip.
+    
+    :param observatory: [optional]
+        Short name for the observatory where the data products originated from. If `None` is given, this will
+        be inferred from the data model keywords.
+    """
 
     instrument = "APOGEE"
     if observatory is None:
@@ -32,15 +50,17 @@ def create_apogee_hdus(
                 [dp.kwargs["telescope"][:3].upper() for dp in data_products]
             )))
         except:
+            log.warning(f"Cannot infer observatory from data products.")
             observatory = None
 
     common_headers = (
-        ("APOGEE DATA REDUCTION PIPELINE", None),
+        (f"{instrument} DATA REDUCTION PIPELINE", None),
         "V_APRED", 
     )
     if len(data_products) == 0:
-        empty_hdu = base.create_empty_hdu(observatory, instrument)
-        return (empty_hdu, empty_hdu)
+        empty_visits_hdu = base.create_empty_hdu(observatory, instrument)
+        empty_star_hdu = base.create_empty_hdu(observatory, instrument)
+        return (empty_visits_hdu, empty_star_hdu)
 
     # Data reduction pipeline keywords
     drp_cards = base.headers_as_cards(data_products[0], common_headers)
@@ -57,22 +77,25 @@ def create_apogee_hdus(
         radial_velocities=velocity_meta["V_REL"],
         **kwargs
     )
-    snr_visit = calculate_snr(flux, flux_error, axis=1)
+    snr_visit = util.calculate_snr(flux, flux_error, axis=1)
 
+    # Deal with apVisits that have different number of pixels, and include this as the DITHERED 
+    # or not 
     # Let's define some quality criteria of what to include in a stack.
     # TODO: Check in again with APOGEE DRP,.. still not clear which visits get included or why
     use_in_stack = (
             (np.isfinite(snr_visit) & (snr_visit > 3))
-        & (np.isfinite(velocity_meta["RCHISQ"]))
+        &   (np.isfinite(velocity_meta["RCHISQ"]))
     )
+
     
-    combined_flux, combined_flux_error, combined_bitmask = pixel_weighted_spectrum(
+    combined_flux, combined_flux_error, combined_bitmask = combine.pixel_weighted_spectrum(
         flux[use_in_stack], 
         flux_error[use_in_stack], 
         continuum[use_in_stack], 
         bitmask[use_in_stack]
     )
-    snr_star = calculate_snr(combined_flux, combined_flux_error, axis=None)
+    snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
 
     DATA_HEADER_CARD = ("SPECTRAL DATA", None)
     star_mappings = [
@@ -93,6 +116,7 @@ def create_apogee_hdus(
         ("FILETYPE", lambda dp, image: dp.filetype),
         # https://stackoverflow.com/questions/6076270/lambda-function-in-list-comprehensions
         *[(k.upper(), partial(lambda dp, image, _k: dp.kwargs[_k], _k=k)) for k in data_products[0].kwargs.keys()],
+
         ("OBSERVING CONDITIONS", None),
         #TODO: DATE_OBS? OBS_DATE? remove entirely since we have MJD?
         # DATE-OBS looks to be start of observation, since it is different from UT-MID
@@ -132,16 +156,14 @@ def create_apogee_hdus(
         # Since DOPPLER uses the same Cannon model for the final fit of all individual visits,
         # we include it here instead of repeating the information many times in the data table.
         base.BLANK_CARD,
-        ("", "DOPPLER STELLAR PARAMETERS", None),
-        *[(f"{k}_D", velocity_meta[f"{k}_DOPPLER"][0]) for k in (
-            "TEFF", "E_TEFF",
-            "LOGG", "E_LOGG",
-            "FEH", "E_FEH",
-        )],        
+        (" ", "DOPPLER STELLAR PARAMETERS", None),
+        *[(f"{k}_D", f"{velocity_meta[f'{k}_DOPPLER'][0]:.0f}") for k in ("TEFF", "E_TEFF")],
+        *[(f"{k}_D", f"{velocity_meta[f'{k}_DOPPLER'][0]:.3f}") for k in ("LOGG", "E_LOGG")],
+        *[(f"{k}_D", f"{velocity_meta[f'{k}_DOPPLER'][0]:.3f}") for k in ("FEH", "E_FEH")],
     ]
 
     # These cards will be common to visit and star data products.
-    header = fits.Header([
+    visit_header = fits.Header([
         *base.metadata_cards(observatory, instrument),
         *drp_cards,
         *spectrum_sampling_cards,
@@ -149,19 +171,28 @@ def create_apogee_hdus(
         *wavelength_cards,
         base.FILLER_CARD,
     ])    
+    star_header = fits.Header([
+        *base.metadata_cards(observatory, instrument),
+        *drp_cards,
+        *spectrum_sampling_cards,
+        *doppler_cards,
+        *wavelength_cards,
+        base.FILLER_CARD,
+    ])
 
-    hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, header)
-    hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, header)
+
+    hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, star_header)
+    hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, visit_header)
 
     # Add S/N for the stacked spectrum.
     hdu_star.header.insert("TTYPE1", "SNR")
-    hdu_star.header["SNR"] = snr_star
+    hdu_star.header["SNR"] = f"{snr_star:.1f}"
     hdu_star.header.comments["SNR"] = base.GLOSSARY.get("SNR", None)
 
     return (hdu_visit, hdu_star)
 
 
-def get_apogee_visit_radial_velocity(data_product: DataProduct):
+def get_apogee_visit_radial_velocity(data_product: DataProduct) -> dict:
     """
     Return the (current) best-estimate of the radial velocity (in km/s) of this 
     visit spectrum that is stored in the APOGEE DRP database.
@@ -251,6 +282,7 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct):
         "RV_COMPONENTS": result.rv_components,
     }  
 
+
 def resample_apogee_visit_spectra(
     visits: List[DataProduct],
     crval: float,
@@ -328,7 +360,7 @@ def resample_apogee_visit_spectra(
 
     include_visits, wavelength, v_shift = ([], [], [])
     flux, flux_error = ([], [])
-    bitmasks, bad_pixel_mask = ([], [])
+    bitmask, bad_pixel_mask = ([], [])
 
     for i, visit in enumerate(visits):
         path = visit.path if isinstance(visit, DataProduct) else visit
@@ -345,13 +377,13 @@ def resample_apogee_visit_spectra(
             wavelength.append(image[hdu_wl].data)
             flux.append(image[hdu_flux].data)
             flux_error.append(image[hdu_flux_error].data)
-            # We resample the bitmasks, and we provide a bad pixel mask.
-            bitmasks.append(image[hdu_bitmask].data)
-            bad_pixel_mask.append((bitmasks[-1] & pixel_mask.badval()) > 0)
+            # We resample the bitmask, and we provide a bad pixel mask.
+            bitmask.append(image[hdu_bitmask].data)
+            bad_pixel_mask.append((bitmask[-1] & pixel_mask.badval()) > 0)
 
         include_visits.append(visit)
 
-    resampled_wavelength = log_lambda_dispersion(crval, cdelt, num_pixels)
+    resampled_wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)
     args = (resampled_wavelength, num_pixels_per_resolution_element, v_shift, wavelength)
 
     kwds = dict(
@@ -364,13 +396,14 @@ def resample_apogee_visit_spectra(
     )
     kwds.update(kwargs)
 
-    resampled_flux, resampled_flux_error, resampled_pseudo_cont = resample_visit_spectra(
+    resampled_flux, resampled_flux_error, resampled_pseudo_cont, resampled_bitmask = combine.resample_visit_spectra(
         *args,
         flux,
         flux_error,
+        bitmask,
         **kwds
     )
-    # TODO: have resample_visit_spectra return this so we dont repeat ourselves
+    # TODO: have combine.resample_visit_spectra return this so we dont repeat ourselves
     meta = dict(
         crval=crval,
         cdelt=cdelt,
@@ -384,7 +417,6 @@ def resample_apogee_visit_spectra(
         scale_by_pseudo_continuum=scale_by_pseudo_continuum,
     )
 
-    resampled_bitmask, *_ = resample_visit_spectra(*args, bitmasks)
     return (
         resampled_flux, 
         resampled_flux_error, 

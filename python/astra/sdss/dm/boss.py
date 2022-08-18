@@ -1,15 +1,13 @@
 import numpy as np
 from astropy.io import fits
-from typing import Union, List, Callable, Optional, Dict, Tuple
 from functools import partial
+from typing import Union, List, Callable, Optional, Dict, Tuple
 
-from astra.database.astradb import Source, DataProduct
+from astra import log
+from astra.database.astradb import DataProduct
+from astra.utils import list_to_dict
 
-from astra.utils import log, list_to_dict
-from astra.sdss.dm import base
-from .util import (calculate_snr, log_lambda_dispersion)
-from .combine import resample_visit_spectra, pixel_weighted_spectrum
-
+from astra.sdss.dm import base, util, combine
 
 def create_boss_hdus(
     data_products: List[DataProduct], 
@@ -21,8 +19,7 @@ def create_boss_hdus(
     **kwargs
 ) -> Tuple[fits.BinTableHDU]:
     """
-    Create a HDU for resampled BOSS visits, and a stacked BOSS spectrum,
-    given the input BOSS data products.
+    Create a HDU for resampled BOSS visits, and a HDU for a stacked BOSS spectrum, given the input BOSS data products.
 
     :param data_products:
         A list of specLite data products.
@@ -38,11 +35,15 @@ def create_boss_hdus(
 
     :param num_pixels_per_resolution_element: [optional]
         The number of pixels per resolution element assumed when performing sinc interpolation.
+    
+    :param observatory: [optional]
+        Short name for the observatory where the data products originated from, since this information
+        is not currently part of the BOSS specLite data model path (default: APO).
     """
 
     instrument = "BOSS"
     common_headers = (
-        ("BOSS DATA REDUCTION PIPELINE", None),
+        (f"{instrument} DATA REDUCTION PIPELINE", None),
         "V_BOSS", 
         "VJAEGER", 
         "VKAIJU",
@@ -62,8 +63,9 @@ def create_boss_hdus(
         "RDNOISE0"    
     )
     if len(data_products) == 0:
-        empty_hdu = base.create_empty_hdu(observatory, instrument)
-        return (empty_hdu, empty_hdu)
+        empty_visits_hdu = base.create_empty_hdu(observatory, instrument)
+        empty_star_hdu = base.create_empty_hdu(observatory, instrument)
+        return (empty_visits_hdu, empty_star_hdu)
 
     # Data reduction pipeline keywords
     drp_cards = base.headers_as_cards(data_products[0], common_headers)
@@ -76,18 +78,31 @@ def create_boss_hdus(
         num_pixels_per_resolution_element=num_pixels_per_resolution_element,
         **kwargs
     )
-    snr_visit = calculate_snr(flux, flux_error, axis=1)
+    snr_visit = util.calculate_snr(flux, flux_error, axis=1)
     
+    # Get ZWARNINGs from the data product metadata.
+    # The ZWARNING is only available in the spAll file, so instead of re-matching it here, we store it
+    # as metadata when the BOSS spSpec files are ingested. In the future if the ZWARNING is stored in
+    # the spSpec file, we should switch to using that.
+    zwarnings = np.array([dp.metadata.get("ZWARNING", -1) for dp in data_products])
+    missing_zwarnings = np.sum(zwarnings == -1)
+    if missing_zwarnings > 0:
+        log.warning(f"Missing ZWARNING from {missing_zwarnings} data products:")
+        for dp, zwarning in zip(data_products, zwarnings):
+            if zwarning == -1: log.warning(f"\t{dp}: {dp.path}")
+        log.warning("We will assume nothing is wrong with them (e.g., as if ZWARNING = 0)!")
+        
     # Let's define some quality criteria of what to include in a stack.
     use_in_stack = (
         (np.isfinite(snr_visit) & (snr_visit > 3))
     &   (np.array(meta["v_meta"]["RXC_XCSAO"]) > 6)
+    &   (zwarnings <= 0)
     )
 
     combined_flux, combined_flux_error, combined_bitmask = \
-        pixel_weighted_spectrum(flux, flux_error, continuum, bitmask)
+        combine.pixel_weighted_spectrum(flux, flux_error, continuum, bitmask)
 
-    snr_star = calculate_snr(combined_flux, combined_flux_error, axis=None)
+    snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
 
     DATA_HEADER_CARD = ("SPECTRAL DATA", None)
     star_mappings = [
@@ -173,7 +188,7 @@ def create_boss_hdus(
 def get_boss_relative_velocity(
     image: fits.hdu.hdulist.HDUList, 
     visit: Union[DataProduct, str]
-) -> float:
+) -> Tuple[float, dict]:
     """
     Return the (current) best-estimate of the relative velocity (in km/s) of this 
     visit spectrum from the image headers. 
@@ -205,7 +220,7 @@ def resample_boss_visit_spectra(
     crval: float,
     cdelt: float,
     num_pixels: int,
-    num_pixels_per_resolution_element: int = 5,
+    num_pixels_per_resolution_element: int,
     radial_velocities: Optional[Union[Callable, List[float]]] = None,
     scale_by_pseudo_continuum: bool = True,
     median_filter_size: int = 501,
@@ -228,7 +243,7 @@ def resample_boss_visit_spectra(
     :param num_pixels: 
         The number of pixels to use for the resampled array.
 
-    :param num_pixels_per_resolution_element: [optional]
+    :param num_pixels_per_resolution_element:
         The number of pixels per resolution element assumed when performing sinc interpolation.
     
     :param radial_velocities: [optional]
@@ -256,7 +271,7 @@ def resample_boss_visit_spectra(
         radial_velocities = get_boss_relative_velocity
 
     additional_meta = []
-    wavelength, v_shift, flux, flux_error, sky_flux = ([], [], [], [], [])
+    wavelength, v_shift, flux, flux_error, sky_flux, bitmask = ([], [], [], [], [], [])
     for i, visit in enumerate(visits):
         path = visit.path if isinstance(visit, DataProduct) else visit
 
@@ -276,9 +291,10 @@ def resample_boss_visit_spectra(
             flux.append(image[1].data["FLUX"])
             flux_error.append(image[1].data["IVAR"]**-0.5)
             sky_flux.append(image[1].data["SKY"])
+            bitmask.append(image[1].data["OR_MASK"])
 
 
-    resampled_wavelength = log_lambda_dispersion(crval, cdelt, num_pixels)
+    resampled_wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)
     args = (resampled_wavelength, num_pixels_per_resolution_element, v_shift, wavelength)
     kwds = dict(
         median_filter_size=median_filter_size,
@@ -288,17 +304,12 @@ def resample_boss_visit_spectra(
     )
     kwds.update(kwargs)
 
-    resampled_flux, resampled_flux_error, resampled_pseudo_cont = resample_visit_spectra(
+    resampled_flux, resampled_flux_error, resampled_pseudo_cont, resampled_bitmask = combine.resample_visit_spectra(
         *args,
         flux,
         flux_error,
         **kwds
     )
-
-    # BOSS DRP gives no per-pixel bitmask array AFAIK
-    # Which is why `use_smooth_filtered_spectrum_for_bad_pixels` is not an option here 
-    # because we have no bad pixel mask anyways. The user can supply these through kwargs.
-    resampled_bitmask = np.zeros(resampled_flux.shape, dtype=int) 
 
     # TODO: have resample_visit_spectra return this so we dont repeat ourselves
     meta = dict(

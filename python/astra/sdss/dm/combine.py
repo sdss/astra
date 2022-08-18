@@ -1,5 +1,6 @@
 import numpy as np
 import numpy as np
+from collections import OrderedDict
 from scipy import interpolate
 from scipy.ndimage.filters import median_filter, gaussian_filter
 from astropy.constants import c
@@ -32,6 +33,29 @@ def pixel_weighted_spectrum(flux, flux_error, continuum, bitmask):
     return (stacked_flux, stacked_flux_error, stacked_bitmask)
 
 
+def separate_bitmasks(bitmask):
+    """
+    Separate a bitmask array into arrays of bitmasks for each bit. Assumes base-2.
+
+    :param bitmask:
+        An array of bitmask values.
+    """
+
+    q_max = int(np.log2(np.max(bitmask)))
+    separated = OrderedDict()
+    for q in range(q_max):
+        is_set = (bitmask & np.uint64(2**q)) > 0
+        if np.any(is_set):
+            separated[q] = np.clip(is_set, 0, 1).astype(float)    
+    return separated
+
+"""
+from astra.database.astradb import Source
+source = Source.get(catalogid=4551536934)
+from astra.sdss.dm.mwm import create_mwm_data_products
+
+foo = create_mwm_data_products(source)
+"""
 
 def resample_visit_spectra(
     resampled_wavelength,
@@ -40,6 +64,7 @@ def resample_visit_spectra(
     wavelength,
     flux,
     flux_error=None,
+    bitmask=None,
     scale_by_pseudo_continuum=False,
     use_smooth_filtered_spectrum_for_bad_pixels=False,
     bad_pixel_mask=None,
@@ -49,6 +74,25 @@ def resample_visit_spectra(
 ):
     """
     Resample visit spectra onto a common wavelength array.
+
+    :param resampled_wavelength:
+        An array of wavelength values to resample the flux onto.
+    
+    :param num_pixels_per_resolution_element:
+        The number of pixels per resolution element to assume when performing sinc interpolation.
+    
+    :param radial_velocity:
+        The radial velocity of each flux. This should be an array of length N, where the `flux` argument
+        has shape (N, P).
+    
+    :param flux:
+        A flux array of shape (N, P) where N is the number of visits and P is the number of pixels.
+    
+    :param flux_error: [optional]
+        A flux error array of shape (N, P) where N is the number of visits and P is the number of pixels.
+    
+    :param bitmask: [optional]
+        A bitmask array the same shape as `flux`.
 
     :param scale_by_pseudo_continuum: [optional]
         Optionally scale each visit spectrum by its pseudo-continuum (a gaussian median filter) when
@@ -90,9 +134,16 @@ def resample_visit_spectra(
     if len(radial_velocity) != n_visits:
         raise ValueError(f"Unexpected number of radial velocities ({len(radial_velocity)} != {n_visits})")
 
+    if bitmask is not None:
+        # Separate all bitmask values.
+        separated_bitmasks = separate_bitmasks(bitmask)
+        n_flags = len(separated_bitmasks)
+        resampled_bitmasks = np.zeros((n_visits, n_pixels, n_flags))
+        num_flagged_pixels = { flag: np.sum(a > 0, axis=-1).astype(int) for flag, a in separated_bitmasks.items() }
+
     for i, v_rad in enumerate(radial_velocity):
         for j, n_res in enumerate(num_pixels_per_resolution_element):
-            
+
             chip_wavelength = visit_and_chip(wavelength, i, j)
             chip_flux = visit_and_chip(flux, i, j)
             chip_flux_error = visit_and_chip(flux_error, i, j)
@@ -118,6 +169,39 @@ def resample_visit_spectra(
             resampled_flux[i, finite] = resampled_chip_flux
             resampled_flux_error[i, finite] = resampled_chip_flux_error
 
+            if bitmask is not None:
+                # Do the sinc interpolation on each bitmask value.
+                output = sincint(
+                    pixel[finite],
+                    n_res,
+                    [
+                        [flag_bitmask[i, j], None] for flag_bitmask in separated_bitmasks.values()
+                    ]
+                )
+
+                for k, (flag, (resampled_bitmask_flag, _)) in enumerate(zip(separated_bitmasks.keys(), output)):
+                    if num_flagged_pixels[flag][i, j] == 0: continue
+
+                    # The resampling will produce a continuous (fraction) of bitmask values everywhere
+                    # with an exponential sinc function pattern. In SDSS-IV they decided just to take
+                    # any pixel with a fraction > 0.1 (in most cases) and assign pixels like that with
+                    # the bitmask.
+
+                    # If you have a *single* pixel that is flagged, and zero radial velocity (so no shift)
+                    # then this >0.1 metric would end up flagging the neighbouring pixels as well, even
+                    # though there was no change to the flux. 
+
+                    # Instead, here I will take metric to be whatever is needed to keep the same *number*
+                    # of pixels originally flagged.
+                    # and we take the absolute so that we don't imprint a fringe pattern on the bitmask
+                    #metric = np.sort(np.abs(resampled_bitmask_flag))[-num_flagged_pixels[flag][i, j]]
+                    #print(f"Took metric={metric:.1f} for bitmask {flag} on visit {i} chip {j}")
+                    
+                    # Turns out that this was not a good idea. Let's be more conservative.
+                    metric = 0.1
+                    resampled_bitmasks[i, finite, k] = (resampled_bitmask_flag >= metric).astype(int)
+                
+
             # Scale by continuum?
             if scale_by_pseudo_continuum:
                 # TODO: If there are gaps in `finite` then this will cause issues because median filter and gaussian filter 
@@ -129,11 +213,18 @@ def resample_visit_spectra(
                 resampled_flux_error[i, finite] /= resampled_pseudo_cont[i, finite]
 
     # TODO: return flux ivar instead?
-    
+    resampled_bitmask = np.zeros(resampled_flux.shape, dtype=np.uint64)
+    if bitmask is not None:
+        # Sum them together.
+        for k, flag in enumerate(separated_bitmasks.keys()):
+            resampled_bitmask += (resampled_bitmasks[:, :, k] * (2**flag)).astype(np.uint64)
+
+
     return (
         resampled_flux,
         resampled_flux_error,
         resampled_pseudo_cont,
+        resampled_bitmask
     )
 
 
@@ -196,6 +287,9 @@ def sincint(x, nres, speclist) :
         u2 = np.pi*xkernel
         sinc = np.exp(-(u1**2)) * np.sin(u2) / u2
         sinc /= (nres/2.)
+
+        # the sinc function value at x = 0 is defined by the limit, -> 1
+        sinc[u2 == 0] = 1
 
         lobe = np.arange(ksize) - nhalf + ix[i]
         vals = np.zeros(ksize)

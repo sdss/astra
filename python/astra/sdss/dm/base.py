@@ -9,13 +9,14 @@ from .catalog import get_sky_position
 
 from healpy import ang2pix
 
-BLANK_CARD = (None, None, None)
+BLANK_CARD = (" ", " ", None)
 FILLER_CARD = (FILLER_CARD_KEY, *_) = ("TTYPE0", "Water cuggle", None)
 
 GLOSSARY = {
     #           "*****************************************************"
     "INSTRMNT": "Instrument name",
     "OBSRVTRY": "Observatory name",
+    "EXTNAME": "Short extension name",
     # Observing conditions
     "ALT": "Telescope altitude [deg]",
     "AZ": "Telescope azimuth [deg]",
@@ -99,10 +100,11 @@ GLOSSARY = {
     "SNR": "Mean signal-to-noise ratio",
 
     # Wavelength solution
-    "CRVAL1": "Log(10) wavelength of first pixel [Angstrom]",
-    "CDELT1": "Log(10) delta wavelength per pixel [Angstrom]",
-    "CRPIX1": "Pixel offset from the first pixel",
-    "CTYPE1": "Wavelength solution description",
+    "CRVAL": "Log(10) wavelength of first pixel [Angstrom]",
+    "CDELT": "Log(10) delta wavelength per pixel [Angstrom]",
+    "CRPIX": "Pixel offset from the first pixel",
+    "CTYPE": "Wavelength solution description",
+    "CUNIT": "Wavelength solution unit",
     "DC-FLAG": "Wavelength solution flag",
 
     "RELEASE": "SDSS data release name",
@@ -238,12 +240,12 @@ def get_auxiliary_source_data(source: Union[Source, int]):
     # Define the columns and associated comments.    
     field_descriptors = [
         BLANK_CARD,
-        ("",            "IDENTIFIERS",                  None),
+        (" ",           "IDENTIFIERS",                  None),
         ("SDSS_ID",     Catalog.catalogid,              f"SDSS-V catalog identifier"),
         ("TIC_ID",      TIC.id.alias("tic_id"),         f"TESS Input Catalog ({tic_dr}) identifier"),
         ("GAIA_ID",     Gaia.source_id,                 f"Gaia {gaia_dr} source identifier"),
         BLANK_CARD,
-        ("",            "ASTROMETRY",                   None),
+        (" ",           "ASTROMETRY",                   None),
         ("RA",          Catalog.ra,                     "SDSS-V catalog right ascension (J2000) [deg]"),
         ("DEC",         Catalog.dec,                    "SDSS-V catalog declination (J2000) [deg]"),
         ("GAIA_RA",     Gaia.ra,                        f"Gaia {gaia_dr} right ascension [deg]"),
@@ -257,7 +259,7 @@ def get_auxiliary_source_data(source: Union[Source, int]):
         ("VRAD",        Gaia.radial_velocity,           f"Gaia {gaia_dr} radial velocity [km/s]"),
         ("E_VRAD",      Gaia.radial_velocity_error,     f"Gaia {gaia_dr} radial velocity error [km/s]"),
         BLANK_CARD,
-        ("",            "PHOTOMETRY",                   None),
+        (" ",           "PHOTOMETRY",                   None),
         ("G_MAG",       Gaia.phot_g_mean_mag,           f"Gaia {gaia_dr} mean apparent G magnitude [mag]"),
         ("BP_MAG",      Gaia.phot_bp_mean_mag,          f"Gaia {gaia_dr} mean apparent BP magnitude [mag]"),
         ("RP_MAG",      Gaia.phot_rp_mean_mag,          f"Gaia {gaia_dr} mean apparent RP magnitude [mag]"),
@@ -298,25 +300,33 @@ def get_auxiliary_source_data(source: Union[Source, int]):
     cartons, programs = get_cartons_and_programs(source)
     data.extend([
         BLANK_CARD,
-        ("",            "TARGETING",        None),
+        (" ",           "TARGETING",        None),
         ("CARTONS",     ",".join(cartons), f"Comma-separated SDSS-V program names"),
-        ("PROGRAMS",    ",".join(programs), f"Comma-separated SDSS-V carton names"),
-        ("MAPPERS",     ",".join([p.split("_")[0] for p in programs]), f"Comma-separated SDSS-V Mappers")
+        ("PROGRAMS",    ",".join(list(set(programs))), f"Comma-separated SDSS-V carton names"),
+        ("MAPPERS",     ",".join([p.split("_")[0] for p in list(set(programs))]), f"Comma-separated SDSS-V Mappers")
     ])
     return data
 
 
-def create_empty_hdu(telescope: str, instrument: str) -> fits.BinTableHDU:
+def create_empty_hdu(observatory: str, instrument: str) -> fits.BinTableHDU:
     """
     Create an empty HDU to use as a filler.
     """
-    return fits.BinTableHDU(header=fits.Header(metadata_cards(telescope, instrument)))
-
+    cards = metadata_cards(observatory, instrument)
+    cards.extend([
+        BLANK_CARD,
+        ("COMMENT", f"No {instrument} data available from {observatory} for this source.")
+    ])
+    return fits.BinTableHDU(
+        header=fits.Header(cards),
+    )
+    
 
 def metadata_cards(observatory: str, instrument: str) -> List:
     return [
         BLANK_CARD,
-        ("", "METADATA"),
+        (" ", "METADATA"),
+        ("EXTNAME", f"{instrument}/{observatory}"),
         ("OBSRVTRY", observatory),
         ("INSTRMNT", instrument),
     ]
@@ -334,7 +344,7 @@ def spectrum_sampling_cards(
         nres = " ".join(list(map(str, num_pixels_per_resolution_element)))
     return [
         BLANK_CARD,
-        ("", "SPECTRUM SAMPLING AND STACKING"),
+        (" ", "SPECTRUM SAMPLING AND STACKING"),
         ("NRES",        nres),
         ("FILTSIZE",    median_filter_size),
         ("NORMSIZE",    gaussian_filter_size),
@@ -351,13 +361,14 @@ def wavelength_cards(
 ) -> List:
     return [
         BLANK_CARD,
-        ("", "WAVELENGTH INFORMATION (VACUUM)", None),
-        ("CRVAL1", crval, None),
-        ("CDELT1", cdelt, None),
-        ("CTYPE1", "LOG-LINEAR", None),
-        ("CRPIX1", 1, None),
+        (" ", "WAVELENGTH INFORMATION (VACUUM)", None),
+        ("CRVAL", crval, None),
+        ("CDELT", cdelt, None),
+        ("CTYPE", "LOG-LINEAR", None),
+        ("CUNIT", "Angstrom (Vacuum)", None),
+        ("CRPIX", 1, None),
         ("DC-FLAG", 1, None),
-        ("NAXIS1", num_pixels, "Number of pixels per spectrum"),
+        ("NPIXELS", num_pixels, "Number of pixels per spectrum"),
     ]
 
 def remove_filler_card(hdu):
@@ -398,7 +409,11 @@ def hdu_from_data_mappings(data_products, mappings, header):
                 **fits_column_kwargs(values[key])
             )
         )
-    hdu = fits.BinTableHDU.from_columns(columns, header=header)
+    hdu = fits.BinTableHDU.from_columns(
+        columns, 
+        header=header,
+        #name=f"{header['INSTRMNT']}/{header['OBSRVTRY']}"
+    )
 
     add_table_category_headers(hdu, category_headers)
     add_glossary_comments(hdu)
@@ -421,7 +436,7 @@ def add_table_category_headers(hdu, category_headers):
         index = 1 + hdu.data.dtype.names.index(dtype_name)
         key = f"TTYPE{index}"
         hdu.header.insert(key, BLANK_CARD)
-        hdu.header.insert(key, ("", category_header))    
+        hdu.header.insert(key, (" ", category_header))    
     return None
 
 def add_glossary_comments(hdu):
@@ -432,6 +447,7 @@ def add_glossary_comments(hdu):
     remove_filler_card(hdu)
     return None
 
+
 def headers_as_cards(data_product, input_header_keys):
     cards = []
     with fits.open(data_product.path) as image:
@@ -440,7 +456,7 @@ def headers_as_cards(data_product, input_header_keys):
                 old_key, new_key = key
                 if new_key is None:
                     cards.append((None, None, None))
-                    cards.append(("", old_key, None))
+                    cards.append((" ", old_key, None))
                     continue 
             else:
                 old_key = new_key = key
@@ -459,10 +475,26 @@ def headers_as_cards(data_product, input_header_keys):
     return cards
 
 
-def create_primary_hdu(
+def add_check_sums(hdu_list: fits.HDUList):
+    """
+    Add checksums to the HDU list.
+    """
+    for hdu in hdu_list:
+        hdu.verify("fix")
+        hdu.add_checksum()
+        hdu.header.insert("CHECKSUM", BLANK_CARD)
+        hdu.header.insert("CHECKSUM", (" ", "DATA INTEGRITY"))            
+        hdu.add_checksum()
+        
+
+    return None
+
+
+
+def create_primary_hdu_cards(
     source: Union[Source, int],
     hdu_descriptions: Optional[List[str]] = None
-) -> fits.PrimaryHDU:
+) -> List:
     """
     Create primary HDU (headers only) for a Milky Way Mapper data product, given some source.
     
@@ -486,7 +518,7 @@ def create_primary_hdu(
     
     cards = [
         BLANK_CARD,
-        ("",        "METADATA",     None),
+        (" ",       "METADATA",     None),
         ("ASTRA",   astra_version,  f"Astra version"),
         ("CREATED", created,        f"File creation time (UTC {datetime_fmt})"),
         ("HEALPIX", healpix,        f"Healpix location ({nside} sides)")
@@ -497,18 +529,18 @@ def create_primary_hdu(
     if hdu_descriptions is not None:
         cards.extend([
             BLANK_CARD,
-            ("",        "HDU DESCRIPTIONS",     None),
+            (" ",          "HDU DESCRIPTIONS",     None),
             *[(f"COMMENT", f"HDU {i}: {desc}", None) for i, desc in enumerate(hdu_descriptions)]
         ])
         
-    return fits.PrimaryHDU(header=fits.Header(cards))
-
+    return cards
+    
 
 
 
 def fits_column_kwargs(values):
     if all(isinstance(v, str) for v in values):
-        max_len = max(map(len, values))
+        max_len = max(1, max(map(len, values)))
         return dict(format=f"{max_len}A")
 
     """

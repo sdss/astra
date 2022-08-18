@@ -31,40 +31,50 @@ def create_mwm_data_products(
         "APOGEE spectra from Apache Point Observatory",
         "APOGEE spectra from Las Campanas Observatory"
     ]
-    primary_hdu = base.create_primary_hdu(source, hdu_descriptions)
+    cards = base.create_primary_hdu_cards(source, hdu_descriptions)
+    primary_visit_hdu = fits.PrimaryHDU(header=fits.Header(cards))
+    primary_star_hdu = fits.PrimaryHDU(header=fits.Header(cards))
 
     boss_north_visits, boss_north_star = boss.create_boss_hdus(
         [dp for dp in source.data_products if dp.filetype == "specLite"],
+        observatory="APO",
         **(boss_kwargs or dict())
     )
-    # TODO: Eventually we might have some BOSS spectra from Las Campanas..
-    boss_south_visits = boss_south_star = base.create_empty_hdu("LCO", "BOSS")
+
+    boss_south_visits = base.create_empty_hdu("LCO", "BOSS")
+    boss_south_star = base.create_empty_hdu("LCO", "BOSS")
 
     apogee_north_visits, apogee_north_star = apogee.create_apogee_hdus(
         [dp for dp in source.data_products \
             if dp.filetype == "apVisit" and dp.kwargs["telescope"] == "apo25m"],
+        observatory="APO",
         **(apogee_kwargs or dict())
     )
     apogee_south_visits, apogee_south_star = apogee.create_apogee_hdus(
         [dp for dp in source.data_products \
             if dp.filetype == "apVisit" and dp.kwargs["telescope"] == "lco25m"],
+        observatory="LCO",
         **(apogee_kwargs or dict())
     )
 
     hdu_visit_list = fits.HDUList([
-        primary_hdu,
+        primary_visit_hdu,
         boss_north_visits,
         boss_south_visits,
         apogee_north_visits,
         apogee_south_visits,
     ])
     hdu_star_list = fits.HDUList([
-        primary_hdu,
+        primary_star_hdu,
         boss_north_star,
         boss_south_star,
         apogee_north_star,
         apogee_south_star,
     ])
+
+    # Add checksums and datasums to each HDU.
+    base.add_check_sums(hdu_visit_list)
+    base.add_check_sums(hdu_star_list)
 
     # Define the paths, return data products
     return (hdu_visit_list, hdu_star_list)
