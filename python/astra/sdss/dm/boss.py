@@ -146,10 +146,12 @@ def create_boss_hdus(
         ("TAI-END", lambda dp, image: image[0].header["TAI-END"]),
 
         ("RADIAL VELOCITIES (XCSAO)", None),
-        ("V_HELIO_XCSAO", lambda dp, image: image[2].data["XCSAO_RV"][0]),
-        ("E_V_HELIO_XCSAO", lambda dp, image: image[2].data["XCSAO_ERV"][0]),
+        ("V_RAD", lambda dp, image: image[2].data["XCSAO_RV"][0]),
+        ("E_V_RAD", lambda dp, image: image[2].data["XCSAO_ERV"][0]),
         ("RXC_XCSAO", lambda dp, image: image[2].data["XCSAO_RXC"][0]),
-        ("V_HC", lambda dp, image: image[0].header["HELIO_RV"]),
+        # We're using radial velocities in the Solar system barycentric rest frame, not heliocentric rest frame.
+        #("V_HC", lambda dp, image: image[0].header["HELIO_RV"]),
+        ("V_BC", lambda dp, image: image[0].header.get("BARY_RV", None)),
         ("TEFF_XCSAO", lambda dp, image: image[2].data["XCSAO_TEFF"][0]),
         ("E_TEFF_XCSAO", lambda dp, image: image[2].data["XCSAO_ETEFF"][0]),
         ("LOGG_XCSAO", lambda dp, image: image[2].data["XCSAO_LOGG"][0]),

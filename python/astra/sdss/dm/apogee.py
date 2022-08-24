@@ -77,6 +77,13 @@ def create_apogee_hdus(
         radial_velocities=velocity_meta["V_REL"],
         **kwargs
     )
+
+    # Increase the flux uncertainties at the pixel level due to persistence and significant skylines,
+    # in the same way that is done for apStar data products.
+    increase_flux_uncertainties_due_to_persistence(flux_error, bitmask)
+    increase_flux_uncertainties_due_to_skylines(flux_error, bitmask)
+
+    # Now calculate the S/N.
     snr_visit = util.calculate_snr(flux, flux_error, axis=1)
 
     # Deal with apVisits that have different number of pixels, and include this as the DITHERED 
@@ -88,7 +95,6 @@ def create_apogee_hdus(
         &   (np.isfinite(velocity_meta["RCHISQ"]))
     )
 
-    
     combined_flux, combined_flux_error, combined_bitmask = combine.pixel_weighted_spectrum(
         flux[use_in_stack], 
         flux_error[use_in_stack], 
@@ -103,7 +109,8 @@ def create_apogee_hdus(
         ("FLUX", combined_flux),
         ("E_FLUX", combined_flux_error),
         ("BITMASK", combined_bitmask),
-    ]    
+    ]
+
     visit_mappings = [
         DATA_HEADER_CARD,
         ("SNR", snr_visit), 
@@ -124,19 +131,19 @@ def create_apogee_hdus(
         ("EXPTIME", lambda dp, image: image[0].header["EXPTIME"]),
         ("FLUXFLAM", lambda dp, image: image[0].header["FLUXFLAM"]),
         ("NPAIRS", lambda dp, image: image[0].header["NPAIRS"]),
-        # TODO Is NCOMBINE same as NEXP for BOSS? --> make consistent naming?
-        ("NEXP", lambda dp, image: image[0].header["NCOMBINE"]),
+        #("NCOMBINE", lambda dp, image: image[0].header["NCOMBINE"]),
+        ("DITHERED", lambda dp, image: 1.0 if image[1].data.size == (3 * 4096) else 0.0),
 
         ("RADIAL VELOCITIES (DOPPLER)", None),
         *((k, velocity_meta[k]) for k in (
             "JD",
-            "V_BARY", "V_REL", "E_V_REL", "V_BC",  
+            "V_RAD", "E_V_RAD", "V_REL", "V_BC",  
             "RCHISQ",
         )),
         
         ("RADIAL VELOCITIES (CROSS-CORRELATION)", None),
         *((k, velocity_meta[k]) for k in (
-            "V_BARY_XCORR", "V_REL_XCORR", "E_V_REL_XCORR",
+            "V_RAD_XCORR", "V_REL_XCORR", "E_V_RAD_XCORR",
             "N_RV_COMPONENTS", #"RV_COMPONENTS",
         )),
 
@@ -229,6 +236,7 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct) -> dict:
         return {
                 "V_BC": np.nan,
                 "V_REL": 0,
+                "V_RAD": np.nan,
                 "E_V_REL": np.nan,
                 "V_TYPE": -1,
                 "JD": -1,
@@ -241,12 +249,11 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct) -> dict:
                 "E_FEH_DOPPLER": np.nan,
                 "VISIT_PK": -1,
                 "RV_VISIT_PK": -1,
-                "V_BARY": np.nan,
                 "RCHISQ": np.nan,
                 "N_RV_COMPONENTS": 0, 
                 "V_REL_XCORR": np.nan,
-                "E_V_REL_XCORR": np.nan,
-                "V_BARY_XCORR": np.nan,
+                "E_V_RAD_XCORR": np.nan,
+                "V_RAD_XCORR": np.nan,
                 "RV_COMPONENTS": np.array([np.nan, np.nan, np.nan]),
             }  
         
@@ -261,7 +268,9 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct) -> dict:
     return {
         "V_BC": result.bc,
         "V_REL": result.vrel,
+        "V_RAD": result.vheliobary,
         "E_V_REL": result.vrelerr,
+        "E_V_RAD": result.vrelerr,
         "V_TYPE": result.vtype, # 1=chisq, 2=xcorr
         "JD": result.jd,
         "DATE-OBS": result.dateobs,
@@ -273,12 +282,11 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct) -> dict:
         "E_FEH_DOPPLER": result.rv_feherr,
         "VISIT_PK": result.visit_pk,
         "RV_VISIT_PK": result.pk,
-        "V_BARY": result.vheliobary,
         "RCHISQ": result.chisq,
         "N_RV_COMPONENTS": result.n_components,
         "V_REL_XCORR": result.xcorr_vrel,
-        "E_V_REL_XCORR": result.xcorr_vrelerr,
-        "V_BARY_XCORR": result.xcorr_vheliobary,
+        "E_V_RAD_XCORR": result.xcorr_vrelerr,
+        "V_RAD_XCORR": result.xcorr_vheliobary,
         "RV_COMPONENTS": result.rv_components,
     }  
 
@@ -424,3 +432,36 @@ def resample_apogee_visit_spectra(
         resampled_bitmask,
         meta
     )
+
+
+def increase_flux_uncertainties_due_to_persistence(resampled_flux_error, resampled_bitmask) -> None:
+    """
+    Increase the pixel-level resampled flux uncertainties (in-place, no array copying) due to persistence flags in the resampled bitmask.
+    
+    This logic follows directly from what is performed when constructing the apStar files. See:
+        https://github.com/sdss/apogee_drp/blob/73cfd3f7a7fbb15963ddd2190e24a15261fb07b1/python/apogee_drp/apred/rv.py#L780-L791
+    """
+
+    V, P = resampled_bitmask.shape
+    pixel_mask = PixelBitMask()
+    is_high = ((resampled_bitmask & pixel_mask.getval("PERSIST_HIGH")) > 0)
+    is_medium = ((resampled_bitmask & pixel_mask.getval("PERSIST_MED")) > 0)
+    is_low = ((resampled_bitmask & pixel_mask.getval("PERSIST_LOW")) > 0)
+
+    resampled_flux_error[is_high] *= np.sqrt(5)
+    resampled_flux_error[is_medium & ~is_high] *= np.sqrt(4)
+    resampled_flux_error[is_low & ~is_medium & ~is_low] *= np.sqrt(3)
+    return None
+
+
+def increase_flux_uncertainties_due_to_skylines(resampled_flux_error, resampled_bitmask) -> None:
+    """
+    Increase the pixel-level resampled flux uncertainties (in-place; no array copying) due to significant skylines.
+
+    This logic follows directly from what is performed when constructing the apStar files. See:
+        https://github.com/sdss/apogee_drp/blob/73cfd3f7a7fbb15963ddd2190e24a15261fb07b1/python/apogee_drp/apred/rv.py#L780-L791
+    """
+
+    is_significant_skyline = ((resampled_bitmask & PixelBitMask.getval("SIG_SKYLINE")) > 0)
+    resampled_flux_error[is_significant_skyline] *= np.sqrt(100)
+    return None

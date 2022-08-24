@@ -5,6 +5,21 @@ from astropy.io import fits
 from astra import (log, __version__ as astra_version)
 from astra.database.astradb import Source
 
+
+from peewee import Alias, JOIN, fn
+from sdssdb.peewee.sdss5db import database as sdss5_database
+sdss5_database.set_profile("operations") 
+
+from sdssdb.peewee.sdss5db.catalogdb import (Catalog, CatalogToTIC_v8, TIC_v8 as TIC, TwoMassPSC)
+from sdssdb.peewee.sdss5db.targetdb import (Target, CartonToTarget, Carton)
+
+try:
+    from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR3 as Gaia
+except ImportError:
+    from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR2 as Gaia
+    log.warning(f"Gaia DR3 not yet available in sdssdb.peewee.sdss5db.catalogdb. Using Gaia DR2.")
+
+
 from .catalog import get_sky_position
 
 from healpy import ang2pix
@@ -82,6 +97,7 @@ GLOSSARY = {
     "UT-MID": "Date at mid-point of visit",
     "FLUXFLAM": "ADU to flux conversion factor [ergs/s/cm^2/A]",
     "NPAIRS": "Number of dither pairs combined",
+    "DITHERED": "Fraction of visits that were dithered",
 
     # XCSAO
     "V_HELIO_XCSAO": "Heliocentric velocity from XCSAO [km/s]",
@@ -125,8 +141,9 @@ GLOSSARY = {
     "APRED": "APOGEE reduction tag",
 
     # Radial velocity keys (common to any code)
-    "V_BARY": "Barycentric radial velocity [km/s]",
-    "V_BC": "Barycentric velocity correction applied [km/s]",
+    "V_RAD": "Radial velocity in Solar system barycentric rest frame [km/s]",
+    "E_V_RAD": "Error in radial velocity [km/s]",
+    "V_BC": "Solar system barycentric velocity correction applied [km/s]",
     "V_HC": "Heliocentric velocity correction applied [km/s]",
     "V_REL": "Relative velocity [km/s]",
     "E_V_REL": "Error in relative velocity [km/s]",
@@ -179,11 +196,6 @@ def get_cartons_and_programs(source: Union[Source, int]):
     """
     
     catalogid = get_catalog_identifier(source)
-    from peewee import fn
-    from sdssdb.peewee.sdss5db import database as sdss5_database
-    sdss5_database.set_profile("operations") # TODO: HOW CAN WE SET THIS AS DEFAULT!?!
-
-    from sdssdb.peewee.sdss5db.targetdb import (Target, CartonToTarget, Carton)
 
     sq = (
         Carton.select(
@@ -209,7 +221,46 @@ def get_cartons_and_programs(source: Union[Source, int]):
         .tuples()
     )
     _, cartons, programs = q_cartons.first()
-    return (cartons.split(","), programs.split(","))
+    cartons, programs = (cartons.split(","), programs.split(","))
+
+
+def get_first_carton(source: Union[Source, int]) -> Carton:
+    """
+    Return the first carton this source was assigned to.
+    
+    This is the carton with the lowest priority value in the targeting database,
+    because fibers are assigned in order of priority (lowest numbers first).
+    
+    Note that this provides the "first carton" for the observations taken with the
+    fiber positioning system (FPS), but in the 'plate era', it may not be 100% true.
+    The situation in the plate era is a little more complex, in so much that the 
+    same source on two plates could have a different first carton assignment because 
+    of the fiber priority in that plate. Similarly, the first carton for a source in
+    the plate era may not match the first carton for the same source in the FPS
+    era. The targeting and robostrategy people know what is happening, but it is a
+    little complex to put everything together.
+    
+    In summary, the first carton will be correct for the FPS-era data, but may be 
+    incorrect for the plate-era data.
+    """
+
+    catalogid = get_catalog_identifier(source)    
+
+    sq = (
+        CartonToTarget.select(
+                CartonToTarget.carton_pk
+            )
+            .join(Target)
+            .where(Target.catalogid == catalogid)
+            .order_by(CartonToTarget.priority.asc())
+            .limit(1)
+            .alias("first_carton")        
+    )
+    return (
+        Carton.select()
+              .join(sq, on=(sq.c.carton_pk == Carton.pk))
+              .first()
+    )
 
 
 def get_auxiliary_source_data(source: Union[Source, int]):
@@ -219,17 +270,6 @@ def get_auxiliary_source_data(source: Union[Source, int]):
     :param source:
         The astronomical source, or the SDSS-V catalog identifier.
     """
-    from peewee import Alias, JOIN
-    from sdssdb.peewee.sdss5db import database as sdss5_database
-    sdss5_database.set_profile("operations") # TODO: HOW CAN WE SET THIS AS DEFAULT!?!
-
-    from sdssdb.peewee.sdss5db.catalogdb import (Catalog, CatalogToTIC_v8, TIC_v8 as TIC, TwoMassPSC)
-
-    try:
-        from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR3 as Gaia
-    except ImportError:
-        from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR2 as Gaia
-        log.warning(f"Gaia DR3 not yet available in sdssdb.peewee.sdss5db.catalogdb. Using Gaia DR2.")
 
     catalogid = get_catalog_identifier(source)
     tic_dr = TIC.__name__.split("_")[-1]
@@ -298,9 +338,13 @@ def get_auxiliary_source_data(source: Union[Source, int]):
 
     # Add carton and target information
     cartons, programs = get_cartons_and_programs(source)
+
+    first_carton = get_first_carton(source)
+
     data.extend([
         BLANK_CARD,
         (" ",           "TARGETING",        None),
+        ("CARTON_0",    first_carton.carton, f"Prioritised carton for to source (see documentation)"),
         ("CARTONS",     ",".join(cartons), f"Comma-separated SDSS-V program names"),
         ("PROGRAMS",    ",".join(list(set(programs))), f"Comma-separated SDSS-V carton names"),
         ("MAPPERS",     ",".join([p.split("_")[0] for p in list(set(programs))]), f"Comma-separated SDSS-V Mappers")

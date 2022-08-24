@@ -18,18 +18,13 @@ def pixel_weighted_spectrum(flux, flux_error, continuum, bitmask):
     resampled_ivar = 1.0 / flux_error**2
     resampled_ivar[flux_error == 0] = 0
 
-    pixel_snr_clipped = np.clip(flux * np.sqrt(resampled_ivar), 0, np.inf)
-    #estimate_snr = np.mean(pixel_snr_clipped, axis=1)
-
     cont = np.median(continuum, axis=0) # TODO: is this right?
     stacked_ivar = np.sum(resampled_ivar, axis=0)
     stacked_flux = np.sum(flux * resampled_ivar, axis=0) / stacked_ivar * cont
     stacked_flux_error = np.sqrt(1.0/stacked_ivar) * cont
 
-    #stacked_flux = np.atleast_2d(stacked_flux)
-    #stacked_flux_error = np.atleast_2d(stacked_flux_error)
-    #bitmask = np.atleast_2d(bitmask)
-    stacked_bitmask = np.zeros_like(stacked_flux)
+    stacked_bitmask = np.bitwise_or.reduce(bitmask, 0)
+
     return (stacked_flux, stacked_flux_error, stacked_bitmask)
 
 
