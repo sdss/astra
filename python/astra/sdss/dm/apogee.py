@@ -7,7 +7,7 @@ from astra.database.astradb import DataProduct
 from astra.utils import log, list_to_dict
 from astra.sdss.dm import (base, combine, util)
 
-from astra.sdss.apogee_bitmask import PixelBitMask # TODO: put elsewhere
+from astra.sdss.apogee_bitmask import StarBitMask, PixelBitMask # TODO: put elsewhere
 
 def create_apogee_hdus(
     data_products: List[DataProduct],
@@ -86,14 +86,21 @@ def create_apogee_hdus(
     # Now calculate the S/N.
     snr_visit = util.calculate_snr(flux, flux_error, axis=1)
 
-    # Deal with apVisits that have different number of pixels, and include this as the DITHERED 
-    # or not 
     # Let's define some quality criteria of what to include in a stack.
-    # TODO: Check in again with APOGEE DRP,.. still not clear which visits get included or why
-    use_in_stack = (
-            (np.isfinite(snr_visit) & (snr_visit > 3))
-        &   (np.isfinite(velocity_meta["RCHISQ"]))
-    )
+    # This logic follows from https://github.com/sdss/apogee_drp/blob/73cfd3f7a7fbb15963ddd2190e24a15261fb07b1/python/apogee_drp/apred/rv.py
+    use_in_stack = (np.isfinite(snr_visit) & (snr_visit > 3))
+
+    starmask = StarBitMask()
+    dithered = np.zeros(len(data_products), dtype=float)
+    for i, data_product in enumerate(data_products):
+        with fits.open(data_product.path) as image:
+            starflag = np.uint64(image[0].header["STARFLAG"])
+            use_in_stack *= (
+                ((starflag & starmask.badval()) == 0)
+            &   ((starflag & starmask.getval("RV_REJECT")) == 0)
+            )
+            dithered[i] = 1.0 if image[1].data.size == (3 * 4096) else 0.0
+    
 
     combined_flux, combined_flux_error, combined_bitmask = combine.pixel_weighted_spectrum(
         flux[use_in_stack], 
@@ -102,10 +109,14 @@ def create_apogee_hdus(
         bitmask[use_in_stack]
     )
     snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
+    wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)
+
+    # Calculate the visits that were dithered that went into the stack
 
     DATA_HEADER_CARD = ("SPECTRAL DATA", None)
     star_mappings = [
         DATA_HEADER_CARD,
+        ("LAMBDA", wavelength),
         ("FLUX", combined_flux),
         ("E_FLUX", combined_flux_error),
         ("BITMASK", combined_bitmask),
@@ -114,6 +125,11 @@ def create_apogee_hdus(
     visit_mappings = [
         DATA_HEADER_CARD,
         ("SNR", snr_visit), 
+        # If we store the wavelength in an array in the visit file then we need to repeat the entry
+        # for every row (e.g., be the same size as the flux file).
+        # Since most users will use the mwmStar file, and more expert users will use the mwmVisit
+        # file, we will assume the more expert users can reconstruct the wavelength array themselves.
+        #("LAMBDA", np.tile(wavelength, flux.shape[0]).reshape(flux.shape)),
         ("FLUX", flux),
         ("E_FLUX", flux_error),
         ("BITMASK", bitmask),
@@ -130,9 +146,11 @@ def create_apogee_hdus(
         ("DATE-OBS", lambda dp, image: image[0].header["DATE-OBS"]), 
         ("EXPTIME", lambda dp, image: image[0].header["EXPTIME"]),
         ("FLUXFLAM", lambda dp, image: image[0].header["FLUXFLAM"]),
-        ("NPAIRS", lambda dp, image: image[0].header["NPAIRS"]),
+        # Some NPAIRS are encoded as a string, which is why we need the int() here.
+        ("NPAIRS", lambda dp, image: int(image[0].header["NPAIRS"])),
         #("NCOMBINE", lambda dp, image: image[0].header["NCOMBINE"]),
-        ("DITHERED", lambda dp, image: 1.0 if image[1].data.size == (3 * 4096) else 0.0),
+        # Nidever (via sdss5/#mwm_software): "if the flux array has 4096 pixels, then it was definitely dithered".
+        ("DITHERED", dithered),
 
         ("RADIAL VELOCITIES (DOPPLER)", None),
         *((k, velocity_meta[k]) for k in (
@@ -149,6 +167,10 @@ def create_apogee_hdus(
 
         ("SPECTRUM SAMPLING AND STACKING", None),
         ("V_SHIFT", meta["v_shift"]),
+        # TODO: This is an APOGEE-level flag that is named "STARFLAG" but is decided on a per-visit spectrum.
+        #       It doesn't make sense. Should re-name this and homogenise the description from other reduction
+        #       or analysis pipelines.
+        ("STARFLAG", lambda dp, image: np.uint64(image[0].header["STARFLAG"])),
         ("IN_STACK", use_in_stack),
 
         ("DATABASE PRIMARY KEYS", None),
@@ -164,9 +186,9 @@ def create_apogee_hdus(
         # we include it here instead of repeating the information many times in the data table.
         base.BLANK_CARD,
         (" ", "DOPPLER STELLAR PARAMETERS", None),
-        *[(f"{k}_D", f"{velocity_meta[f'{k}_DOPPLER'][0]:.0f}") for k in ("TEFF", "E_TEFF")],
-        *[(f"{k}_D", f"{velocity_meta[f'{k}_DOPPLER'][0]:.3f}") for k in ("LOGG", "E_LOGG")],
-        *[(f"{k}_D", f"{velocity_meta[f'{k}_DOPPLER'][0]:.3f}") for k in ("FEH", "E_FEH")],
+        *[(f"{k}_D", np.round(velocity_meta[f'{k}_DOPPLER'][0], 1)) for k in ("TEFF", "E_TEFF")],
+        *[(f"{k}_D", np.round(velocity_meta[f'{k}_DOPPLER'][0], 3)) for k in ("LOGG", "E_LOGG")],
+        *[(f"{k}_D", np.round(velocity_meta[f'{k}_DOPPLER'][0], 3)) for k in ("FEH", "E_FEH")],
     ]
 
     # These cards will be common to visit and star data products.
@@ -182,18 +204,20 @@ def create_apogee_hdus(
         *base.metadata_cards(observatory, instrument),
         *drp_cards,
         *spectrum_sampling_cards,
+        # Add the fraction that are dithered.
+        ("DITHERED", np.sum(dithered[use_in_stack])/np.sum(use_in_stack)),
+        ("NVISITS", np.sum(use_in_stack)),
         *doppler_cards,
         *wavelength_cards,
         base.FILLER_CARD,
     ])
-
 
     hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, star_header)
     hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, visit_header)
 
     # Add S/N for the stacked spectrum.
     hdu_star.header.insert("TTYPE1", "SNR")
-    hdu_star.header["SNR"] = f"{snr_star:.1f}"
+    hdu_star.header["SNR"] = np.round(snr_star, 1)
     hdu_star.header.comments["SNR"] = base.GLOSSARY.get("SNR", None)
 
     return (hdu_visit, hdu_star)
@@ -238,6 +262,7 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct) -> dict:
                 "V_REL": 0,
                 "V_RAD": np.nan,
                 "E_V_REL": np.nan,
+                "E_V_RAD": np.nan,
                 "V_TYPE": -1,
                 "JD": -1,
                 "DATE-OBS": "",
@@ -461,7 +486,6 @@ def increase_flux_uncertainties_due_to_skylines(resampled_flux_error, resampled_
     This logic follows directly from what is performed when constructing the apStar files. See:
         https://github.com/sdss/apogee_drp/blob/73cfd3f7a7fbb15963ddd2190e24a15261fb07b1/python/apogee_drp/apred/rv.py#L780-L791
     """
-
-    is_significant_skyline = ((resampled_bitmask & PixelBitMask.getval("SIG_SKYLINE")) > 0)
+    is_significant_skyline = ((resampled_bitmask & PixelBitMask().getval("SIG_SKYLINE")) > 0)
     resampled_flux_error[is_significant_skyline] *= np.sqrt(100)
     return None

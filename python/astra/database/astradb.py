@@ -1,10 +1,12 @@
 import datetime
+from distutils import core
 import json
 import os
+import hashlib
 from functools import (lru_cache, cached_property)
 from sdss_access import SDSSPath
-from peewee import (SQL, fn, SqliteDatabase, BooleanField, IntegerField, AutoField, TextField, ForeignKeyField, DateTimeField, BigIntegerField, FloatField, BooleanField)
-from sdssdb.connection import PeeweeDatabaseConnection
+from peewee import (IntegrityError, SQL, fn, SqliteDatabase, BooleanField, IntegerField, AutoField, TextField, ForeignKeyField, DateTimeField, BigIntegerField, FloatField, BooleanField)
+from sdssdb.connection import DatabaseConnection, PeeweeDatabaseConnection
 from sdssdb.peewee import BaseModel
 from astra import (config, log)
 from astra.utils import flatten
@@ -13,25 +15,25 @@ from tqdm import tqdm
 from time import sleep
 from importlib import import_module
 
+# Environment variable overrides all, for running CI tests.
+_database_url = os.environ.get("ASTRA_DATABASE_URL", None)
+if _database_url is not None:
+    from playhouse.sqlite_ext import (SqliteExtDatabase as AstraDatabaseConnection, JSONField)
 
-# The database config should always be present, but let's not prevent importing the module because it's missing.
-_database_config = config.get("astra_database", {})
+    log.info(f"Using ASTRA_DATABASE_URL enironment variable, and assuming a SQLite database")
 
-try:
-    # Environment variable overrides all, for testing purposes.
-    _database_url = os.environ["ASTRA_DATABASE_URL"]
-    if _database_url is not None:
-        log.info(f"Using ASTRA_DATABASE_URL enironment variable")
-except KeyError:
-    _database_url = _database_config.get("url", None)
-
-# If a URL is given, that overrides all other config settings.
-if _database_url:
-    from playhouse.db_url import connect
-    database = connect(_database_url)
+    # The PeeweeDatabaseConnection assumes a postgresql database under the hood. Argh!
+    database = AstraDatabaseConnection(_database_url)
     schema = None
 
 else:
+    # The documentation says we should be using the PostgresqlExtDatabase if we are using a 
+    # BinaryJSONField, but that class is incompatible with PeeweeDatabaseConnection, and it
+    # doesn't look like we need anything different from the existing PostgresqlDatabase class.
+    from playhouse.postgres_ext import BinaryJSONField as JSONField
+
+    _database_config = config.get("astra_database", {})
+
     class AstraDatabaseConnection(PeeweeDatabaseConnection):
         dbname = _database_config.get("dbname", None)
         
@@ -53,36 +55,16 @@ else:
                 host: [HOST]
                 port: 5432
                 domain: [DOMAIN]
-
             See https://sdssdb.readthedocs.io/en/stable/intro.html#supported-profiles for more details. 
             If the profile name '{profile}' is incorrect, you can change the 'database' / 'profile' key 
             in ~/.astra/astra.yml
             """)
-
 
 class AstraBaseModel(BaseModel):
     class Meta:
         database = database
         schema = schema
 
-
-#from playhouse.sqlite_ext import JSONField
-#from playhouse.postgres_ext import JSONField
-
-class JSONField(TextField):
-    def db_value(self, value):
-        # Problems with querying, e.g. DataProduct.kwargs.contains("2M034") would be resolved to:
-        #   ... ILIKE '"%2M034%"' 
-        # and the extra quotation marks (from json.dumps) would kill us.
-        #return json.dumps(value)
-        # This change shouldn't screw anything up because we are usually just inserting/updating
-        # with dicts, and not strings directly.
-        if value is not None:
-            return value if isinstance(value, str) else json.dumps(value)
-
-    def python_value(self, value):
-        if value is not None:
-            return json.loads(value)
 
 @lru_cache
 def _lru_sdsspath(release):
@@ -102,25 +84,96 @@ class Source(AstraBaseModel):
                        .where(Source.catalogid == self.catalogid)
         )        
 
+class DataProductKeywordsField(JSONField):
+
+    def adapt(self, kwargs):
+        # See https://github.com/sdss/astra/issues/8
+        coerced = {}
+        coerce_types = {
+            # apVisit
+            "mjd": int,
+            # Some APOGEE paths were periodically screwed up in the database.
+            "field": lambda _: str(_).strip(),
+            "fiber": int,
+            "apred": str,
+            "healpix": int,
+            # specFull
+            "fieldid": int,
+        }
+        for key, value in kwargs.items():
+            key = key.strip().lower()
+            if key in coerce_types:
+                value = coerce_types[key](value)
+            coerced[key] = value
+        return coerced
+
+_template_dpkwf = DataProductKeywordsField()
 
 class DataProduct(AstraBaseModel):
+
     id = AutoField()
-    release = TextField(default="sdss5") # TODO: Should we make this a configuration setting?
+    
+    release = TextField()
     filetype = TextField()
-    kwargs = JSONField()
+    kwargs = DataProductKeywordsField()
+    kwargs_hash = TextField()
 
     metadata = JSONField(null=True)
 
-    # A column that could be used to track n_visits, relative cost, etc.
-    # Should only be used when comparing against DataProducts of the same
-    # release and filetype
-    size = IntegerField(null=True)
+    created = DateTimeField(default=datetime.datetime.now)
+    updated = DateTimeField(default=datetime.datetime.now)
 
     class Meta:
         indexes = (
             # Always remember to put the comma at the end.
-            (("release", "filetype", "kwargs"), True),
+            (("release", "filetype", "kwargs_hash"), True),
         )
+
+
+    def __init__(self, *args, **kwargs):
+        # Adapt keywords
+        adapted, hashed = self.adapt_and_hash_kwargs(kwargs.get("kwargs", {}))
+        kwargs["kwargs"] = adapted
+        kwargs.setdefault("kwargs_hash", hashed)
+        super(DataProduct, self).__init__(*args, **kwargs)
+
+    @classmethod
+    def adapt_and_hash_kwargs(cls, kwargs):
+        adapted = _template_dpkwf.adapt(kwargs)
+        hashed = hashlib.md5(json.dumps(adapted).encode("utf-8")).hexdigest()
+        return (adapted, hashed)
+
+    # Don't do filtering just based on .get(), because sometimes we might be querying by partial keywords
+    # and we'll be searching with an incomplete (and incorrect) hash.
+    
+    @classmethod
+    def get_or_create(cls, **kwargs):
+        defaults = kwargs.pop('defaults', {})
+        query = cls.select()
+
+        for field, value in kwargs.items():
+            # Just search by kwargs hash
+            if field == "kwargs":
+                # instead, seach by kwargs hash
+                adapted, hashed = cls.adapt_and_hash_kwargs(value)
+                query = query.where(getattr(cls, "kwargs_hash") == hashed)
+            else:
+                query = query.where(getattr(cls, field) == value)
+
+        try:
+            return query.get(), False
+        except cls.DoesNotExist:
+            try:
+                if defaults:
+                    kwargs.update(defaults)
+                with cls._meta.database.atomic():
+                    return cls.create(**kwargs), True
+            except IntegrityError as exc:
+                try:
+                    return query.get(), False
+                except cls.DoesNotExist:
+                    raise exc
+
 
     @property
     def input_to_tasks(self):
@@ -134,10 +187,6 @@ class DataProduct(AstraBaseModel):
     @cached_property
     def path(self):
         kwds = self.kwargs.copy()
-        if "field" in kwds:
-            if kwds["field"].startswith(" "):
-                log.warning(f"Field name of {self.release} {self.filetype} {self.kwargs} starts with spaces.")
-                kwds["field"] = str(kwds["field"]).strip()
         return _lru_sdsspath(self.release).full(self.filetype, **kwds)
         
 
@@ -149,6 +198,7 @@ class DataProduct(AstraBaseModel):
                   .join(DataProduct)
                   .where(DataProduct.id == self.id)
         )
+
 
 # DataProducts and Sources should be a many-to-many relationship.
 class SourceDataProduct(AstraBaseModel):

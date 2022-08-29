@@ -9,6 +9,9 @@ from astra.database.astradb import (database, DataProduct, Source, SourceDataPro
 from astra import log
 from astra.utils import flatten, expand_path
 from astropy.time import Time
+from tqdm import tqdm
+from time import time
+import numpy as np
 
 from astropy.table import Table
 
@@ -26,9 +29,6 @@ def lookup_keys(release, filetype):
     return path_instance(release).lookup_keys(filetype)
 
 
-
-from time import time
-import numpy as np
 def get_or_create_data_product_from_apogee_drpdb(
         origin, 
         release=None,
@@ -43,20 +43,13 @@ def get_or_create_data_product_from_apogee_drpdb(
     :param filetype: [optional]
         The filetype of the data product. If `None`, this will be read from `origin.filetype`.
     """
-    t_init = time()
-
     release = release or origin.release
     filetype = filetype or origin.filetype
 
     kwds = { k: getattr(origin, k) for k in lookup_keys(release, filetype) }
     if "field" in kwds:
         kwds["field"] = kwds["field"].strip()
-    t_kwds = time() - t_init
-    t_init = time()
     path = path_instance(release).full(filetype, **kwds)
-    t_path = time() - t_init
-
-    t_init = time()
     if not os.path.exists(path):
         error = {
             "detail": path,
@@ -64,45 +57,30 @@ def get_or_create_data_product_from_apogee_drpdb(
             "reason": "File does not exist"
         }        
         return (False, error)
-    t_check_path = time() - t_init
-
-    # Try to get a size.
-    try:
-        size = origin.nvisits # apogee_drp.star
-    except:
-        size = 1
 
     # TODO: If we the data product already exists, check that the size matches
-    with database.atomic() as txn:
-        t_init = time()
+    #with database.atomic() as txn:
+    if True:
         data_product, data_product_created = DataProduct.get_or_create(
             release=release,
             filetype=filetype,
             kwargs=kwds,
-            defaults=dict(size=size)
         )
-        if not data_product_created:
-            # Update the size
-            if data_product.size != size:
-                log.info(f"Updating size of data product {data_product} from {data_product.size} to {size}")
-                data_product.size = size
-                data_product.save()
+        #if not data_product_created:
+        #    # Update the size
+        #    if data_product.size != size:
+        #        log.info(f"Updating size of data product {data_product} from {data_product.size} to {size}")
+        #        data_product.size = size
+        #        data_product.save()
 
-        t_dp = time() - t_init
-        t_init = time()
+        # Have to make sure the source exists before we link SourceDataProduct..
         source, _ = Source.get_or_create(catalogid=origin.catalogid)
-        t_source = time() - t_init
-        t_init = time()
         SourceDataProduct.get_or_create(
-            source=source,
+            source_id=origin.catalogid,
             data_product=data_product
         )
-        t_sourcedataproduct = time() - t_init
 
-    ts = np.array([t_kwds, t_path, t_check_path, t_dp, t_source, t_sourcedataproduct])
-    #print(np.round(ts/np.sum(ts), 1))
-
-    result = dict(data_product=data_product, source=source)
+    result = dict(data_product_id=data_product.id, source_id=origin.catalogid)
     return (True, result)
 
 
@@ -174,9 +152,12 @@ class BossSpectrumOperator(BaseOperator):
         data = Table.read(expand_path(f"$BOSS_SPECTRO_REDUX/{self.run2d}/spAll-{self.run2d}.fits"))
 
         prev_ds, ds = (context["prev_ds"], context["ds"])
-        mjd_start, mjd_end = list(map(lambda x: Time(x).mjd, (prev_ds, ds)))
-
-        mask = (mjd_end > data["MJD"]) & (data["MJD"] >= mjd_start)
+        if prev_ds is None:
+            # Schedule once only
+            mask = np.ones(len(data), dtype=bool)
+        else:
+            mjd_start, mjd_end = list(map(lambda x: Time(x).mjd, (prev_ds, ds)))
+            mask = (mjd_end > data["MJD"]) & (data["MJD"] >= mjd_start)
 
         N = sum(mask)
         if N == 0:
@@ -208,12 +189,17 @@ class BossSpectrumOperator(BaseOperator):
                 errors.append(error)
                 continue
                 
+            # We need the ZWARNING metadata downstream.
             with database.atomic() as txn:
                 data_product, _ = DataProduct.get_or_create(
                     release=self.release,
                     filetype=self.filetype,
                     kwargs=kwds,
                 )
+                # Update the ZWARNING metadata, even if this data product already exists.
+                data_product.metadata = {"ZWARNING": row["ZWARNING"]} 
+                data_product.save()
+
                 source, _ = Source.get_or_create(catalogid=catalogid)
                 SourceDataProduct.get_or_create(
                     source=source,
@@ -254,36 +240,46 @@ class ApVisitOperator(BaseOperator):
 
         prev_ds, ds = (context["prev_ds"], context["ds"])
         
+        if prev_ds is None:
+            expression = Visit.created > ds
+        else:
+            expression = Visit.created.between(prev_ds, ds)
+
         # catalogid < 0 apparently implies unassigned fibre
         # TODO: check if they are really unassigned ornot .
         # apogee-pipeline 470] off target robots in reductions
     
+        # Through inspection I found that all the visit (Database) records with missing paths
+        # tended to be those without any sdssv_apogee_target0 value.
+
         log.info(f"{self} is looking for products created between {prev_ds} and {ds}")
         q = (
             Visit.select()
                  .where(
-                    Visit.created.between(prev_ds, ds)
+                    expression
                 &   (Visit.apred_vers == self.apred)
                 &   (Visit.catalogid > 0)
                  )
+                 .order_by(Visit.pk.asc())
         )
 
         N = q.count()
         if N == 0:
             raise AirflowSkipException(f"No products for {self} created between {prev_ds} and {ds}")
 
+        log.info(f"Found {N} rows.")
+
         ids = []
         errors = []
         for origin in q:
             success, result = get_or_create_data_product_from_apogee_drpdb(origin)
             if success:
-                log.info("Data product {data_product} matched to {source}".format(**result))
-                ids.append(result["data_product"].id)
+                log.debug("Data product {data_product_id} matched to {source_id}".format(**result))
+                ids.append(result["data_product_id"])
             else:
                 log.warning("{reason} ({detail}) from {origin}".format(**result))
                 errors.append(result)
 
-        log.info(f"Found {N} rows.")
         log.info(f"Created {len(ids)} data products.")
         log.info(f"Encountered {len(errors)} errors.")
         if len(errors) == N:
@@ -734,8 +730,8 @@ class ApStarOperator(BaseOperator):
         for origin in q:
             success, result = get_or_create_data_product_from_apogee_drpdb(origin)
             if success:
-                log.info("Data product {data_product} matched to {source}".format(**result))
-                ids.append(result["data_product"].id)
+                log.info("Data product {data_product_id} matched to {source_id}".format(**result))
+                ids.append(result["data_product_id"])
             else:
                 log.warning("{reason} ({detail}) from {origin}".format(**result))
                 errors.append(result)

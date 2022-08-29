@@ -50,6 +50,9 @@ def filter_sources(
     """
     Filter catalog sources that belong to a given carton or program.
 
+    If a tuple of cartons/programs/mappers are given, or some combination of cartons and programs
+    are given, etc, then a source only needs to match one of the given constraints.
+
     :param catalogids:
         A list-like of catalogids.
     

@@ -79,12 +79,19 @@ def create_boss_hdus(
         **kwargs
     )
     snr_visit = util.calculate_snr(flux, flux_error, axis=1)
+
+    # There's some metadata that we need before we can create the mappings.
+    # We need ZWARNING before everything else.
+    zwarnings = np.zeros(len(data_products), dtype=int)
+    for i, data_product in enumerate(data_products):
+        with fits.open(data_product.path) as image:
+            try:
+                zwarning = image[2].data["ZWARNING"][0]
+            except:
+                zwarning = -1
+            finally:
+                zwarnings[i] = zwarning
     
-    # Get ZWARNINGs from the data product metadata.
-    # The ZWARNING is only available in the spAll file, so instead of re-matching it here, we store it
-    # as metadata when the BOSS spSpec files are ingested. In the future if the ZWARNING is stored in
-    # the spSpec file, we should switch to using that.
-    zwarnings = np.array([dp.metadata.get("ZWARNING", -1) for dp in data_products])
     missing_zwarnings = np.sum(zwarnings == -1)
     if missing_zwarnings > 0:
         log.warning(f"Missing ZWARNING from {missing_zwarnings} data products:")
@@ -103,10 +110,13 @@ def create_boss_hdus(
         combine.pixel_weighted_spectrum(flux, flux_error, continuum, bitmask)
 
     snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
+    wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)
 
     DATA_HEADER_CARD = ("SPECTRAL DATA", None)
+    
     star_mappings = [
         DATA_HEADER_CARD,
+        ("LAMBDA", wavelength),
         ("FLUX", combined_flux),
         ("E_FLUX", combined_flux_error),
         ("BITMASK", combined_bitmask),
@@ -114,6 +124,7 @@ def create_boss_hdus(
     visit_mappings = [
         DATA_HEADER_CARD,
         ("SNR", snr_visit),
+        ("LAMBDA", wavelength),
         ("FLUX", flux),
         ("E_FLUX", flux_error),
         ("BITMASK", bitmask),
@@ -144,6 +155,9 @@ def create_boss_hdus(
         ("NGUIDE", lambda dp, image: image[0].header["NGUIDE"]),
         ("TAI-BEG", lambda dp, image: image[0].header["TAI-BEG"]),
         ("TAI-END", lambda dp, image: image[0].header["TAI-END"]),
+        ("FIBER_OFFSET", lambda dp, image: bool(image[2].data["FIBER_OFFSET"][0])),
+        ("DELTA_RA", lambda dp, image: image[2].data["DELTA_RA"][0]),
+        ("DELTA_DEC", lambda dp, image: image[2].data["DELTA_DEC"][0]),
 
         ("RADIAL VELOCITIES (XCSAO)", None),
         ("V_RAD", lambda dp, image: image[2].data["XCSAO_RV"][0]),
@@ -151,7 +165,7 @@ def create_boss_hdus(
         ("RXC_XCSAO", lambda dp, image: image[2].data["XCSAO_RXC"][0]),
         # We're using radial velocities in the Solar system barycentric rest frame, not heliocentric rest frame.
         #("V_HC", lambda dp, image: image[0].header["HELIO_RV"]),
-        ("V_BC", lambda dp, image: image[0].header.get("BARY_RV", None)),
+        ("V_BC", lambda dp, image: image[0].header["BARY_RV"]),
         ("TEFF_XCSAO", lambda dp, image: image[2].data["XCSAO_TEFF"][0]),
         ("E_TEFF_XCSAO", lambda dp, image: image[2].data["XCSAO_ETEFF"][0]),
         ("LOGG_XCSAO", lambda dp, image: image[2].data["XCSAO_LOGG"][0]),
@@ -207,8 +221,15 @@ def get_boss_relative_velocity(
     
     :param visit:
         The supplied visit.
-    """    
-    v = image[2].data["XCSAO_RV"][0] - image[0].header["HELIO_RV"]
+    """
+    
+    try:
+        v_correction = image[0].header["HELIO_RV"]
+    except:
+        log.warning(f"No 'VHELIO_RV' key found in HDU 0 of visit {visit}")
+        v_correction = 0
+
+    v = image[2].data["XCSAO_RV"][0] - v_correction
     meta = {
         "RXC_XCSAO": image[2].data["XCSAO_RXC"][0],
         "V_HELIO_XCSAO": image[2].data["XCSAO_RV"][0],

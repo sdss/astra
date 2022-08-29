@@ -90,6 +90,10 @@ GLOSSARY = {
     "SKYCHI2": "Mean \chi^2 of sky subtraction",
     "SCHI2MIN": "Minimum \chi^2 of sky subtraction",
     "SCHI2MAX": "Maximum \chi^2 of sky subtraction",
+    "ZWARNING": "See sdss.org/dr14/algorithms/bitmasks/#ZWARNING",
+    "FIBER_OFFSET": "Position offset applied during observations",
+    "DELTA_RA": "Offset in right ascension [arcsecond]",
+    "DELTA_DEC": "Offset in declination [arcsecond]",
 
     # APOGEE data reduction pipeline
     "DATE-OBS": "Observation date (UTC)",
@@ -98,6 +102,7 @@ GLOSSARY = {
     "FLUXFLAM": "ADU to flux conversion factor [ergs/s/cm^2/A]",
     "NPAIRS": "Number of dither pairs combined",
     "DITHERED": "Fraction of visits that were dithered",
+    "NVISITS": "Number of visits included in the stack",
 
     # XCSAO
     "V_HELIO_XCSAO": "Heliocentric velocity from XCSAO [km/s]",
@@ -111,6 +116,7 @@ GLOSSARY = {
     "E_FEH_XCSAO": "Error in metallicity from XCSAO",
 
     # Data things
+    "LAMBDA": "Source rest frame vacuum wavelength [Angstrom]",
     "FLUX": "Source flux",
     "E_FLUX": "Standard deviation of source flux",
     "SNR": "Mean signal-to-noise ratio",
@@ -141,13 +147,16 @@ GLOSSARY = {
     "APRED": "APOGEE reduction tag",
 
     # Radial velocity keys (common to any code)
-    "V_RAD": "Radial velocity in Solar system barycentric rest frame [km/s]",
+    "V_RAD": "Radial velocity in Solar barycentric rest frame [km/s]",
     "E_V_RAD": "Error in radial velocity [km/s]",
-    "V_BC": "Solar system barycentric velocity correction applied [km/s]",
-    "V_HC": "Heliocentric velocity correction applied [km/s]",
+    "V_BC": "Solar barycentric velocity applied [km/s]",
+    "V_HC": "Heliocentric velocity applied [km/s]",
     "V_REL": "Relative velocity [km/s]",
     "E_V_REL": "Error in relative velocity [km/s]",
     "JD": "Julian date at mid-point of visit",
+
+    "STARFLAG": "APOGEE DRP quality bit mask",
+    "BITMASK": "Pixel-level bitmask (see documentation)",
 
     # Doppler keys
     "TEFF_D": "Effective temperature from DOPPLER [K]",
@@ -162,8 +171,8 @@ GLOSSARY = {
     "N_RV_COMPONENTS": "Number of detected RV components",
     "RV_COMPONENTS": "Relative velocity of detected components [km/s]",
     "V_REL_XCORR": "Relative velocity from XCORR [km/s]",
-    "E_V_REL_XCORR": "Error in relative velocity from XCORR [km/s]",
-    "V_BARY_XCORR": "Barycentric radial velocity from XCORR [km/s]",
+    "E_V_RAD_XCORR": "Error in relative velocity from XCORR [km/s]",
+    "V_RAD_XCORR": "Radial velocity in Solar barycentric rest frame [km/s]"
 }
 for key, comment in GLOSSARY.items():
     if len(comment) > 80:
@@ -181,7 +190,6 @@ def get_catalog_identifier(source: Union[Source, int]):
         The astronomical source, or the SDSS-V catalog identifier.
     """
     return source.catalogid if isinstance(source, Source) else int(source)
-
 
 def get_cartons_and_programs(source: Union[Source, int]):
     """
@@ -222,6 +230,7 @@ def get_cartons_and_programs(source: Union[Source, int]):
     )
     _, cartons, programs = q_cartons.first()
     cartons, programs = (cartons.split(","), programs.split(","))
+    return (cartons, programs)
 
 
 def get_first_carton(source: Union[Source, int]) -> Carton:
@@ -344,10 +353,10 @@ def get_auxiliary_source_data(source: Union[Source, int]):
     data.extend([
         BLANK_CARD,
         (" ",           "TARGETING",        None),
-        ("CARTON_0",    first_carton.carton, f"Prioritised carton for to source (see documentation)"),
-        ("CARTONS",     ",".join(cartons), f"Comma-separated SDSS-V program names"),
-        ("PROGRAMS",    ",".join(list(set(programs))), f"Comma-separated SDSS-V carton names"),
-        ("MAPPERS",     ",".join([p.split("_")[0] for p in list(set(programs))]), f"Comma-separated SDSS-V Mappers")
+        ("CARTON_0",    first_carton.carton, f"First carton for source (see documentation)"),
+        ("CARTONS",     ",".join(cartons), f"SDSS-V cartons"),
+        ("PROGRAMS",    ",".join(list(set(programs))), f"SDSS-V programs"),
+        ("MAPPERS",     ",".join(list(set([p.split("_")[0] for p in programs]))), f"SDSS-V mappers")
     ])
     return data
 
@@ -437,7 +446,7 @@ def hdu_from_data_mappings(data_products, mappings, header):
                             value = function(data_product, image)
                         except KeyError:
                             log.warning(f"No {key} found in {data_product.path}")
-                            value = None
+                            value = np.nan
                         values[key].append(value)
                     else:
                         values[key] = function    
@@ -607,8 +616,8 @@ def fits_column_kwargs(values):
 
     mappings = [
         ("E", lambda v: isinstance(v[0], (float, np.floating))), # all 32-bit
+        ("K", lambda v: isinstance(v[0], (int, np.integer)) and (isinstance(v[0], np.uint64)) or (isinstance(v[0], (int, np.integer)) and (int(max(v) >> 32) > 0))), # 64-bit integers
         ("J", lambda v: isinstance(v[0], (int, np.integer)) and (int(max(v) >> 32) == 0)), # 32-bit integers
-        ("K", lambda v: isinstance(v[0], (int, np.integer)) and (int(max(v) >> 32) > 0)), # 64-bit integers
         ("L", lambda v: isinstance(v[0], (bool, np.bool_))), # bools
     ]
     flat_values = np.array(values).flatten()

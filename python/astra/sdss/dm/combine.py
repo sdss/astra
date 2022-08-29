@@ -28,20 +28,21 @@ def pixel_weighted_spectrum(flux, flux_error, continuum, bitmask):
     return (stacked_flux, stacked_flux_error, stacked_bitmask)
 
 
-def separate_bitmasks(bitmask):
+def separate_bitmasks(bitmasks):
     """
     Separate a bitmask array into arrays of bitmasks for each bit. Assumes base-2.
 
-    :param bitmask:
-        An array of bitmask values.
+    :param bitmasks:
+        An list of bitmask arrays.
     """
 
-    q_max = int(np.log2(np.max(bitmask)))
+    q_max = max([int(np.log2(np.max(bitmask))) for bitmask in bitmasks])
     separated = OrderedDict()
     for q in range(q_max):
-        is_set = (bitmask & np.uint64(2**q)) > 0
-        if np.any(is_set):
-            separated[q] = np.clip(is_set, 0, 1).astype(float)    
+        separated[q] = []
+        for bitmask in bitmasks:                
+            is_set = (bitmask & np.uint64(2**q)) > 0
+            separated[q].append(np.clip(is_set, 0, 1).astype(float))
     return separated
 
 """
@@ -134,7 +135,7 @@ def resample_visit_spectra(
         separated_bitmasks = separate_bitmasks(bitmask)
         n_flags = len(separated_bitmasks)
         resampled_bitmasks = np.zeros((n_visits, n_pixels, n_flags))
-        num_flagged_pixels = { flag: np.sum(a > 0, axis=-1).astype(int) for flag, a in separated_bitmasks.items() }
+        #num_flagged_pixels = { flag: np.sum(a > 0, axis=-1).astype(int) for flag, a in separated_bitmasks.items() }
 
     for i, v_rad in enumerate(radial_velocity):
         for j, n_res in enumerate(num_pixels_per_resolution_element):
@@ -170,12 +171,12 @@ def resample_visit_spectra(
                     pixel[finite],
                     n_res,
                     [
-                        [flag_bitmask[i, j], None] for flag_bitmask in separated_bitmasks.values()
+                        [visit_and_chip(flag_bitmask, i, j), None] for flag_bitmask in separated_bitmasks.values()
                     ]
                 )
 
                 for k, (flag, (resampled_bitmask_flag, _)) in enumerate(zip(separated_bitmasks.keys(), output)):
-                    if num_flagged_pixels[flag][i, j] == 0: continue
+                    #if num_flagged_pixels[flag][i, j] == 0: continue
 
                     # The resampling will produce a continuous (fraction) of bitmask values everywhere
                     # with an exponential sinc function pattern. In SDSS-IV they decided just to take

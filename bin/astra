@@ -1,5 +1,4 @@
 import click
-from astra import log
 
 # Common options.
 @click.group()
@@ -10,7 +9,8 @@ def cli(context, verbose):
     context.ensure_object(dict)
     context.obj["verbose"] = verbose
     # Overwrite settings in ~/.astra/astra.yml
-    log.set_level(10 if verbose else 20)
+    #from astra import log
+    #log.set_level(10 if verbose else 20)
 
 
 @cli.command()
@@ -33,6 +33,7 @@ def vacuum(dry_run):
     """
     from peewee import JOIN, fn
     from time import sleep
+    from astra import log
     from astra.database.astradb import Task, Bundle, TaskBundle, TaskOutput, TaskInputDataProducts
 
     if not dry_run:
@@ -244,6 +245,11 @@ def do_work(ids, is_bundle):
             
     return None
 
+def _execute_task(task_id):
+    print(f"executing task {task_id}")
+    from astra.database.astradb import Task
+    Task.get(task_id).instance().execute()
+
 
 @execute.command(hidden=True)
 @click.argument("task_ids", type=int, nargs=-1, required=True)
@@ -264,13 +270,37 @@ def task(task_id):
 def bundles(bundle_ids):
     """Execute multiple task bundles""" 
     return do_work(bundle_ids, True)
-    
+
 
 @execute.command()
+@click.option("-p", "--parallelism", type=int, nargs=1, default=1)
 @click.argument("bundle_id", type=int, nargs=1, required=True)
-def bundle(bundle_id):
+def bundle(bundle_id, parallelism):
     """Execute a task bundle"""
-    return do_work([bundle_id], True)
+
+    if parallelism > 1:
+        from astra import log
+        from joblib import Parallel, delayed
+
+        from astra.database.astradb import Task, TaskBundle
+
+        tasks = (
+            Task.select()
+                .join(TaskBundle)
+                .where(TaskBundle.bundle_id == bundle_id)
+        )
+
+        def f(task):
+            try:
+                task.instance().execute()
+            except:
+                log.exception(f"Exception in executing task {task}:")
+
+
+        Parallel(parallelism, prefer="processes")(delayed(f)(task) for task in tasks)
+        
+    else:
+        return do_work([bundle_id], True)
 
 
 if __name__ == "__main__":
