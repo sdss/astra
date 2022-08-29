@@ -29,10 +29,11 @@ from numbers import Number
 import numpy as np
 
 
-def convolve_mask(mask, kernel_size_coef=.25, kernel_size_limit=(2, 100),
-                  sink_region=(200, .5)):
+def convolve_mask(
+    mask, kernel_size_coef=0.25, kernel_size_limit=(2, 100), sink_region=(200, 0.5)
+):
     """
-    
+
     Parameters
     ----------
     mask: array like
@@ -44,7 +45,7 @@ def convolve_mask(mask, kernel_size_coef=.25, kernel_size_limit=(2, 100),
     sink_region: tuple
         (width, threshold fraction of good pixels in this region)
         if None, pass
-        
+
     Returns
     -------
     convolved mask
@@ -57,25 +58,28 @@ def convolve_mask(mask, kernel_size_coef=.25, kernel_size_limit=(2, 100),
     mask2 = np.copy(mask0)
 
     mask1_diff = np.diff(mask1)
-    bad_chunks = np.vstack(
-        (np.where(mask1_diff < 0)[0], np.where(mask1_diff > 0)[0])).T
+    bad_chunks = np.vstack((np.where(mask1_diff < 0)[0], np.where(mask1_diff > 0)[0])).T
 
     bad_chunks_len = np.round(np.diff(bad_chunks, axis=1) * kernel_size_coef)
-    bad_chunks_len = np.where(bad_chunks_len < kernel_size_limit[0],
-                              kernel_size_limit[0], bad_chunks_len)
-    bad_chunks_len = np.where(bad_chunks_len > kernel_size_limit[1],
-                              kernel_size_limit[1], bad_chunks_len)
+    bad_chunks_len = np.where(
+        bad_chunks_len < kernel_size_limit[0], kernel_size_limit[0], bad_chunks_len
+    )
+    bad_chunks_len = np.where(
+        bad_chunks_len > kernel_size_limit[1], kernel_size_limit[1], bad_chunks_len
+    )
 
     bad_chunks_convolved = np.array(
-        bad_chunks_len.reshape(-1, 1) * np.array([-1, 1]) + bad_chunks, int)
+        bad_chunks_len.reshape(-1, 1) * np.array([-1, 1]) + bad_chunks, int
+    )
+    bad_chunks_convolved = np.where(bad_chunks_convolved < 0, 0, bad_chunks_convolved)
     bad_chunks_convolved = np.where(
-        bad_chunks_convolved < 0, 0, bad_chunks_convolved)
-    bad_chunks_convolved = np.where(
-        bad_chunks_convolved >= len(mask0), len(mask0), bad_chunks_convolved)
+        bad_chunks_convolved >= len(mask0), len(mask0), bad_chunks_convolved
+    )
 
     for i_chunk in range(bad_chunks_convolved.shape[0]):
-        mask2[bad_chunks_convolved[i_chunk, 0]:bad_chunks_convolved[
-            i_chunk, 1]] = False
+        mask2[
+            bad_chunks_convolved[i_chunk, 0] : bad_chunks_convolved[i_chunk, 1]
+        ] = False
 
     # 2. sink_region: second round mask convolution
     if sink_region is not None:
@@ -91,15 +95,16 @@ def convolve_mask(mask, kernel_size_coef=.25, kernel_size_limit=(2, 100),
                     this_stop = this_start + sink_region[0]
                 else:
                     this_start = this_stop - sink_region[0]
-            good_frac[i] = np.sum(mask0[this_start:this_stop]) / \
-                           (this_stop - this_start)
+            good_frac[i] = np.sum(mask0[this_start:this_stop]) / (
+                this_stop - this_start
+            )
         mask2 = np.where(good_frac < sink_region[1], False, mask2)
 
     return mask2
 
 
 def uniform(tr_labels, bins, n_pick=3, ignore_out=False, digits=8):
-    """ make a uniform sample --> index stored in Slam.uniform_good
+    """make a uniform sample --> index stored in Slam.uniform_good
 
     Parameters
     ----------
@@ -109,10 +114,10 @@ def uniform(tr_labels, bins, n_pick=3, ignore_out=False, digits=8):
         how many to pick in each bin
     ignore_out: bool
         if True, kick stars out of bins
-        if False, raise error if there is any star out of bins 
+        if False, raise error if there is any star out of bins
     digits: int
         digits to form string
-        
+
     Examples
     --------
     >>> uniform(data, [np.arange(3000, 6000, 100), np.arange(-1, 5, .2),
@@ -140,20 +145,21 @@ def uniform(tr_labels, bins, n_pick=3, ignore_out=False, digits=8):
         for i_bin in range(len(this_bins) - 1):
             ind = np.logical_and(
                 tr_labels[:, i_dim] > this_bins[i_bin],
-                tr_labels[:, i_dim] < this_bins[i_bin + 1])
+                tr_labels[:, i_dim] < this_bins[i_bin + 1],
+            )
             uniform_ind[ind, i_dim] = i_bin
 
     # check bins covering all stars
-    ind_not_in_bins = np.any(
-        np.logical_not(np.isfinite(uniform_ind)), axis=1)
+    ind_not_in_bins = np.any(np.logical_not(np.isfinite(uniform_ind)), axis=1)
     if np.sum(ind_not_in_bins) > 0:
         if ignore_out:
             print("@utils.uniform: These stars are out of bins and ignored")
             print("i = ", np.where(ind_not_in_bins)[0])
             uniform_good &= np.logical_not(ind_not_in_bins)
         else:
-            raise (ValueError(
-                "@utils.uniform: bins not wide enough to cover all stars"))
+            raise (
+                ValueError("@utils.uniform: bins not wide enough to cover all stars")
+            )
 
     # make ID string for bins
     fmt = "{{:0{}.0f}}".format(digits)
@@ -167,7 +173,8 @@ def uniform(tr_labels, bins, n_pick=3, ignore_out=False, digits=8):
 
     # unique IDs
     u_str, u_inverse, u_counts = np.unique(
-        uniform_str, return_inverse=True, return_counts=True)
+        uniform_str, return_inverse=True, return_counts=True
+    )
 
     # pick stars from these bins
     ind_bin_need_to_pick = np.where(u_counts > n_pick)[0]
@@ -176,20 +183,25 @@ def uniform(tr_labels, bins, n_pick=3, ignore_out=False, digits=8):
         np.random.shuffle(ind_in_this_bin)
         uniform_good[ind_in_this_bin[n_pick:]] = False
 
-    print("@utils.uniform: [{}/{}] stars chosen to make a uniform sample!"
-          "".format(np.sum(uniform_good), n_obs))
+    print(
+        "@utils.uniform: [{}/{}] stars chosen to make a uniform sample!"
+        "".format(np.sum(uniform_good), n_obs)
+    )
 
-    return dict(uniform_picked=uniform_good,
-                uniform_unpicked=np.logical_not(uniform_good),
-                uniform_ind=uniform_ind,
-                uniform_str=uniform_str,
-                uniform_bins=bins,
-                n_pick=n_pick,
-                digits=digits,
-                ignore_out=ignore_out)
+    return dict(
+        uniform_picked=uniform_good,
+        uniform_unpicked=np.logical_not(uniform_good),
+        uniform_ind=uniform_ind,
+        uniform_str=uniform_str,
+        uniform_bins=bins,
+        n_pick=n_pick,
+        digits=digits,
+        ignore_out=ignore_out,
+    )
+
 
 unit_scale_dict = dict(
-    b=1.,
+    b=1.0,
     kb=1024**-1,
     mb=1024**-2,
     gb=1024**-3,
@@ -197,7 +209,7 @@ unit_scale_dict = dict(
 
 
 # deprecated
-def sizeof(obj, unit='mb', verbose=False, key_removed=None):
+def sizeof(obj, unit="mb", verbose=False, key_removed=None):
 
     # get scale for unit
     try:
@@ -210,11 +222,11 @@ def sizeof(obj, unit='mb', verbose=False, key_removed=None):
     for _ in dir(obj):
         v_dict[_] = getsize(obj.__getattribute__(_))
 
-    v_dict['_total'] = np.sum([v_dict[_] for _ in v_dict.keys()])
+    v_dict["_total"] = np.sum([v_dict[_] for _ in v_dict.keys()])
     for k in v_dict.keys():
         v_dict[k] = np.int(scale * v_dict[k])
 
-    v_dict['_unit'] = unit
+    v_dict["_unit"] = unit
 
     if verbose:
         print(v_dict)
@@ -232,28 +244,31 @@ def sizeof(obj, unit='mb', verbose=False, key_removed=None):
 #     iteritems = 'iteritems'
 # except NameError: # Python 3
 zero_depth_bases = (str, bytes, Number, range, bytearray)
-iteritems = 'items'
+iteritems = "items"
 
 
 def getsize(obj_0):
     """Recursively iterate to sum size of object & members."""
-    def inner(obj, _seen_ids = set()):
+
+    def inner(obj, _seen_ids=set()):
         obj_id = id(obj)
         if obj_id in _seen_ids:
             return 0
         _seen_ids.add(obj_id)
         size = sys.getsizeof(obj)
         if isinstance(obj, zero_depth_bases):
-            pass # bypass remaining control flow and return
+            pass  # bypass remaining control flow and return
         elif isinstance(obj, (tuple, list, Set, deque)):
             size += sum(inner(i) for i in obj)
         elif isinstance(obj, Mapping) or hasattr(obj, iteritems):
             size += sum(inner(k) + inner(v) for k, v in getattr(obj, iteritems)())
         # Check for custom object instances - may subclass above too
-        if hasattr(obj, '__dict__'):
+        if hasattr(obj, "__dict__"):
             size += inner(vars(obj))
-        if hasattr(obj, '__slots__'): # can have __slots__ with __dict__
-            size += sum(inner(getattr(obj, s)) for s in obj.__slots__ if hasattr(obj, s))
+        if hasattr(obj, "__slots__"):  # can have __slots__ with __dict__
+            size += sum(
+                inner(getattr(obj, s)) for s in obj.__slots__ if hasattr(obj, s)
+            )
         return size
-    return inner(obj_0)
 
+    return inner(obj_0)

@@ -38,7 +38,7 @@ format_slam = "[%(asctime)s] [%(module)s] %(levelname)s: %(message)s"
 logging.basicConfig(format=format_slam, level=0)
 
 # create a logger for SLAM
-logger = logging.getLogger('SLAM')
+logger = logging.getLogger("SLAM")
 
 # how to use it in other modules:
 # from .logger import logger

@@ -1,5 +1,3 @@
-
-
 import numpy as np
 import warnings
 from tqdm import tqdm
@@ -18,7 +16,7 @@ def grid_search(
     log10_alpha_min=-10,
     log10_alpha_max=-1,
     log10_alpha_delta=0.25,
-    **kwargs
+    **kwargs,
 ):
     """
     Perform a grid search to set the regularization strength.
@@ -31,7 +29,7 @@ def grid_search(
 
     models = []
 
-    alphas = 10**np.arange(log10_alpha_min, log10_alpha_max, log10_alpha_delta)
+    alphas = 10 ** np.arange(log10_alpha_min, log10_alpha_max, log10_alpha_delta)
     validation_chi_sqs = np.zeros_like(alphas)
 
     for i, alpha in enumerate(tqdm(alphas, desc="Regularization grid search")):
@@ -43,14 +41,18 @@ def grid_search(
             regularization=alpha,
         )
         model.train(**kwargs)
-        validation_chi_sqs[i] = model.chi_sq(validation_labels, validation_flux, validation_ivar)
+        validation_chi_sqs[i] = model.chi_sq(
+            validation_labels, validation_flux, validation_ivar
+        )
 
         models.append(model)
-    
+
     # Select model with lowest validation \chi^2
     index = np.argmin(validation_chi_sqs)
     if index == 0 or index == (validation_chi_sqs.size - 1):
-        warnings.warn(f"Regularization strength with lowest validation \chi^2 is on the edge of the grid: {alphas[index]:.2e}")
+        warnings.warn(
+            f"Regularization strength with lowest validation \chi^2 is on the edge of the grid: {alphas[index]:.2e}"
+        )
 
     meta = dict(
         models=models,

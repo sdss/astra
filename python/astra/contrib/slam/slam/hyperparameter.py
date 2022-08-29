@@ -32,19 +32,21 @@ import pandas as pd
 from joblib import Parallel, delayed
 
 
-__all__ = ['summarize_hyperparameters_to_table', 'summarize_table']
+__all__ = ["summarize_hyperparameters_to_table", "summarize_table"]
 
 
 # ############################ #
 # to summarize grid parameters #
 # ############################ #
-def hyperparameter_grid_stats(svrs, pivot=("param_C", "param_gamma"),
-                              n_jobs=10, verbose=10):
-    """ statistics for GridSearchCV results """
+def hyperparameter_grid_stats(
+    svrs, pivot=("param_C", "param_gamma"), n_jobs=10, verbose=10
+):
+    """statistics for GridSearchCV results"""
     stats_train = []
     stats_test = []
     r = Parallel(n_jobs=n_jobs, verbose=verbose)(
-        delayed(hyperparameter_grid_stats_)(svr, pivot=pivot) for svr in svrs)
+        delayed(hyperparameter_grid_stats_)(svr, pivot=pivot) for svr in svrs
+    )
     for i in range(len(r)):
         stats_train.append(r[i][0])
         stats_test.append(r[i][1])
@@ -52,7 +54,7 @@ def hyperparameter_grid_stats(svrs, pivot=("param_C", "param_gamma"),
 
 
 def hyperparameter_grid_stats_(svr, pivot=("param_C", "param_gamma")):
-    """ statistics for GridSearchCV results """
+    """statistics for GridSearchCV results"""
     if isinstance(svr, GridSearchCV):
         # yes, that's it
         cvr = svr.cv_results_
@@ -67,7 +69,8 @@ def hyperparameter_grid_stats_(svr, pivot=("param_C", "param_gamma")):
         if pivot is not None:
             return (
                 pd.DataFrame(stats_train_).pivot(*pivot, "mean_train_score"),
-                pd.DataFrame(stats_test_).pivot(*pivot, "mean_test_score"))
+                pd.DataFrame(stats_test_).pivot(*pivot, "mean_test_score"),
+            )
         else:
             return pd.DataFrame(stats_train_), pd.DataFrame(stats_test_)
     else:
@@ -78,8 +81,9 @@ def hyperparameter_grid_stats_(svr, pivot=("param_C", "param_gamma")):
 # summarize best estimator #
 # ######################## #
 
+
 def summarize_hyperparameters_to_table(svrs):
-    """ summarize hyper-parameters as a Table
+    """summarize hyper-parameters as a Table
 
     Parameters
     ----------
@@ -92,15 +96,19 @@ def summarize_hyperparameters_to_table(svrs):
         if isinstance(svr, SVR):
             hyperparams.append((svr.C, svr.gamma, svr.epsilon))
         elif isinstance(svr, GridSearchCV):
-            hyperparams.append((svr.best_estimator_.C,
-                                svr.best_estimator_.gamma,
-                                svr.best_estimator_.epsilon))
+            hyperparams.append(
+                (
+                    svr.best_estimator_.C,
+                    svr.best_estimator_.gamma,
+                    svr.best_estimator_.epsilon,
+                )
+            )
     hp_array = np.array(hyperparams)
-    return Table(data=hp_array, names=['C', 'gamma', 'epsilon'])
+    return Table(data=hp_array, names=["C", "gamma", "epsilon"])
 
 
 def summarize_table(hpt):
-    """ summarize table data
+    """summarize table data
 
     Parameters
     ----------

@@ -5,13 +5,12 @@
 A polynomial vectorizer for The Cannon.
 """
 
-from __future__ import (division, print_function, absolute_import,
-                        unicode_literals)
+from __future__ import division, print_function, absolute_import, unicode_literals
 
 __all__ = ["PolynomialVectorizer"]
 
 import numpy as np
-from collections import (Counter, OrderedDict)
+from collections import Counter, OrderedDict
 from itertools import combinations_with_replacement
 from six import string_types
 
@@ -38,12 +37,15 @@ class PolynomialVectorizer(BaseVectorizer):
     """
 
     def __init__(self, label_names=None, order=None, terms=None, **kwargs):
-        
+
         # Check to see if we have a terms/(label_names and order) dichotamy/
-        if (terms is None and None in (label_names, order)) \
-        or (terms is not None and order is not None):
-            raise ValueError("order must be None if terms are provided, "
-                "and terms must be None if label_names and order are provided")
+        if (terms is None and None in (label_names, order)) or (
+            terms is not None and order is not None
+        ):
+            raise ValueError(
+                "order must be None if terms are provided, "
+                "and terms must be None if label_names and order are provided"
+            )
 
         if terms is None:
             # Parse human-readable terms.
@@ -57,17 +59,17 @@ class PolynomialVectorizer(BaseVectorizer):
         terms = parse_label_vector_description(terms, label_names=label_names)
 
         super(PolynomialVectorizer, self).__init__(
-            label_names=label_names, terms=terms, **kwargs)
+            label_names=label_names, terms=terms, **kwargs
+        )
         return None
-
 
     def get_label_vector(self, labels):
         """
         Return the values of the label vector, given the scaled labels.
 
         :param labels:
-            The scaled and offset labels to use to calculate the label vector(s). 
-            This can be a ond-dimensional vector of `K` labels, or a 
+            The scaled and offset labels to use to calculate the label vector(s).
+            This can be a ond-dimensional vector of `K` labels, or a
             two-dimensional array of `N` by `K` labels.
         """
 
@@ -77,19 +79,18 @@ class PolynomialVectorizer(BaseVectorizer):
 
         columns = [np.ones(labels.shape[0], dtype=float)]
         for term in self.terms:
-            column = 1. # This works; don't use np.multiply/np.product.
+            column = 1.0  # This works; don't use np.multiply/np.product.
             for index, order in term:
-                column *= labels[:, index]**order
+                column *= labels[:, index] ** order
             columns.append(column)
         return np.vstack(columns)
-
 
     def get_label_vector_derivative(self, labels):
         """
         Return the derivatives of the label vector with respect to fluxes.
 
         :param labels:
-            The scaled labels to calculate the label vector derivatives. This can 
+            The scaled labels to calculate the label vector derivatives. This can
             be a one-dimensional vector of `K` labels (using the same order and
             length provided by self.label_names), or a two-dimensional array of
             `N` by `K` values. The returning array will be of shape `(N, D)`,
@@ -102,16 +103,16 @@ class PolynomialVectorizer(BaseVectorizer):
         indices_used = np.zeros(L, dtype=bool)
 
         columns = np.ones((T + 1, L), dtype=float)
-        columns[0] = 0.0 # First theta derivative always zero.
+        columns[0] = 0.0  # First theta derivative always zero.
 
         for t, term in enumerate(self.terms, start=1):
-                
+
             indices_used[:] = False
-            
+
             for index, order in term:
 
-                dy = order * (labels[index]**(order - 1))
-                y = labels[index]**order
+                dy = order * (labels[index] ** (order - 1))
+                y = labels[index] ** order
 
                 # If it's the index w.r.t. it, take derivative.
                 columns[t, index] *= dy
@@ -124,11 +125,10 @@ class PolynomialVectorizer(BaseVectorizer):
 
         return columns
 
-
     def get_human_readable_label_vector(self, mul="*", pow="^", bracket=False):
         """
         Return a human-readable form of the label vector.
-        
+
         :param mul: [optional]
             String to use to represent a multiplication operator. For example,
             if giving LaTeX label definitions one may want to use '\cdot' for
@@ -144,8 +144,8 @@ class PolynomialVectorizer(BaseVectorizer):
             A human-readable string representing the label vector.
         """
         return human_readable_label_vector(
-            self.terms, self.label_names, mul=mul, pow=pow, bracket=bracket)
-
+            self.terms, self.label_names, mul=mul, pow=pow, bracket=bracket
+        )
 
     @property
     def human_readable_label_vector(self):
@@ -154,9 +154,7 @@ class PolynomialVectorizer(BaseVectorizer):
         """
         return self.get_human_readable_label_vector()
 
-
-    def get_human_readable_label_term(self, term_index, label_names=None,
-        **kwargs):
+    def get_human_readable_label_term(self, term_index, label_names=None, **kwargs):
         """
         Return a human-readable form of a single term in the label vector.
 
@@ -164,17 +162,21 @@ class PolynomialVectorizer(BaseVectorizer):
             The term in the label vector to return.
 
         :param label_names: [optional]
-            The label names to use. For example, these could be LaTeX 
+            The label names to use. For example, these could be LaTeX
             representations of the label names.
 
         :returns:
             A human-readable string representing a single term in the label vector.
         """
 
-        if term_index == 0: return "1"
+        if term_index == 0:
+            return "1"
         else:
-            return human_readable_label_term(self.terms[term_index - 1],
-                label_names=label_names or self.label_names, **kwargs)
+            return human_readable_label_term(
+                self.terms[term_index - 1],
+                label_names=label_names or self.label_names,
+                **kwargs
+            )
 
 
 def _is_structured_label_vector(label_vector):
@@ -193,9 +195,11 @@ def _is_structured_label_vector(label_vector):
             return False
 
         for term in descriptor:
-            if not isinstance(term, (list, tuple)) \
-            or len(term) != 2 \
-            or not isinstance(term[-1], (int, float)):
+            if (
+                not isinstance(term, (list, tuple))
+                or len(term) != 2
+                or not isinstance(term[-1], (int, float))
+            ):
                 return False
 
     if len(label_vector) == 0 or sum(map(len, label_vector)) == 0:
@@ -215,7 +219,7 @@ def parse_label_vector_description(description, label_names=None, **kwargs):
         str or list
 
     :param label_names: [optional]
-        If `label_names` are provided, instead of label names being provided as 
+        If `label_names` are provided, instead of label names being provided as
         the output parameter, the corresponding index location will be given.
 
     :returns:
@@ -271,7 +275,7 @@ def parse_label_vector_description(description, label_names=None, **kwargs):
 
         term = OrderedDict()
         for label, order in zip(labels, orders):
-            term[label] = term.get(label, 0) + order # Sum repeat term powers.
+            term[label] = term.get(label, 0) + order  # Sum repeat term powers.
 
         # Prevent uses of x^0 etc clogging up the label vector.
         valid_terms = [(l, o) for l, o in term.items() if o != 0]
@@ -280,15 +284,14 @@ def parse_label_vector_description(description, label_names=None, **kwargs):
 
         if len(valid_terms) > 0:
             label_vector.append(valid_terms)
-    
+
     if sum(map(len, label_vector)) == 0:
         raise ValueError("no valid terms provided")
 
     return label_vector
 
 
-def human_readable_label_term(term, label_names=None, mul="*", pow="^",
-    bracket=False):
+def human_readable_label_term(term, label_names=None, mul="*", pow="^", bracket=False):
     """
     Return a human-readable form of a single term in the label vector.
 
@@ -330,8 +333,9 @@ def human_readable_label_term(term, label_names=None, mul="*", pow="^",
         return mul.join(ct)
 
 
-def human_readable_label_vector(terms, label_names=None, mul="*", pow="^",
-    bracket=False):
+def human_readable_label_vector(
+    terms, label_names=None, mul="*", pow="^", bracket=False
+):
     """
     Return a human-readable form of the label vector.
 
@@ -360,8 +364,9 @@ def human_readable_label_vector(terms, label_names=None, mul="*", pow="^",
 
     human_terms = ["1"]
     for term in terms:
-        human_terms.append(human_readable_label_term(
-            term, label_names=label_names, mul=mul, pow=pow))
+        human_terms.append(
+            human_readable_label_term(term, label_names=label_names, mul=mul, pow=pow)
+        )
     return " + ".join(human_terms)
 
 
@@ -378,11 +383,11 @@ def terminator(label_names, order, cross_term_order=-1, **kwargs):
 
     :param cross_term_order: [optional]
         The maximum order of the cross-terms (e.g., cross_term_order 2 implies
-        A^2*B is a term). If the provided `cross_term_order` value is negative, 
+        A^2*B is a term). If the provided `cross_term_order` value is negative,
         then `cross_term_order = order - 1` will be assumed.
 
     :param mul: [optional]
-        The operator to use to represent multiplication in the description of 
+        The operator to use to represent multiplication in the description of
         the label vector.
 
     :param pow: [optional]
@@ -394,7 +399,7 @@ def terminator(label_names, order, cross_term_order=-1, **kwargs):
     """
     sep, mul, pow = kwargs.pop(["sep", "mul", "pow"], "+*^")
 
-    #I make no apologies: it's fun to code like this for short complex functions
+    # I make no apologies: it's fun to code like this for short complex functions
     items = []
     if 0 > cross_term_order:
         cross_term_order = order - 1
@@ -404,10 +409,15 @@ def terminator(label_names, order, cross_term_order=-1, **kwargs):
             # Python 2 and 3 behave differently here, so generate an ordered
             # dictionary based on sorting the keys.
             t = OrderedDict([(k, t[k]) for k in sorted(t.keys())])
-            if len(t) == 1 and order >= max(t.values()) \
-            or len(t) > 1 and cross_term_order >= max(t.values()):
+            if (
+                len(t) == 1
+                and order >= max(t.values())
+                or len(t) > 1
+                and cross_term_order >= max(t.values())
+            ):
                 c = [pow.join([[l], [l, str(p)]][p > 1]) for l, p in t.items()]
-                if c: items.append(mul.join(map(str, c)))
+                if c:
+                    items.append(mul.join(map(str, c)))
     return " {} ".format(sep).join(items)
 
 
@@ -422,5 +432,8 @@ def get_label_names(label_vector):
     :returns:
         A list of the label names that make up the label vector.
     """
-    return list(OrderedDict.fromkeys([label for term in label_vector \
-        for label, power in term if power != 0]))
+    return list(
+        OrderedDict.fromkeys(
+            [label for term in label_vector for label, power in term if power != 0]
+        )
+    )

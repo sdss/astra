@@ -31,7 +31,7 @@ from scipy.interpolate import PchipInterpolator, interp1d
 
 
 def interp_pchip(wave, spec, wave_interp, extrapolate=False):
-    """ interpolate for single spectrum (pchip)
+    """interpolate for single spectrum (pchip)
 
     Parameters
     ----------
@@ -57,7 +57,7 @@ def interp_pchip(wave, spec, wave_interp, extrapolate=False):
 
 
 def interp_linear(wave, spec, wave_interp, fill_value=np.nan):
-    """ interpolate for single spectrum (linear)
+    """interpolate for single spectrum (linear)
 
     Parameters
     ----------
@@ -76,13 +76,12 @@ def interp_linear(wave, spec, wave_interp, fill_value=np.nan):
         interpolated spectrum
 
     """
-    I = interp1d(wave, spec, kind='linear',
-                 bounds_error=False, fill_value=fill_value)
+    I = interp1d(wave, spec, kind="linear", bounds_error=False, fill_value=fill_value)
     return I(wave_interp)
 
 
 def interp_cubic(wave, spec, wave_interp, fill_value=np.nan):
-    """ interpolate for single spectrum (cubic)
+    """interpolate for single spectrum (cubic)
 
     Parameters
     ----------
@@ -101,13 +100,12 @@ def interp_cubic(wave, spec, wave_interp, fill_value=np.nan):
         interpolated spectrum
 
     """
-    I = interp1d(wave, spec, kind='cubic',
-                 bounds_error=False, fill_value=fill_value)
+    I = interp1d(wave, spec, kind="cubic", bounds_error=False, fill_value=fill_value)
     return I(wave_interp)
 
 
 def interp_nearest(wave, spec, wave_interp, fill_value=np.nan):
-    """ interpolate for single spectrum (nearest)
+    """interpolate for single spectrum (nearest)
 
     Parameters
     ----------
@@ -126,13 +124,12 @@ def interp_nearest(wave, spec, wave_interp, fill_value=np.nan):
         interpolated spectrum
 
     """
-    I = interp1d(wave, spec, kind='nearest',
-                 bounds_error=False, fill_value=fill_value)
+    I = interp1d(wave, spec, kind="nearest", bounds_error=False, fill_value=fill_value)
     return I(wave_interp)
 
 
 def add_noise_normal(flux, snr):
-    """ add normal random noise for flux (single spectrum)
+    """add normal random noise for flux (single spectrum)
 
     Parameters
     ----------
@@ -147,13 +144,13 @@ def add_noise_normal(flux, snr):
 
     """
     nsr = np.random.randn(*flux.shape) / snr
-    nsr = np.where((nsr < 1.) * (nsr > -1.), nsr, np.zeros_like(flux))
+    nsr = np.where((nsr < 1.0) * (nsr > -1.0), nsr, np.zeros_like(flux))
 
-    return flux * (1. + nsr)
+    return flux * (1.0 + nsr)
 
 
 def add_noise_gpoisson(flux, k=1.0):
-    """ add SCALED Poisson random noise for flux (single spectrum)
+    """add SCALED Poisson random noise for flux (single spectrum)
 
     Parameters
     ----------
@@ -169,13 +166,13 @@ def add_noise_gpoisson(flux, k=1.0):
 
     """
     nsr = np.random.randn(*flux.shape) / np.sqrt(np.abs(flux)) / k
-    nsr = np.where((nsr < 1.) * (nsr > -1.), nsr, np.zeros_like(flux))
+    nsr = np.where((nsr < 1.0) * (nsr > -1.0), nsr, np.zeros_like(flux))
 
-    return flux * (1. + nsr)
+    return flux * (1.0 + nsr)
 
 
 def add_noise_poisson(flux):
-    """ add Poisson random noise for flux (single/multi spectrum)
+    """add Poisson random noise for flux (single/multi spectrum)
 
     Parameters
     ----------
@@ -191,7 +188,7 @@ def add_noise_poisson(flux):
 
 
 def measure_poisson_snr(flux):
-    """ measure Poisson SNR  for flux
+    """measure Poisson SNR  for flux
 
     Parameters
     ----------
@@ -213,7 +210,7 @@ def measure_poisson_snr(flux):
 
 
 def shift_poisson_snr(flux, snr):
-    """ shift Poisson SNR for flux
+    """shift Poisson SNR for flux
 
     Parameters
     ----------
@@ -234,12 +231,12 @@ def shift_poisson_snr(flux, snr):
         flux = flux.reshape(1, -1)
     elif flux.ndim > 2:
         # >2d
-        raise(ValueError('The number of dimensions of input flux is larger than 2!'))
+        raise (ValueError("The number of dimensions of input flux is larger than 2!"))
 
     # measure poisson SNR for flux
     snr_med = measure_poisson_snr(flux)[:, None]
     # determine scale
-    scale_ = (snr_med/snr) ** 2.
+    scale_ = (snr_med / snr) ** 2.0
     # scale flux
     flux_ = flux / scale_
 
@@ -289,12 +286,10 @@ def binning_pixels(wave, flux, ivar=None, n_pixel=3):
 
     # iterate for each binned pixel [wave, flux, ivar]
     for i_pix in range(n_binned):
-        binned_wave[i_pix] = np.mean(
-            wave[i_pix * n_pixel:(i_pix + 1) * n_pixel])
-        binned_flux[i_pix] = np.mean(
-            flux[i_pix * n_pixel:(i_pix + 1) * n_pixel])
-        this_ivar_array = ivar[i_pix * n_pixel:(i_pix + 1) * n_pixel]
-        if np.all((this_ivar_array > 0.) * np.isfinite(this_ivar_array)):
+        binned_wave[i_pix] = np.mean(wave[i_pix * n_pixel : (i_pix + 1) * n_pixel])
+        binned_flux[i_pix] = np.mean(flux[i_pix * n_pixel : (i_pix + 1) * n_pixel])
+        this_ivar_array = ivar[i_pix * n_pixel : (i_pix + 1) * n_pixel]
+        if np.all((this_ivar_array > 0.0) * np.isfinite(this_ivar_array)):
             # all pixels are good
             # ################## binning method #################### #
             # (err1**2 + err2**2 + ... + errn**2) / n**2 = errbin**2 #
@@ -302,23 +297,23 @@ def binning_pixels(wave, flux, ivar=None, n_pixel=3):
             # --> binning n pixels with the same error               #
             # --> improves SNR by a factor of sqrt(n)                #
             # ###################################################### #
-            binned_ivar[i_pix] = n_pixel ** 2. / np.sum(1. / this_ivar_array)
+            binned_ivar[i_pix] = n_pixel**2.0 / np.sum(1.0 / this_ivar_array)
         else:
             # bad pixel exists
-            binned_ivar[i_pix] = 0.
+            binned_ivar[i_pix] = 0.0
 
     return binned_wave, binned_flux, binned_ivar
 
 
 def test_interpolation():
-    x = np.arange(0., 10., 1.)
+    x = np.arange(0.0, 10.0, 1.0)
     y = np.sin(x)
-    plt.plot(x, y, 'r')
-    xx = np.arange(0., 10., 0.2)
-    plt.plot(xx, interp_pchip(x, y, xx), 'b')
-    plt.plot(xx, interp_linear(x, y, xx), 'g')
-    plt.plot(xx, interp_cubic(x, y, xx), 'c')
-    plt.plot(xx, interp_nearest(x, y, xx), 'm')
+    plt.plot(x, y, "r")
+    xx = np.arange(0.0, 10.0, 0.2)
+    plt.plot(xx, interp_pchip(x, y, xx), "b")
+    plt.plot(xx, interp_linear(x, y, xx), "g")
+    plt.plot(xx, interp_cubic(x, y, xx), "c")
+    plt.plot(xx, interp_nearest(x, y, xx), "m")
 
 
 if __name__ == "__main__":

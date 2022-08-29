@@ -1,1 +1,1 @@
-__all__ = ['interpolate', 'polynomial']
+__all__ = ["interpolate", "polynomial"]

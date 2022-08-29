@@ -6,21 +6,17 @@ from airflow.models.baseoperator import BaseOperator
 from airflow.utils.operator_helpers import context_to_airflow_vars
 
 from astra import log
-from astra.utils import (deserialize, flatten)
+from astra.utils import deserialize, flatten
 from astra.operators.utils import to_callable
 from astra.database.astradb import Task
-        
+
 
 class AstraOperator(BaseOperator):
 
-    template_fields = ("task_parameters", )
+    template_fields = ("task_parameters",)
 
     def __init__(
-        self,
-        task_name,
-        task_parameters=None,
-        return_id_kind="task",
-        **kwargs
+        self, task_name, task_parameters=None, return_id_kind="task", **kwargs
     ) -> None:
         super(AstraOperator, self).__init__(**kwargs)
         self.task_name = task_name
@@ -30,14 +26,16 @@ class AstraOperator(BaseOperator):
             raise ValueError(f"return_id_kind must be either `task` or `data_product`")
 
     def execute(self, context):
-        log.info(f"Creating task {self.task_name} with task_parameters {self.task_parameters}")
+        log.info(
+            f"Creating task {self.task_name} with task_parameters {self.task_parameters}"
+        )
         executable_class = to_callable(self.task_name)
         task = executable_class(**self.task_parameters)
 
         log.info(f"Executing")
         task.execute()
         log.info(f"Done")
-        
+
         if self.return_id_kind == "task":
             outputs = [task.id for task in task.context["tasks"]]
         elif self.return_id_kind == "data_product":
@@ -45,14 +43,13 @@ class AstraOperator(BaseOperator):
             for t in task.context["tasks"]:
                 for dp in t.output_data_products:
                     outputs.append(dp.id)
-        
+
         return outputs
-    
 
 
 class TaskExecutor(BaseOperator):
 
-    template_fields = ("execute_task_ids", )
+    template_fields = ("execute_task_ids",)
 
     def __init__(
         self,
@@ -62,7 +59,6 @@ class TaskExecutor(BaseOperator):
         super(TaskExecutor, self).__init__(**kwargs)
         self.execute_task_ids = execute_task_ids
         return None
-
 
     def execute(self, context):
 
@@ -79,5 +75,5 @@ class TaskExecutor(BaseOperator):
                 log.exception(f"Exception when executing item {task}")
             else:
                 log.info(f"Completed task {task}")
-                
+
         return None

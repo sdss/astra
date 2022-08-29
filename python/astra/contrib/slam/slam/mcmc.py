@@ -29,16 +29,23 @@ from emcee import EnsembleSampler
 from .predict import predict_spectrum
 
 
-__all__ = ['lnlike_gaussian', 'lnprior_uniform', 'lnprob',
-           'predict_label_mcmc', 'predict_spectrum',
-           'theta_between', 'check_chains', 'sampler_mcc']
+__all__ = [
+    "lnlike_gaussian",
+    "lnprior_uniform",
+    "lnprob",
+    "predict_label_mcmc",
+    "predict_spectrum",
+    "theta_between",
+    "check_chains",
+    "sampler_mcc",
+]
 
 eps = 1e-10  # Once flux_ivar < eps, these pixels are ignored
 stablechain_corrcoef_threshold = 0.4
 
 
 def lnlike_gaussian(theta, svrs, flux_obs, flux_ivar, mask):
-    """ Gaussian likelihood function
+    """Gaussian likelihood function
 
     Parameters
     ----------
@@ -73,12 +80,13 @@ def lnlike_gaussian(theta, svrs, flux_obs, flux_ivar, mask):
     flux_pred = predict_spectrum(svrs, theta, mask=mask)
 
     # Gaussian likelihood
-    return - 0.5 * np.nansum((flux_obs - flux_pred) ** 2. * flux_ivar +
-                             np.log(2. * np.pi / flux_ivar))
+    return -0.5 * np.nansum(
+        (flux_obs - flux_pred) ** 2.0 * flux_ivar + np.log(2.0 * np.pi / flux_ivar)
+    )
 
 
 def lnprior_uniform(theta, theta_lb, theta_ub):
-    """ loose uniform prior for theta
+    """loose uniform prior for theta
 
     Parameters
     ----------
@@ -95,13 +103,13 @@ def lnprior_uniform(theta, theta_lb, theta_ub):
     # if np.all(-np.inf < theta) and np.all(theta < np.inf):
     if np.all(theta_lb < theta) and np.all(theta < theta_ub):
         # reasonable theta
-        return 0.
+        return 0.0
     # unreasonable theta
     return -np.inf
 
 
 def lnprob(theta, svrs, flux_obs, flux_ivar, mask, theta_lb, theta_ub):
-    """ posterior probability function
+    """posterior probability function
 
     Parameters
     ----------
@@ -139,30 +147,48 @@ def lnprob(theta, svrs, flux_obs, flux_ivar, mask, theta_lb, theta_ub):
     return lp
 
 
-def predict_label_mcmc(theta0, svrs, flux_obs, flux_ivar, mask,
-                       theta_lb=None, theta_ub=None,
-                       n_walkers=10, n_burnin=200, n_run=500, threads=1,
-                       return_chain=False, mcmc_run_max_iter=5, mcc=0.4,
-                       prompt=None, **kwargs):
-    """ predict labels using emcee MCMC """
+def predict_label_mcmc(
+    theta0,
+    svrs,
+    flux_obs,
+    flux_ivar,
+    mask,
+    theta_lb=None,
+    theta_ub=None,
+    n_walkers=10,
+    n_burnin=200,
+    n_run=500,
+    threads=1,
+    return_chain=False,
+    mcmc_run_max_iter=5,
+    mcc=0.4,
+    prompt=None,
+    **kwargs
+):
+    """predict labels using emcee MCMC"""
     # theta length
     n_dim = len(theta0)
 
     # default theta lower/upper bounds
     if theta_lb is None:
-        theta_lb = np.ones_like(theta0) * -10.
+        theta_lb = np.ones_like(theta0) * -10.0
     if theta_ub is None:
-        theta_ub = np.ones_like(theta0) * 10.
+        theta_ub = np.ones_like(theta0) * 10.0
 
     # instantiate EnsambleSampler
-    sampler = EnsembleSampler(n_walkers, n_dim, lnprob,
-                              args=(svrs, flux_obs, flux_ivar, mask,
-                                    theta_lb, theta_ub),
-                              threads=threads)  # **kwargs?
+    sampler = EnsembleSampler(
+        n_walkers,
+        n_dim,
+        lnprob,
+        args=(svrs, flux_obs, flux_ivar, mask, theta_lb, theta_ub),
+        threads=threads,
+    )  # **kwargs?
 
     # burn in
-    pos0 = [theta0 + np.random.uniform(-1, 1, size=(len(theta0),)) * 1.e-3
-            for _ in range(n_walkers)]
+    pos0 = [
+        theta0 + np.random.uniform(-1, 1, size=(len(theta0),)) * 1.0e-3
+        for _ in range(n_walkers)
+    ]
     pos, prob, rstate = sampler.run_mcmc(pos0, n_burnin)
 
     # run mcmc
@@ -173,14 +199,14 @@ def predict_label_mcmc(theta0, svrs, flux_obs, flux_ivar, mask,
 
         # new position
         pos_new, state, pos_best = check_chains(
-            sampler, pos, theta_lb, theta_ub, mode_list=['bounds'])
+            sampler, pos, theta_lb, theta_ub, mode_list=["bounds"]
+        )
         print(prompt, " New pos : ", pos_new)
         print(prompt, " Best pos : ", pos_best)
 
         if np.any(np.logical_not(state)):
             print(prompt, " Chain states : ", state)
-            print(
-            prompt, " RESET chain : ", np.arange(0, len(state) + 1)[state])
+            print(prompt, " RESET chain : ", np.arange(0, len(state) + 1)[state])
 
         # maximum correlation coefficients
         mcc_qtl, mcc_mat = sampler_mcc(sampler)
@@ -200,10 +226,10 @@ def predict_label_mcmc(theta0, svrs, flux_obs, flux_ivar, mask,
         sampler.reset()
         pos, prob, rstate = sampler.run_mcmc(pos_new, n_run)
 
-    print(prompt, ' state_mcc : ', state_mcc)
+    print(prompt, " state_mcc : ", state_mcc)
 
     # estimate percentiles
-    theta_est_mcmc = np.nanpercentile(sampler.flatchain, [15., 50., 85.], axis=0)
+    theta_est_mcmc = np.nanpercentile(sampler.flatchain, [15.0, 50.0, 85.0], axis=0)
 
     # format of theta_est_mcmc:
     # array([theta_p15,
@@ -216,18 +242,22 @@ def predict_label_mcmc(theta0, svrs, flux_obs, flux_ivar, mask,
 
     # sampler is not returned, for saving memory
     if return_chain:
-        result = {'theta': theta_est_mcmc,
-                  'state_mcc': state_mcc,
-                  'mcc_qtl': mcc_qtl,
-                  'mcc_mat': mcc_mat,
-                  'i_run': i_run,
-                  'flatchain': sampler.flatchain}
+        result = {
+            "theta": theta_est_mcmc,
+            "state_mcc": state_mcc,
+            "mcc_qtl": mcc_qtl,
+            "mcc_mat": mcc_mat,
+            "i_run": i_run,
+            "flatchain": sampler.flatchain,
+        }
     else:
-        result = {'theta': theta_est_mcmc,
-                  'state_mcc': state_mcc,
-                  'mcc_qtl': mcc_qtl,
-                  'mcc_mat': mcc_mat,
-                  'i_run': i_run}
+        result = {
+            "theta": theta_est_mcmc,
+            "state_mcc": state_mcc,
+            "mcc_qtl": mcc_qtl,
+            "mcc_mat": mcc_mat,
+            "i_run": i_run,
+        }
 
     return result
     # if not return_chain:
@@ -237,21 +267,21 @@ def predict_label_mcmc(theta0, svrs, flux_obs, flux_ivar, mask,
 
 
 def theta_between(theta, theta_lb, theta_ub):
-    """ check if theta is between [theta_lb, theta_ub] """
-    state = np.all(theta.flatten() >= theta_lb.flatten()) and \
-            np.all(theta.flatten() <= theta_ub.flatten()) #and \
-            # np.all(np.isfinite())
+    """check if theta is between [theta_lb, theta_ub]"""
+    state = np.all(theta.flatten() >= theta_lb.flatten()) and np.all(
+        theta.flatten() <= theta_ub.flatten()
+    )  # and \
+    # np.all(np.isfinite())
     return state
 
 
-def check_chains(sampler, pos, theta_lb, theta_ub,
-                 mode_list=['bounds']):
-    """ check chains
+def check_chains(sampler, pos, theta_lb, theta_ub, mode_list=["bounds"]):
+    """check chains
 
     1> reset out-of-bound chains
     2> reset all chains to max likelihood neighbours
     """
-    mode_all = ['bounds', 'reset_all']
+    mode_all = ["bounds", "reset_all"]
 
     for mode in mode_list:
         assert mode in mode_all
@@ -265,24 +295,26 @@ def check_chains(sampler, pos, theta_lb, theta_ub,
     pos_best = sampler.flatchain[np.argsort(sampler.flatlnprobability)[-1]]
 
     # 'bounds' : chain pos should be between theta_lb, theta_ub
-    if 'bounds' in mode_list:
-        state = np.logical_and(state, np.array(
-            [theta_between(pos[i], theta_lb, theta_ub) for i in
-             range(n_walkers)]))
+    if "bounds" in mode_list:
+        state = np.logical_and(
+            state,
+            np.array(
+                [theta_between(pos[i], theta_lb, theta_ub) for i in range(n_walkers)]
+            ),
+        )
 
     # 'reset_all' : reset all chains
-    if 'reset_all' in mode_list:
-        state = np.logical_and(state,
-                               np.zeros((n_walkers,), dtype=np.bool))
+    if "reset_all" in mode_list:
+        state = np.logical_and(state, np.zeros((n_walkers,), dtype=np.bool))
 
     # determine new pos
     pos_new = []
     for i, state_ in enumerate(state):
         if not state_:
             # state_ = False, reset
-            pos_new.append(pos_best +
-                           np.random.uniform(-1, 1,
-                                             size=pos_best.shape) * 1.e-3)
+            pos_new.append(
+                pos_best + np.random.uniform(-1, 1, size=pos_best.shape) * 1.0e-3
+            )
         else:
             pos_new.append(pos[i])
 
@@ -291,7 +323,7 @@ def check_chains(sampler, pos, theta_lb, theta_ub,
 
 # IMPORTANT : this function is designed to implement "adaptive burn in length"
 def sampler_mcc(sampler):
-    """ calculate correlation coefficient matrix of chains
+    """calculate correlation coefficient matrix of chains
 
     Parameters
     ----------
@@ -316,14 +348,14 @@ def sampler_mcc(sampler):
             coefs[ichain, ichain, idim] = np.nan
 
     # correlation coefficient quantile
-    mcc_qtl = np.nanpercentile(coefs, [25., 50., 75.])
+    mcc_qtl = np.nanpercentile(coefs, [25.0, 50.0, 75.0])
 
     # return quantiles
     return mcc_qtl, coefs
 
 
 def chain_corrcoef(sampler):
-    """ calculate correlation coefficients of chains
+    """calculate correlation coefficients of chains
 
     Parameters
     ----------
@@ -343,14 +375,15 @@ def chain_corrcoef(sampler):
     for i in range(n_chain):
         for j in range(n_chain):
             for k in range(n_dim):
-                coefs[i, j, k] = np.corrcoef(sampler.chain[i, :, k],
-                                             sampler.chain[j, :, k])[1, 0]
+                coefs[i, j, k] = np.corrcoef(
+                    sampler.chain[i, :, k], sampler.chain[j, :, k]
+                )[1, 0]
     return coefs
 
 
 # deprecated
 def flatchain_mean_std_check(fchain, fprob, n_step, theta_lb, theta_ub):
-    """ calculate correlation coefficients of chains
+    """calculate correlation coefficients of chains
 
     Parameters
     ----------
@@ -379,8 +412,11 @@ def flatchain_mean_std_check(fchain, fprob, n_step, theta_lb, theta_ub):
     # => this is a good chain
     bad_chain_mask = np.zeros((n_chain,), dtype=bool)
     for i_chain, m_ in enumerate(m):
-        if np.all(m_ > theta_lb) and np.all(m_ < theta_ub) \
-                and np.all(np.abs(m_ - mbest) < s * 3.):
+        if (
+            np.all(m_ > theta_lb)
+            and np.all(m_ < theta_ub)
+            and np.all(np.abs(m_ - mbest) < s * 3.0)
+        ):
             continue
         else:
             bad_chain_mask[i_chain] = True
@@ -392,7 +428,7 @@ def flatchain_mean_std_check(fchain, fprob, n_step, theta_lb, theta_ub):
 
 # deprecated
 def flatchain_mean_std(fchain, n_step):
-    """ calculate correlation coefficients of chains
+    """calculate correlation coefficients of chains
 
     Parameters
     ----------
@@ -423,7 +459,7 @@ def flatchain_mean_std(fchain, n_step):
 
 # deprecated
 def flatchain_corrcoef_mean(fchain, n_step):
-    """ calculate correlation coefficients of chains
+    """calculate correlation coefficients of chains
 
     Parameters
     ----------
@@ -442,4 +478,4 @@ def flatchain_corrcoef_mean(fchain, n_step):
 
     coefs = chain_corrcoef(fchain, n_step)
 
-    return np.mean(coefs) - 1. / n_chain
+    return np.mean(coefs) - 1.0 / n_chain

@@ -1,12 +1,17 @@
-
-
-
 import numpy as np
 import os
 import pickle
 from astra import log, __version__
 from astra.base import ExecutableTask, Parameter
-from astra.database.astradb import DataProduct, TaskOutput, Output, TheCannonOutput, TaskInputDataProducts, database, TaskOutputDataProducts
+from astra.database.astradb import (
+    DataProduct,
+    TaskOutput,
+    Output,
+    TheCannonOutput,
+    TaskInputDataProducts,
+    database,
+    TaskOutputDataProducts,
+)
 from astropy.table import Table
 
 from astra.tools.spectrum import Spectrum1D
@@ -23,10 +28,14 @@ def result_dict(p_opt, p_cov, label_names):
     """
     uncertainty_prefix, rho_prefix = "u_", "rho_"
     result = dict(zip(label_names, p_opt))
-    result.update(dict(zip(
-        [f"{uncertainty_prefix}{name}" for name in label_names], 
-        np.sqrt(np.diag(p_cov))
-    )))
+    result.update(
+        dict(
+            zip(
+                [f"{uncertainty_prefix}{name}" for name in label_names],
+                np.sqrt(np.diag(p_cov)),
+            )
+        )
+    )
 
     # correlation coefficients
     L = len(label_names)
@@ -57,10 +66,12 @@ class TestTheCannon(ExecutableTask):
             ivar = np.atleast_2d(spectrum.uncertainty.array)
 
             with database.atomic():
-                for j, (p_opt, p_cov, meta) in enumerate(model.fit_spectrum(flux, ivar, tqdm_kwds=dict(disable=True))):
+                for j, (p_opt, p_cov, meta) in enumerate(
+                    model.fit_spectrum(flux, ivar, tqdm_kwds=dict(disable=True))
+                ):
                     result = result_dict(p_opt, p_cov, model.label_names)
                     result.update(snr=spectrum.meta["snr"][j], **meta)
-            
+
                     output = Output.create()
                     TaskOutput.create(task=task, output=output)
                     TheCannonOutput.create(
@@ -68,12 +79,12 @@ class TestTheCannon(ExecutableTask):
                         output=output,
                         **result,
                     )
-                    
-            #if i in Ns_cumsum:
+
+            # if i in Ns_cumsum:
             #    results.append([])
-            #result = result_dict(p_opt, p_cov, model.label_names)
-            #result.update(meta)
-            #results[-1].append(result)
+            # result = result_dict(p_opt, p_cov, model.label_names)
+            # result.update(meta)
+            # results[-1].append(result)
             """
             N, P = flux.shape
             #x0 = np.repeat(model.offsets, N).reshape((N, -1))
@@ -87,7 +98,7 @@ class TestTheCannon(ExecutableTask):
             """
         return None
 
-    '''
+    """
     def post_execute(self):
         for (task, data_product, _), results in zip(self.iterable(), tqdm(self.result)):
             for result_dict in results:
@@ -98,7 +109,7 @@ class TestTheCannon(ExecutableTask):
                     output=output,
                     **result_dict,
                 )
-    '''
+    """
 
     def slice_and_normalize_spectrum(self, data_product):
 
@@ -111,15 +122,17 @@ class TestTheCannon(ExecutableTask):
                 try:
                     spectrum.meta[key] = np.array(spectrum.meta[key])[slices]
                 except:
-                    log.exception(f"Unable to slice '{key}' metadata with {self.slice_args} on {data_product}")
-        
+                    log.exception(
+                        f"Unable to slice '{key}' metadata with {self.slice_args} on {data_product}"
+                    )
+
         if self.normalization_method is not None:
             try:
                 self._normalizer
             except AttributeError:
                 klass = executable(self.normalization_method)
                 kwds = self.normalization_kwds or dict()
-                self._normalizer = klass(spectrum, **kwds)        
+                self._normalizer = klass(spectrum, **kwds)
             else:
                 self._normalizer.spectrum = spectrum
             finally:

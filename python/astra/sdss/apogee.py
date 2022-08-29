@@ -7,44 +7,45 @@ from astra.database.astradb import Source, DataProduct
 
 from astra.utils import log, list_to_dict
 from astra.sdss.dm import base
-from .util import (calculate_snr, log_lambda_dispersion)
+from .util import calculate_snr, log_lambda_dispersion
 from .combine import resample_visit_spectra, pixel_weighted_spectrum
 
 
 def get_apogee_visit_radial_velocity(data_product: DataProduct):
     """
-    Return the (current) best-estimate of the radial velocity (in km/s) of this 
+    Return the (current) best-estimate of the radial velocity (in km/s) of this
     visit spectrum that is stored in the APOGEE DRP database.
 
     :param image:
         The FITS image of the ApVisit data product.
-    
+
     :param visit:
         The supplied visit.
     """
-    from astra.database.apogee_drpdb import (RvVisit, Visit)
+    from astra.database.apogee_drpdb import RvVisit, Visit
+
     if data_product.filetype.lower() != "apvisit":
         raise ValueError(f"Data product must have filetype 'apVisit'")
-    
+
     # Note: The rv_visit table contains *NEARLY* everything to uniquely identify
     #       a visit. It contains mjd, apred, fiber (fibreid), telescope, plate,
     #       but does not contain FIELD. So we must cross-match with the visit table.
     q = (
         RvVisit.select()
-               .join(Visit, on=(RvVisit.visit_pk == Visit.pk))
-               .where(
-                    (Visit.telescope == data_product.kwargs["telescope"])
-                &   (Visit.fiberid == data_product.kwargs["fiber"])
-                &   (Visit.mjd == data_product.kwargs["mjd"])
-                &   (Visit.apred == data_product.kwargs["apred"])
-                &   (Visit.field == data_product.kwargs["field"])
-                &   (Visit.plate == data_product.kwargs["plate"])
-               )
-               .order_by(RvVisit.created.desc())
+        .join(Visit, on=(RvVisit.visit_pk == Visit.pk))
+        .where(
+            (Visit.telescope == data_product.kwargs["telescope"])
+            & (Visit.fiberid == data_product.kwargs["fiber"])
+            & (Visit.mjd == data_product.kwargs["mjd"])
+            & (Visit.apred == data_product.kwargs["apred"])
+            & (Visit.field == data_product.kwargs["field"])
+            & (Visit.plate == data_product.kwargs["plate"])
+        )
+        .order_by(RvVisit.created.desc())
     )
     result = q.first()
     # Sanity check
-    if (data_product.sources[0].catalogid != result.catalogid):
+    if data_product.sources[0].catalogid != result.catalogid:
         raise ValueError(
             f"Data product {data_product} catalogid does not match record in APOGEE DRP "
             f"table ({data_product.sources[0].catalogid} != {result.catalogid}) "
@@ -55,7 +56,7 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct):
         "V_BC": result.bc,
         "V_REL": result.vrel,
         "E_V_REL": result.vrelerr,
-        "V_TYPE": result.vtype, # 1=chisq, 2=xcorr
+        "V_TYPE": result.vtype,  # 1=chisq, 2=xcorr
         "JD": result.jd,
         "DATE-OBS": result.dateobs,
         "TEFF_DOPPLER": result.rv_teff,
@@ -73,7 +74,8 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct):
         "E_V_REL_XCORR": result.xcorr_vrelerr,
         "V_BARY_XCORR": result.xcorr_vheliobary,
         "RV_COMPONENTS": result.rv_components,
-    }  
+    }
+
 
 def resample_apogee_visit_spectra(
     visits: List[DataProduct, str],
@@ -87,20 +89,20 @@ def resample_apogee_visit_spectra(
     median_filter_size: int = 501,
     median_filter_mode: str = "reflect",
     gaussian_filter_size: float = 100,
-    **kwargs
+    **kwargs,
 ):
     """
     Resample APOGEE visit spectra onto a common wavelength array.
-    
+
     :param visits:
         A list of ApVisit data products, or their paths.
-    
+
     :param crval: [optional]
         The log10(lambda) of the wavelength of the first pixel to resample to.
-    
+
     :param cdelt: [optional]
         The log (base 10) of the wavelength spacing to use when resampling.
-    
+
     :param num_pixels: [optional]
         The number of pixels to use for the resampled array.
 
@@ -108,7 +110,7 @@ def resample_apogee_visit_spectra(
         The number of pixels per resolution element assumed when performing sinc interpolation.
         If a tuple is given, then it is assumed the input visits are multi-dimensional (e.g., multiple
         chips) and a different number of pixels per resolution element should be used per chip.
-    
+
     :param radial_velocities: [optional]
         Either a list of radial velocities (one per visit), or a callable that takes two arguments
         (the FITS image of the data product, and the input visit) and returns a radial velocity
@@ -127,12 +129,12 @@ def resample_apogee_visit_spectra(
 
     :param median_filter_size: [optional]
         The filter width (in pixels) to use for any median filters (default: 501).
-    
+
     :param median_filter_mode: [optional]
         The mode to use for any median filters (default: reflect).
 
     :param gaussian_filter_size: [optional]
-        The filter size (in pixels) to use for any gaussian filter applied.            
+        The filter size (in pixels) to use for any gaussian filter applied.
 
     :returns:
         A 7-length tuple containing:
@@ -156,7 +158,7 @@ def resample_apogee_visit_spectra(
 
     for i, visit in enumerate(visits):
         path = visit.path if isinstance(visit, DataProduct) else visit
-        
+
         with fits.open(path) as image:
             if callable(radial_velocities):
                 v = radial_velocities(image, visit)
@@ -164,7 +166,7 @@ def resample_apogee_visit_spectra(
                 v = radial_velocities[i]
 
             hdu_header, hdu_flux, hdu_flux_error, hdu_bitmask, hdu_wl, *_ = range(11)
-        
+
             v_shift.append(v)
             wavelength.append(image[hdu_wl].data)
             flux.append(image[hdu_flux].data)
@@ -176,7 +178,12 @@ def resample_apogee_visit_spectra(
         include_visits.append(visit)
 
     resampled_wavelength = log_lambda_dispersion(crval, cdelt, num_pixels)
-    args = (resampled_wavelength, num_pixels_per_resolution_element, v_shift, wavelength)
+    args = (
+        resampled_wavelength,
+        num_pixels_per_resolution_element,
+        v_shift,
+        wavelength,
+    )
 
     kwds = dict(
         scale_by_pseudo_continuum=scale_by_pseudo_continuum,
@@ -184,16 +191,15 @@ def resample_apogee_visit_spectra(
         bad_pixel_mask=bad_pixel_mask,
         median_filter_size=median_filter_size,
         median_filter_mode=median_filter_mode,
-        gaussian_filter_size=gaussian_filter_size
+        gaussian_filter_size=gaussian_filter_size,
     )
     kwds.update(kwargs)
 
-    resampled_flux, resampled_flux_error, resampled_pseudo_cont = resample_visit_spectra(
-        *args,
-        flux,
-        flux_error,
-        **kwds
-    )
+    (
+        resampled_flux,
+        resampled_flux_error,
+        resampled_pseudo_cont,
+    ) = resample_visit_spectra(*args, flux, flux_error, **kwds)
     # TODO: have resample_visit_spectra return this so we dont repeat ourselves
     meta = dict(
         crval=crval,
@@ -210,9 +216,9 @@ def resample_apogee_visit_spectra(
 
     resampled_bitmask, *_ = resample_visit_spectra(*args, bitmasks)
     return (
-        resampled_flux, 
-        resampled_flux_error, 
-        resampled_pseudo_cont, 
+        resampled_flux,
+        resampled_flux_error,
+        resampled_pseudo_cont,
         resampled_bitmask,
-        meta
+        meta,
     )

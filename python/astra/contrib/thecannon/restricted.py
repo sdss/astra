@@ -7,8 +7,7 @@ to make the model more physically realistic and limit information propagated
 through abundance correlations.
 """
 
-from __future__ import (division, print_function, absolute_import,
-                        unicode_literals)
+from __future__ import division, print_function, absolute_import, unicode_literals
 
 __all__ = ["RestrictedCannonModel"]
 
@@ -26,16 +25,16 @@ class RestrictedCannonModel(CannonModel):
     abundance correlations.
 
     :param training_set_labels:
-        A set of objects with labels known to high fidelity. This can be 
+        A set of objects with labels known to high fidelity. This can be
         given as a numpy structured array, or an astropy table.
 
     :param training_set_flux:
-        An array of normalised fluxes for stars in the labelled set, given 
+        An array of normalised fluxes for stars in the labelled set, given
         as shape `(num_stars, num_pixels)`. The `num_stars` should match the
         number of rows in `training_set_labels`.
 
     :param training_set_ivar:
-        An array of inverse variances on the normalized fluxes for stars in 
+        An array of inverse variances on the normalized fluxes for stars in
         the training set. The shape of the `training_set_ivar` array should
         match that of `training_set_flux`.
 
@@ -44,9 +43,9 @@ class RestrictedCannonModel(CannonModel):
         should be a sub-class of `vectorizer.BaseVectorizer`.
 
     :param dispersion: [optional]
-        The dispersion values corresponding to the given pixels. If provided, 
+        The dispersion values corresponding to the given pixels. If provided,
         this should have a size of `num_pixels`.
-    
+
     :param regularization: [optional]
         The strength of the L1 regularization. This should either be `None`,
         a float-type value for single regularization strength for all pixels,
@@ -62,24 +61,37 @@ class RestrictedCannonModel(CannonModel):
         `None` to indicate no limit on a boundary.
     """
 
-    def __init__(self, training_set_labels, training_set_flux, training_set_ivar,
-        vectorizer, dispersion=None, regularization=None, censors=None, 
-        theta_bounds=None, **kwargs):
+    def __init__(
+        self,
+        training_set_labels,
+        training_set_flux,
+        training_set_ivar,
+        vectorizer,
+        dispersion=None,
+        regularization=None,
+        censors=None,
+        theta_bounds=None,
+        **kwargs
+    ):
 
-        super(RestrictedCannonModel, self).__init__(training_set_labels,
-            training_set_flux, training_set_ivar, vectorizer, 
-            dispersion=dispersion, regularization=regularization, 
-            censors=censors, **kwargs)
+        super(RestrictedCannonModel, self).__init__(
+            training_set_labels,
+            training_set_flux,
+            training_set_ivar,
+            vectorizer,
+            dispersion=dispersion,
+            regularization=regularization,
+            censors=censors,
+            **kwargs
+        )
 
         self.theta_bounds = theta_bounds
         return None
 
-
     @property
     def theta_bounds(self):
-        """ Return the boundaries placed on theta coefficients. """
+        """Return the boundaries placed on theta coefficients."""
         return self._theta_bounds
-
 
     @theta_bounds.setter
     def theta_bounds(self, theta_bounds):
@@ -87,25 +99,26 @@ class RestrictedCannonModel(CannonModel):
         Set lower and upper boundaries on specific theta coefficients.
 
         :param theta_bounds:
-            A dictionary containing vectorizer terms as keys and two-length 
-            tuples as values, indicating acceptable minimum and maximum values. 
+            A dictionary containing vectorizer terms as keys and two-length
+            tuples as values, indicating acceptable minimum and maximum values.
             Specify `None` to indicate no limit on a boundary. For example:
             `theta_bounds={"FE_H": (None, 0), "TEFF^3": (None, None)}`
         """
         theta_bounds = {} if theta_bounds is None else theta_bounds
         if isinstance(theta_bounds, dict):
-            
+
             label_vector = self.vectorizer.human_readable_label_vector
             terms = label_vector.split(" + ")
             checked_bounds = {}
             for term in theta_bounds.keys():
                 bounds = theta_bounds[term]
                 term = str(term)
-                
+
                 if term not in terms:
-                    logging.warn("Boundary on term '{}' ignored because it is "
-                                 "not in the label vector: {}".format(
-                                    term, label_vector))
+                    logging.warn(
+                        "Boundary on term '{}' ignored because it is "
+                        "not in the label vector: {}".format(term, label_vector)
+                    )
                 else:
                     if len(bounds) != 2:
                         raise ValueError("bounds must be a two-length tuple")
@@ -118,8 +131,6 @@ class RestrictedCannonModel(CannonModel):
 
         else:
             raise TypeError("theta_bounds must be a dictionary-like object")
-
-
 
     def train(self, threads=None, op_kwds=None):
         """
@@ -138,10 +149,12 @@ class RestrictedCannonModel(CannonModel):
         """
 
         # Generate the optimization bounds based on self.theta_bounds.
-        op_bounds = [self.theta_bounds.get(term, (None, None)) \
-            for term in self.vectorizer.human_readable_label_vector.split(" + ")]
+        op_bounds = [
+            self.theta_bounds.get(term, (None, None))
+            for term in self.vectorizer.human_readable_label_vector.split(" + ")
+        ]
 
         kwds = dict(op_method="l_bfgs_b", op_strict=False, op_kwds=(op_kwds or {}))
         kwds["op_kwds"].update(bounds=op_bounds)
-        
+
         return super(RestrictedCannonModel, self).train(threads=threads, **kwds)

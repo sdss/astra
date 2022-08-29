@@ -3,7 +3,13 @@ import os
 import pickle
 from astra import log, __version__
 from astra.base import ExecutableTask, Parameter, DictParameter, TupleParameter
-from astra.database.astradb import Task, DataProduct, TaskInputDataProducts, database, TaskOutputDataProducts
+from astra.database.astradb import (
+    Task,
+    DataProduct,
+    TaskInputDataProducts,
+    database,
+    TaskOutputDataProducts,
+)
 from astropy.table import Table
 
 from astra.tools.spectrum import Spectrum1D
@@ -41,15 +47,17 @@ class CreateLabelledSetFromTable(ExecutableTask):
         "prefix": lambda c: np.array([f"{ea}".lstrip()[:2] for ea in c("file")]),
     }
 
-    convert_x_fe_columns_to_x_h = Parameter("convert_x_fe_to_x_h", default=False, bundled=True)
+    convert_x_fe_columns_to_x_h = Parameter(
+        "convert_x_fe_to_x_h", default=False, bundled=True
+    )
 
     def execute(self):
-        """ Execute the task. """
+        """Execute the task."""
 
         table = Table.read(expand_path(self.path), hdu=self.hdu)
         field_names = list(table.dtype.names)
         field_names_lower = list(map(str.lower, field_names))
-        
+
         def get_column(name):
             # Case insensitive column name
             name = name.lower()
@@ -62,13 +70,19 @@ class CreateLabelledSetFromTable(ExecutableTask):
                     if name in self.auto_translations:
                         callable = self.auto_translations[name]
                         return callable(get_column)
-                
-                raise ValueError(f"Unable to find column '{name}' in table {self.path}, or among any translations")
 
-        unknown = set(list(map(str.lower, self.label_names))).difference(field_names_lower)
+                raise ValueError(
+                    f"Unable to find column '{name}' in table {self.path}, or among any translations"
+                )
+
+        unknown = set(list(map(str.lower, self.label_names))).difference(
+            field_names_lower
+        )
         if unknown:
-            raise ValueError(f"{len(unknown)} unknown label names: {unknown} not among {field_names_lower}")
-            
+            raise ValueError(
+                f"{len(unknown)} unknown label names: {unknown} not among {field_names_lower}"
+            )
+
         paths = SDSSPath(release=self.release)
 
         keys = paths.lookup_keys(self.filetype)
@@ -82,7 +96,7 @@ class CreateLabelledSetFromTable(ExecutableTask):
                 f"{self.release} file of type {self.filetype} requires {missing} keys. Use `defaults` to set defaults or "
                 f"Use `translate` parameter like `translate=dict(missing_column_name='use_column_name')` to translate."
             )
-        
+
         # Define the subset.
         N = len(table)
         subset = np.ones(N, dtype=bool)
@@ -95,25 +109,29 @@ class CreateLabelledSetFromTable(ExecutableTask):
             for key, value in self.limits.items():
                 if isinstance(value, (tuple, list, np.ndarray)):
                     if len(value) != 2:
-                        raise ValueError(f"{key} value must be a single value or a two-length tuple")
+                        raise ValueError(
+                            f"{key} value must be a single value or a two-length tuple"
+                        )
 
                     # upper/lower
                     try:
                         lower, upper = sorted(value)
-                    except: # can't sort things like (int, None)
+                    except:  # can't sort things like (int, None)
                         lower, upper = value
                     values = get_column(key)
                     if lower is not None:
-                        subset *= (values >= lower)
+                        subset *= values >= lower
                     if upper is not None:
-                        subset *= (values <= upper)
+                        subset *= values <= upper
 
                     N_now = subset.sum()
-                    log.debug(f"Requiring {key} between {lower} and {upper} removed {N - N_now} rows")
+                    log.debug(
+                        f"Requiring {key} between {lower} and {upper} removed {N - N_now} rows"
+                    )
 
                 elif isinstance(value, (int, float, str)):
                     # Single value.
-                    subset *= (get_column(key) == value)
+                    subset *= get_column(key) == value
                     N_now = subset.sum()
                     log.debug(f"Requiring {key} = {value} removed {N - N_now} rows")
                 else:
@@ -132,21 +150,21 @@ class CreateLabelledSetFromTable(ExecutableTask):
         # Get all keywords first.
         defaults = self.defaults or dict()
         non_default_keys = set(keys).difference(defaults)
-        data_product_kwargs = { k: get_column(k) for k in non_default_keys }
+        data_product_kwargs = {k: get_column(k) for k in non_default_keys}
 
         for index in tqdm(np.where(subset)[0]):
-            kwargs = { k: data_product_kwargs[k][index] for k in non_default_keys }
+            kwargs = {k: data_product_kwargs[k][index] for k in non_default_keys}
             kwargs.update(defaults)
             path = paths.full(self.filetype, **kwargs)
             if not os.path.exists(path):
-                log.warning(f"Row index {index} yields data path {path} that does not exist.")
+                log.warning(
+                    f"Row index {index} yields data path {path} that does not exist."
+                )
                 missing_paths.append(index)
                 continue
 
             data_product, created = DataProduct.get_or_create(
-                release=self.release,
-                filetype=self.filetype,
-                kwargs=kwargs
+                release=self.release, filetype=self.filetype, kwargs=kwargs
             )
             data_products.append(data_product)
 
@@ -160,12 +178,17 @@ class CreateLabelledSetFromTable(ExecutableTask):
             for key in map(str.lower, self.label_names):
                 if key.endswith("_fe"):
                     new_key = key.split("_")[0] + "_h"
-                    labels[new_key] = np.array(get_column(key)[subset]) + np.array(get_column("fe_h")[subset])
+                    labels[new_key] = np.array(get_column(key)[subset]) + np.array(
+                        get_column("fe_h")[subset]
+                    )
                 else:
                     labels[key] = np.array(get_column(key)[subset])
-        
+
         else:
-            labels = { key: np.array(get_column(key)[subset]) for key in map(str.lower, self.label_names) }
+            labels = {
+                key: np.array(get_column(key)[subset])
+                for key in map(str.lower, self.label_names)
+            }
 
         wl, flux, ivar, bitmask = ([], [], [], [])
         for data_product in tqdm(data_products, desc="Loading and normalizing data"):
@@ -182,7 +205,9 @@ class CreateLabelledSetFromTable(ExecutableTask):
         ivar = np.atleast_2d(ivar)
         bitmask = np.atleast_2d(bitmask)
 
-        log.debug(f"Data array shapes: wl={wl.shape}, flux={flux.shape}, ivar={ivar.shape}, bitmask={bitmask.shape}")
+        log.debug(
+            f"Data array shapes: wl={wl.shape}, flux={flux.shape}, ivar={ivar.shape}, bitmask={bitmask.shape}"
+        )
 
         # Nicely check if all wavelengths are the same?
         if all(np.allclose(a, b) for a, b in zip(wl[0], wl.T)):
@@ -190,7 +215,7 @@ class CreateLabelledSetFromTable(ExecutableTask):
             wl = wl[[0]]
 
         # Associate data products to this task.
-        this_task, = self.context["tasks"]
+        (this_task,) = self.context["tasks"]
         with database.atomic():
             for data_product in data_products:
                 TaskInputDataProducts.create(
@@ -200,12 +225,7 @@ class CreateLabelledSetFromTable(ExecutableTask):
 
         # Return the training set.
         labelled_set = dict(
-            data=dict(
-                wavelength=wl,
-                flux=flux,
-                ivar=ivar,
-                bitmask=bitmask
-            ),
+            data=dict(wavelength=wl, flux=flux, ivar=ivar, bitmask=bitmask),
             labels=labels,
             meta=dict(
                 # This is not meant to be a complete metadata description.
@@ -222,14 +242,16 @@ class CreateLabelledSetFromTable(ExecutableTask):
                     translate=self.translate,
                     normalization_method=self.normalization_method,
                     normalization_kwds=self.normalization_kwds,
-                    slice_args=self.slice_args
-                )
-            )
+                    slice_args=self.slice_args,
+                ),
+            ),
         )
 
         # Create output data product, and write to disk.
-        task, = self.context["tasks"]
-        path = expand_path(f"$MWM_ASTRA/{__version__}/thecannon/labelled-set-task-{task.id}.pkl")
+        (task,) = self.context["tasks"]
+        path = expand_path(
+            f"$MWM_ASTRA/{__version__}/thecannon/labelled-set-task-{task.id}.pkl"
+        )
         log.info(f"Writing labelled set to {path}")
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
@@ -237,18 +259,17 @@ class CreateLabelledSetFromTable(ExecutableTask):
             pickle.dump(labelled_set, fp)
 
         log.info(f"Created labelled set at {path}")
-        
+
         # Create and assign data product.
         data_product = DataProduct.create(
-            release=self.release,
-            filetype="full",
-            kwargs=dict(full=path)
+            release=self.release, filetype="full", kwargs=dict(full=path)
         )
         TaskOutputDataProducts.create(task=task, data_product=data_product)
-        log.info(f"Created data product {data_product} and assigned it as output to task {task}")
+        log.info(
+            f"Created data product {data_product} and assigned it as output to task {task}"
+        )
 
         return labelled_set
-
 
     def slice_and_normalize_spectrum(self, data_product):
 
@@ -261,15 +282,17 @@ class CreateLabelledSetFromTable(ExecutableTask):
                 try:
                     spectrum.meta[key] = np.array(spectrum.meta[key])[slices]
                 except:
-                    log.exception(f"Unable to slice '{key}' metadata with {self.slice_args} on {data_product}")
-        
+                    log.exception(
+                        f"Unable to slice '{key}' metadata with {self.slice_args} on {data_product}"
+                    )
+
         if self.normalization_method is not None:
             try:
                 self._normalizer
             except AttributeError:
                 klass = executable(self.normalization_method)
                 kwds = self.normalization_kwds or dict()
-                self._normalizer = klass(spectrum, **kwds)        
+                self._normalizer = klass(spectrum, **kwds)
             else:
                 self._normalizer.spectrum = spectrum
             finally:
@@ -278,10 +301,8 @@ class CreateLabelledSetFromTable(ExecutableTask):
             return spectrum
 
 
-
-
 class SplitLabelledSet(ExecutableTask):
-    
+
     # input data product is the labelled set
     test_set_fraction = Parameter("test_set_fraction", default=0.2)
     training_set_fraction = Parameter("training_set_fraction", default=0.6)
@@ -292,8 +313,15 @@ class SplitLabelledSet(ExecutableTask):
 
     def execute(self):
 
-        if self.training_set_fraction + self.validation_set_fraction + self.test_set_fraction != 1:
-            raise ValueError(f"Sum of fractions must be 1. Got {self.training_set_fraction + self.validation_set_fraction + self.test_set_fraction}")
+        if (
+            self.training_set_fraction
+            + self.validation_set_fraction
+            + self.test_set_fraction
+            != 1
+        ):
+            raise ValueError(
+                f"Sum of fractions must be 1. Got {self.training_set_fraction + self.validation_set_fraction + self.test_set_fraction}"
+            )
 
         log.debug(f"Using random seed {self.random_seed}")
 
@@ -301,34 +329,34 @@ class SplitLabelledSet(ExecutableTask):
 
         training_set, validation_set, test_set = (
             CreateTrainingSet(
-                input_data_products=input_data_products, 
+                input_data_products=input_data_products,
                 random_seed=self.random_seed,
                 release=self.release,
                 fraction=self.training_set_fraction,
-                offset_fraction=0
+                offset_fraction=0,
             ),
             CreateValidationSet(
-                input_data_products=input_data_products, 
+                input_data_products=input_data_products,
                 random_seed=self.random_seed,
                 release=self.release,
                 fraction=self.validation_set_fraction,
-                offset_fraction=self.training_set_fraction
+                offset_fraction=self.training_set_fraction,
             ),
             CreateTestSet(
                 input_data_products=input_data_products,
                 random_seed=self.random_seed,
                 release=self.release,
                 fraction=self.test_set_fraction,
-                offset_fraction=self.training_set_fraction + self.validation_set_fraction
-            )
+                offset_fraction=self.training_set_fraction
+                + self.validation_set_fraction,
+            ),
         )
         outputs = dict(
             training_set=training_set.execute(),
             validation_set=validation_set.execute(),
-            test_set=test_set.execute()
+            test_set=test_set.execute(),
         )
         return outputs
-
 
 
 class CreateTypeSetBase(ExecutableTask):
@@ -339,14 +367,14 @@ class CreateTypeSetBase(ExecutableTask):
     release = Parameter("release", default="sdss5")
 
     def execute(self):
-        
+
         task = self.context["tasks"][0]
         (labelled_set_dp, *_) = self.context["input_data_products"]
-    
+
         log.info(f"Executing {self} (task {task}) on {labelled_set_dp}")
-        
+
         with open(labelled_set_dp.path, "rb") as fp:
-            labelled_set = pickle.load(fp)        
+            labelled_set = pickle.load(fp)
         N, P = labelled_set["data"]["flux"].shape
 
         np.random.seed(self.random_seed)
@@ -354,17 +382,17 @@ class CreateTypeSetBase(ExecutableTask):
         E = int((self.offset_fraction + self.fraction) * N)
         indices = np.random.permutation(N)[S:E]
 
-        labelled_set_task, = (
+        (labelled_set_task,) = (
             Task.select()
-                .join(TaskOutputDataProducts)
-                .where(TaskOutputDataProducts.data_product_id == labelled_set_dp.id)
+            .join(TaskOutputDataProducts)
+            .where(TaskOutputDataProducts.data_product_id == labelled_set_dp.id)
         )
 
         input_data_products = []
         for i, input_data_product in enumerate(labelled_set_task.input_data_products):
             if i in indices:
                 input_data_products.append(input_data_product)
-        
+
         # Assign those data products to this task.
         with database.atomic():
             for data_product in input_data_products:
@@ -374,19 +402,23 @@ class CreateTypeSetBase(ExecutableTask):
                 )
 
         # Create the output data product.
-        path = expand_path(f"$MWM_ASTRA/{__version__}/thecannon/{self.__class__.__name__[6:]}-{task.id}.pkl")
+        path = expand_path(
+            f"$MWM_ASTRA/{__version__}/thecannon/{self.__class__.__name__[6:]}-{task.id}.pkl"
+        )
 
         meta = labelled_set["meta"]
         meta["subset_meta"] = dict(
             random_seed=self.random_seed,
             fraction=self.fraction,
             offset_fraction=self.offset_fraction,
-            task_id=task.id
+            task_id=task.id,
         )
-        labels = { k: v[indices] for k, v in labelled_set["labels"].items() }
+        labels = {k: v[indices] for k, v in labelled_set["labels"].items()}
         Nw, P = labelled_set["data"]["wavelength"].shape
         Nf, P = labelled_set["data"]["flux"].shape
-        data = { k: v[indices] for k, v in labelled_set["data"].items() if k != "wavelength" }
+        data = {
+            k: v[indices] for k, v in labelled_set["data"].items() if k != "wavelength"
+        }
         data["wavelength"] = labelled_set["data"]["wavelength"]
         if Nf > 1 and Nf == Nw:
             data["wavelength"] = data["wavelength"][indices]
@@ -403,17 +435,17 @@ class CreateTypeSetBase(ExecutableTask):
         # Create and assign data product.
         with database.atomic():
             data_product = DataProduct.create(
-                release=self.release,
-                filetype="full",
-                kwargs=dict(full=path)
+                release=self.release, filetype="full", kwargs=dict(full=path)
             )
             TaskOutputDataProducts.create(task=task, data_product=data_product)
 
-        log.info(f"Created data product {data_product} and assigned it as output to task {task}")
+        log.info(
+            f"Created data product {data_product} and assigned it as output to task {task}"
+        )
 
         # Return the data product ID
         return data_product.id
-        
+
 
 class CreateTrainingSet(CreateTypeSetBase):
     random_seed = Parameter("random_seed", default=0)
@@ -429,10 +461,8 @@ class CreateValidationSet(CreateTypeSetBase):
     release = Parameter("release", default="sdss5")
 
 
-
 class CreateTestSet(CreateTypeSetBase):
     random_seed = Parameter("random_seed", default=0)
     fraction = Parameter("fraction")
     offset_fraction = Parameter("offset")
     release = Parameter("release", default="sdss5")
-

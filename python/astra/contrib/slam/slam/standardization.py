@@ -30,7 +30,7 @@ from sklearn import preprocessing
 
 
 def standardize(X, weight=None, robust=False):
-    """ Standardize X (flux / labels)
+    """Standardize X (flux / labels)
 
     Parameters
     ----------
@@ -65,12 +65,14 @@ def standardize(X, weight=None, robust=False):
         for i_col in range(n_col):
             if n_good[i_col] > 0:
                 # at least 1 good pixels
-                scaler.mean_[i_col] = (np.nanpercentile(
-                    X[ind_good[:, i_col], i_col], 84) + np.nanpercentile(
-                    X[ind_good[:, i_col], i_col], 16)) / 2.
-                scaler.scale_[i_col] = (np.nanpercentile(
-                    X[ind_good[:, i_col], i_col], 84) - np.nanpercentile(
-                    X[ind_good[:, i_col], i_col], 16)) / 2.
+                scaler.mean_[i_col] = (
+                    np.nanpercentile(X[ind_good[:, i_col], i_col], 84)
+                    + np.nanpercentile(X[ind_good[:, i_col], i_col], 16)
+                ) / 2.0
+                scaler.scale_[i_col] = (
+                    np.nanpercentile(X[ind_good[:, i_col], i_col], 84)
+                    - np.nanpercentile(X[ind_good[:, i_col], i_col], 16)
+                ) / 2.0
 
     else:
         # estimate using mean and std
@@ -80,28 +82,27 @@ def standardize(X, weight=None, robust=False):
                 scaler.scale_[i_col] = np.std(X[ind_good[:, i_col], i_col])
                 scaler.mean_[i_col] = np.mean(X[ind_good[:, i_col], i_col])
 
-    scaler.scale_ = np.where(scaler.scale_ < 1e-300, 1., scaler.scale_)
+    scaler.scale_ = np.where(scaler.scale_ < 1e-300, 1.0, scaler.scale_)
     scaler.robust = robust
     X_scaled = scaler.transform(X)
     return scaler, X_scaled
 
 
 def standardize_ivar(ivar, flux_scaler):
-    """ ivar_scaler is copied from flux_scaler, but mean_ is set to be 0
-    """
+    """ivar_scaler is copied from flux_scaler, but mean_ is set to be 0"""
     # copy flux_scaler & generate ivar_scaler
     ivar_scaler = deepcopy(flux_scaler)
     ivar_scaler.mean_ *= 0
-    ivar_scaler.scale_ **= -2.  # this is extremely important!
+    ivar_scaler.scale_ **= -2.0  # this is extremely important!
     # transform ivar data
     ivar_scaled = ivar_scaler.transform(ivar)
     return ivar_scaler, ivar_scaled
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import numpy as np
 
     x = np.random.randn(10, 20)
     s, xs = standardize(x)
-    print (x, xs)
-    print (s, s.mean_, s.scale_)
+    print(x, xs)
+    print(s, s.mean_, s.scale_)

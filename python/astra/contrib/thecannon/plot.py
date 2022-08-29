@@ -5,8 +5,7 @@
 Plotting utilities for The Cannon.
 """
 
-from __future__ import (division, print_function, absolute_import,
-                        unicode_literals)
+from __future__ import division, print_function, absolute_import, unicode_literals
 
 __all__ = ["theta", "scatter", "one_to_one"]
 
@@ -20,12 +19,20 @@ try:
     from matplotlib.ticker import MaxNLocator
 
 except ImportError:
-    logger.warn("Could not import matplotlib; plotting functionality disabled")    
+    logger.warn("Could not import matplotlib; plotting functionality disabled")
 
 
-def theta(model, indices=None, label_terms=None, show_label_terms=True,
-    normalize=True, common_axis=False, latex_label_names=None, xlim=None, 
-    **kwargs):
+def theta(
+    model,
+    indices=None,
+    label_terms=None,
+    show_label_terms=True,
+    normalize=True,
+    common_axis=False,
+    latex_label_names=None,
+    xlim=None,
+    **kwargs
+):
     """
     Plot the spectral derivates (:math:`\boldsymbol{\theta}` coefficiets) from a
     trained model.
@@ -52,7 +59,7 @@ def theta(model, indices=None, label_terms=None, show_label_terms=True,
         provided (e.g., a polynomial vectorizer will recognize ``'TEFF'`` is the
         linear coefficient of ``'TEFF'``, but ``'TEFF'`` on its own may not be
         recognisable to a vectorizer that uses sine and cosine functions.)
-    
+
     :param show_label_terms: [optional]
         Show the label terms on the right hand side of each axis.
 
@@ -117,7 +124,7 @@ def theta(model, indices=None, label_terms=None, show_label_terms=True,
         y = model.theta.T[label_index].copy()
         scale = np.max(np.abs(y)) if normalize and label_index != 0 else 1.0
 
-        ax.plot(x, y/scale, **plot_kwds)
+        ax.plot(x, y / scale, **plot_kwds)
 
         if normalize and label_index != 0:
             ax.set_ylim(-1.2, 1.2)
@@ -128,13 +135,13 @@ def theta(model, indices=None, label_terms=None, show_label_terms=True,
             ylabel = r"$\theta_{{{0}}}$".format(label_index)
             ax.yaxis.set_major_locator(MaxNLocator(3))
 
-
         ax.set_ylabel(ylabel, rotation=0, verticalalignment="center")
         ax.yaxis.labelpad = 30
 
         if show_label_terms:
-            rhs_ylabel = model.vectorizer.get_human_readable_label_term(label_index,
-                label_names=label_names, mul='\cdot', pow='^')
+            rhs_ylabel = model.vectorizer.get_human_readable_label_term(
+                label_index, label_names=label_names, mul="\cdot", pow="^"
+            )
             ax_rhs = ax.twinx()
             if latex_label_names is not None:
                 rhs_ylabel = r"${}$".format(rhs_ylabel)
@@ -142,7 +149,6 @@ def theta(model, indices=None, label_terms=None, show_label_terms=True,
             ax_rhs.set_ylabel(rhs_ylabel, rotation=0, verticalalignment="center")
             ax_rhs.yaxis.labelpad = 30
             ax_rhs.set_yticks([])
-
 
         if ax.is_last_row():
             if model.dispersion is None:
@@ -212,8 +218,9 @@ def scatter(model, ax=None, **kwargs):
     return fig
 
 
-def one_to_one(model, test_labels, cov=None, latex_label_names=None,
-    show_statistics=True, **kwargs):
+def one_to_one(
+    model, test_labels, cov=None, latex_label_names=None, show_statistics=True, **kwargs
+):
     """
     Plot a one-to-one comparison of the training set labels, and the test set
     labels inferred from the training set spectra.
@@ -235,29 +242,30 @@ def one_to_one(model, test_labels, cov=None, latex_label_names=None,
     """
 
     if model.training_set_labels.shape != test_labels.shape:
-        raise ValueError(
-            "test labels must have the same shape as training set labels")
+        raise ValueError("test labels must have the same shape as training set labels")
 
     N, K = test_labels.shape
     if cov is not None and cov.shape != (N, K, K):
         raise ValueError(
-            "shape mis-match in covariance matrix ({N}, {K}, {K}) != {shape}"\
-            .format(N=N, K=K, shape=cov.shape))
+            "shape mis-match in covariance matrix ({N}, {K}, {K}) != {shape}".format(
+                N=N, K=K, shape=cov.shape
+            )
+        )
 
-    factor = 2.0           
+    factor = 2.0
     lbdim = 0.30 * factor
     tdim = 0.25 * factor
     rdim = 0.10 * factor
     wspace = 0.05
     hspace = 0.35
-    yspace = factor * K + factor * (K - 1.) * hspace
+    yspace = factor * K + factor * (K - 1.0) * hspace
     xspace = factor
 
     xdim = lbdim + xspace + rdim
     ydim = lbdim + yspace + tdim
 
     fig, axes = plt.subplots(K, figsize=(xdim, ydim))
-    
+
     l, b = (lbdim / xdim, lbdim / ydim)
     t, r = ((lbdim + yspace) / ydim, ((lbdim + xspace) / xdim))
 
@@ -278,13 +286,13 @@ def one_to_one(model, test_labels, cov=None, latex_label_names=None,
 
         ax.scatter(x, y, **scatter_kwds)
         if cov is not None:
-            yerr = cov[:, i, i]**0.5
+            yerr = cov[:, i, i] ** 0.5
             ax.errorbar(x, y, yerr=yerr, **errorbar_kwds)
 
         # Set x-axis limits and y-axis limits the same
         limits = np.array([ax.get_xlim(), ax.get_ylim()])
         limits = (np.min(limits), np.max(limits))
-        
+
         ax.plot(limits, limits, c="#666666", linestyle=":", zorder=-1)
         ax.set_xlim(limits)
         ax.set_ylim(limits)
@@ -296,8 +304,10 @@ def one_to_one(model, test_labels, cov=None, latex_label_names=None,
                 label_name = r"${}$".format(latex_label_names[i])
             except:
                 logger.warn(
-                    "Could not access latex label name for index {} ({})"\
-                    .format(i, label_name))
+                    "Could not access latex label name for index {} ({})".format(
+                        i, label_name
+                    )
+                )
 
         ax.set_title(label_name)
 
@@ -309,13 +319,17 @@ def one_to_one(model, test_labels, cov=None, latex_label_names=None,
             diff = y - x
             mu = np.nanmedian(diff)
             sigma = np.nanstd(diff)
-            ax.text(0.05, 0.85, r"$\mu = {0:.2f}$".format(mu),
-                transform=ax.transAxes)
-            ax.text(0.05, 0.75, r"$\sigma = {0:.2f}$".format(sigma),
-                transform=ax.transAxes)
-            ax.text(0.05, 0.65, r"$N = {:.0f}$".format(np.sum(np.isfinite(diff))),
-                    transform=ax.transAxes)
-        
+            ax.text(0.05, 0.85, r"$\mu = {0:.2f}$".format(mu), transform=ax.transAxes)
+            ax.text(
+                0.05, 0.75, r"$\sigma = {0:.2f}$".format(sigma), transform=ax.transAxes
+            )
+            ax.text(
+                0.05,
+                0.65,
+                r"$N = {:.0f}$".format(np.sum(np.isfinite(diff))),
+                transform=ax.transAxes,
+            )
+
         ax.set_aspect(1.0)
 
     return fig

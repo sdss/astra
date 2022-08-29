@@ -1,8 +1,13 @@
-
 import os
 import numpy as np
 import astra
-from luigi.parameter import Parameter, FloatParameter, IntParameter, BoolParameter, TaskParameter
+from luigi.parameter import (
+    Parameter,
+    FloatParameter,
+    IntParameter,
+    BoolParameter,
+    TaskParameter,
+)
 from astropy.table import Table
 from astra.tasks.base import BaseTask
 from astra.tasks.targets import LocalTarget
@@ -21,16 +26,16 @@ class TrainTheCannonBase(TheCannonMixin):
 
     :param label_names:
         A list of label names.
-    
+
     :param order: (optional)
-        The polynomial order to use for this model (default: 2).    
+        The polynomial order to use for this model (default: 2).
 
     :param regularization: (optional)
         The strength of L1-regularization to apply during training.
-    
+
     :param threads: (optional)
         The number of threads to use (default: 1).
-    
+
     :param plot: (optional)
         A boolean flag to indicate whether to produce post-training quality plots.
     """
@@ -40,18 +45,17 @@ class TrainTheCannonBase(TheCannonMixin):
     plot = BoolParameter(default=True, significant=False)
 
     def run(self):
-        """ Execute this task. """
+        """Execute this task."""
 
         # Load training set labels and spectra.
         labels, dispersion, training_set_flux, training_set_ivar = read_training_set(
-            self.input().path, 
+            self.input().path,
         )
 
         # Set the vectorizer.
         # We sort the label names so that luigi doesn't re-train models if we alter the order.
         vectorizer = tc.vectorizer.PolynomialVectorizer(
-            sorted(self.label_names),
-            self.order
+            sorted(self.label_names), self.order
         )
 
         # Initiate model.
@@ -61,22 +65,22 @@ class TrainTheCannonBase(TheCannonMixin):
             training_set_ivar,
             vectorizer=vectorizer,
             dispersion=dispersion,
-            regularization=self.regularization
+            regularization=self.regularization,
         )
-    
+
         log.info(f"Training The Cannon model {model}")
         model.train(threads=self.threads)
 
         output_path = self.output().path
         log.info(f"Writing The Cannon model {model} to disk {output_path}")
-        model.write(output_path)    
+        model.write(output_path)
 
         if self.plot:
             # Plot zeroth and first order coefficients.
             fig = plot.theta(
                 model,
                 indices=np.arange(1 + len(model.vectorizer.label_names)),
-                normalize=False
+                normalize=False,
             )
             fig.savefig(f"{self.task_id}-theta.png")
 
@@ -86,22 +90,16 @@ class TrainTheCannonBase(TheCannonMixin):
 
             # Plot one-to-one.
             test_labels, test_cov, test_meta = model.test(
-                training_set_flux, 
+                training_set_flux,
                 training_set_ivar,
-                initial_labels=model.training_set_labels
+                initial_labels=model.training_set_labels,
             )
             fig = plot.one_to_one(model, test_labels, cov=test_cov)
             fig.savefig(f"{self.task_id}-one-to-one.png")
 
-
     def output(self):
-        """ The output of this task. """
-        return LocalTarget(os.path.join(
-            self.output_base_dir,
-            f"{self.task_id}.pkl"
-        ))
-        
-
+        """The output of this task."""
+        return LocalTarget(os.path.join(self.output_base_dir, f"{self.task_id}.pkl"))
 
 
 class TrainingSetTarget(BaseTask):
@@ -111,7 +109,7 @@ class TrainingSetTarget(BaseTask):
 
     :param training_set_path:
         The path to a `pickle` file that contains a dictionary with the following keys:
-            
+
         - `wavelength`: an array of shape `(P, )` where `P` is the number of pixels
         - `flux`: an array of flux values with shape `(N, P)` where `N` is the number of observed spectra and `P` is the number of pixels
         - `ivar`: an array of inverse variance values with shape `(N, P)` where `N` is the number of observed spectra and `P` is the number of pixels
@@ -125,16 +123,15 @@ class TrainingSetTarget(BaseTask):
         return LocalTarget(self.training_set_path)
 
 
-
 class TrainTheCannonGivenTrainingSetTarget(TrainTheCannonBase):
 
     """
     A task to train The Cannon, given some file that contains high-quality labels,
-    and pseudo-continuum-normalised fluxes and inverse variances.    
+    and pseudo-continuum-normalised fluxes and inverse variances.
 
-    :param training_set_path: 
+    :param training_set_path:
         The path to a `pickle` file that contains a dictionary with the following keys:
-            
+
         - `wavelength`: an array of shape `(P, )` where `P` is the number of pixels
         - `flux`: an array of flux values with shape `(N, P)` where `N` is the number of observed spectra and `P` is the number of pixels
         - `ivar`: an array of inverse variance values with shape `(N, P)` where `N` is the number of observed spectra and `P` is the number of pixels
@@ -143,10 +140,10 @@ class TrainTheCannonGivenTrainingSetTarget(TrainTheCannonBase):
 
     :param regularization: (optional)
         The L1 regularization strength to use during training (default: 0.0).
-    
+
     :param threads: (optional)
         The number of threads to use during training (default: 1).
-    
+
     :param plot: (optional)
         Produce quality assurance figures after training (default: True).
     """
@@ -156,7 +153,7 @@ class TrainTheCannonGivenTrainingSetTarget(TrainTheCannonBase):
     )
 
     def requires(self):
-        """ Requirements of this task. """
+        """Requirements of this task."""
         return TrainingSetTarget(training_set_path=self.training_set_path)
 
 
@@ -168,6 +165,7 @@ class TrainTheCannonGivenTrainingSetTask(TrainTheCannonBase):
     create_training_set_task = TaskParameter()
 
     def requires(self):
-        """ The requirements of this task. """
-        return self.create_training_set_task(**self.get_common_param_kwargs(self.create_training_set_task))
-
+        """The requirements of this task."""
+        return self.create_training_set_task(
+            **self.get_common_param_kwargs(self.create_training_set_task)
+        )

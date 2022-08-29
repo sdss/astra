@@ -3,12 +3,26 @@ from distutils import core
 import json
 import os
 import hashlib
-from functools import (lru_cache, cached_property)
+from functools import lru_cache, cached_property
 from sdss_access import SDSSPath
-from peewee import (IntegrityError, SQL, fn, SqliteDatabase, BooleanField, IntegerField, AutoField, TextField, ForeignKeyField, DateTimeField, BigIntegerField, FloatField, BooleanField)
+from peewee import (
+    IntegrityError,
+    SQL,
+    fn,
+    SqliteDatabase,
+    BooleanField,
+    IntegerField,
+    AutoField,
+    TextField,
+    ForeignKeyField,
+    DateTimeField,
+    BigIntegerField,
+    FloatField,
+    BooleanField,
+)
 from sdssdb.connection import DatabaseConnection, PeeweeDatabaseConnection
 from sdssdb.peewee import BaseModel
-from astra import (config, log)
+from astra import config, log
 from astra.utils import flatten
 from astra import __version__
 from tqdm import tqdm
@@ -18,16 +32,21 @@ from importlib import import_module
 # Environment variable overrides all, for running CI tests.
 _database_url = os.environ.get("ASTRA_DATABASE_URL", None)
 if _database_url is not None:
-    from playhouse.sqlite_ext import (SqliteExtDatabase as AstraDatabaseConnection, JSONField)
+    from playhouse.sqlite_ext import (
+        SqliteExtDatabase as AstraDatabaseConnection,
+        JSONField,
+    )
 
-    log.info(f"Using ASTRA_DATABASE_URL enironment variable, and assuming a SQLite database")
+    log.info(
+        f"Using ASTRA_DATABASE_URL enironment variable, and assuming a SQLite database"
+    )
 
     # The PeeweeDatabaseConnection assumes a postgresql database under the hood. Argh!
     database = AstraDatabaseConnection(_database_url)
     schema = None
 
 else:
-    # The documentation says we should be using the PostgresqlExtDatabase if we are using a 
+    # The documentation says we should be using the PostgresqlExtDatabase if we are using a
     # BinaryJSONField, but that class is incompatible with PeeweeDatabaseConnection, and it
     # doesn't look like we need anything different from the existing PostgresqlDatabase class.
     from playhouse.postgres_ext import BinaryJSONField as JSONField
@@ -36,7 +55,7 @@ else:
 
     class AstraDatabaseConnection(PeeweeDatabaseConnection):
         dbname = _database_config.get("dbname", None)
-        
+
     database = AstraDatabaseConnection(autoconnect=True)
     schema = _database_config.get("schema", None)
 
@@ -46,7 +65,8 @@ else:
             database.set_profile(profile)
         except AssertionError as e:
             log.exception(e)
-            log.warning(f"""
+            log.warning(
+                f"""
             Database profile '{profile}' set in Astra configuration file, but there is no database 
             profile called '{profile}' found in ~/.config/sdssdb/sdssdb.yml -- it should look like:
             
@@ -58,7 +78,9 @@ else:
             See https://sdssdb.readthedocs.io/en/stable/intro.html#supported-profiles for more details. 
             If the profile name '{profile}' is incorrect, you can change the 'database' / 'profile' key 
             in ~/.astra/astra.yml
-            """)
+            """
+            )
+
 
 class AstraBaseModel(BaseModel):
     class Meta:
@@ -72,20 +94,20 @@ def _lru_sdsspath(release):
 
 
 class Source(AstraBaseModel):
-    
+
     catalogid = BigIntegerField(primary_key=True)
 
     @property
     def data_products(self):
         return (
             DataProduct.select()
-                       .join(SourceDataProduct)
-                       .join(Source)
-                       .where(Source.catalogid == self.catalogid)
-        )        
+            .join(SourceDataProduct)
+            .join(Source)
+            .where(Source.catalogid == self.catalogid)
+        )
+
 
 class DataProductKeywordsField(JSONField):
-
     def adapt(self, kwargs):
         # See https://github.com/sdss/astra/issues/8
         coerced = {}
@@ -107,12 +129,14 @@ class DataProductKeywordsField(JSONField):
             coerced[key] = value
         return coerced
 
+
 _template_dpkwf = DataProductKeywordsField()
+
 
 class DataProduct(AstraBaseModel):
 
     id = AutoField()
-    
+
     release = TextField()
     filetype = TextField()
     kwargs = DataProductKeywordsField()
@@ -129,7 +153,6 @@ class DataProduct(AstraBaseModel):
             (("release", "filetype", "kwargs_hash"), True),
         )
 
-
     def __init__(self, *args, **kwargs):
         # Adapt keywords
         adapted, hashed = self.adapt_and_hash_kwargs(kwargs.get("kwargs", {}))
@@ -145,10 +168,10 @@ class DataProduct(AstraBaseModel):
 
     # Don't do filtering just based on .get(), because sometimes we might be querying by partial keywords
     # and we'll be searching with an incomplete (and incorrect) hash.
-    
+
     @classmethod
     def get_or_create(cls, **kwargs):
-        defaults = kwargs.pop('defaults', {})
+        defaults = kwargs.pop("defaults", {})
         query = cls.select()
 
         for field, value in kwargs.items():
@@ -174,29 +197,27 @@ class DataProduct(AstraBaseModel):
                 except cls.DoesNotExist:
                     raise exc
 
-
     @property
     def input_to_tasks(self):
         return (
             Task.select()
-                .join(TaskInputDataProducts)
-                .join(DataProduct)
-                .where(DataProduct.id == self.id)
+            .join(TaskInputDataProducts)
+            .join(DataProduct)
+            .where(DataProduct.id == self.id)
         )
 
     @cached_property
     def path(self):
         kwds = self.kwargs.copy()
         return _lru_sdsspath(self.release).full(self.filetype, **kwds)
-        
 
     @property
     def sources(self):
         return (
             Source.select()
-                  .join(SourceDataProduct)
-                  .join(DataProduct)
-                  .where(DataProduct.id == self.id)
+            .join(SourceDataProduct)
+            .join(DataProduct)
+            .where(DataProduct.id == self.id)
         )
 
 
@@ -240,7 +261,7 @@ class Task(AstraBaseModel):
     time_pre_execute = FloatField(null=True)
     time_execute = FloatField(null=True)
     time_post_execute = FloatField(null=True)
-    
+
     time_pre_execute_task = FloatField(null=True)
     time_pre_execute_bundle_overhead = FloatField(null=True)
 
@@ -253,43 +274,42 @@ class Task(AstraBaseModel):
     created = DateTimeField(default=datetime.datetime.now)
     completed = DateTimeField(null=True)
 
-    status = ForeignKeyField(Status, default=1) # default: 1 is the lowest status level ('created' or similar)
+    status = ForeignKeyField(
+        Status, default=1
+    )  # default: 1 is the lowest status level ('created' or similar)
 
     def as_executable(self, strict=True):
         log.warning(f"as_executable() deprecated -> instance")
         return self.instance()
 
-
     def instance(self, strict=True):
         """Return an executable representation of this task."""
 
         from astra.base import TaskInstance
+
         return TaskInstance.from_task(self, strict=strict)
-
-
 
     @property
     def input_data_products(self):
         return (
             DataProduct.select()
-                       .join(TaskInputDataProducts)
-                       .join(Task)
-                       .where(Task.id == self.id)
+            .join(TaskInputDataProducts)
+            .join(Task)
+            .where(Task.id == self.id)
         )
 
     @property
     def output_data_products(self):
         return (
             DataProduct.select()
-                       .join(TaskOutputDataProducts)
-                       .join(Task)
-                       .where(Task.id == self.id)
+            .join(TaskOutputDataProducts)
+            .join(Task)
+            .where(Task.id == self.id)
         )
-
 
     @property
     def outputs(self):
-        '''
+        """
         q = None
         # Create a compound union query to retrieve all possible outputs for this task.
         o = TaskOutput.get(TaskOutput.task == self)
@@ -302,17 +322,16 @@ class Task(AstraBaseModel):
                     q += sq
         # Order by the order they were created.
         return q#.order_by(SQL("output_id").asc())
-        '''
+        """
         outputs = []
         o = TaskOutput.get(TaskOutput.task == self)
         for expr, column in o.output.dependencies():
             if column.model not in (TaskOutput, AstraOutputBaseModel):
                 outputs.extend(column.model.select().where(column.model.task == self))
         return sorted(outputs, key=lambda x: x.output_id)
-    
+
     def count_outputs(self):
         return TaskOutput.select().where(TaskOutput.task == self).count()
-
 
 
 class TaskOutput(AstraBaseModel):
@@ -323,17 +342,14 @@ class TaskOutput(AstraBaseModel):
 
 class Bundle(AstraBaseModel):
     id = AutoField()
-    status = ForeignKeyField(Status, default=1) # default: 1 is the lowest status level ('created' or similar)
+    status = ForeignKeyField(
+        Status, default=1
+    )  # default: 1 is the lowest status level ('created' or similar)
     meta = JSONField(null=True)
 
     @property
     def tasks(self):
-        return (
-            Task.select()
-                .join(TaskBundle)
-                .join(Bundle)
-                .where(Bundle.id == self.id)
-        )
+        return Task.select().join(TaskBundle).join(Bundle).where(Bundle.id == self.id)
 
     def _watch(self, interval=1):
         """
@@ -353,15 +369,14 @@ class Bundle(AstraBaseModel):
                 if M >= T:
                     break
         return None
-                
+
     def count_tasks_with_outputs(self):
         return (
             TaskOutput.select()
-                      .distinct(TaskOutput.task)
-                      .where(TaskOutput.task.in_(self.tasks))
-                      .count()
+            .distinct(TaskOutput.task)
+            .where(TaskOutput.task.in_(self.tasks))
+            .count()
         )
-
 
     def count_tasks(self):
         return self.tasks.count()
@@ -369,23 +384,23 @@ class Bundle(AstraBaseModel):
     def count_input_data_products(self):
         return (
             DataProduct.select()
-                       .join(TaskInputDataProducts)
-                       .join(Task)
-                       .join(TaskBundle)
-                       .where(TaskBundle.bundle_id == self.id)
-                       .count()
+            .join(TaskInputDataProducts)
+            .join(Task)
+            .join(TaskBundle)
+            .where(TaskBundle.bundle_id == self.id)
+            .count()
         )
 
     def count_input_data_products_size(self):
-        count, = (
+        (count,) = (
             DataProduct.select(fn.SUM(DataProduct.size))
-                       .join(TaskInputDataProducts)
-                       .join(Task)
-                       .join(TaskBundle)
-                       .join(Bundle)
-                       .where(Bundle.id == self.id)
-                       .tuples()
-                       .first()
+            .join(TaskInputDataProducts)
+            .join(Task)
+            .join(TaskBundle)
+            .join(Bundle)
+            .where(Bundle.id == self.id)
+            .tuples()
+            .first()
         )
         return count
 
@@ -395,19 +410,19 @@ class Bundle(AstraBaseModel):
 
     def instance(self, strict=True):
         from astra.base import TaskInstance
-        return TaskInstance.from_bundle(self, strict=strict)
 
+        return TaskInstance.from_bundle(self, strict=strict)
 
     def split(self, N):
         N = int(N)
         if N < 2:
             raise ValueError(f"N > 1")
-            
+
         tasks = list(self.tasks)
         T = len(tasks)
         new_bundle_size = 1 + int(T / N)
         log.debug(f"Splitting bundle {self} into {N} smaller bundles")
-        
+
         new_bundles = []
         for i in range(N):
             si = i * new_bundle_size
@@ -420,9 +435,6 @@ class Bundle(AstraBaseModel):
         return new_bundles
 
 
-
-
-
 class TaskBundle(AstraBaseModel):
     id = AutoField()
     task = ForeignKeyField(Task, on_delete="CASCADE")
@@ -433,7 +445,7 @@ class TaskInputDataProducts(AstraBaseModel):
     id = AutoField()
     task = ForeignKeyField(Task, on_delete="CASCADE")
     data_product = ForeignKeyField(DataProduct, on_delete="CASCADE")
-    
+
 
 class TaskOutputDataProducts(AstraBaseModel):
     id = AutoField()
@@ -443,7 +455,7 @@ class TaskOutputDataProducts(AstraBaseModel):
 
 class AstraOutputBaseModel(AstraBaseModel):
 
-    """ A base class for output data models. """
+    """A base class for output data models."""
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
@@ -453,11 +465,13 @@ class AstraOutputBaseModel(AstraBaseModel):
     # This is a convenience reference to avoid us having to join between:
     # xxxOutput -> Task -> TaskInputDataProducts -> DataProduct -> Source
     # TODO: update existing schema to reflect this
-    #source = ForeignKeyField(Source, on_delete="CASCADE", null=True)
+    # source = ForeignKeyField(Source, on_delete="CASCADE", null=True)
 
 
 # Output tables.
 SMALL = -1e-20
+
+
 class ClassifierOutput(AstraOutputBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
@@ -509,9 +523,9 @@ class FerreOutput(AstraOutputBaseModel):
     metals = FloatField()
     lgvsini = FloatField(null=True)
     # BA grid doesn't use these:
-    log10vdop = FloatField(null=True) 
+    log10vdop = FloatField(null=True)
     o_mg_si_s_ca_ti = FloatField(null=True)
-    c = FloatField(null=True) 
+    c = FloatField(null=True)
     n = FloatField(null=True)
 
     u_teff = FloatField()
@@ -530,7 +544,7 @@ class FerreOutput(AstraOutputBaseModel):
     bitmask_lgvsini = IntegerField(default=0)
     bitmask_o_mg_si_s_ca_ti = IntegerField(default=0)
     bitmask_c = IntegerField(default=0)
-    bitmask_n = IntegerField(default=0)   
+    bitmask_n = IntegerField(default=0)
 
     log_chisq_fit = FloatField()
     log_snr_sq = FloatField()
@@ -550,7 +564,7 @@ class FerreOutput(AstraOutputBaseModel):
     ferre_time_load = FloatField(null=True)
     ferre_n_threads = IntegerField(null=True)
     ferre_n_obj = IntegerField(null=True)
-    
+
 
 class ApogeeNetOutput(AstraOutputBaseModel):
 
@@ -572,12 +586,41 @@ class AspcapOutput(AstraOutputBaseModel):
     # Metadata.
     snr = FloatField()
 
+
 # Dynamically add many fields to AspcapOutput.
-sp_field_names = ("teff", "logg", "metals", "log10vdop", "o_mg_si_s_ca_ti", "lgvsini", "c", "n")
+sp_field_names = (
+    "teff",
+    "logg",
+    "metals",
+    "log10vdop",
+    "o_mg_si_s_ca_ti",
+    "lgvsini",
+    "c",
+    "n",
+)
 null_field_names = ("lgvsini", "log10vdop", "o_mg_si_s_ca_ti", "c", "n")
 elements = (
-    "cn", "al", "ca", "ce", "co", "cr", "fe", "k", "mg", "mn",
-    "na", "nd", "ni", "o", "p", "rb", "si", "s", "ti", "v", "yb"
+    "cn",
+    "al",
+    "ca",
+    "ce",
+    "co",
+    "cr",
+    "fe",
+    "k",
+    "mg",
+    "mn",
+    "na",
+    "nd",
+    "ni",
+    "o",
+    "p",
+    "rb",
+    "si",
+    "s",
+    "ti",
+    "v",
+    "yb",
 )
 
 for field_name in sp_field_names:
@@ -589,13 +632,12 @@ for field_name in sp_field_names:
 AspcapOutput._meta.add_field("log_chisq_fit", FloatField())
 AspcapOutput._meta.add_field("log_snr_sq", FloatField())
 
-# All element fields can be null, and they need their own log_chisq_fit 
+# All element fields can be null, and they need their own log_chisq_fit
 for element in elements:
     AspcapOutput._meta.add_field(f"{element}_h", FloatField(null=True))
     AspcapOutput._meta.add_field(f"u_{element}_h", FloatField(null=True))
     AspcapOutput._meta.add_field(f"bitmask_{element}_h", IntegerField(default=0))
     AspcapOutput._meta.add_field(f"log_chisq_fit_{element}_h", FloatField(null=True))
-
 
 
 class TheCannonOutput(AstraOutputBaseModel):
@@ -613,11 +655,11 @@ class TheCannonOutput(AstraOutputBaseModel):
     fe_h = FloatField()
     u_fe_h = FloatField()
     c_h = FloatField()
-    u_c_h =  FloatField()
+    u_c_h = FloatField()
     n_h = FloatField()
-    u_n_h =  FloatField()
+    u_n_h = FloatField()
     o_h = FloatField()
-    u_o_h =  FloatField()
+    u_o_h = FloatField()
     na_h = FloatField()
     u_na_h = FloatField()
     mg_h = FloatField()
@@ -627,15 +669,15 @@ class TheCannonOutput(AstraOutputBaseModel):
     si_h = FloatField()
     u_si_h = FloatField()
     s_h = FloatField()
-    u_s_h =  FloatField()
+    u_s_h = FloatField()
     k_h = FloatField()
-    u_k_h =  FloatField()
+    u_k_h = FloatField()
     ca_h = FloatField()
     u_ca_h = FloatField()
     ti_h = FloatField()
     u_ti_h = FloatField()
     v_h = FloatField()
-    u_v_h =  FloatField()
+    u_v_h = FloatField()
     cr_h = FloatField()
     u_cr_h = FloatField()
     mn_h = FloatField()
@@ -891,7 +933,7 @@ class WhiteDwarfOutput(AstraOutputBaseModel):
 
     conditioned_on_parallax = FloatField(null=True)
     conditioned_on_absolute_G_mag = FloatField(null=True)
-    
+
 
 class SlamOutput(AstraOutputBaseModel):
 
@@ -909,20 +951,22 @@ class SlamOutput(AstraOutputBaseModel):
 
 
 def create_tables(
-        drop_existing_tables=False, 
-        reuse_if_open=True,
-        insert_status_rows=True,
-    ):
-    """ 
-    Create all tables for the Astra database. 
-    
+    drop_existing_tables=False,
+    reuse_if_open=True,
+    insert_status_rows=True,
+):
+    """
+    Create all tables for the Astra database.
+
     """
 
     log.info(f"Connecting to database to create tables.")
     database.connect(reuse_if_open=reuse_if_open)
     models = AstraBaseModel.__subclasses__()
     models.extend(AstraOutputBaseModel.__subclasses__())
-    log.info(f"Tables ({len(models)}): {', '.join([model.__name__ for model in models])}")
+    log.info(
+        f"Tables ({len(models)}): {', '.join([model.__name__ for model in models])}"
+    )
     if drop_existing_tables:
         log.info(f"Dropping existing tables..")
         database.drop_tables(models)
@@ -943,9 +987,8 @@ def create_tables(
             "completed",
             "failed-pre-execution",
             "failed-execution",
-            "failed-post-execution"
+            "failed-post-execution",
         ]
         with database.atomic():
             for description in status_descriptions:
                 Status.create(description=description)
-

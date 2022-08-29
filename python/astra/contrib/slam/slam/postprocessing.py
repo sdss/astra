@@ -10,10 +10,11 @@ define error processing functions
 # jacobian matrix to covariance
 def jac_to_cov(jac):
     from scipy.linalg import svd
+
     _, s, VT = svd(jac, full_matrices=False)
     threshold = np.finfo(float).eps * max(jac.shape) * s[0]
     s = s[s > threshold]
-    VT = VT[:s.size]
+    VT = VT[: s.size]
     pcov = np.dot(VT.T / s**2, VT)
     return pcov
 
@@ -26,10 +27,11 @@ def cov_to_err(cov):
 # jacobian matrix to standard deviation
 def jac_to_err(jac):
     from scipy.linalg import svd
+
     _, s, VT = svd(jac, full_matrices=False)
     threshold = np.finfo(float).eps * max(jac.shape) * s[0]
     s = s[s > threshold]
-    VT = VT[:s.size]
+    VT = VT[: s.size]
     pcov = np.dot(VT.T / s**2, VT)
     return np.sqrt(np.diag(pcov))
 
@@ -62,8 +64,9 @@ def do_post(ls_result, label_scaler=None):
     pp_result["cost"] = ls_result["cost"]
     pp_result["grad"] = ls_result["grad"]
 
-    pp_result["pcov"] = jac_to_cov(ls_result["jac"]) * \
-                        np.dot(label_scaler.scale_.reshape(-1, 1), label_scaler.scale_.reshape(1, -1))
+    pp_result["pcov"] = jac_to_cov(ls_result["jac"]) * np.dot(
+        label_scaler.scale_.reshape(-1, 1), label_scaler.scale_.reshape(1, -1)
+    )
     pp_result["pstd"] = cov_to_err(pp_result["pcov"])
 
     pp_result["message"] = ls_result["message"]
@@ -72,6 +75,8 @@ def do_post(ls_result, label_scaler=None):
     pp_result["status"] = ls_result["status"]
     pp_result["success"] = ls_result["success"]
 
-    pp_result["x"] = label_scaler.inverse_transform(ls_result["x"].reshape(1, -1)).flatten()
+    pp_result["x"] = label_scaler.inverse_transform(
+        ls_result["x"].reshape(1, -1)
+    ).flatten()
 
     return pp_result

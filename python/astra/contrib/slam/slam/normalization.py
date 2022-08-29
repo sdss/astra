@@ -34,13 +34,21 @@ print("slam.normalization module will be deprecated in future")
 
 
 def normalize_spectrum_null(wave):
-    return np.ones_like(wave)*np.nan, np.ones_like(wave)*np.nan
+    return np.ones_like(wave) * np.nan, np.ones_like(wave) * np.nan
 
 
-def normalize_spectrum(wave, flux, norm_range, dwave,
-                       p=(1E-6, 1E-6), q=0.5, ivar=None, eps=1e-10,
-                       rsv_frac=1.):
-    """ A double smooth normalization of a spectrum
+def normalize_spectrum(
+    wave,
+    flux,
+    norm_range,
+    dwave,
+    p=(1e-6, 1e-6),
+    q=0.5,
+    ivar=None,
+    eps=1e-10,
+    rsv_frac=1.0,
+):
+    """A double smooth normalization of a spectrum
 
     Converted from Chao Liu's normSpectrum.m
     Updated by Bo Zhang
@@ -87,11 +95,12 @@ def normalize_spectrum(wave, flux, norm_range, dwave,
 
     if ivar is not None:
         # ivar is set
-        ivar = np.where(np.logical_or(wave < norm_range[0],
-                                      wave > norm_range[1]), 0, ivar)
+        ivar = np.where(
+            np.logical_or(wave < norm_range[0], wave > norm_range[1]), 0, ivar
+        )
         ivar = np.where(ivar <= eps, eps, ivar)
         # mask = ivar <= eps
-        var = 1. / ivar
+        var = 1.0 / ivar
     else:
         # default config is even weight
         var = np.ones_like(flux)
@@ -100,7 +109,7 @@ def normalize_spectrum(wave, flux, norm_range, dwave,
     # flux = flux[~mask]
 
     # check q region
-    assert 0. < q < 1.
+    assert 0.0 < q < 1.0
 
     # n_iter = len(p)
     n_bin = np.int(np.fix(np.diff(norm_range) / dwave) + 1)
@@ -109,29 +118,32 @@ def normalize_spectrum(wave, flux, norm_range, dwave,
     # SMOOTH 1
     # print(wave.shape, flux.shape, var.shape)
     if ivar is not None:
-        ind_good_init = 1. * (ivar > 0.) * (flux > 0.)
+        ind_good_init = 1.0 * (ivar > 0.0) * (flux > 0.0)
     else:
-        ind_good_init = 1. * (flux > 0.)
+        ind_good_init = 1.0 * (flux > 0.0)
     ind_good_init = ind_good_init.astype(np.bool)
     # print("@Cham: sum(ind_good_init)", np.sum(ind_good_init))
 
-    flux_smoothed1 = SmoothSpline(wave[ind_good_init], flux[ind_good_init],
-                                  p=p[0], var=var[ind_good_init])(wave)
+    flux_smoothed1 = SmoothSpline(
+        wave[ind_good_init], flux[ind_good_init], p=p[0], var=var[ind_good_init]
+    )(wave)
     dflux = flux - flux_smoothed1
 
     # collecting continuum pixels --> ITERATION 1
     ind_good = np.zeros(wave.shape, dtype=np.bool)
     for i_bin in range(n_bin):
-        ind_bin = np.logical_and(wave > wave1 + (i_bin - 0.5) * dwave,
-                                 wave <= wave1 + (i_bin + 0.5) * dwave)
+        ind_bin = np.logical_and(
+            wave > wave1 + (i_bin - 0.5) * dwave, wave <= wave1 + (i_bin + 0.5) * dwave
+        )
         if np.sum(ind_bin > 0):
             # median & sigma
             bin_median = np.median(dflux[ind_bin])
             bin_std = np.median(np.abs(dflux - bin_median))
             # within 1 sigma with q-percentile
             ind_good_ = ind_bin * (
-                np.abs(dflux - np.nanpercentile(dflux[ind_bin], q * 100.)) < (
-                rsv_frac * bin_std))
+                np.abs(dflux - np.nanpercentile(dflux[ind_bin], q * 100.0))
+                < (rsv_frac * bin_std)
+            )
             ind_good = np.logical_or(ind_good, ind_good_)
 
     ind_good = np.logical_and(ind_good, ind_good_init)
@@ -145,16 +157,18 @@ def normalize_spectrum(wave, flux, norm_range, dwave,
     # SMOOTH 2
     # continuum flux
     flux_smoothed2 = SmoothSpline(
-        wave[ind_good], flux[ind_good], p=p[1], var=var[ind_good])(wave)
+        wave[ind_good], flux[ind_good], p=p[1], var=var[ind_good]
+    )(wave)
     # normalized flux
     flux_norm = flux / flux_smoothed2
 
     return flux_norm, flux_smoothed2
 
 
-def normalize_spectrum_iter(wave, flux, p=1E-6, q=0.5, lu=(-1, 1), binwidth=30,
-                            niter=5):
-    """ A double smooth normalization of a spectrum
+def normalize_spectrum_iter(
+    wave, flux, p=1e-6, q=0.5, lu=(-1, 1), binwidth=30, niter=5
+):
+    """A double smooth normalization of a spectrum
 
     Converted from Chao Liu's normSpectrum.m
     Updated by Bo Zhang
@@ -206,18 +220,20 @@ def normalize_spectrum_iter(wave, flux, p=1E-6, q=0.5, lu=(-1, 1), binwidth=30,
     ind_good = np.isfinite(flux)
     for _ in range(niter):
 
-        flux_smoothed1 = SmoothSpline(wave[ind_good], flux[ind_good],
-                                      p=p, var=var[ind_good])(wave)
+        flux_smoothed1 = SmoothSpline(
+            wave[ind_good], flux[ind_good], p=p, var=var[ind_good]
+        )(wave)
         # residual
         res = flux - flux_smoothed1
 
         # determine sigma
         stdres = np.zeros(nbins)
         for ibin in range(nbins):
-            ind_this_bin = ind_good & (np.abs(wave-bincenters[ibin]) <= binwidth)
+            ind_this_bin = ind_good & (np.abs(wave - bincenters[ibin]) <= binwidth)
             if 0 <= q <= 0:
                 stdres[ibin] = np.std(
-                    res[ind_this_bin] - np.percentile(res[ind_this_bin], 100 * q))
+                    res[ind_this_bin] - np.percentile(res[ind_this_bin], 100 * q)
+                )
             else:
                 stdres[ibin] = np.std(res[ind_this_bin])
         stdres_interp = interp1d(bincenters, stdres, kind="linear")(wave)
@@ -236,17 +252,28 @@ def normalize_spectrum_iter(wave, flux, p=1E-6, q=0.5, lu=(-1, 1), binwidth=30,
 
     # final smoothing
     flux_smoothed2 = SmoothSpline(
-        wave[ind_good], flux[ind_good], p=p, var=var[ind_good])(wave)
+        wave[ind_good], flux[ind_good], p=p, var=var[ind_good]
+    )(wave)
     # normalized flux
     flux_norm = flux / flux_smoothed2
 
     return flux_norm, flux_smoothed2
 
 
-def normalize_spectra_block(wave, flux_block, norm_range, dwave,
-                            p=(1E-6, 1E-6), q=0.5, ivar_block=None, eps=1e-10,
-                            rsv_frac=3., n_jobs=1, verbose=10):
-    """ normalize multiple spectra using the same configuration
+def normalize_spectra_block(
+    wave,
+    flux_block,
+    norm_range,
+    dwave,
+    p=(1e-6, 1e-6),
+    q=0.5,
+    ivar_block=None,
+    eps=1e-10,
+    rsv_frac=3.0,
+    n_jobs=1,
+    verbose=10,
+):
+    """normalize multiple spectra using the same configuration
     This is specially designed for TheKeenan
 
     Parameters
@@ -294,9 +321,18 @@ def normalize_spectra_block(wave, flux_block, norm_range, dwave,
 
     results = Parallel(n_jobs=n_jobs, verbose=verbose)(
         delayed(normalize_spectrum)(
-            wave, flux_block[i], norm_range, dwave, p=p, q=q,
-            ivar=ivar_block[i], eps=eps, rsv_frac=rsv_frac)
-        for i in range(n_spec))
+            wave,
+            flux_block[i],
+            norm_range,
+            dwave,
+            p=p,
+            q=q,
+            ivar=ivar_block[i],
+            eps=eps,
+            rsv_frac=rsv_frac,
+        )
+        for i in range(n_spec)
+    )
 
     # unpack results
     flux_norm_block = []
@@ -330,17 +366,23 @@ def get_stable_pixels(pixel_disp, wave_arm=100, frac=0.20):
     for i in range(len(ind_stable)):
         edge_l = np.max([i - wave_arm, 0])
         edge_r = np.min([i + wave_arm, len(pixel_disp)])
-        if pixel_disp[i] <= \
-                np.percentile(pixel_disp[edge_l:edge_r], frac * 100.):
+        if pixel_disp[i] <= np.percentile(pixel_disp[edge_l:edge_r], frac * 100.0):
             ind_stable[i] = True
 
     return ind_stable
 
 
 # TODO: this is a generalized version
-def normalize_spectra(wave_flux_tuple_list, norm_range, dwave,
-                      p=(1E-6, 1E-6), q=50, n_jobs=1, verbose=False):
-    """ normalize multiple spectra using the same configuration
+def normalize_spectra(
+    wave_flux_tuple_list,
+    norm_range,
+    dwave,
+    p=(1e-6, 1e-6),
+    q=50,
+    n_jobs=1,
+    verbose=False,
+):
+    """normalize multiple spectra using the same configuration
 
     Parameters
     ----------
@@ -406,6 +448,6 @@ def normalize_spectra(wave_flux_tuple_list, norm_range, dwave,
 #         '/pool/projects/TheKeenan/data/TheCannonData/test_norm_spec_1.pdf')
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     pass
     # test_normaliza_spectra_block()

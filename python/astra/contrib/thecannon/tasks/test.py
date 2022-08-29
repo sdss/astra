@@ -1,4 +1,3 @@
-
 import os
 import luigi
 import pickle
@@ -16,22 +15,21 @@ import astra.contrib.thecannon as tc
 from astra.contrib.thecannon.tasks.base import TheCannonMixin
 from astra.contrib.thecannon.tasks.train import TrainTheCannonGivenTrainingSetTarget
 
+
 class TestTheCannon(TheCannonMixin):
 
     # TODO: Allow for explicit initial values?
     N_initialisations = luigi.IntParameter(default=10)
     use_derivatives = luigi.BoolParameter(default=True)
-    
+
     def requires(self):
         raise NotImplementedError(
             "You must overwrite the `requires()` function in the `astra_thecannon.tasks.Test` class "
             "so that it provides a dictionary with keys 'model' and 'observation', and tasks as values."
         )
 
-
     def output(self):
         raise NotImplementedError("This should be provided by the sub-classes")
-
 
     def read_observation(self):
         """
@@ -45,7 +43,6 @@ class TestTheCannon(TheCannonMixin):
             continuum = 1
 
         return (observation, continuum)
-
 
     def prepare_observation(self, dispersion, spectrum=None, continuum=None):
         if spectrum is None:
@@ -71,13 +68,11 @@ class TestTheCannon(TheCannonMixin):
 
         return (flux, ivar)
 
-
     def read_model(self):
         return tc.CannonModel.read(self.input()["model"].path)
 
-
     def run(self):
-        
+
         model = self.read_model()
 
         # This can be run in batch mode.
@@ -87,19 +82,22 @@ class TestTheCannon(TheCannonMixin):
                 flux,
                 ivar,
                 initialisations=task.N_initialisations,
-                use_derivatives=task.use_derivatives
+                use_derivatives=task.use_derivatives,
             )
-            
+
             # TODO: Write outputs somewhere!
             log.warn("Not writing outputs anywhere!")
 
 
-
-
-class EstimateStellarLabelsGivenApStarFileBase(TrainTheCannonGivenTrainingSetTarget, TestTheCannon):
-
+class EstimateStellarLabelsGivenApStarFileBase(
+    TrainTheCannonGivenTrainingSetTarget, TestTheCannon
+):
     def requires(self):
-        return dict(model=TrainTheCannonGivenTrainingSetTarget(**self.get_common_param_kwargs(TrainTheCannonGivenTrainingSetTarget)))
+        return dict(
+            model=TrainTheCannonGivenTrainingSetTarget(
+                **self.get_common_param_kwargs(TrainTheCannonGivenTrainingSetTarget)
+            )
+        )
 
     def run(self):
 
@@ -119,19 +117,19 @@ class EstimateStellarLabelsGivenApStarFileBase(TrainTheCannonGivenTrainingSetTar
                 continue
             spectrum, cont = task.read_observation()
             flux, ivar = task.prepare_observation(
-                model.dispersion, 
-                spectrum=spectrum, 
-                continuum=cont
+                model.dispersion, spectrum=spectrum, continuum=cont
             )
             data.append((flux, ivar, cont))
 
             N_spectra = flux.shape[0]
-            task_meta.append(dict(
-                N_spectra=N_spectra,
-                snr=spectrum.meta["snr"],
-            ))
+            task_meta.append(
+                dict(
+                    N_spectra=N_spectra,
+                    snr=spectrum.meta["snr"],
+                )
+            )
             task_spectra.append(spectrum)
-            
+
         flux, ivar, cont = map(np.vstack, zip(*data))
 
         labels, cov, op_meta = model.test(
@@ -139,23 +137,25 @@ class EstimateStellarLabelsGivenApStarFileBase(TrainTheCannonGivenTrainingSetTar
             ivar,
             initialisations=self.N_initialisations,
             use_derivatives=self.use_derivatives,
-            threads=self.threads
+            threads=self.threads,
         )
 
         si = 0
-        for i, (task, spectrum, meta) in enumerate(zip(self.get_batch_tasks(), task_spectra, task_meta)):
+        for i, (task, spectrum, meta) in enumerate(
+            zip(self.get_batch_tasks(), task_spectra, task_meta)
+        ):
             if spectrum is None and meta is None:
-                continue 
+                continue
 
             sliced = slice(si, si + meta["N_spectra"])
-            
+
             result = dict(
                 labels=labels[sliced],
                 cov=cov[sliced],
             )
-            for key in  ("snr", "r_chi_sq", "chi_sq", "x0"):
+            for key in ("snr", "r_chi_sq", "chi_sq", "x0"):
                 result[key] = [row[key] for row in op_meta[sliced]]
-                            
+
             if "AstraSource" in task.output():
                 # Write AstraSource target.
                 task.output()["AstraSource"].write(
@@ -166,28 +166,31 @@ class EstimateStellarLabelsGivenApStarFileBase(TrainTheCannonGivenTrainingSetTar
                     model_flux=np.array([ea["model_flux"] for ea in op_meta[sliced]]),
                     # TODO: Project uncertainties to flux space and include here.
                     model_ivar=None,
-                    results_table=Table(data=result)
+                    results_table=Table(data=result),
                 )
-            
+
             if "database" in task.output():
                 # Write database rows.
                 L = len(model.vectorizer.label_names)
-                rows = dict(zip(
-                    map(str.lower, model.vectorizer.label_names),
-                    result["labels"].T
-                ))
-                rows.update(dict(zip(
-                    (f"u_{ln.lower()}" for ln in model.vectorizer.label_names),
-                    np.sqrt(result["cov"][:, np.arange(L), np.arange(L)]).T
-                )))
+                rows = dict(
+                    zip(
+                        map(str.lower, model.vectorizer.label_names), result["labels"].T
+                    )
+                )
+                rows.update(
+                    dict(
+                        zip(
+                            (f"u_{ln.lower()}" for ln in model.vectorizer.label_names),
+                            np.sqrt(result["cov"][:, np.arange(L), np.arange(L)]).T,
+                        )
+                    )
+                )
                 for key in ("snr", "r_chi_sq", "chi_sq"):
-                    rows.update({ key: result[key] })
+                    rows.update({key: result[key]})
 
                 task.output()["database"].write(rows)
-                
-            si += meta["N_spectra"]
 
+            si += meta["N_spectra"]
 
     def output(self):
         raise RuntimeError("this should be over-written by parent classes")
-

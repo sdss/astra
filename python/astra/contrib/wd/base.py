@@ -45,12 +45,13 @@ class WhiteDwarfStellarParameters(ExecutableTask):
             gaia = get_gaia_dr2_photometry(source.catalogid)
 
             parallax = parallax or gaia["parallax"]
-            absolute_G_mag = absolute_G_mag \
-                or (gaia["phot_g_mean_mag"] + 5 * np.log10(gaia["parallax"]/100))
+            absolute_G_mag = absolute_G_mag or (
+                gaia["phot_g_mean_mag"] + 5 * np.log10(gaia["parallax"] / 100)
+            )
 
-
-        log.info(f"{self} on {data_product} using parallax = {parallax:.2f} and absolute_G_mag = {absolute_G_mag:.2f}")
-
+        log.info(
+            f"{self} on {data_product} using parallax = {parallax:.2f} and absolute_G_mag = {absolute_G_mag:.2f}"
+        )
 
         spectrum = Spectrum1D.read(data_product.path)
 
@@ -217,52 +218,87 @@ class WhiteDwarfStellarParameters(ExecutableTask):
         log.info(f"Created database outputs {output} and {wd_output}")
 
         # TODO: Create a BossStar output file.
-        
 
         if self.plot:
 
             import matplotlib.pyplot as plt
 
-            lines_s,lines_m,mod_n=fit_func((Teff,logg,rv),spec_n,l_crop,models=self.model_grid,mode=1)
-            lines_s_o,lines_m_o,mod_n_o=fit_func((Teff2,logg2,rv),spec_n,l_crop_s,models=self.model_grid, mode=1)
-            lines_s_final,lines_m_final,mod_n_final=fit_func((final_T,100*final_g,rv),spec_n,l_crop,models=self.model_grid,mode=1)
-            
-            fig=plt.figure(figsize=(11.5,3.75))
-            ax1 = plt.subplot2grid((1,4), (0, 3))
+            lines_s, lines_m, mod_n = fit_func(
+                (Teff, logg, rv), spec_n, l_crop, models=self.model_grid, mode=1
+            )
+            lines_s_o, lines_m_o, mod_n_o = fit_func(
+                (Teff2, logg2, rv), spec_n, l_crop_s, models=self.model_grid, mode=1
+            )
+            lines_s_final, lines_m_final, mod_n_final = fit_func(
+                (final_T, 100 * final_g, rv),
+                spec_n,
+                l_crop,
+                models=self.model_grid,
+                mode=1,
+            )
+
+            fig = plt.figure(figsize=(11.5, 3.75))
+            ax1 = plt.subplot2grid((1, 4), (0, 3))
             step = 0
-            for i in range(0,4): # plots Halpha (i=0) to H6 (i=5)
-                min_p   = lines_s[i][:,0][lines_s[i][:,1]==np.min(lines_s[i][:,1])][0]
-                min_p_o = lines_s_o[i][:,0][lines_s_o[i][:,1]==np.min(lines_s_o[i][:,1])][0]
-                min_p_final = lines_s_final[i][:,0][lines_s_final[i][:,1]==np.min(lines_s_final[i][:,1])][0]
-                ax1.plot(lines_s[i][:,0]-min_p,lines_s[i][:,1]+step,color='k')
-                ax1.plot(lines_s[i][:,0]-min_p,lines_m[i]+step,color='r')
-                ax1.plot(lines_s_o[i][:,0]-min_p_o,lines_m_o[i]+step,color='g')
-                ax1.plot(lines_s_final[i][:,0]-min_p_final,lines_m_final[i]+step,color='tab:blue')
-                
-                step+=0.5
+            for i in range(0, 4):  # plots Halpha (i=0) to H6 (i=5)
+                min_p = lines_s[i][:, 0][lines_s[i][:, 1] == np.min(lines_s[i][:, 1])][
+                    0
+                ]
+                min_p_o = lines_s_o[i][:, 0][
+                    lines_s_o[i][:, 1] == np.min(lines_s_o[i][:, 1])
+                ][0]
+                min_p_final = lines_s_final[i][:, 0][
+                    lines_s_final[i][:, 1] == np.min(lines_s_final[i][:, 1])
+                ][0]
+                ax1.plot(lines_s[i][:, 0] - min_p, lines_s[i][:, 1] + step, color="k")
+                ax1.plot(lines_s[i][:, 0] - min_p, lines_m[i] + step, color="r")
+                ax1.plot(lines_s_o[i][:, 0] - min_p_o, lines_m_o[i] + step, color="g")
+                ax1.plot(
+                    lines_s_final[i][:, 0] - min_p_final,
+                    lines_m_final[i] + step,
+                    color="tab:blue",
+                )
+
+                step += 0.5
             xticks = ax1.xaxis.get_major_ticks()
             ax1.set_xticklabels([])
             ax1.set_yticklabels([])
 
-            ax2 = plt.subplot2grid((1,4), (0, 0),colspan=3)
+            ax2 = plt.subplot2grid((1, 4), (0, 0), colspan=3)
 
-            #full_spec_w=fitting_scripts.vac_to_air(full_spec[:,0])
-            spec_w=data[:,0]
-            ax2.plot(data[:,0],data[:,1],color='k')
-            #Adjust the flux of models to match the spectrum
+            # full_spec_w=fitting_scripts.vac_to_air(full_spec[:,0])
+            spec_w = data[:, 0]
+            ax2.plot(data[:, 0], data[:, 1], color="k")
+            # Adjust the flux of models to match the spectrum
             mod_n[np.isnan(mod_n)], mod_n_o[np.isnan(mod_n_o)] = 0.0, 0.0
-            check_f_spec=data[:,1][(spec_w>4500.) & (spec_w<4700.)]
-            check_f_model=mod_n[:,1][(mod_n[:,0]>4500.) & (mod_n[:,0]<4700.)]
-            adjust=np.average(check_f_model)/np.average(check_f_spec)
-            ax2.plot(mod_n[:,0]*(rv+299792.458)/299792.458,mod_n[:,1]/adjust,color='r')
-            check_f_model_o=mod_n_o[:,1][(mod_n_o[:,0]>4500.) & (mod_n_o[:,0]<4700.)]
-            adjust_o=np.average(check_f_model_o)/np.average(check_f_spec)
+            check_f_spec = data[:, 1][(spec_w > 4500.0) & (spec_w < 4700.0)]
+            check_f_model = mod_n[:, 1][(mod_n[:, 0] > 4500.0) & (mod_n[:, 0] < 4700.0)]
+            adjust = np.average(check_f_model) / np.average(check_f_spec)
+            ax2.plot(
+                mod_n[:, 0] * (rv + 299792.458) / 299792.458,
+                mod_n[:, 1] / adjust,
+                color="r",
+            )
+            check_f_model_o = mod_n_o[:, 1][
+                (mod_n_o[:, 0] > 4500.0) & (mod_n_o[:, 0] < 4700.0)
+            ]
+            adjust_o = np.average(check_f_model_o) / np.average(check_f_spec)
 
-            check_f_model_final=mod_n_final[:,1][(mod_n_final[:,0]>4500.) & (mod_n_final[:,0]<4700.)]
-            adjust_final=np.average(check_f_model_final)/np.average(check_f_spec)
+            check_f_model_final = mod_n_final[:, 1][
+                (mod_n_final[:, 0] > 4500.0) & (mod_n_final[:, 0] < 4700.0)
+            ]
+            adjust_final = np.average(check_f_model_final) / np.average(check_f_spec)
 
-            ax2.plot(mod_n_o[:,0]*(rv+299792.458)/299792.458,mod_n_o[:,1]/adjust_o,color='g')
-            ax2.plot(mod_n_final[:,0]*(rv+299792.458)/299792.458,mod_n_final[:,1]/adjust_final,color='tab:blue')
+            ax2.plot(
+                mod_n_o[:, 0] * (rv + 299792.458) / 299792.458,
+                mod_n_o[:, 1] / adjust_o,
+                color="g",
+            )
+            ax2.plot(
+                mod_n_final[:, 0] * (rv + 299792.458) / 299792.458,
+                mod_n_final[:, 1] / adjust_final,
+                color="tab:blue",
+            )
 
             m = ((spectrum.flux.value * spectrum.uncertainty.array) > 3)[0]
             wls = spectrum.wavelength.value[m]
@@ -271,10 +307,12 @@ class WhiteDwarfStellarParameters(ExecutableTask):
             ax2.set_xlim(3000, 10_000)
             ax2.set_ylim(0, 2 * np.median(fls))
 
-            ax2.set_ylabel(r'F$_{\lambda}$ [erg cm$^{-2}$ s$^{-1} \AA^{-1}$]',fontsize=12)
-            ax2.set_xlabel(r'Wavelength $(\AA)$',fontsize=12)
+            ax2.set_ylabel(
+                r"F$_{\lambda}$ [erg cm$^{-2}$ s$^{-1} \AA^{-1}$]", fontsize=12
+            )
+            ax2.set_xlabel(r"Wavelength $(\AA)$", fontsize=12)
             fig.tight_layout()
-            
+
             basename = os.path.basename(data_product.path[:-5])
             fig_path = expand_path(f"$MWM_ASTRA/{__version__}/wd/{basename}.png")
             os.makedirs(os.path.dirname(fig_path), exist_ok=True)

@@ -5,18 +5,19 @@ from astra.database.utils import create_task_output
 from astra.operators.utils import prepare_data
 from astra.utils import log
 
+
 def estimate_radial_velocity(
-        pks, 
-        verbose=True, 
-        mcmc=False,
-        figfile=None,
-        cornername=None,
-        retpmodels=False,
-        plot=False,
-        tweak=True,
-        usepeak=False,
-        maxvel=[-1000, 1000]
-    ):
+    pks,
+    verbose=True,
+    mcmc=False,
+    figfile=None,
+    cornername=None,
+    retpmodels=False,
+    plot=False,
+    tweak=True,
+    usepeak=False,
+    maxvel=[-1000, 1000],
+):
     """
     Estimate radial velocities for the sources that are identified by the task instances
     of the given primary keys.
@@ -35,7 +36,8 @@ def estimate_radial_velocity(
 
     failures = []
     for instance, path, spectrum in prepare_data(pks):
-        if spectrum is None: continue
+        if spectrum is None:
+            continue
 
         log.debug(f"Running Doppler on {instance} from {path}")
 
@@ -51,11 +53,13 @@ def estimate_radial_velocity(
                 plot=plot,
                 tweak=tweak,
                 usepeak=usepeak,
-                maxvel=maxvel
+                maxvel=maxvel,
             )
 
         except:
-            log.exception(f"Exception occurred on Doppler on {path} with task instance {instance}")
+            log.exception(
+                f"Exception occurred on Doppler on {path} with task instance {instance}"
+            )
             failures.append(instance.pk)
             continue
 
@@ -63,24 +67,22 @@ def estimate_radial_velocity(
             # Write the output to the database.
             results = prepare_results(summary)
 
-            create_task_output(
-                instance,
-                astradb.Doppler,
-                **results
-            )
+            create_task_output(instance, astradb.Doppler, **results)
 
     if len(failures) > 0:
-        log.warning(f"There were {len(failures)} Doppler failures out of a total {len(pks)} executions.")
+        log.warning(
+            f"There were {len(failures)} Doppler failures out of a total {len(pks)} executions."
+        )
         log.warning(f"Failed primary keys include: {failures}")
 
         log.warning(f"Raising last exception to indicate failure in pipeline.")
         raise
-    
+
 
 def prepare_results(summary_table):
     """
-    Prepare outputs for the database from the Doppler summary table. 
-    
+    Prepare outputs for the database from the Doppler summary table.
+
     :param summary_table:
         The output summary table provided by Doppler.
 
@@ -92,7 +94,7 @@ def prepare_results(summary_table):
         "tefferr": "u_teff",
         "loggerr": "u_logg",
         "feh": "fe_h",
-        "feherr": "u_fe_h"
+        "feherr": "u_fe_h",
     }
     results = {}
     for column_name in summary_table.dtype.names:

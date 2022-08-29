@@ -5,8 +5,7 @@
 Plotting utilities for The Cannon.
 """
 
-from __future__ import (division, print_function, absolute_import,
-                        unicode_literals)
+from __future__ import division, print_function, absolute_import, unicode_literals
 
 __all__ = ["theta", "scatter", "one_to_one"]
 
@@ -20,9 +19,12 @@ try:
     from matplotlib.ticker import MaxNLocator
 
 except ImportError:
-    logger.warn("Could not import matplotlib; plotting functionality disabled")    
+    logger.warn("Could not import matplotlib; plotting functionality disabled")
 
-def plot_gridsearch_sparsity(regularization, sparsity, sparsity_by_feature_type, **kwargs):
+
+def plot_gridsearch_sparsity(
+    regularization, sparsity, sparsity_by_feature_type, **kwargs
+):
     fig, ax = plt.subplots()
     ax.plot(regularization, sparsity, c="k", lw=2)
     for j in range(sparsity_by_feature_type.shape[1]):
@@ -31,24 +33,37 @@ def plot_gridsearch_sparsity(regularization, sparsity, sparsity_by_feature_type,
     ax.semilogx()
     ax.set_xlabel(r"Regularization")
     ax.set_ylabel(r"Sparsity")
-    
+
     fig.tight_layout()
 
     return fig
 
 
-
-def plot_gridsearch_chisq(regularization, train_chisq, validation_chisq, ax=None, **kwargs):
+def plot_gridsearch_chisq(
+    regularization, train_chisq, validation_chisq, ax=None, **kwargs
+):
     if ax is None:
         fig, ax = plt.subplots()
         new_figure = True
     else:
         fig = ax.figure
         new_figure = False
-    ax.plot(regularization, validation_chisq/validation_chisq[0], label="validation", c="tab:blue", **kwargs)
-    ax.plot(regularization, train_chisq/train_chisq[0], label="train", c="tab:green", **kwargs)
+    ax.plot(
+        regularization,
+        validation_chisq / validation_chisq[0],
+        label="validation",
+        c="tab:blue",
+        **kwargs,
+    )
+    ax.plot(
+        regularization,
+        train_chisq / train_chisq[0],
+        label="train",
+        c="tab:green",
+        **kwargs,
+    )
 
-    if new_figure:            
+    if new_figure:
         ax.axhline(1, c="#666666", ls=":", lw=0.5, zorder=-1)
 
         ax.legend()
@@ -60,9 +75,18 @@ def plot_gridsearch_chisq(regularization, train_chisq, validation_chisq, ax=None
     return fig
 
 
-def plot_theta(theta, indices, dispersion=None, label_terms=None, show_label_terms=True,
-    normalize=True, common_axis=False, latex_label_names=None, xlim=None, 
-    **kwargs):
+def plot_theta(
+    theta,
+    indices,
+    dispersion=None,
+    label_terms=None,
+    show_label_terms=True,
+    normalize=True,
+    common_axis=False,
+    latex_label_names=None,
+    xlim=None,
+    **kwargs,
+):
 
     K = len(indices)
 
@@ -83,10 +107,10 @@ def plot_theta(theta, indices, dispersion=None, label_terms=None, show_label_ter
     for i, (ax, index) in enumerate(zip(axes, indices)):
 
         y = theta[index]
-        #scale = np.max(np.abs(y)) if normalize and label_index != 0 else 1.0
+        # scale = np.max(np.abs(y)) if normalize and label_index != 0 else 1.0
         scale = 1
 
-        ax.plot(x, y/scale, **plot_kwds)
+        ax.plot(x, y / scale, **plot_kwds)
 
         if ax.is_last_row():
             if dispersion is None:
@@ -156,13 +180,7 @@ def scatter(model, ax=None, **kwargs):
     return fig
 
 
-def plot_labels(
-    known_labels,
-    test_labels,
-    label_names,
-    show_statistics=True,
-    **kwargs
-):
+def plot_labels(known_labels, test_labels, label_names, show_statistics=True, **kwargs):
     N, K = np.atleast_2d(known_labels).shape
 
     factor = 2.0
@@ -171,14 +189,14 @@ def plot_labels(
     rdim = 0.10 * factor
     wspace = 0.05
     hspace = 0.35
-    yspace = factor * K + factor * (K - 1.) * hspace
+    yspace = factor * K + factor * (K - 1.0) * hspace
     xspace = factor
 
     xdim = lbdim + xspace + rdim
     ydim = lbdim + yspace + tdim
 
     fig, axes = plt.subplots(K, figsize=(xdim, ydim))
-    
+
     l, b = (lbdim / xdim, lbdim / ydim)
     t, r = ((lbdim + yspace) / ydim, ((lbdim + xspace) / xdim))
 
@@ -198,14 +216,14 @@ def plot_labels(
         y = test_labels[:, i]
 
         ax.scatter(x, y, **scatter_kwds)
-        #if cov is not None:
+        # if cov is not None:
         #    yerr = cov[:, i, i]**0.5
         #    ax.errorbar(x, y, yerr=yerr, **errorbar_kwds)
 
         # Set x-axis limits and y-axis limits the same
         limits = np.array([ax.get_xlim(), ax.get_ylim()])
         limits = (np.min(limits), np.max(limits))
-        
+
         ax.plot(limits, limits, c="#666666", linestyle=":", zorder=-1)
         ax.set_xlim(limits)
         ax.set_ylim(limits)
@@ -223,21 +241,25 @@ def plot_labels(
             diff = y - x
             mu = np.nanmedian(diff)
             sigma = np.nanstd(diff)
-            ax.text(0.05, 0.85, r"$\mu = {0:.2f}$".format(mu),
-                transform=ax.transAxes)
-            ax.text(0.05, 0.75, r"$\sigma = {0:.2f}$".format(sigma),
-                transform=ax.transAxes)
-            ax.text(0.05, 0.65, r"$N = {:.0f}$".format(np.sum(np.isfinite(diff))),
-                    transform=ax.transAxes)
-        
+            ax.text(0.05, 0.85, r"$\mu = {0:.2f}$".format(mu), transform=ax.transAxes)
+            ax.text(
+                0.05, 0.75, r"$\sigma = {0:.2f}$".format(sigma), transform=ax.transAxes
+            )
+            ax.text(
+                0.05,
+                0.65,
+                r"$N = {:.0f}$".format(np.sum(np.isfinite(diff))),
+                transform=ax.transAxes,
+            )
+
         ax.set_aspect(1.0)
 
     return fig
 
 
-
-def one_to_one(model, test_labels, cov=None, latex_label_names=None,
-    show_statistics=True, **kwargs):
+def one_to_one(
+    model, test_labels, cov=None, latex_label_names=None, show_statistics=True, **kwargs
+):
     """
     Plot a one-to-one comparison of the training set labels, and the test set
     labels inferred from the training set spectra.
@@ -259,29 +281,30 @@ def one_to_one(model, test_labels, cov=None, latex_label_names=None,
     """
 
     if model.training_set_labels.shape != test_labels.shape:
-        raise ValueError(
-            "test labels must have the same shape as training set labels")
+        raise ValueError("test labels must have the same shape as training set labels")
 
     N, K = test_labels.shape
     if cov is not None and cov.shape != (N, K, K):
         raise ValueError(
-            "shape mis-match in covariance matrix ({N}, {K}, {K}) != {shape}"\
-            .format(N=N, K=K, shape=cov.shape))
+            "shape mis-match in covariance matrix ({N}, {K}, {K}) != {shape}".format(
+                N=N, K=K, shape=cov.shape
+            )
+        )
 
-    factor = 2.0           
+    factor = 2.0
     lbdim = 0.30 * factor
     tdim = 0.25 * factor
     rdim = 0.10 * factor
     wspace = 0.05
     hspace = 0.35
-    yspace = factor * K + factor * (K - 1.) * hspace
+    yspace = factor * K + factor * (K - 1.0) * hspace
     xspace = factor
 
     xdim = lbdim + xspace + rdim
     ydim = lbdim + yspace + tdim
 
     fig, axes = plt.subplots(K, figsize=(xdim, ydim))
-    
+
     l, b = (lbdim / xdim, lbdim / ydim)
     t, r = ((lbdim + yspace) / ydim, ((lbdim + xspace) / xdim))
 
@@ -302,13 +325,13 @@ def one_to_one(model, test_labels, cov=None, latex_label_names=None,
 
         ax.scatter(x, y, **scatter_kwds)
         if cov is not None:
-            yerr = cov[:, i, i]**0.5
+            yerr = cov[:, i, i] ** 0.5
             ax.errorbar(x, y, yerr=yerr, **errorbar_kwds)
 
         # Set x-axis limits and y-axis limits the same
         limits = np.array([ax.get_xlim(), ax.get_ylim()])
         limits = (np.min(limits), np.max(limits))
-        
+
         ax.plot(limits, limits, c="#666666", linestyle=":", zorder=-1)
         ax.set_xlim(limits)
         ax.set_ylim(limits)
@@ -320,8 +343,10 @@ def one_to_one(model, test_labels, cov=None, latex_label_names=None,
                 label_name = r"${}$".format(latex_label_names[i])
             except:
                 logger.warn(
-                    "Could not access latex label name for index {} ({})"\
-                    .format(i, label_name))
+                    "Could not access latex label name for index {} ({})".format(
+                        i, label_name
+                    )
+                )
 
         ax.set_title(label_name)
 
@@ -333,13 +358,17 @@ def one_to_one(model, test_labels, cov=None, latex_label_names=None,
             diff = y - x
             mu = np.nanmedian(diff)
             sigma = np.nanstd(diff)
-            ax.text(0.05, 0.85, r"$\mu = {0:.2f}$".format(mu),
-                transform=ax.transAxes)
-            ax.text(0.05, 0.75, r"$\sigma = {0:.2f}$".format(sigma),
-                transform=ax.transAxes)
-            ax.text(0.05, 0.65, r"$N = {:.0f}$".format(np.sum(np.isfinite(diff))),
-                    transform=ax.transAxes)
-        
+            ax.text(0.05, 0.85, r"$\mu = {0:.2f}$".format(mu), transform=ax.transAxes)
+            ax.text(
+                0.05, 0.75, r"$\sigma = {0:.2f}$".format(sigma), transform=ax.transAxes
+            )
+            ax.text(
+                0.05,
+                0.65,
+                r"$N = {:.0f}$".format(np.sum(np.isfinite(diff))),
+                transform=ax.transAxes,
+            )
+
         ax.set_aspect(1.0)
 
     return fig

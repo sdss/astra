@@ -5,8 +5,7 @@
 Continuum-normalization.
 """
 
-from __future__ import (division, print_function, absolute_import,
-                        unicode_literals)
+from __future__ import division, print_function, absolute_import, unicode_literals
 
 __all__ = ["normalize", "sines_and_cosines"]
 
@@ -32,16 +31,30 @@ def _continuum_design_matrix(dispersion, L, order):
 
     L, dispersion = float(L), np.array(dispersion)
     scale = 2 * (np.pi / L)
-    return np.vstack([
-        np.ones_like(dispersion).reshape((1, -1)), 
-        np.array([
-            [np.cos(o * scale * dispersion), np.sin(o * scale * dispersion)] \
-            for o in range(1, order + 1)]).reshape((2 * order, dispersion.size))
-        ])
+    return np.vstack(
+        [
+            np.ones_like(dispersion).reshape((1, -1)),
+            np.array(
+                [
+                    [np.cos(o * scale * dispersion), np.sin(o * scale * dispersion)]
+                    for o in range(1, order + 1)
+                ]
+            ).reshape((2 * order, dispersion.size)),
+        ]
+    )
 
 
-def sines_and_cosines(dispersion, flux, ivar, continuum_pixels, L=1400, order=3, 
-    regions=None, fill_value=1.0, **kwargs):
+def sines_and_cosines(
+    dispersion,
+    flux,
+    ivar,
+    continuum_pixels,
+    L=1400,
+    order=3,
+    regions=None,
+    fill_value=1.0,
+    **kwargs,
+):
     """
     Fit the flux values of pre-defined continuum pixels using a sum of sine and
     cosine functions.
@@ -84,11 +97,11 @@ def sines_and_cosines(dispersion, flux, ivar, continuum_pixels, L=1400, order=3,
         If set as True, then a metadata dictionary will also be returned.
 
     :returns:
-        The continuum values for all pixels, and a dictionary that contains 
+        The continuum values for all pixels, and a dictionary that contains
         metadata about the fit.
     """
 
-    scalar = kwargs.pop("__magic_scalar", 1e-6) # MAGIC
+    scalar = kwargs.pop("__magic_scalar", 1e-6)  # MAGIC
     flux, ivar = np.atleast_2d(flux), np.atleast_2d(ivar)
 
     if regions is None:
@@ -107,14 +120,17 @@ def sines_and_cosines(dispersion, flux, ivar, continuum_pixels, L=1400, order=3,
         region_masks.append(region_mask)
         pixel_included_in_regions[:, region_mask] += 1
 
-        continuum_masks.append(continuum_pixels[
-            (ei >= continuum_pixels) * (continuum_pixels >= si)])
+        continuum_masks.append(
+            continuum_pixels[(ei >= continuum_pixels) * (continuum_pixels >= si)]
+        )
 
         # Build the design matrices for this region.
         region_matrices.append(
-            _continuum_design_matrix(dispersion[region_masks[-1]], L, order))
+            _continuum_design_matrix(dispersion[region_masks[-1]], L, order)
+        )
         continuum_matrices.append(
-            _continuum_design_matrix(dispersion[continuum_masks[-1]], L, order))
+            _continuum_design_matrix(dispersion[continuum_masks[-1]], L, order)
+        )
 
         # TODO: ISSUE: Check for overlapping regions and raise an warning.
 
@@ -130,32 +146,42 @@ def sines_and_cosines(dispersion, flux, ivar, continuum_pixels, L=1400, order=3,
         if any(warn_indices):
             # Split by deltas so that we give useful warning messages.
             segment_indices = np.where(np.diff(warn_indices) > 1)[0]
-            segment_indices = np.sort(np.hstack(
-                [0, segment_indices, segment_indices + 1, len(warn_indices)]))
+            segment_indices = np.sort(
+                np.hstack([0, segment_indices, segment_indices + 1, len(warn_indices)])
+            )
             segment_indices = segment_indices.reshape(-1, 2)
 
-            segments = ", ".join(["{:.1f} to {:.1f}".format(
-                dispersion[s], dispersion[e], e-s) for s, e in segment_indices])
+            segments = ", ".join(
+                [
+                    "{:.1f} to {:.1f}".format(dispersion[s], dispersion[e], e - s)
+                    for s, e in segment_indices
+                ]
+            )
 
-            warn(f"Some pixels in have measured flux values (e.g., ivar > 0) but are not included "
-                 f"in any specified region ({segments}).")
+            warn(
+                f"Some pixels in have measured flux values (e.g., ivar > 0) but are not included "
+                f"in any specified region ({segments})."
+            )
 
         # Get the flux and inverse variance for this object.
         object_metadata = []
         object_flux, object_ivar = (flux[i], ivar[i])
 
         # Normalize each region.
-        for region_mask, region_matrix, continuum_mask, continuum_matrix in \
-        zip(region_masks, region_matrices, continuum_masks, continuum_matrices):
+        for region_mask, region_matrix, continuum_mask, continuum_matrix in zip(
+            region_masks, region_matrices, continuum_masks, continuum_matrices
+        ):
             if continuum_mask.size == 0:
                 # Skipping..
                 object_metadata.append([order, L, fill_value, scalar, [], None])
                 continue
 
-            # We will fit to continuum pixels only.   
-            continuum_disp = dispersion[continuum_mask] 
-            continuum_flux, continuum_ivar \
-                = (object_flux[continuum_mask], object_ivar[continuum_mask])
+            # We will fit to continuum pixels only.
+            continuum_disp = dispersion[continuum_mask]
+            continuum_flux, continuum_ivar = (
+                object_flux[continuum_mask],
+                object_ivar[continuum_mask],
+            )
 
             # Solve for the amplitudes.
             M = continuum_matrix
@@ -165,21 +191,30 @@ def sines_and_cosines(dispersion, flux, ivar, continuum_pixels, L=1400, order=3,
             eigenvalues = np.linalg.eigvalsh(MTM)
             MTM[np.diag_indices(len(MTM))] += scalar * np.max(eigenvalues)
             eigenvalues = np.linalg.eigvalsh(MTM)
-            condition_number = max(eigenvalues)/min(eigenvalues)
+            condition_number = max(eigenvalues) / min(eigenvalues)
 
             amplitudes = np.linalg.solve(MTM, MTy)
             continuum[i, region_mask] = np.dot(region_matrix.T, amplitudes)
             object_metadata.append(
-                (order, L, fill_value, scalar, amplitudes, condition_number))
+                (order, L, fill_value, scalar, amplitudes, condition_number)
+            )
 
         metadata.append(object_metadata)
 
-    return (continuum, metadata) 
-    
+    return (continuum, metadata)
 
-def normalize(dispersion, flux, ivar, continuum_regions=None, L=1400, order=3, 
-              regions=([3000, 10000], [15090, 15822], [15823, 16451], [16452, 16971]), 
-              fill_value=1.0, **kwargs):
+
+def normalize(
+    dispersion,
+    flux,
+    ivar,
+    continuum_regions=None,
+    L=1400,
+    order=3,
+    regions=([3000, 10000], [15090, 15822], [15823, 16451], [16452, 16971]),
+    fill_value=1.0,
+    **kwargs,
+):
     """
     Pseudo-continuum-normalize the flux using a defined set of continuum pixels
     and a sum of sine and cosine functions.
@@ -223,12 +258,14 @@ def normalize(dispersion, flux, ivar, continuum_regions=None, L=1400, order=3,
         If set as True, then a metadata dictionary will also be returned.
 
     :returns:
-        The continuum values for all pixels, and a dictionary that contains 
+        The continuum values for all pixels, and a dictionary that contains
         metadata about the fit.
     """
 
     if continuum_regions is None:
-        default_path = os.path.join(os.path.dirname(__file__), "etc/continuum-regions.list")
+        default_path = os.path.join(
+            os.path.dirname(__file__), "etc/continuum-regions.list"
+        )
         continuum_regions = np.loadtxt(default_path)
 
     # Work out the continuum pixels.
@@ -238,18 +275,24 @@ def normalize(dispersion, flux, ivar, continuum_regions=None, L=1400, order=3,
 
     continuum_pixels = np.arange(dispersion.size)[mask]
 
-    continuum, metadata = sines_and_cosines(dispersion, flux, ivar, 
-        continuum_pixels, L=L, order=order, regions=regions,
-        fill_value=fill_value, **kwargs)
+    continuum, metadata = sines_and_cosines(
+        dispersion,
+        flux,
+        ivar,
+        continuum_pixels,
+        L=L,
+        order=order,
+        regions=regions,
+        fill_value=fill_value,
+        **kwargs,
+    )
 
-    normalized_flux = flux/continuum
+    normalized_flux = flux / continuum
     normalized_ivar = continuum * ivar * continuum
     normalized_flux[normalized_ivar == 0] = 1.0
-    
+
     non_finite_pixels = ~np.isfinite(normalized_flux)
     normalized_flux[non_finite_pixels] = 1.0
     normalized_ivar[non_finite_pixels] = 0.0
 
     return (normalized_flux, normalized_ivar, continuum, metadata)
-
-

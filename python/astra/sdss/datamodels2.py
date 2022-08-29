@@ -8,7 +8,7 @@ from astropy import units as u
 from healpy import ang2pix
 from functools import partial
 
-from astra import (log, __version__ as astra_version)
+from astra import log, __version__ as astra_version
 from astra.utils import flatten, list_to_dict
 from astra.database.astradb import Source, DataProduct
 from astra.base import ExecutableTask, Parameter
@@ -16,7 +16,7 @@ from astra.base import ExecutableTask, Parameter
 from scipy import interpolate
 from scipy.ndimage.filters import median_filter, gaussian_filter
 
-from astra.sdss.apogee_bitmask import PixelBitMask # TODO: put elsewhere
+from astra.sdss.apogee_bitmask import PixelBitMask  # TODO: put elsewhere
 
 from .catalog import get_sky_position
 
@@ -31,13 +31,13 @@ GLOSSARY = {
     # Observing conditions
     "ALT": "Telescope altitude [deg]",
     "AZ": "Telescope azimuth [deg]",
-    "EXPTIME":  "Total exposure time [s]",
-    "NEXP":     "Number of exposures taken",
+    "EXPTIME": "Total exposure time [s]",
+    "NEXP": "Number of exposures taken",
     "AIRMASS": "Mean airmass",
     "AIRTEMP": "Air temperature [C]",
     "DEWPOINT": "Dew point temperature [C]",
     "HUMIDITY": "Humidity [%]",
-    "PRESSURE": "Air pressure [inch Hg?]", # TODO
+    "PRESSURE": "Air pressure [inch Hg?]",  # TODO
     "MOON_PHASE_MEAN": "Mean phase of the moon",
     "MOON_DIST_MEAN": "Mean sky distance to the moon [deg]",
     "SEEING": "Median seeing conditions [arcsecond]",
@@ -48,19 +48,16 @@ GLOSSARY = {
     "TAI-BEG": "MJD (TAI) at start of integrations [s]",
     "TAI-END": "MJD (TAI) at end of integrations [s]",
     "NGUIDE": "Number of guider frames during integration",
-
     # Stacking
     "V_HELIO": "Heliocentric velocity correction [km/s]",
     "V_SHIFT": "Relative velocity shift used in stack [km/s]",
     "IN_STACK": "Was this spectrum used in the stack?",
-
     # Metadata related to sinc interpolation and stacking
-    "NRES":     "Sinc bandlimit [pixel/resolution element]",
+    "NRES": "Sinc bandlimit [pixel/resolution element]",
     "FILTSIZE": "Median filter size for pseudo-continuum [pixel]",
     "NORMSIZE": "Gaussian width for pseudo-continuum [pixel]",
     "CONSCALE": "Scale by pseudo-continuum when stacking",
     "STACK_VRAD": "Radial velocity used when stacking spectra [km/s]",
-
     # BOSS data reduction pipeline
     "V_BOSS": "Version of the BOSS ICC",
     "VJAEGER": "Version of Jaeger",
@@ -76,10 +73,10 @@ GLOSSARY = {
     "VERSFLAT": "Version of SPECFLAT product",
     "DIDFLUSH": "Was CCD flushed before integration",
     "CARTID": "Cartridge identifier",
-    "PSFSKY":   "Order of PSF sky subtraction",
-    "PREJECT":  "Profile area rejection threshold",
-    "LOWREJ":   "Extraction: low rejection",
-    "HIGHREJ":  "Extraction: high rejection",
+    "PSFSKY": "Order of PSF sky subtraction",
+    "PREJECT": "Profile area rejection threshold",
+    "LOWREJ": "Extraction: low rejection",
+    "HIGHREJ": "Extraction: high rejection",
     "SCATPOLY": "Extraction: Order of scattered light polynomial",
     "PROFTYPE": "Extraction profile: 1=Gaussian",
     "NFITPOLY": "Extraction: Number of profile parameters",
@@ -87,58 +84,50 @@ GLOSSARY = {
     "SKYCHI2": "Mean \chi^2 of sky subtraction",
     "SCHI2MIN": "Minimum \chi^2 of sky subtraction",
     "SCHI2MAX": "Maximum \chi^2 of sky subtraction",
-
     # APOGEE data reduction pipeline
     "DATE-OBS": "Observation date (UTC)",
     "JD-MID": "Julian date at mid-point of visit",
     "UT-MID": "Date at mid-point of visit",
     "FLUXFLAM": "ADU to flux conversion factor [ergs/s/cm^2/A]",
     "NPAIRS": "Number of dither pairs combined",
-
     # XCSAO
     "V_REL_XCSAO": "Relative velocity from XCSAO [km/s]",
     "E_V_REL_XCSAO": "Error in Relative velocity from XCSAO [km/s]",
-    #"XCSAO_RXC": 
+    # "XCSAO_RXC":
     "TEFF_XCSAO": "Effective temperature from XCSAO [K]",
     "E_TEFF_XCSAO": "Error in effective temperature from XCSAO [K]",
     "LOGG_XCSAO": "Surface gravity from XCSAO",
     "E_LOGG_XCSAO": "Error in surface gravity from XCSAO",
     "FEH_XCSAO": "Metallicity from XCSAO",
     "E_FEH_XCSAO": "Error in metallicity from XCSAO",
-
     # Data things
     "FLUX": "Source flux",
     "E_FLUX": "Standard deviation of source flux",
     "SNR": "Mean signal-to-noise ratio",
-
     # Wavelength solution
     "CRVAL1": "Log(10) wavelength of first pixel [Angstrom]",
     "CDELT1": "Log(10) delta wavelength per pixel [Angstrom]",
     "CRPIX1": "Pixel offset from the first pixel",
     "CTYPE1": "Wavelength solution description",
     "DC-FLAG": "Wavelength solution flag",
-
     # BOSS data model keywords
-    "RUN2D":    "Spectro-2D reduction name",
+    "RUN2D": "Spectro-2D reduction name",
     "FIELDID": "Field identifier",
     "MJD": "Modified Julian Date of the observations",
     "CATALOGID": "SDSS-V catalog identifier",
     "ISPLATE": "Whether the data were taken with plates",
-
     # APOGEE data model keywords
     "FIBER": "Fiber number",
     "TELESCOPE": "Telescope name",
     "PLATE": "Plate number",
     "FIELD": "Field number",
     "APRED": "APOGEE reduction tag",
-
     # Radial velocity keys (common to any code)
     "V_BARY": "Barycentric radial velocity [km/s]",
     "V_BC": "Barycentric velocity correction applied [km/s]",
     "V_REL": "Relative velocity [km/s]",
     "E_V_REL": "Error in relative velocity [km/s]",
     "JD": "Julian date at mid-point of visit",
-
     # Doppler keys
     "TEFF_DP": "Effective temperature from DOPPLER [K]",
     "E_TEFF_DP": "Error in effective temperature from DOPPLER [K]",
@@ -164,8 +153,9 @@ for key, comment in GLOSSARY.items():
 
 
 _filter_data_products = lambda idp, filetype, telescope=None: filter(
-    lambda dp: (dp.filetype == filetype) and ((telescope is None) or (telescope == dp.kwargs["telescope"])),
-    idp
+    lambda dp: (dp.filetype == filetype)
+    and ((telescope is None) or (telescope == dp.kwargs["telescope"])),
+    idp,
 )
 
 
@@ -176,23 +166,20 @@ def create_mwm_data_product(source):
         "BOSS spectra from Apache Point Observatory",
         "BOSS spectra from Las Campanas Observatory",
         "APOGEE spectra from Apache Point Observatory",
-        "APOGEE spectra from Las Campanas Observatory"
+        "APOGEE spectra from Las Campanas Observatory",
     ]
 
     primary_hdu = create_primary_hdu(source, hdu_descriptions)
 
-
     # BOSS
     boss_south = create_empty_hdu("lco25m", "BOSS")
-    
+
     boss_north, boss_stack_args = create_boss_visits_hdu(
         list(_filter_data_products(source.data_products, "specLite")),
     )
-    
+
     boss_north_stack = create_star_hdu(
-        *boss_stack_args,
-        telescope="apo25m",
-        instrument="BOSS"
+        *boss_stack_args, telescope="apo25m", instrument="BOSS"
     )
 
     # APOGEE
@@ -207,36 +194,35 @@ def create_mwm_data_product(source):
         apogee_north_star = create_empty_hdu("apo25m", "APOGEE")
     else:
         apogee_north_star = create_star_hdu(
-            *apo25m_resampled,
-            telescope="apo25m",
-            instrument="APOGEE"
+            *apo25m_resampled, telescope="apo25m", instrument="APOGEE"
         )
 
     if lco25m_resampled is None:
         apogee_south_star = create_empty_hdu("lco25m", "APOGEE")
     else:
         apogee_south_star = create_star_hdu(
-            *lco25m_resampled,
-            telescope="lco25m",
-            instrument="APOGEE"
+            *lco25m_resampled, telescope="lco25m", instrument="APOGEE"
         )
 
-    hdulist_visits = fits.HDUList([
-        primary_hdu,
-        boss_north,
-        boss_south,
-        apogee_north,
-        apogee_south,
-    ])
+    hdulist_visits = fits.HDUList(
+        [
+            primary_hdu,
+            boss_north,
+            boss_south,
+            apogee_north,
+            apogee_south,
+        ]
+    )
 
-    
-    hdulist_stack = fits.HDUList([
-        primary_hdu,
-        boss_north_stack,
-        boss_south,
-        apogee_north_star,
-        apogee_south_star
-    ])
+    hdulist_stack = fits.HDUList(
+        [
+            primary_hdu,
+            boss_north_stack,
+            boss_south,
+            apogee_north_star,
+            apogee_south_star,
+        ]
+    )
 
     return (hdulist_visits, hdulist_stack)
 
@@ -248,12 +234,12 @@ def pixel_weighted_spectrum(flux, flux_error, continuum, bitmask):
     resampled_ivar[flux_error == 0] = 0
 
     pixel_snr_clipped = np.clip(flux * np.sqrt(resampled_ivar), 0, np.inf)
-    #estimate_snr = np.mean(pixel_snr_clipped, axis=1)
+    # estimate_snr = np.mean(pixel_snr_clipped, axis=1)
 
-    cont = np.median(continuum, axis=0) # TODO: is this right?
+    cont = np.median(continuum, axis=0)  # TODO: is this right?
     stacked_ivar = np.sum(resampled_ivar, axis=0)
     stacked_flux = np.sum(flux * resampled_ivar, axis=0) / stacked_ivar * cont
-    stacked_flux_error = np.sqrt(1.0/stacked_ivar) * cont
+    stacked_flux_error = np.sqrt(1.0 / stacked_ivar) * cont
 
     return (stacked_flux, stacked_flux_error, bitmask)
 
@@ -294,27 +280,28 @@ def create_star_hdu(
     # Data reduction pipeline keywords..
     # TODO: allow cards
 
-    cards.extend([
-        BLANK_CARD,
-        ("", "SPECTRUM SAMPLING AND STACKING"),
-        ("NRES",        meta["num_pixels_per_resolution_element"]),
-        ("FILTSIZE",    meta["median_filter_size"]),
-        ("NORMSIZE",    meta["gaussian_filter_size"]),
-        ("CONSCALE",    meta["scale_by_pseudo_continuum"]),
+    cards.extend(
+        [
+            BLANK_CARD,
+            ("", "SPECTRUM SAMPLING AND STACKING"),
+            ("NRES", meta["num_pixels_per_resolution_element"]),
+            ("FILTSIZE", meta["median_filter_size"]),
+            ("NORMSIZE", meta["gaussian_filter_size"]),
+            ("CONSCALE", meta["scale_by_pseudo_continuum"]),
+            BLANK_CARD,
+            ("", "WAVELENGTH INFORMATION (VACUUM)", None),
+            ("CRVAL1", meta["crval"], None),
+            ("CDELT1", meta["cdelt"], None),
+            ("CTYPE1", "LOG-LINEAR", None),
+            ("CRPIX1", 1, None),
+            ("DC-FLAG", 1, None),
+            ("NAXIS1", meta["num_pixels"], "Number of pixels per spectrum"),
+            BLANK_CARD,
+            ("", "SPECTRAL DATA", None),
+            FILLER_CARD,
+        ]
+    )
 
-        BLANK_CARD,
-        ("", "WAVELENGTH INFORMATION (VACUUM)", None),
-        ("CRVAL1", meta["crval"], None),
-        ("CDELT1", meta["cdelt"], None),
-        ("CTYPE1", "LOG-LINEAR", None),
-        ("CRPIX1", 1, None),
-        ("DC-FLAG", 1, None),
-        ("NAXIS1", meta["num_pixels"], "Number of pixels per spectrum"),
-        BLANK_CARD,
-        ("", "SPECTRAL DATA", None),
-        FILLER_CARD
-    ])
-    
     stacked_flux, stacked_flux_error, stacked_bitmask = pixel_weighted_spectrum(
         flux, flux_error, continuum, bitmask
     )
@@ -329,15 +316,10 @@ def create_star_hdu(
     columns = []
     for key, values in mappings:
         columns.append(
-            fits.Column(
-                name=key,
-                array=values,
-                unit=None, 
-                **fits_column_kwargs(values)
-            )
+            fits.Column(name=key, array=values, unit=None, **fits_column_kwargs(values))
         )
-    
-    hdu = fits.BinTableHDU.from_columns(columns, header=header)        
+
+    hdu = fits.BinTableHDU.from_columns(columns, header=header)
     # Add explanatory things from glossary
     for key in hdu.header.keys():
         hdu.header.comments[key] = GLOSSARY.get(key, None)
@@ -348,11 +330,13 @@ def create_star_hdu(
             del hdu.header[FILLER_CARD_KEY]
         except:
             None
-        
+
     return hdu
 
 
-def create_boss_visits_hdu(data_products: List[Union[DataProduct, str]], telescope=None, **kwargs):
+def create_boss_visits_hdu(
+    data_products: List[Union[DataProduct, str]], telescope=None, **kwargs
+):
     """
     Create a binary table HDU containing all BOSS visit spectra.
 
@@ -362,26 +346,26 @@ def create_boss_visits_hdu(data_products: List[Union[DataProduct, str]], telesco
     cards = [
         BLANK_CARD,
         ("", "METADATA"),
-        ("TELESCOP", telescope), 
+        ("TELESCOP", telescope),
         ("INSTRMNT", "BOSS"),
-    ]    
+    ]
     if len(data_products) == 0:
         return (fits.BinTableHDU(header=fits.Header(cards)), None)
 
     flux, flux_error, cont, bitmask, meta = resampled = resample_boss_visit_spectra(
-        data_products,
-        **kwargs
+        data_products, **kwargs
     )
     snr = np.nanmean(flux / flux_error, axis=1)
 
-
-    cards.extend([
-        BLANK_CARD,
-        ("",   "BOSS DATA REDUCTION PIPELINE"),
-    ])
+    cards.extend(
+        [
+            BLANK_CARD,
+            ("", "BOSS DATA REDUCTION PIPELINE"),
+        ]
+    )
     drp_keys = (
-        "V_BOSS", 
-        "VJAEGER", 
+        "V_BOSS",
+        "VJAEGER",
         "VKAIJU",
         "VCOORDIO",
         "VCALIBS",
@@ -392,11 +376,20 @@ def create_boss_visits_hdu(data_products: List[Union[DataProduct, str]], telesco
         "VERSCOMB",
         "VERSLOG",
         "VERSFLAT",
-        "DIDFLUSH", "CARTID", 
-        "PSFSKY", "PREJECT", "LOWREJ", "HIGHREJ", "SCATPOLY", "PROFTYPE", "NFITPOLY",
-        "SKYCHI2", "SCHI2MIN", "SCHI2MAX",
+        "DIDFLUSH",
+        "CARTID",
+        "PSFSKY",
+        "PREJECT",
+        "LOWREJ",
+        "HIGHREJ",
+        "SCATPOLY",
+        "PROFTYPE",
+        "NFITPOLY",
+        "SKYCHI2",
+        "SCHI2MIN",
+        "SCHI2MAX",
         ("HELIO_RV", "V_HELIO"),
-        "RDNOISE0"
+        "RDNOISE0",
     )
 
     with fits.open(data_products[0].path) as image:
@@ -412,30 +405,27 @@ def create_boss_visits_hdu(data_products: List[Union[DataProduct, str]], telesco
                 log.warning(f"No {old_key} header of HDU 0 in {data_products[0].path}")
                 value = comment = None
 
-            cards.append((
-                new_key, 
-                value, 
-                GLOSSARY.get(new_key, comment)
-            ))
+            cards.append((new_key, value, GLOSSARY.get(new_key, comment)))
 
-    cards.extend([
-        BLANK_CARD,
-        ("", "SPECTRUM SAMPLING AND STACKING"),
-        ("NRES",        meta["num_pixels_per_resolution_element"]),
-        ("FILTSIZE",    meta["median_filter_size"]),
-        ("NORMSIZE",    meta["gaussian_filter_size"]),
-        ("CONSCALE",    meta["scale_by_pseudo_continuum"]),
-
-        BLANK_CARD,
-        ("", "WAVELENGTH INFORMATION (VACUUM)", None),
-        ("CRVAL1", meta["crval"], None),
-        ("CDELT1", meta["cdelt"], None),
-        ("CTYPE1", "LOG-LINEAR", None),
-        ("CRPIX1", 1, None),
-        ("DC-FLAG", 1, None),
-        ("NAXIS1", meta["num_pixels"], "Number of pixels per spectrum"),
-        FILLER_CARD
-    ])
+    cards.extend(
+        [
+            BLANK_CARD,
+            ("", "SPECTRUM SAMPLING AND STACKING"),
+            ("NRES", meta["num_pixels_per_resolution_element"]),
+            ("FILTSIZE", meta["median_filter_size"]),
+            ("NORMSIZE", meta["gaussian_filter_size"]),
+            ("CONSCALE", meta["scale_by_pseudo_continuum"]),
+            BLANK_CARD,
+            ("", "WAVELENGTH INFORMATION (VACUUM)", None),
+            ("CRVAL1", meta["crval"], None),
+            ("CDELT1", meta["cdelt"], None),
+            ("CTYPE1", "LOG-LINEAR", None),
+            ("CRPIX1", 1, None),
+            ("DC-FLAG", 1, None),
+            ("NAXIS1", meta["num_pixels"], "Number of pixels per spectrum"),
+            FILLER_CARD,
+        ]
+    )
 
     header = fits.Header(cards)
     mappings = [
@@ -445,10 +435,12 @@ def create_boss_visits_hdu(data_products: List[Union[DataProduct, str]], telesco
         ("FLUX_ERROR", flux_error),
         ("BITMASK", bitmask),
         ("SNR", snr),
-
-        ("INPUT DATA MODEL KEYWORDS", None),   
+        ("INPUT DATA MODEL KEYWORDS", None),
         # https://stackoverflow.com/questions/6076270/lambda-function-in-list-comprehensions
-        *[(k.upper(), partial(lambda dp, image, _k: dp.kwargs[_k], _k=k)) for k in data_products[0].kwargs.keys()],
+        *[
+            (k.upper(), partial(lambda dp, image, _k: dp.kwargs[_k], _k=k))
+            for k in data_products[0].kwargs.keys()
+        ],
         ("OBSERVING CONDITIONS", None),
         ("ALT", lambda dp, image: image[0].header["ALT"]),
         ("AZ", lambda dp, image: image[0].header["AZ"]),
@@ -462,15 +454,23 @@ def create_boss_visits_hdu(data_products: List[Union[DataProduct, str]], telesco
         ("GUSTS", lambda dp, image: image[0].header["GUSTS"]),
         ("WINDD", lambda dp, image: image[0].header["WINDD"]),
         ("WINDS", lambda dp, image: image[0].header["WINDS"]),
-        ("MOON_DIST_MEAN", lambda dp, image: np.mean(list(map(float, image[2].data["MOON_DIST"][0][0].split(" "))))),
-        ("MOON_PHASE_MEAN", lambda dp, image: np.mean(list(map(float, image[2].data["MOON_PHASE"][0][0].split(" "))))),
+        (
+            "MOON_DIST_MEAN",
+            lambda dp, image: np.mean(
+                list(map(float, image[2].data["MOON_DIST"][0][0].split(" ")))
+            ),
+        ),
+        (
+            "MOON_PHASE_MEAN",
+            lambda dp, image: np.mean(
+                list(map(float, image[2].data["MOON_PHASE"][0][0].split(" ")))
+            ),
+        ),
         ("EXPTIME", lambda dp, image: image[2].data["EXPTIME"][0]),
         ("NEXP", lambda dp, image: image[2].data["NEXP"][0]),
         ("NGUIDE", lambda dp, image: image[0].header["NGUIDE"]),
         ("TAI-BEG", lambda dp, image: image[0].header["TAI-BEG"]),
         ("TAI-END", lambda dp, image: image[0].header["TAI-END"]),
-
-
         ("RADIAL VELOCITIES (XCSAO)", None),
         ("V_REL_XCSAO", lambda dp, image: image[2].data["XCSAO_RV"][0]),
         ("E_V_REL_XCSAO", lambda dp, image: image[2].data["XCSAO_ERV"][0]),
@@ -481,16 +481,14 @@ def create_boss_visits_hdu(data_products: List[Union[DataProduct, str]], telesco
         ("E_LOGG_XCSAO", lambda dp, image: image[2].data["XCSAO_ELOGG"][0]),
         ("FEH_XCSAO", lambda dp, image: image[2].data["XCSAO_FEH"][0]),
         ("E_FEH_XCSAO", lambda dp, image: image[2].data["XCSAO_EFEH"][0]),
-
         ("SPECTRUM SAMPLING AND STACKING", None),
-        ("V_SHIFT",     meta["v_shift"]),
+        ("V_SHIFT", meta["v_shift"]),
         # TODO: have some criteria for whether we use all in the stack or not
-        ("IN_STACK",    np.ones(len(data_products), dtype=bool)),
-        
+        ("IN_STACK", np.ones(len(data_products), dtype=bool)),
     ]
 
     table_category_headers = []
-    values = {} 
+    values = {}
     for j, data_product in enumerate(data_products):
         with fits.open(data_product.path) as image:
             for i, (key, function) in enumerate(mappings):
@@ -510,23 +508,24 @@ def create_boss_visits_hdu(data_products: List[Union[DataProduct, str]], telesco
 
     columns = []
     for key, function in mappings:
-        if function is None: continue
+        if function is None:
+            continue
         columns.append(
             fits.Column(
                 name=key,
                 array=values[key],
-                unit=None, 
-                **fits_column_kwargs(values[key])
+                unit=None,
+                **fits_column_kwargs(values[key]),
             )
         )
-    
+
     hdu = fits.BinTableHDU.from_columns(columns, header=header)
     for dtype_name, category_header in table_category_headers:
         index = 1 + hdu.data.dtype.names.index(dtype_name)
         key = f"TTYPE{index}"
         hdu.header.insert(key, BLANK_CARD)
         hdu.header.insert(key, ("", category_header))
-        
+
     # Add explanatory things from glossary
     for key in hdu.header.keys():
         hdu.header.comments[key] = GLOSSARY.get(key, None)
@@ -537,16 +536,14 @@ def create_boss_visits_hdu(data_products: List[Union[DataProduct, str]], telesco
             del hdu.header[FILLER_CARD_KEY]
         except:
             None
-        
+
     return (hdu, resampled)
 
 
-
-
 def create_apogee_visits_hdu(
-    data_products: List[Union[DataProduct, str]], 
+    data_products: List[Union[DataProduct, str]],
     telescope: Optional[str] = None,
-    **kwargs
+    **kwargs,
 ):
     """
     Create a binary table HDU containing all given APOGEE visit spectra.
@@ -554,36 +551,35 @@ def create_apogee_visits_hdu(
     :param data_products:
         A list of ApVisit data products.
     """
-    
+
     cards = [
         BLANK_CARD,
         ("", "METADATA"),
-        ("TELESCOP", telescope), 
+        ("TELESCOP", telescope),
         ("INSTRMNT", "APOGEE"),
     ]
 
     if len(data_products) == 0:
         return (fits.BinTableHDU(header=fits.Header(cards)), None)
-    
+
     # First get the velocity information from the APOGEE data reduction pipeline database.
-    velocity_meta = list_to_dict(tuple(map(get_apogee_visit_radial_velocity, data_products)))
+    velocity_meta = list_to_dict(
+        tuple(map(get_apogee_visit_radial_velocity, data_products))
+    )
 
     flux, flux_error, cont, bitmask, meta = resampled = resample_apogee_visit_spectra(
-        data_products,
-        radial_velocities=velocity_meta["V_REL"],
-        **kwargs
+        data_products, radial_velocities=velocity_meta["V_REL"], **kwargs
     )
 
     snr = np.nanmean(flux / flux_error, axis=1)
-    
 
-    cards.extend([
-        BLANK_CARD,
-        ("",   "APOGEE DATA REDUCTION PIPELINE"),
-    ])
-    drp_keys = (
-        "V_APRED", 
+    cards.extend(
+        [
+            BLANK_CARD,
+            ("", "APOGEE DATA REDUCTION PIPELINE"),
+        ]
     )
+    drp_keys = ("V_APRED",)
     # MEANFIB and SIGFIB are in ApStar, but we are using ApVisits..
 
     with fits.open(data_products[0].path) as image:
@@ -599,41 +595,42 @@ def create_apogee_visits_hdu(
                 log.warning(f"No {old_key} header of HDU 0 in {data_products[0].path}")
                 value = comment = None
 
-            cards.append((
-                new_key, 
-                value, 
-                GLOSSARY.get(new_key, comment)
-            ))
+            cards.append((new_key, value, GLOSSARY.get(new_key, comment)))
 
-    cards.extend([
-        BLANK_CARD,
-        ("", "SPECTRUM SAMPLING AND STACKING"),
-        ("NRES",        " ".join(map(str, meta["num_pixels_per_resolution_element"]))),
-        ("FILTSIZE",    meta["median_filter_size"]),
-        ("NORMSIZE",    meta["gaussian_filter_size"]),
-        ("CONSCALE",    meta["scale_by_pseudo_continuum"]),
-
-        # Since DOPPLER uses the same Cannon model for the final fit of all individual visits,
-        # we include it here instead of repeating the information many times in the data table.
-        BLANK_CARD,
-        ("", "DOPPLER STELLAR PARAMETERS", None),
-        *[(f"{k}_D", velocity_meta[f"{k}_DOPPLER"][0]) for k in (
-            "TEFF", "E_TEFF",
-            "LOGG", "E_LOGG",
-            "FEH", "E_FEH",
-        )],
-
-        BLANK_CARD,
-        ("", "WAVELENGTH INFORMATION (VACUUM)", None),
-        ("CRVAL1", meta["crval"], None),
-        ("CDELT1", meta["cdelt"], None),
-        ("CTYPE1", "LOG-LINEAR", None),
-        ("CRPIX1", 1, None),
-        ("DC-FLAG", 1, None),
-        ("NAXIS1", meta["num_pixels"], "Number of pixels per spectrum"),
-                        
-        FILLER_CARD
-    ])
+    cards.extend(
+        [
+            BLANK_CARD,
+            ("", "SPECTRUM SAMPLING AND STACKING"),
+            ("NRES", " ".join(map(str, meta["num_pixels_per_resolution_element"]))),
+            ("FILTSIZE", meta["median_filter_size"]),
+            ("NORMSIZE", meta["gaussian_filter_size"]),
+            ("CONSCALE", meta["scale_by_pseudo_continuum"]),
+            # Since DOPPLER uses the same Cannon model for the final fit of all individual visits,
+            # we include it here instead of repeating the information many times in the data table.
+            BLANK_CARD,
+            ("", "DOPPLER STELLAR PARAMETERS", None),
+            *[
+                (f"{k}_D", velocity_meta[f"{k}_DOPPLER"][0])
+                for k in (
+                    "TEFF",
+                    "E_TEFF",
+                    "LOGG",
+                    "E_LOGG",
+                    "FEH",
+                    "E_FEH",
+                )
+            ],
+            BLANK_CARD,
+            ("", "WAVELENGTH INFORMATION (VACUUM)", None),
+            ("CRVAL1", meta["crval"], None),
+            ("CDELT1", meta["cdelt"], None),
+            ("CTYPE1", "LOG-LINEAR", None),
+            ("CRPIX1", 1, None),
+            ("DC-FLAG", 1, None),
+            ("NAXIS1", meta["num_pixels"], "Number of pixels per spectrum"),
+            FILLER_CARD,
+        ]
+    )
 
     header = fits.Header(cards)
 
@@ -644,48 +641,58 @@ def create_apogee_visits_hdu(
         ("FLUX_ERROR", flux_error),
         ("BITMASK", bitmask),
         ("SNR", snr),
-
-        ("INPUT DATA MODEL KEYWORDS", None),   
+        ("INPUT DATA MODEL KEYWORDS", None),
         # https://stackoverflow.com/questions/6076270/lambda-function-in-list-comprehensions
-        *[(k.upper(), partial(lambda dp, image, _k: dp.kwargs[_k], _k=k)) for k in data_products[0].kwargs.keys()],
+        *[
+            (k.upper(), partial(lambda dp, image, _k: dp.kwargs[_k], _k=k))
+            for k in data_products[0].kwargs.keys()
+        ],
         ("OBSERVING CONDITIONS", None),
-        #TODO: DATE_OBS? OBS_DATE? remove entirely since we have MJD?
+        # TODO: DATE_OBS? OBS_DATE? remove entirely since we have MJD?
         # DATE-OBS looks to be start of observation, since it is different from UT-MID
-        ("DATE-OBS", lambda dp, image: image[0].header["DATE-OBS"]), 
+        ("DATE-OBS", lambda dp, image: image[0].header["DATE-OBS"]),
         ("EXPTIME", lambda dp, image: image[0].header["EXPTIME"]),
         # TODO: homogenise with TAI-BEG, TAI-END with BOSS?
-        #("JD-MID", lambda dp, image: image[0].header["JD-MID"]),
-        #("UT-MID", lambda dp, image: image[0].header["UT-MID"]),
+        # ("JD-MID", lambda dp, image: image[0].header["JD-MID"]),
+        # ("UT-MID", lambda dp, image: image[0].header["UT-MID"]),
         ("FLUXFLAM", lambda dp, image: image[0].header["FLUXFLAM"]),
         ("NPAIRS", lambda dp, image: image[0].header["NPAIRS"]),
         # TODO Is NCOMBINE same as NEXP for BOSS? --> make consistent naming?
         ("NEXP", lambda dp, image: image[0].header["NCOMBINE"]),
-
         ("SPECTRUM SAMPLING AND STACKING", None),
-        ("V_SHIFT",     meta["v_shift"]),
+        ("V_SHIFT", meta["v_shift"]),
         # TODO: have some criteria for whether we use all in the stack or not
-        ("IN_STACK",    np.ones(len(data_products), dtype=bool)),
-
+        ("IN_STACK", np.ones(len(data_products), dtype=bool)),
         ("RADIAL VELOCITIES (DOPPLER)", None),
-        *((k, velocity_meta[k]) for k in (
-            "JD",
-            "V_BARY", "V_REL", "E_V_REL", "V_BC",  
-            "RCHISQ",
-        )),
-        
+        *(
+            (k, velocity_meta[k])
+            for k in (
+                "JD",
+                "V_BARY",
+                "V_REL",
+                "E_V_REL",
+                "V_BC",
+                "RCHISQ",
+            )
+        ),
         ("RADIAL VELOCITIES (CROSS-CORRELATION)", None),
-        *((k, velocity_meta[k]) for k in (
-            "V_BARY_XCORR", "V_REL_XCORR", "E_V_REL_XCORR",
-            "N_RV_COMPONENTS", "RV_COMPONENTS",
-        )),
-
+        *(
+            (k, velocity_meta[k])
+            for k in (
+                "V_BARY_XCORR",
+                "V_REL_XCORR",
+                "E_V_REL_XCORR",
+                "N_RV_COMPONENTS",
+                "RV_COMPONENTS",
+            )
+        ),
         ("DATABASE PRIMARY KEYS", None),
         ("VISIT_PK", velocity_meta["VISIT_PK"]),
         ("RV_VISIT_PK", velocity_meta["RV_VISIT_PK"]),
     ]
 
     table_category_headers = []
-    values = {} 
+    values = {}
     for j, data_product in enumerate(data_products):
         with fits.open(data_product.path) as image:
             for i, (key, function) in enumerate(mappings):
@@ -704,7 +711,7 @@ def create_apogee_visits_hdu(
                         values[key] = function
 
     # Special cases of arrays
-    for key in ("RV_COMPONENTS", ):
+    for key in ("RV_COMPONENTS",):
         try:
             values[key] = np.array(values[key])
         except:
@@ -712,13 +719,14 @@ def create_apogee_visits_hdu(
 
     columns = []
     for key, function in mappings:
-        if function is None: continue
+        if function is None:
+            continue
         columns.append(
             fits.Column(
                 name=key,
                 array=values[key],
-                unit=None, 
-                **fits_column_kwargs(values[key])
+                unit=None,
+                **fits_column_kwargs(values[key]),
             )
         )
 
@@ -728,7 +736,7 @@ def create_apogee_visits_hdu(
         key = f"TTYPE{index}"
         hdu.header.insert(key, BLANK_CARD)
         hdu.header.insert(key, ("", category_header))
-        
+
     # Add explanatory things from glossary
     for key in hdu.header.keys():
         hdu.header.comments[key] = GLOSSARY.get(key, None)
@@ -746,7 +754,7 @@ def create_apogee_visits_hdu(
 def get_catalog_identifier(source: Union[Source, int]):
     """
     Return a catalog identifer given either a source, or catalog identifier (as string or int).
-    
+
     :param source:
         The astronomical source, or the SDSS-V catalog identifier.
     """
@@ -764,20 +772,17 @@ def get_cartons_and_programs(source: Union[Source, int]):
         A two-length tuple containing a list of carton names (e.g., `mwm_snc_250pc`)
         and a list of program names (e.g., `mwm_snc`).
     """
-    
+
     catalogid = get_catalog_identifier(source)
     from peewee import fn
     from sdssdb.peewee.sdss5db import database as sdss5_database
-    sdss5_database.set_profile("operations") # TODO: HOW CAN WE SET THIS AS DEFAULT!?!
 
-    from sdssdb.peewee.sdss5db.targetdb import (Target, CartonToTarget, Carton)
+    sdss5_database.set_profile("operations")  # TODO: HOW CAN WE SET THIS AS DEFAULT!?!
+
+    from sdssdb.peewee.sdss5db.targetdb import Target, CartonToTarget, Carton
 
     sq = (
-        Carton.select(
-            Target.catalogid, 
-            Carton.carton,
-            Carton.program
-        )
+        Carton.select(Target.catalogid, Carton.carton, Carton.program)
         .distinct()
         .join(CartonToTarget)
         .join(Target)
@@ -787,7 +792,7 @@ def get_cartons_and_programs(source: Union[Source, int]):
 
     q_cartons = (
         Target.select(
-            Target.catalogid, 
+            Target.catalogid,
             fn.STRING_AGG(sq.c.carton, ",").alias("cartons"),
             fn.STRING_AGG(sq.c.program, ",").alias("programs"),
         )
@@ -808,15 +813,24 @@ def get_auxiliary_source_data(source: Union[Source, int]):
     """
     from peewee import Alias, JOIN
     from sdssdb.peewee.sdss5db import database as sdss5_database
-    sdss5_database.set_profile("operations") # TODO: HOW CAN WE SET THIS AS DEFAULT!?!
 
-    from sdssdb.peewee.sdss5db.catalogdb import (Catalog, CatalogToTIC_v8, TIC_v8 as TIC, TwoMassPSC)
+    sdss5_database.set_profile("operations")  # TODO: HOW CAN WE SET THIS AS DEFAULT!?!
+
+    from sdssdb.peewee.sdss5db.catalogdb import (
+        Catalog,
+        CatalogToTIC_v8,
+        TIC_v8 as TIC,
+        TwoMassPSC,
+    )
 
     try:
         from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR3 as Gaia
     except ImportError:
         from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR2 as Gaia
-        log.warning(f"Gaia DR3 not yet available in sdssdb.peewee.sdss5db.catalogdb. Using Gaia DR2.")
+
+        log.warning(
+            f"Gaia DR3 not yet available in sdssdb.peewee.sdss5db.catalogdb. Using Gaia DR2."
+        )
 
     catalogid = get_catalog_identifier(source)
     tic_dr = TIC.__name__.split("_")[-1]
@@ -824,50 +838,74 @@ def get_auxiliary_source_data(source: Union[Source, int]):
 
     ignore = lambda c: c is None or isinstance(c, str)
 
-    # Define the columns and associated comments.    
+    # Define the columns and associated comments.
     field_descriptors = [
         BLANK_CARD,
-        ("",            "IDENTIFIERS",                  None),
-        ("SDSS_ID",     Catalog.catalogid,              f"SDSS-V catalog identifier"),
-        ("TIC_ID",      TIC.id.alias("tic_id"),         f"TESS Input Catalog ({tic_dr}) identifier"),
-        ("GAIA_ID",     Gaia.source_id,                 f"Gaia {gaia_dr} source identifier"),
+        ("", "IDENTIFIERS", None),
+        ("SDSS_ID", Catalog.catalogid, f"SDSS-V catalog identifier"),
+        ("TIC_ID", TIC.id.alias("tic_id"), f"TESS Input Catalog ({tic_dr}) identifier"),
+        ("GAIA_ID", Gaia.source_id, f"Gaia {gaia_dr} source identifier"),
         BLANK_CARD,
-        ("",            "ASTROMETRY",                   None),
-        ("RA",          Catalog.ra,                     "SDSS-V catalog right ascension (J2000) [deg]"),
-        ("DEC",         Catalog.dec,                    "SDSS-V catalog declination (J2000) [deg]"),
-        ("GAIA_RA",     Gaia.ra,                        f"Gaia {gaia_dr} right ascension [deg]"),
-        ("GAIA_DEC",    Gaia.dec,                       f"Gaia {gaia_dr} declination [deg]"),        
-        ("PLX",         Gaia.parallax,                  f"Gaia {gaia_dr} parallax [mas]"),
-        ("E_PLX",       Gaia.parallax_error,            f"Gaia {gaia_dr} parallax error [mas]"),
-        ("PMRA",        Gaia.pmra,                      f"Gaia {gaia_dr} proper motion in RA [mas/yr]"),
-        ("E_PMRA",      Gaia.pmra_error,                f"Gaia {gaia_dr} proper motion in RA error [mas/yr]"),
-        ("PMDE",        Gaia.pmdec,                     f"Gaia {gaia_dr} proper motion in DEC [mas/yr]"),
-        ("E_PMDE",      Gaia.pmdec_error,               f"Gaia {gaia_dr} proper motion in DEC error [mas/yr]"),
-        ("VRAD",        Gaia.radial_velocity,           f"Gaia {gaia_dr} radial velocity [km/s]"),
-        ("E_VRAD",      Gaia.radial_velocity_error,     f"Gaia {gaia_dr} radial velocity error [km/s]"),
+        ("", "ASTROMETRY", None),
+        ("RA", Catalog.ra, "SDSS-V catalog right ascension (J2000) [deg]"),
+        ("DEC", Catalog.dec, "SDSS-V catalog declination (J2000) [deg]"),
+        ("GAIA_RA", Gaia.ra, f"Gaia {gaia_dr} right ascension [deg]"),
+        ("GAIA_DEC", Gaia.dec, f"Gaia {gaia_dr} declination [deg]"),
+        ("PLX", Gaia.parallax, f"Gaia {gaia_dr} parallax [mas]"),
+        ("E_PLX", Gaia.parallax_error, f"Gaia {gaia_dr} parallax error [mas]"),
+        ("PMRA", Gaia.pmra, f"Gaia {gaia_dr} proper motion in RA [mas/yr]"),
+        (
+            "E_PMRA",
+            Gaia.pmra_error,
+            f"Gaia {gaia_dr} proper motion in RA error [mas/yr]",
+        ),
+        ("PMDE", Gaia.pmdec, f"Gaia {gaia_dr} proper motion in DEC [mas/yr]"),
+        (
+            "E_PMDE",
+            Gaia.pmdec_error,
+            f"Gaia {gaia_dr} proper motion in DEC error [mas/yr]",
+        ),
+        ("VRAD", Gaia.radial_velocity, f"Gaia {gaia_dr} radial velocity [km/s]"),
+        (
+            "E_VRAD",
+            Gaia.radial_velocity_error,
+            f"Gaia {gaia_dr} radial velocity error [km/s]",
+        ),
         BLANK_CARD,
-        ("",            "PHOTOMETRY",                   None),
-        ("G_MAG",       Gaia.phot_g_mean_mag,           f"Gaia {gaia_dr} mean apparent G magnitude [mag]"),
-        ("BP_MAG",      Gaia.phot_bp_mean_mag,          f"Gaia {gaia_dr} mean apparent BP magnitude [mag]"),
-        ("RP_MAG",      Gaia.phot_rp_mean_mag,          f"Gaia {gaia_dr} mean apparent RP magnitude [mag]"),
-        ("J_MAG",       TwoMassPSC.j_m,                 f"2MASS mean apparent J magnitude [mag]"),
-        ("E_J_MAG",     TwoMassPSC.j_cmsig,             f"2MASS mean apparent J magnitude error [mag]"),
-        ("H_MAG",       TwoMassPSC.h_m,                 f"2MASS mean apparent H magnitude [mag]"),        
-        ("E_H_MAG",     TwoMassPSC.h_cmsig,             f"2MASS mean apparent H magnitude error [mag]"),
-        ("K_MAG",       TwoMassPSC.k_m,                 f"2MASS mean apparent K magnitude [mag]"),
-        ("E_K_MAG",     TwoMassPSC.k_cmsig,             f"2MASS mean apparent K magnitude error [mag]"),
+        ("", "PHOTOMETRY", None),
+        (
+            "G_MAG",
+            Gaia.phot_g_mean_mag,
+            f"Gaia {gaia_dr} mean apparent G magnitude [mag]",
+        ),
+        (
+            "BP_MAG",
+            Gaia.phot_bp_mean_mag,
+            f"Gaia {gaia_dr} mean apparent BP magnitude [mag]",
+        ),
+        (
+            "RP_MAG",
+            Gaia.phot_rp_mean_mag,
+            f"Gaia {gaia_dr} mean apparent RP magnitude [mag]",
+        ),
+        ("J_MAG", TwoMassPSC.j_m, f"2MASS mean apparent J magnitude [mag]"),
+        ("E_J_MAG", TwoMassPSC.j_cmsig, f"2MASS mean apparent J magnitude error [mag]"),
+        ("H_MAG", TwoMassPSC.h_m, f"2MASS mean apparent H magnitude [mag]"),
+        ("E_H_MAG", TwoMassPSC.h_cmsig, f"2MASS mean apparent H magnitude error [mag]"),
+        ("K_MAG", TwoMassPSC.k_m, f"2MASS mean apparent K magnitude [mag]"),
+        ("E_K_MAG", TwoMassPSC.k_cmsig, f"2MASS mean apparent K magnitude error [mag]"),
     ]
 
     q = (
         Catalog.select(*[c for k, c, comment in field_descriptors if not ignore(c)])
-               .distinct(Catalog.catalogid)
-               .join(CatalogToTIC_v8, JOIN.LEFT_OUTER)
-               .join(TIC)
-               .join(Gaia, JOIN.LEFT_OUTER)
-               .switch(TIC)
-               .join(TwoMassPSC, JOIN.LEFT_OUTER)
-               .where(Catalog.catalogid == catalogid)
-               .dicts()
+        .distinct(Catalog.catalogid)
+        .join(CatalogToTIC_v8, JOIN.LEFT_OUTER)
+        .join(TIC)
+        .join(Gaia, JOIN.LEFT_OUTER)
+        .switch(TIC)
+        .join(TwoMassPSC, JOIN.LEFT_OUTER)
+        .where(Catalog.catalogid == catalogid)
+        .dicts()
     )
     row = q.first()
 
@@ -877,32 +915,38 @@ def get_auxiliary_source_data(source: Union[Source, int]):
         if ignore(field):
             data.append((key, field, comment))
         else:
-            data.append((
-                key,
-                row[field._alias if isinstance(field, Alias) else field.name],
-                comment
-            ))
+            data.append(
+                (
+                    key,
+                    row[field._alias if isinstance(field, Alias) else field.name],
+                    comment,
+                )
+            )
 
     # Add carton and target information
     cartons, programs = get_cartons_and_programs(source)
-    data.extend([
-        BLANK_CARD,
-        ("",            "TARGETING",        None),
-        ("CARTONS",     ",".join(cartons), f"Comma-separated SDSS-V program names"),
-        ("PROGRAMS",    ",".join(programs), f"Comma-separated SDSS-V carton names"),
-        ("MAPPERS",     ",".join([p.split("_")[0] for p in programs]), f"Comma-separated SDSS-V Mappers")
-    ])
+    data.extend(
+        [
+            BLANK_CARD,
+            ("", "TARGETING", None),
+            ("CARTONS", ",".join(cartons), f"Comma-separated SDSS-V program names"),
+            ("PROGRAMS", ",".join(programs), f"Comma-separated SDSS-V carton names"),
+            (
+                "MAPPERS",
+                ",".join([p.split("_")[0] for p in programs]),
+                f"Comma-separated SDSS-V Mappers",
+            ),
+        ]
+    )
     return data
 
 
-
 def create_primary_hdu(
-    source: Union[Source, int],
-    hdu_descriptions: Optional[List[str]] = None
+    source: Union[Source, int], hdu_descriptions: Optional[List[str]] = None
 ) -> fits.PrimaryHDU:
     """
     Create primary HDU (headers only) for a Milky Way Mapper data product, given some source.
-    
+
     :param source:
         The astronomical source, or the SDSS-V catalog identifier.
 
@@ -910,7 +954,7 @@ def create_primary_hdu(
         A list of strings describing all HDUs.
     """
     catalogid = get_catalog_identifier(source)
-    
+
     # Sky position.
     ra, dec = get_sky_position(catalogid)
     nside = 128
@@ -920,28 +964,30 @@ def create_primary_hdu(
     # Even %Y-%m-%d %H:%M:%S is one character too long! ARGH!
     datetime_fmt = "%y-%m-%d %H:%M:%S"
     created = datetime.datetime.utcnow().strftime(datetime_fmt)
-    
+
     cards = [
         BLANK_CARD,
-        ("",        "METADATA",     None),
-        ("ASTRA",   astra_version,  f"Astra version"),
-        ("CREATED", created,        f"File creation time (UTC {datetime_fmt})"),
-        ("HEALPIX", healpix,        f"Healpix location ({nside} sides)")
+        ("", "METADATA", None),
+        ("ASTRA", astra_version, f"Astra version"),
+        ("CREATED", created, f"File creation time (UTC {datetime_fmt})"),
+        ("HEALPIX", healpix, f"Healpix location ({nside} sides)"),
     ]
     # Get photometry and other auxiliary data.
     cards.extend(get_auxiliary_source_data(source))
 
     if hdu_descriptions is not None:
-        cards.extend([
-            BLANK_CARD,
-            ("",        "HDU DESCRIPTIONS",     None),
-            *[(f"COMMENT", f"HDU {i}: {desc}", None) for i, desc in enumerate(hdu_descriptions)]
-        ])
-        
+        cards.extend(
+            [
+                BLANK_CARD,
+                ("", "HDU DESCRIPTIONS", None),
+                *[
+                    (f"COMMENT", f"HDU {i}: {desc}", None)
+                    for i, desc in enumerate(hdu_descriptions)
+                ],
+            ]
+        )
+
     return fits.PrimaryHDU(header=fits.Header(cards))
-
-
-
 
 
 def resample_visit_spectra(
@@ -971,12 +1017,12 @@ def resample_visit_spectra(
 
     :param median_filter_size: [optional]
         The filter width (in pixels) to use for any median filters (default: 501).
-    
+
     :param median_filter_mode: [optional]
         The mode to use for any median filters (default: reflect).
 
     :param gaussian_filter_size: [optional]
-        The filter size (in pixels) to use for any gaussian filter applied.    
+        The filter size (in pixels) to use for any gaussian filter applied.
     """
 
     try:
@@ -985,45 +1031,59 @@ def resample_visit_spectra(
         n_chips = None
     finally:
         num_pixels_per_resolution_element = flatten(num_pixels_per_resolution_element)
-    
+
     n_visits, n_pixels = shape = (len(wavelength), len(resampled_wavelength))
 
     resampled_flux = np.zeros(shape)
     resampled_flux_error = np.zeros(shape)
     resampled_pseudo_cont = np.ones(shape)
 
-    visit_and_chip = lambda f, i, j: None if f is None else (f[i][j] if n_chips is not None else f[i])
-    smooth_filter = lambda f: gaussian_filter(median_filter(f, [median_filter_size], mode=median_filter_mode), gaussian_filter_size)
+    visit_and_chip = (
+        lambda f, i, j: None
+        if f is None
+        else (f[i][j] if n_chips is not None else f[i])
+    )
+    smooth_filter = lambda f: gaussian_filter(
+        median_filter(f, [median_filter_size], mode=median_filter_mode),
+        gaussian_filter_size,
+    )
 
     if radial_velocity is None:
         radial_velocity = np.zeros(n_visits)
 
     if len(radial_velocity) != n_visits:
-        raise ValueError(f"Unexpected number of radial velocities ({len(radial_velocity)} != {n_visits})")
+        raise ValueError(
+            f"Unexpected number of radial velocities ({len(radial_velocity)} != {n_visits})"
+        )
 
     for i, v_rad in enumerate(radial_velocity):
         for j, n_res in enumerate(num_pixels_per_resolution_element):
-            
+
             chip_wavelength = visit_and_chip(wavelength, i, j)
             chip_flux = visit_and_chip(flux, i, j)
             chip_flux_error = visit_and_chip(flux_error, i, j)
-            
-            if bad_pixel_mask is not None and use_smooth_filtered_spectrum_for_bad_pixels:
+
+            if (
+                bad_pixel_mask is not None
+                and use_smooth_filtered_spectrum_for_bad_pixels
+            ):
                 chip_bad_pixel_mask = visit_and_chip(bad_pixel_mask, i, j)
                 if any(chip_bad_pixel_mask):
-                    chip_flux[chip_bad_pixel_mask] = smooth_filter(chip_flux)[chip_bad_pixel_mask]
+                    chip_flux[chip_bad_pixel_mask] = smooth_filter(chip_flux)[
+                        chip_bad_pixel_mask
+                    ]
                     if chip_flux_error is not None:
-                        chip_flux_error[chip_bad_pixel_mask] = smooth_filter(chip_flux_error)[chip_bad_pixel_mask]
+                        chip_flux_error[chip_bad_pixel_mask] = smooth_filter(
+                            chip_flux_error
+                        )[chip_bad_pixel_mask]
 
-            pixel = wave_to_pixel(resampled_wavelength * (1 + v_rad/C_KM_S), chip_wavelength)
-            finite, = np.where(np.isfinite(pixel))
+            pixel = wave_to_pixel(
+                resampled_wavelength * (1 + v_rad / C_KM_S), chip_wavelength
+            )
+            (finite,) = np.where(np.isfinite(pixel))
 
-            (resampled_chip_flux, resampled_chip_flux_error), = sincint(
-                pixel[finite], 
-                n_res,
-                [
-                    [chip_flux, chip_flux_error]
-                ]
+            ((resampled_chip_flux, resampled_chip_flux_error),) = sincint(
+                pixel[finite], n_res, [[chip_flux, chip_flux_error]]
             )
 
             resampled_flux[i, finite] = resampled_chip_flux
@@ -1031,7 +1091,7 @@ def resample_visit_spectra(
 
             # Scale by continuum?
             if scale_by_pseudo_continuum:
-                # TODO: If there are gaps in `finite` then this will cause issues because median filter and gaussian filter 
+                # TODO: If there are gaps in `finite` then this will cause issues because median filter and gaussian filter
                 #       don't receive the x array
                 # TODO: Take a closer look at this process.
                 resampled_pseudo_cont[i, finite] = smooth_filter(resampled_chip_flux)
@@ -1040,7 +1100,7 @@ def resample_visit_spectra(
                 resampled_flux_error[i, finite] /= resampled_pseudo_cont[i, finite]
 
     # TODO: return flux ivar instead?
-    
+
     return (
         resampled_flux,
         resampled_flux_error,
@@ -1049,21 +1109,20 @@ def resample_visit_spectra(
 
 
 def get_boss_radial_velocity(
-    image: fits.hdu.hdulist.HDUList, 
-    visit: Union[DataProduct, str]
+    image: fits.hdu.hdulist.HDUList, visit: Union[DataProduct, str]
 ):
     """
-    Return the (current) best-estimate of the radial velocity (in km/s) of this 
-    visit spectrum from the image headers. 
-    
+    Return the (current) best-estimate of the radial velocity (in km/s) of this
+    visit spectrum from the image headers.
+
     This defaults to using the `XCSAO_RV` radial velocity.
 
     :param image:
         The FITS image of the BOSS SpecLite data product.
-    
+
     :param visit:
         The supplied visit.
-    """    
+    """
     return image[2].data["XCSAO_RV"][0]
 
 
@@ -1078,46 +1137,46 @@ def resample_boss_visit_spectra(
     median_filter_size: int = 501,
     median_filter_mode: str = "reflect",
     gaussian_filter_size: float = 100,
-    **kwargs
+    **kwargs,
 ):
     """
     Resample BOSS visit spectra onto a common wavelength array.
-    
+
     :param visits:
         A list of specLite data products, or their paths.
-    
+
     :param crval: [optional]
         The log10(lambda) of the wavelength of the first pixel to resample to.
-    
+
     :param cdelt: [optional]
         The log (base 10) of the wavelength spacing to use when resampling.
-    
+
     :param num_pixels: [optional]
         The number of pixels to use for the resampled array.
 
     :param num_pixels_per_resolution_element: [optional]
         The number of pixels per resolution element assumed when performing sinc interpolation.
-    
+
     :param radial_velocities: [optional]
         Either a list of radial velocities (one per visit), or a callable that takes two arguments
         (the FITS image of the data product, and the input visit) and returns a radial velocity
         in units of km/s.
 
         If `None` is given then we use `get_boss_radial_velocity`.
-    
+
     :param scale_by_pseudo_continuum: [optional]
         Optionally scale each visit spectrum by its pseudo-continuum (a gaussian median filter) when
         stacking to keep them on the same relative scale (default: True).
 
     :param median_filter_size: [optional]
         The filter width (in pixels) to use for any median filters (default: 501).
-    
+
     :param median_filter_mode: [optional]
         The mode to use for any median filters (default: reflect).
 
     :param gaussian_filter_size: [optional]
-        The filter size (in pixels) to use for any gaussian filter applied.    
-    
+        The filter size (in pixels) to use for any gaussian filter applied.
+
     """
     if radial_velocities is None:
         radial_velocities = get_boss_radial_velocity
@@ -1131,35 +1190,38 @@ def resample_boss_visit_spectra(
                 v = radial_velocities(image, visit)
             else:
                 v = radial_velocities[i]
-            
+
             v_shift.append(v)
-            wavelength.append(10**image[1].data["LOGLAM"])
+            wavelength.append(10 ** image[1].data["LOGLAM"])
             flux.append(image[1].data["FLUX"])
-            flux_error.append(image[1].data["IVAR"]**-0.5)
+            flux_error.append(image[1].data["IVAR"] ** -0.5)
             sky_flux.append(image[1].data["SKY"])
-        
 
     resampled_wavelength = log_lambda_dispersion(crval, cdelt, num_pixels)
-    args = (resampled_wavelength, num_pixels_per_resolution_element, v_shift, wavelength)
+    args = (
+        resampled_wavelength,
+        num_pixels_per_resolution_element,
+        v_shift,
+        wavelength,
+    )
     kwds = dict(
         median_filter_size=median_filter_size,
         median_filter_mode=median_filter_mode,
         gaussian_filter_size=gaussian_filter_size,
-        scale_by_pseudo_continuum=scale_by_pseudo_continuum
+        scale_by_pseudo_continuum=scale_by_pseudo_continuum,
     )
     kwds.update(kwargs)
 
-    resampled_flux, resampled_flux_error, resampled_pseudo_cont = resample_visit_spectra(
-        *args,
-        flux,
-        flux_error,
-        **kwds
-    )
+    (
+        resampled_flux,
+        resampled_flux_error,
+        resampled_pseudo_cont,
+    ) = resample_visit_spectra(*args, flux, flux_error, **kwds)
 
     # BOSS DRP gives no per-pixel bitmask array AFAIK
-    # Which is why `use_smooth_filtered_spectrum_for_bad_pixels` is not an option here 
+    # Which is why `use_smooth_filtered_spectrum_for_bad_pixels` is not an option here
     # because we have no bad pixel mask anyways. The user can supply these through kwargs.
-    resampled_bitmask = np.zeros(resampled_flux.shape, dtype=int) 
+    resampled_bitmask = np.zeros(resampled_flux.shape, dtype=int)
 
     # TODO: have resample_visit_spectra return this so we dont repeat ourselves
     meta = dict(
@@ -1176,11 +1238,11 @@ def resample_boss_visit_spectra(
     )
 
     return (
-        resampled_flux, 
-        resampled_flux_error, 
-        resampled_pseudo_cont, 
+        resampled_flux,
+        resampled_flux_error,
+        resampled_pseudo_cont,
         resampled_bitmask,
-        meta
+        meta,
     )
 
 
@@ -1195,7 +1257,7 @@ def get_apogee_visit_metadata(
     # HEALPIX   Healpix location
     # TELESCOP  Telescope name
     # APRED     APOGEE reduction pipeline version
-    # APSTAR 
+    # APSTAR
 
     # Radial velocity:
     # V_BARY
@@ -1210,13 +1272,11 @@ def get_apogee_visit_metadata(
     # Line spread function:
     # FIB_MEAN  S/N weighted mean fiber number
     # N_RES     # number of pixels per resolution element
-    
 
-    # FLUXFLAM 
+    # FLUXFLAM
     # HPLUS
     # HMINUS
-    
-    
+
     # Things that are relevant to individual visits:
     # FIELD
     # MJD
@@ -1225,14 +1285,12 @@ def get_apogee_visit_metadata(
     # TELESCOPE
     # PLATE
 
-
     # DATE-OBS
     # EXPTIME
     # NCOMBINE
     # FRAME1
     # FRAME2
     # NPAIRS
-
 
     #  RADIAL VELOCITY
     # JD
@@ -1242,9 +1300,6 @@ def get_apogee_visit_metadata(
     # SNR
     # CHI_SQ
     # STARFLAG
-
-
-
 
     fields = [
         ("LOCID", "LOC_ID"),
@@ -1257,28 +1312,24 @@ def get_apogee_visit_metadata(
         ("JD-MID", None),
         ("UT-MID", None),
         ("NCOMBINE", "NCOMBINE"),
-        ("FRAME1", "FRAME1")
+        ("FRAME1", "FRAME1"),
     ]
-
 
     fields = [
         (0, "TELESCOP", "TELESCOP", None),
         (0, "PLATE", "PLATE", None),
         # TODO: How are location ID and plate ID different?
-        (0, "LOCID", "LOC_ID", None), 
+        (0, "LOCID", "LOC_ID", None),
     ]
 
     # visit data for th etable:
 
-    #MJD5, "MJD",
-    
+    # MJD5, "MJD",
 
     return get_visit_metadata(image, fields)
 
-def get_visit_metadata(
-    image: fits.hdu.hdulist.HDUList,
-    fields: List
-):
+
+def get_visit_metadata(image: fits.hdu.hdulist.HDUList, fields: List):
     """
     Return metadata fields for a given FITS image.
     This will return a list of fields (key, value, comment) suitable for
@@ -1286,14 +1337,14 @@ def get_visit_metadata(
 
     :param image:
         The FITS image of the ApVisit data product.
-    
+
     :param fields:
         A list of 4-length tuples that each contain:
             - 0-indexed HDU where to access the header in the ApVisit file
             - Existing header key in the ApVisit file
             - Header key to use for the new data product
             - Comment to use in the new data product
-    """    
+    """
     metadata = []
     for (hdu, key, new_key, comment) in fields:
         if hdu is None:
@@ -1304,42 +1355,41 @@ def get_visit_metadata(
     return metadata
 
 
-
-
 def get_apogee_visit_radial_velocity(data_product: DataProduct):
     """
-    Return the (current) best-estimate of the radial velocity (in km/s) of this 
+    Return the (current) best-estimate of the radial velocity (in km/s) of this
     visit spectrum that is stored in the APOGEE DRP database.
 
     :param image:
         The FITS image of the ApVisit data product.
-    
+
     :param visit:
         The supplied visit.
     """
-    from astra.database.apogee_drpdb import (RvVisit, Visit)
+    from astra.database.apogee_drpdb import RvVisit, Visit
+
     if data_product.filetype.lower() != "apvisit":
         raise ValueError(f"Data product must have filetype 'apVisit'")
-    
+
     # Note: The rv_visit table contains *NEARLY* everything to uniquely identify
     #       a visit. It contains mjd, apred, fiber (fibreid), telescope, plate,
     #       but does not contain FIELD. So we must cross-match with the visit table.
     q = (
         RvVisit.select()
-               .join(Visit, on=(RvVisit.visit_pk == Visit.pk))
-               .where(
-                    (Visit.telescope == data_product.kwargs["telescope"])
-                &   (Visit.fiberid == data_product.kwargs["fiber"])
-                &   (Visit.mjd == data_product.kwargs["mjd"])
-                &   (Visit.apred == data_product.kwargs["apred"])
-                &   (Visit.field == data_product.kwargs["field"])
-                &   (Visit.plate == data_product.kwargs["plate"])
-               )
-               .order_by(RvVisit.created.desc())
+        .join(Visit, on=(RvVisit.visit_pk == Visit.pk))
+        .where(
+            (Visit.telescope == data_product.kwargs["telescope"])
+            & (Visit.fiberid == data_product.kwargs["fiber"])
+            & (Visit.mjd == data_product.kwargs["mjd"])
+            & (Visit.apred == data_product.kwargs["apred"])
+            & (Visit.field == data_product.kwargs["field"])
+            & (Visit.plate == data_product.kwargs["plate"])
+        )
+        .order_by(RvVisit.created.desc())
     )
     result = q.first()
     # Sanity check
-    if (data_product.sources[0].catalogid != result.catalogid):
+    if data_product.sources[0].catalogid != result.catalogid:
         raise ValueError(
             f"Data product {data_product} catalogid does not match record in APOGEE DRP "
             f"table ({data_product.sources[0].catalogid} != {result.catalogid}) "
@@ -1350,7 +1400,7 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct):
         "V_BC": result.bc,
         "V_REL": result.vrel,
         "E_V_REL": result.vrelerr,
-        "V_TYPE": result.vtype, # 1=chisq, 2=xcorr
+        "V_TYPE": result.vtype,  # 1=chisq, 2=xcorr
         "JD": result.jd,
         "DATE-OBS": result.dateobs,
         "TEFF_DOPPLER": result.rv_teff,
@@ -1368,8 +1418,8 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct):
         "E_V_REL_XCORR": result.xcorr_vrelerr,
         "V_BARY_XCORR": result.xcorr_vheliobary,
         "RV_COMPONENTS": result.rv_components,
-    }  
-    
+    }
+
 
 def resample_apogee_visit_spectra(
     visits: List[Union[DataProduct, str]],
@@ -1383,20 +1433,20 @@ def resample_apogee_visit_spectra(
     median_filter_size: int = 501,
     median_filter_mode: str = "reflect",
     gaussian_filter_size: float = 100,
-    **kwargs
+    **kwargs,
 ):
     """
     Resample APOGEE visit spectra onto a common wavelength array.
-    
+
     :param visits:
         A list of ApVisit data products, or their paths.
-    
+
     :param crval: [optional]
         The log10(lambda) of the wavelength of the first pixel to resample to.
-    
+
     :param cdelt: [optional]
         The log (base 10) of the wavelength spacing to use when resampling.
-    
+
     :param num_pixels: [optional]
         The number of pixels to use for the resampled array.
 
@@ -1404,7 +1454,7 @@ def resample_apogee_visit_spectra(
         The number of pixels per resolution element assumed when performing sinc interpolation.
         If a tuple is given, then it is assumed the input visits are multi-dimensional (e.g., multiple
         chips) and a different number of pixels per resolution element should be used per chip.
-    
+
     :param radial_velocities: [optional]
         Either a list of radial velocities (one per visit), or a callable that takes two arguments
         (the FITS image of the data product, and the input visit) and returns a radial velocity
@@ -1423,12 +1473,12 @@ def resample_apogee_visit_spectra(
 
     :param median_filter_size: [optional]
         The filter width (in pixels) to use for any median filters (default: 501).
-    
+
     :param median_filter_mode: [optional]
         The mode to use for any median filters (default: reflect).
 
     :param gaussian_filter_size: [optional]
-        The filter size (in pixels) to use for any gaussian filter applied.            
+        The filter size (in pixels) to use for any gaussian filter applied.
 
     :returns:
         A 7-length tuple containing:
@@ -1463,7 +1513,7 @@ def resample_apogee_visit_spectra(
                 v = radial_velocities[i]
 
             hdu_header, hdu_flux, hdu_flux_error, hdu_bitmask, hdu_wl, *_ = range(11)
-        
+
             v_shift.append(v)
             wavelength.append(image[hdu_wl].data)
             flux.append(image[hdu_flux].data)
@@ -1475,7 +1525,12 @@ def resample_apogee_visit_spectra(
         include_visits.append(visit)
 
     resampled_wavelength = log_lambda_dispersion(crval, cdelt, num_pixels)
-    args = (resampled_wavelength, num_pixels_per_resolution_element, v_shift, wavelength)
+    args = (
+        resampled_wavelength,
+        num_pixels_per_resolution_element,
+        v_shift,
+        wavelength,
+    )
 
     kwds = dict(
         scale_by_pseudo_continuum=scale_by_pseudo_continuum,
@@ -1483,16 +1538,15 @@ def resample_apogee_visit_spectra(
         bad_pixel_mask=bad_pixel_mask,
         median_filter_size=median_filter_size,
         median_filter_mode=median_filter_mode,
-        gaussian_filter_size=gaussian_filter_size
+        gaussian_filter_size=gaussian_filter_size,
     )
     kwds.update(kwargs)
 
-    resampled_flux, resampled_flux_error, resampled_pseudo_cont = resample_visit_spectra(
-        *args,
-        flux,
-        flux_error,
-        **kwds
-    )
+    (
+        resampled_flux,
+        resampled_flux_error,
+        resampled_pseudo_cont,
+    ) = resample_visit_spectra(*args, flux, flux_error, **kwds)
     # TODO: have resample_visit_spectra return this so we dont repeat ourselves
     meta = dict(
         crval=crval,
@@ -1509,11 +1563,11 @@ def resample_apogee_visit_spectra(
 
     resampled_bitmask, *_ = resample_visit_spectra(*args, bitmasks)
     return (
-        resampled_flux, 
-        resampled_flux_error, 
-        resampled_pseudo_cont, 
+        resampled_flux,
+        resampled_flux_error,
+        resampled_pseudo_cont,
         resampled_bitmask,
-        meta
+        meta,
     )
 
 
@@ -1528,12 +1582,12 @@ def combine_spectra(
 
     :param flux:
         An (N, P) array of fluxes of N visit spectra, each with P pixels.
-    
+
     :param flux_error:
         An (N, P) array of flux errors of N visit spectra.
-    
+
     :param pseudo_continuum: [optional]
-        Pseudo continuum array used when resampling spectra.        
+        Pseudo continuum array used when resampling spectra.
 
     :param bitmask: [optional]
         An optional bitmask array (of shape (N, P)) to combine (by 'and').
@@ -1543,10 +1597,10 @@ def combine_spectra(
 
     stacked_ivar = np.sum(ivar, axis=0)
     stacked_flux = np.sum(flux * ivar, axis=0) / stacked_ivar
-    stacked_flux_error = np.sqrt(1/stacked_ivar)
+    stacked_flux_error = np.sqrt(1 / stacked_ivar)
 
     if pseudo_continuum is not None:
-        cont = np.median(pseudo_continuum, axis=0) # TODO: check
+        cont = np.median(pseudo_continuum, axis=0)  # TODO: check
         stacked_flux *= cont
         stacked_flux_error *= cont
     else:
@@ -1556,7 +1610,7 @@ def combine_spectra(
         stacked_bitmask = np.bitwise_and.reduce(bitmask, 0)
     else:
         stacked_bitmask = np.zeros(stacked_flux.shape, dtype=int)
-    
+
     return (stacked_flux, stacked_flux_error, cont, stacked_bitmask)
 
 
@@ -1584,10 +1638,16 @@ def fits_column_kwargs(values):
     """
 
     mappings = [
-        ("E", lambda v: isinstance(v[0], (float, np.floating))), # all 32-bit
-        ("J", lambda v: isinstance(v[0], (int, np.integer)) and (int(max(v) >> 32) == 0)), # 32-bit integers
-        ("K", lambda v: isinstance(v[0], (int, np.integer)) and (int(max(v) >> 32) > 0)), # 64-bit integers
-        ("L", lambda v: isinstance(v[0], (bool, np.bool_))), # bools
+        ("E", lambda v: isinstance(v[0], (float, np.floating))),  # all 32-bit
+        (
+            "J",
+            lambda v: isinstance(v[0], (int, np.integer)) and (int(max(v) >> 32) == 0),
+        ),  # 32-bit integers
+        (
+            "K",
+            lambda v: isinstance(v[0], (int, np.integer)) and (int(max(v) >> 32) > 0),
+        ),  # 64-bit integers
+        ("L", lambda v: isinstance(v[0], (bool, np.bool_))),  # bools
     ]
     flat_values = np.array(values).flatten()
     for format_code, check in mappings:
@@ -1598,7 +1658,7 @@ def fits_column_kwargs(values):
 
     kwds = {}
     if isinstance(values, np.ndarray):
-        #S = values.size
+        # S = values.size
         V, P = np.atleast_2d(values).shape
         if values.ndim == 2:
             kwds["format"] = f"{P:.0f}{format_code}"
@@ -1611,111 +1671,118 @@ def fits_column_kwargs(values):
     return kwds
 
 
-
 # TODO: Refactor this to something that can be used by astra/operators/sdss and here.
 def get_boss_visits(catalogid):
     from astropy.table import Table
     from astra.utils import expand_path
+
     data = Table.read(expand_path("$BOSS_SPECTRO_REDUX/master/spAll-master.fits"))
     matches = np.where(data["CATALOGID"] == catalogid)[0]
 
     kwds = []
     for row in data[matches]:
-        kwds.append(dict(
-            # TODO: remove this when the path is fixed in sdss_access
-            fieldid=f"{row['FIELD']:0>6.0f}",
-            mjd=int(row["MJD"]),
-            catalogid=int(catalogid),
-            run2d=row["RUN2D"],
-            isplate=""
-        ))
+        kwds.append(
+            dict(
+                # TODO: remove this when the path is fixed in sdss_access
+                fieldid=f"{row['FIELD']:0>6.0f}",
+                mjd=int(row["MJD"]),
+                catalogid=int(catalogid),
+                run2d=row["RUN2D"],
+                isplate="",
+            )
+        )
     return kwds
 
+
 from sdss_access import SDSSPath
-paths = [SDSSPath("sdss5").full("specLite", **kwds) for kwds in get_boss_visits(27021597917837494)]
+
+paths = [
+    SDSSPath("sdss5").full("specLite", **kwds)
+    for kwds in get_boss_visits(27021597917837494)
+]
 
 # Utilities below.
 
 
 def log_lambda_dispersion(crval, cdelt, num_pixels):
-    return 10**(crval + cdelt * np.arange(num_pixels))
+    return 10 ** (crval + cdelt * np.arange(num_pixels))
 
 
-    
-
-def wave_to_pixel(wave,wave0) :
-    """ convert wavelength to pixel given wavelength array
+def wave_to_pixel(wave, wave0):
+    """convert wavelength to pixel given wavelength array
     Args :
        wave(s) : wavelength(s) (\AA) to get pixel of
-       wave0 : array with wavelength as a function of pixel number 
+       wave0 : array with wavelength as a function of pixel number
     Returns :
        pixel(s) in the chip
     """
-    pix0= np.arange(len(wave0))
+    pix0 = np.arange(len(wave0))
     # Need to sort into ascending order
-    sindx= np.argsort(wave0)
-    wave0= wave0[sindx]
-    pix0= pix0[sindx]
+    sindx = np.argsort(wave0)
+    wave0 = wave0[sindx]
+    pix0 = pix0[sindx]
     # Start from a linear baseline
-    baseline= np.polynomial.Polynomial.fit(wave0,pix0,1)
-    ip= interpolate.InterpolatedUnivariateSpline(wave0,pix0/baseline(wave0),k=3)
-    out= baseline(wave)*ip(wave)
+    baseline = np.polynomial.Polynomial.fit(wave0, pix0, 1)
+    ip = interpolate.InterpolatedUnivariateSpline(wave0, pix0 / baseline(wave0), k=3)
+    out = baseline(wave) * ip(wave)
     # NaN for out of bounds
-    out[wave > wave0[-1]]= np.nan
-    out[wave < wave0[0]]= np.nan
+    out[wave > wave0[-1]] = np.nan
+    out[wave < wave0[0]] = np.nan
     return out
 
 
-def sincint(x, nres, speclist) :
-    """ Use sinc interpolation to get resampled values
-        x : desired positions
-        nres : number of pixels per resolution element (2=Nyquist)
-        speclist : list of [quantity, variance] pairs (variance can be None)
+def sincint(x, nres, speclist):
+    """Use sinc interpolation to get resampled values
+    x : desired positions
+    nres : number of pixels per resolution element (2=Nyquist)
+    speclist : list of [quantity, variance] pairs (variance can be None)
     """
 
-    dampfac = 3.25*nres/2.
-    ksize = int(21*nres/2.)
-    if ksize%2 == 0 : ksize +=1
-    nhalf = ksize//2 
+    dampfac = 3.25 * nres / 2.0
+    ksize = int(21 * nres / 2.0)
+    if ksize % 2 == 0:
+        ksize += 1
+    nhalf = ksize // 2
 
-    #number of output and input pixels
+    # number of output and input pixels
     nx = len(x)
     nf = len(speclist[0][0])
 
     # integer and fractional pixel location of each output pixel
     ix = x.astype(int)
-    fx = x-ix
+    fx = x - ix
 
     # outputs
-    outlist=[]
-    for spec in speclist :
-        if spec[1] is None :
-            outlist.append([np.full_like(x,0),None])
-        else :
-            outlist.append([np.full_like(x,0),np.full_like(x,0)])
+    outlist = []
+    for spec in speclist:
+        if spec[1] is None:
+            outlist.append([np.full_like(x, 0), None])
+        else:
+            outlist.append([np.full_like(x, 0), np.full_like(x, 0)])
 
-    for i in range(len(x)) :
-        xkernel = np.arange(ksize)-nhalf - fx[i]
+    for i in range(len(x)):
+        xkernel = np.arange(ksize) - nhalf - fx[i]
         # in units of Nyquist
-        xkernel /= (nres/2.)
-        u1 = xkernel/dampfac
-        u2 = np.pi*xkernel
+        xkernel /= nres / 2.0
+        u1 = xkernel / dampfac
+        u2 = np.pi * xkernel
         sinc = np.exp(-(u1**2)) * np.sin(u2) / u2
-        sinc /= (nres/2.)
+        sinc /= nres / 2.0
 
         lobe = np.arange(ksize) - nhalf + ix[i]
         vals = np.zeros(ksize)
         vars = np.zeros(ksize)
-        gd = np.where( (lobe>=0) & (lobe<nf) )[0]
+        gd = np.where((lobe >= 0) & (lobe < nf))[0]
 
-        for spec,out in zip(speclist,outlist) :
+        for spec, out in zip(speclist, outlist):
             vals = spec[0][lobe[gd]]
-            out[0][i] = (sinc[gd]*vals).sum()
-            if spec[1] is not None : 
+            out[0][i] = (sinc[gd] * vals).sum()
+            if spec[1] is not None:
                 var = spec[1][lobe[gd]]
-                out[1][i] = (sinc[gd]**2*var).sum()
+                out[1][i] = (sinc[gd] ** 2 * var).sum()
 
-    for out in outlist :
-       if out[1] is not None : out[1] = np.sqrt(out[1])
-    
+    for out in outlist:
+        if out[1] is not None:
+            out[1] = np.sqrt(out[1])
+
     return outlist

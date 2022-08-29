@@ -38,7 +38,7 @@ __all__ = ["apStar_url", "apStar_download", "mkdir_loop"]
 
 
 def reconstruct_wcs_coord_from_fits_header(hdr, dim=1):
-    """ reconstruct wcs coordinates (e.g., wavelength array) """
+    """reconstruct wcs coordinates (e.g., wavelength array)"""
     # assert dim is not larger than limit
     assert dim <= hdr["NAXIS"]
 
@@ -59,7 +59,7 @@ def reconstruct_wcs_coord_from_fits_header(hdr, dim=1):
 
 
 def apStar_read(fp, full=False, meta=False, verbose=False):
-    """ read apStar fits file
+    """read apStar fits file
 
     Parameters
     ----------
@@ -101,26 +101,34 @@ def apStar_read(fp, full=False, meta=False, verbose=False):
     # construct Table instance
     if not full:
         # not full apStar info, [wave, flux, flux_err, mask] only
-        spec = Table([
-            Column(
-                10. ** reconstruct_wcs_coord_from_fits_header(hl[1].header, 1),
-                "wave"),
-            Column(hl[1].data.T, "flux"),
-            Column(hl[2].data.T, "flux_err"),
-            Column(hl[3].data.T, "mask")])
+        spec = Table(
+            [
+                Column(
+                    10.0 ** reconstruct_wcs_coord_from_fits_header(hl[1].header, 1),
+                    "wave",
+                ),
+                Column(hl[1].data.T, "flux"),
+                Column(hl[2].data.T, "flux_err"),
+                Column(hl[3].data.T, "mask"),
+            ]
+        )
     else:
         # full apStar info
-        spec = Table([
-            Column(
-                10. ** reconstruct_wcs_coord_from_fits_header(hl[1].header, 1),
-                "wave"),
-            Column(hl[1].data.T, "flux"),
-            Column(hl[2].data.T, "flux_err"),
-            Column(hl[3].data.T, "mask"),
-            Column(hl[4].data.T, "sky"),
-            Column(hl[5].data.T, "sky_err"),
-            Column(hl[6].data.T, "telluric"),
-            Column(hl[7].data.T, "telluric_err")])
+        spec = Table(
+            [
+                Column(
+                    10.0 ** reconstruct_wcs_coord_from_fits_header(hl[1].header, 1),
+                    "wave",
+                ),
+                Column(hl[1].data.T, "flux"),
+                Column(hl[2].data.T, "flux_err"),
+                Column(hl[3].data.T, "mask"),
+                Column(hl[4].data.T, "sky"),
+                Column(hl[5].data.T, "sky_err"),
+                Column(hl[6].data.T, "telluric"),
+                Column(hl[7].data.T, "telluric_err"),
+            ]
+        )
 
     # meta data
     if meta:
@@ -132,7 +140,7 @@ def apStar_read(fp, full=False, meta=False, verbose=False):
 
 
 def aspcapStar_read(fp, meta=False, verbose=False):
-    """ read apStar fits file
+    """read apStar fits file
 
     Parameters
     ----------
@@ -164,13 +172,16 @@ def aspcapStar_read(fp, meta=False, verbose=False):
     hl = fits.open(fp)
 
     # construct Table instance
-    spec = Table([
-        Column(
-            10. ** reconstruct_wcs_coord_from_fits_header(hl[1].header, 1),
-            "wave"),
-        Column(hl[1].data, "flux"),
-        Column(hl[2].data, "flux_err"),
-        Column(hl[3].data, "flux_fit")])
+    spec = Table(
+        [
+            Column(
+                10.0 ** reconstruct_wcs_coord_from_fits_header(hl[1].header, 1), "wave"
+            ),
+            Column(hl[1].data, "flux"),
+            Column(hl[2].data, "flux_err"),
+            Column(hl[3].data, "flux_fit"),
+        ]
+    )
 
     # meta data
     if meta:
@@ -199,9 +210,8 @@ def test_apStar_read():
     # spec = test_apStar_read()
 
 
-def apStar_url(telescope, location_id, field, file_,
-               url_header=None):
-    """ apStar url generator
+def apStar_url(telescope, location_id, field, file_, url_header=None):
+    """apStar url generator
     which in principle is able to generate file path
 
     Parameters
@@ -232,8 +242,7 @@ def apStar_url(telescope, location_id, field, file_,
     """
 
     if url_header is None or url_header is "sas":
-        url_header = ("https://data.sdss.org/sas/dr13/apogee"
-                      "/spectro/redux/r6/stars")
+        url_header = "https://data.sdss.org/sas/dr13/apogee" "/spectro/redux/r6/stars"
 
     url_header = url_header.strip()
     telescope = telescope.strip()
@@ -247,13 +256,13 @@ def apStar_url(telescope, location_id, field, file_,
         # apo25m
         url = "%s/%s/%s/%s" % (url_header, telescope, location_id, file_)
     else:
-        raise(ValueError("@Cham: This is not an option!"))
+        raise (ValueError("@Cham: This is not an option!"))
     return url
 
 
 def aspcapStar_url(location_id, file_, url_header=None):
 
-    """ aspcapStar url generator
+    """aspcapStar url generator
     which in principle is able to generate file path
 
     Parameters
@@ -279,8 +288,10 @@ def aspcapStar_url(location_id, file_, url_header=None):
     """
 
     if url_header is None or url_header is "sas":
-        url_header = ("https://data.sdss.org/sas/dr13/apogee"
-                      "/spectro/redux/r6/stars/l30e/l30e.2")
+        url_header = (
+            "https://data.sdss.org/sas/dr13/apogee"
+            "/spectro/redux/r6/stars/l30e/l30e.2"
+        )
 
     url_header = url_header.strip()
     file_ = file_.strip()
@@ -293,9 +304,10 @@ def aspcapStar_url(location_id, file_, url_header=None):
     return url
 
 
-def apStar_download(url, file_path, verbose=False,
-                    username="sdss", password="2.5-meters"):
-    """ apStar file downloading utils
+def apStar_download(
+    url, file_path, verbose=False, username="sdss", password="2.5-meters"
+):
+    """apStar file downloading utils
     which in principle is able to download everything from a valid url
 
     Parameters
@@ -347,7 +359,7 @@ def apStar_download(url, file_path, verbose=False,
 
 
 def mkdir_loop(file_path, n_loop=3, verbose=True):
-    """ a weak version of os.makedirs()
+    """a weak version of os.makedirs()
     which may avoid infinite loop
 
     Parameters
@@ -380,7 +392,7 @@ def mkdir_loop(file_path, n_loop=3, verbose=True):
             return True
         else:
             # if dirname(dirname) doesn't exists
-            if mkdir_loop(dirname, n_loop-1):
+            if mkdir_loop(dirname, n_loop - 1):
                 return mkdir_loop(file_path, n_loop)
             else:
                 return False

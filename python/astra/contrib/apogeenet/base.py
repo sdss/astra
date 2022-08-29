@@ -1,4 +1,3 @@
-
 import numpy as np
 import torch
 from tqdm import tqdm
@@ -13,19 +12,20 @@ from astra.contrib.apogeenet.model import Model
 from astra.contrib.apogeenet.utils import get_metadata, create_bitmask
 from astropy.io import fits
 
+
 class StellarParameters(ExecutableTask):
 
     model_path = Parameter(bundled=True)
     num_uncertainty_draws = Parameter(default=100)
     large_error = Parameter(default=1e10)
-    
+
     def execute(self):
-    
+
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         log.info(f"Executing on {device}")
 
         model = Model(self.model_path, device)
-        
+
         all_results = []
         # Since this could be a long process, we update the progress bar only ~100 times on ~pseudo
         # uniform steps in log iterations so that we don't fill the log file with crap.
@@ -34,23 +34,39 @@ class StellarParameters(ExecutableTask):
 
                 with fits.open(data_products[0].path) as image:
                     N, P = image[1].data.shape
-                    keys, metadata, metadata_norm = get_metadata(headers=image[0].header)
+                    keys, metadata, metadata_norm = get_metadata(
+                        headers=image[0].header
+                    )
 
                     snr = [image[0].header["SNR"]]
                     n_visits = image[0].header["NVISITS"]
                     if n_visits > 1:
                         snr.append(snr[0])
-                        snr.extend([image[0].header[f"SNRVIS{i}"] for i in range(1, 1 + n_visits)])
+                        snr.extend(
+                            [
+                                image[0].header[f"SNRVIS{i}"]
+                                for i in range(1, 1 + n_visits)
+                            ]
+                        )
 
-                    flux = np.nan_to_num(image[1].data).astype(np.float32).reshape((N, 1, P))
-                    error = np.nan_to_num(image[2].data).astype(np.float32).reshape((N, 1, P))
+                    flux = (
+                        np.nan_to_num(image[1].data)
+                        .astype(np.float32)
+                        .reshape((N, 1, P))
+                    )
+                    error = (
+                        np.nan_to_num(image[2].data)
+                        .astype(np.float32)
+                        .reshape((N, 1, P))
+                    )
                     meta = np.tile(metadata_norm, N).reshape((N, -1))
 
                     median_error = 5 * np.median(error, axis=(1, 2))
                     for j, value in enumerate(median_error):
-                        bad_pixel = (error[j] == parameters["large_error"]) | (error[j] >= value)
-                        error[j][bad_pixel] = value                 
-
+                        bad_pixel = (error[j] == parameters["large_error"]) | (
+                            error[j] >= value
+                        )
+                        error[j][bad_pixel] = value
 
                 flux = torch.from_numpy(flux).to(device)
                 error = torch.from_numpy(error).to(device)
@@ -60,11 +76,17 @@ class StellarParameters(ExecutableTask):
                     predictions = model.predict_spectra(flux, meta)
                     if device != "cpu":
                         predictions = predictions.cpu().data.numpy()
-                
+
                 # Replace infinites with non-finite.
                 predictions[~np.isfinite(predictions)] = np.nan
 
-                inputs = torch.randn((parameters["num_uncertainty_draws"], N, 1, P), device=device) * error + flux
+                inputs = (
+                    torch.randn(
+                        (parameters["num_uncertainty_draws"], N, 1, P), device=device
+                    )
+                    * error
+                    + flux
+                )
                 inputs = inputs.reshape((parameters["num_uncertainty_draws"] * N, 1, P))
 
                 meta_error = meta.repeat(parameters["num_uncertainty_draws"], 1)
@@ -88,7 +110,7 @@ class StellarParameters(ExecutableTask):
                 bitmask_flag = create_bitmask(
                     predictions,
                     median_draw_predictions=median_draw_predictions,
-                    std_draw_predictions=std_draw_predictions
+                    std_draw_predictions=std_draw_predictions,
                 )
 
                 result = {
@@ -102,7 +124,7 @@ class StellarParameters(ExecutableTask):
                     "teff_sample_median": teff_median,
                     "logg_sample_median": log_g_median,
                     "fe_h_sample_median": fe_h_median,
-                    "bitmask_flag": bitmask_flag
+                    "bitmask_flag": bitmask_flag,
                 }
 
                 results = dict_to_list(result)
@@ -112,12 +134,8 @@ class StellarParameters(ExecutableTask):
                     for result in results:
                         output = Output.create()
                         TaskOutput.create(task=task, output=output)
-                        ApogeeNetOutput.create(
-                            task=task,
-                            output=output,
-                            **result
-                        )  
-                                          
+                        ApogeeNetOutput.create(task=task, output=output, **result)
+
                 pb.update()
                 all_results.append(results)
 

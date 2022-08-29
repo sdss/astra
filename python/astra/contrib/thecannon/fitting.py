@@ -5,24 +5,39 @@
 Fitting functions for use in The Cannon.
 """
 
-from __future__ import (division, print_function, absolute_import,
-                        unicode_literals)
+from __future__ import division, print_function, absolute_import, unicode_literals
 
-__all__ = ["fit_spectrum", "fit_pixel_fixed_scatter", "fit_theta_by_linalg",
-    "chi_sq", "L1Norm_variation"]
+__all__ = [
+    "fit_spectrum",
+    "fit_pixel_fixed_scatter",
+    "fit_theta_by_linalg",
+    "chi_sq",
+    "L1Norm_variation",
+]
 
 import numpy as np
 import scipy.optimize as op
 from time import time
-from warnings import (filterwarnings, warn)
+from warnings import filterwarnings, warn
 
 from astra.utils import log
 
-filterwarnings("ignore", category=RuntimeWarning) 
+filterwarnings("ignore", category=RuntimeWarning)
 
 
-def fit_spectrum(flux, ivar, initial_labels, vectorizer, theta, s2, fiducials,
-    scales, dispersion=None, use_derivatives=True, op_kwds=None):
+def fit_spectrum(
+    flux,
+    ivar,
+    initial_labels,
+    vectorizer,
+    theta,
+    s2,
+    fiducials,
+    scales,
+    dispersion=None,
+    use_derivatives=True,
+    op_kwds=None,
+):
     """
     Fit a single spectrum by least-squared fitting.
 
@@ -48,7 +63,7 @@ def fit_spectrum(flux, ivar, initial_labels, vectorizer, theta, s2, fiducials,
         The dispersion (e.g., wavelength) points for the normalized fluxes.
 
     :param use_derivatives: [optional]
-        Boolean `True` indicating to use analytic derivatives provided by 
+        Boolean `True` indicating to use analytic derivatives provided by
         the vectorizer, `None` to calculate on the fly, or a callable
         function to calculate your own derivatives.
 
@@ -60,7 +75,7 @@ def fit_spectrum(flux, ivar, initial_labels, vectorizer, theta, s2, fiducials,
         matrix, and metadata associated with the optimization.
     """
 
-    adjusted_ivar = ivar/(1. + ivar * s2)
+    adjusted_ivar = ivar / (1.0 + ivar * s2)
 
     # Exclude non-finite points (e.g., points with zero inverse variance
     # or non-finite flux values, but the latter shouldn't exist anyway).
@@ -69,12 +84,15 @@ def fit_spectrum(flux, ivar, initial_labels, vectorizer, theta, s2, fiducials,
 
     if not np.any(use):
         log.error("No information in spectrum!")
-        return (np.nan * np.ones(L), None, {
-                "fail_message": "Pixels contained no information"})
+        return (
+            np.nan * np.ones(L),
+            None,
+            {"fail_message": "Pixels contained no information"},
+        )
 
     # Splice the arrays we will use most.
     flux = flux[use]
-    weights = np.sqrt(adjusted_ivar[use]) # --> 1.0 / sigma
+    weights = np.sqrt(adjusted_ivar[use])  # --> 1.0 / sigma
     use_theta = theta[use]
 
     initial_labels = np.atleast_2d(initial_labels)
@@ -89,14 +107,20 @@ def fit_spectrum(flux, ivar, initial_labels, vectorizer, theta, s2, fiducials,
             log.error(f"No label vector derivatives available in {vectorizer}!")
 
         except:
-            log.error("Exception raised when trying to calculate the "\
-                      "label vector derivative at the fiducial values:")
+            log.error(
+                "Exception raised when trying to calculate the "
+                "label vector derivative at the fiducial values:"
+            )
             raise
 
         else:
             # Use the label vector derivative.
-            Dfun = lambda parameters: weights * np.dot(use_theta,
-                vectorizer.get_label_vector_derivative(parameters)).T
+            Dfun = (
+                lambda parameters: weights
+                * np.dot(
+                    use_theta, vectorizer.get_label_vector_derivative(parameters)
+                ).T
+            )
 
     else:
         Dfun = None
@@ -111,12 +135,11 @@ def fit_spectrum(flux, ivar, initial_labels, vectorizer, theta, s2, fiducials,
         "func": residuals,
         "Dfun": Dfun,
         "col_deriv": True,
-
         # These get passed through to leastsq:
-        "ftol": 7./3 - 4./3 - 1, # Machine precision.
-        "xtol": 7./3 - 4./3 - 1, # Machine precision.
+        "ftol": 7.0 / 3 - 4.0 / 3 - 1,  # Machine precision.
+        "xtol": 7.0 / 3 - 4.0 / 3 - 1,  # Machine precision.
         "gtol": 0.0,
-        "maxfev": 100000, # MAGIC
+        "maxfev": 100000,  # MAGIC
         "epsfcn": None,
         "factor": 1.0,
     }
@@ -131,14 +154,14 @@ def fit_spectrum(flux, ivar, initial_labels, vectorizer, theta, s2, fiducials,
 
         try:
             op_labels, cov, meta, mesg, ier = op.leastsq(
-                x0=(x0 - fiducials)/scales, full_output=True, **kwds)
+                x0=(x0 - fiducials) / scales, full_output=True, **kwds
+            )
 
         except RuntimeError:
             log.exception("Exception in fitting from {}".format(x0))
             continue
 
-        meta.update(
-            dict(x0=x0, chi_sq=np.sum(meta["fvec"]**2), ier=ier, mesg=mesg))
+        meta.update(dict(x0=x0, chi_sq=np.sum(meta["fvec"] ** 2), ier=ier, mesg=mesg))
         results.append((op_labels, cov, meta))
 
     if len(results) == 0:
@@ -155,7 +178,9 @@ def fit_spectrum(flux, ivar, initial_labels, vectorizer, theta, s2, fiducials,
     op_labels = op_labels * scales + fiducials
 
     if np.allclose(op_labels, meta["x0"]):
-        log.error("Discarding optimized result because it is exactly the same as the initial value!")
+        log.error(
+            "Discarding optimized result because it is exactly the same as the initial value!"
+        )
 
         # We are in dire straits. We should not trust the result.
         op_labels *= np.nan
@@ -168,20 +193,21 @@ def fit_spectrum(flux, ivar, initial_labels, vectorizer, theta, s2, fiducials,
         log.error("Non-finite covariance matrix returned!")
 
     # Save additional information.
-    meta.update({
-        "method": "leastsq",
-        "label_names": vectorizer.label_names,
-        "best_result_index": best_result_index,
-        "initial_points": len(initial_labels),
-        "derivatives_used": Dfun is not None,
-        "snr": np.nanmedian(flux * weights),
-        "r_chi_sq": meta["chi_sq"]/(use.sum() - L - 1),
-    })
+    meta.update(
+        {
+            "method": "leastsq",
+            "label_names": vectorizer.label_names,
+            "best_result_index": best_result_index,
+            "initial_points": len(initial_labels),
+            "derivatives_used": Dfun is not None,
+            "snr": np.nanmedian(flux * weights),
+            "r_chi_sq": meta["chi_sq"] / (use.sum() - L - 1),
+        }
+    )
     for key in ("ftol", "xtol", "gtol", "maxfev", "factor", "epsfcn"):
         meta[key] = kwds[key]
 
     return (op_labels, cov, meta)
-
 
 
 def fit_theta_by_linalg(flux, ivar, s2, design_matrix):
@@ -206,7 +232,7 @@ def fit_theta_by_linalg(flux, ivar, s2, design_matrix):
         matrix.
     """
 
-    adjusted_ivar = ivar/(1. + ivar * s2)
+    adjusted_ivar = ivar / (1.0 + ivar * s2)
     CiA = design_matrix * np.tile(adjusted_ivar, (design_matrix.shape[1], 1)).T
     try:
         ATCiAinv = np.linalg.inv(np.dot(design_matrix.T, CiA))
@@ -218,7 +244,6 @@ def fit_theta_by_linalg(flux, ivar, s2, design_matrix):
     theta = np.dot(ATCiAinv, ATY)
 
     return (theta, ATCiAinv)
-
 
 
 # TODO: This logic should probably go somewhere else.
@@ -276,8 +301,9 @@ def L1Norm_variation(theta):
     return (np.sum(np.abs(theta[1:])), np.hstack([0.0, np.sign(theta[1:])]))
 
 
-def _pixel_objective_function_fixed_scatter(theta, design_matrix, flux, ivar,
-    regularization, gradient=True):
+def _pixel_objective_function_fixed_scatter(
+    theta, design_matrix, flux, ivar, regularization, gradient=True
+):
     """
     The objective function for a single regularized pixel with fixed scatter.
 
@@ -319,9 +345,9 @@ def _pixel_objective_function_fixed_scatter(theta, design_matrix, flux, ivar,
 
 
 def _scatter_objective_function(scatter, residuals_squared, ivar):
-    adjusted_ivar = ivar/(1.0 + ivar * scatter**2)
+    adjusted_ivar = ivar / (1.0 + ivar * scatter**2)
     chi_sq = residuals_squared * adjusted_ivar
-    return (np.median(chi_sq) - 1.0)**2
+    return (np.median(chi_sq) - 1.0) ** 2
 
 
 def _remove_forbidden_op_kwds(op_method, op_kwds):
@@ -338,24 +364,52 @@ def _remove_forbidden_op_kwds(op_method, op_kwds):
         `None`. The dictionary of `op_kwds` will be updated.
     """
     all_allowed_keys = dict(
-        l_bfgs_b=("x0", "args", "bounds", "m", "factr", "pgtol", "epsilon", 
-            "iprint", "maxfun", "maxiter", "disp", "callback", "maxls"),
-        powell=("x0", "args", "xtol", "ftol", "maxiter", "maxfun", 
-            "full_output", "disp", "retall", "callback", "initial_simplex"))
+        l_bfgs_b=(
+            "x0",
+            "args",
+            "bounds",
+            "m",
+            "factr",
+            "pgtol",
+            "epsilon",
+            "iprint",
+            "maxfun",
+            "maxiter",
+            "disp",
+            "callback",
+            "maxls",
+        ),
+        powell=(
+            "x0",
+            "args",
+            "xtol",
+            "ftol",
+            "maxiter",
+            "maxfun",
+            "full_output",
+            "disp",
+            "retall",
+            "callback",
+            "initial_simplex",
+        ),
+    )
 
     forbidden_keys = set(op_kwds).difference(all_allowed_keys[op_method])
     if forbidden_keys:
-        warn("Ignoring forbidden optimization keywords for {}: {}"\
-            .format(op_method, ", ".join(forbidden_keys)))
+        warn(
+            "Ignoring forbidden optimization keywords for {}: {}".format(
+                op_method, ", ".join(forbidden_keys)
+            )
+        )
         for key in forbidden_keys:
             del op_kwds[key]
 
     return None
-            
 
 
-def fit_pixel_fixed_scatter(flux, ivar, initial_thetas, design_matrix,
-    regularization, censoring_mask, **kwargs):
+def fit_pixel_fixed_scatter(
+    flux, ivar, initial_thetas, design_matrix, regularization, censoring_mask, **kwargs
+):
     """
     Fit theta coefficients and noise residual for a single pixel, using
     an initially fixed scatter value.
@@ -390,10 +444,10 @@ def fit_pixel_fixed_scatter(flux, ivar, initial_thetas, design_matrix,
         metadata related to the optimization process.
     """
 
-    if np.sum(ivar) < 1.0 * ivar.size: # MAGIC
+    if np.sum(ivar) < 1.0 * ivar.size:  # MAGIC
         metadata = dict(message="No pixel information.", op_time=0.0)
         fiducial = np.hstack([1.0, np.zeros(design_matrix.shape[1] - 1)])
-        return (fiducial, np.inf, metadata) # MAGIC
+        return (fiducial, np.inf, metadata)  # MAGIC
 
     # Determine if any theta coefficients will be censored.
     censored_theta = ~np.any(np.isfinite(design_matrix), axis=0)
@@ -402,14 +456,21 @@ def fit_pixel_fixed_scatter(flux, ivar, initial_thetas, design_matrix,
 
     feval = []
     for initial_theta, initial_theta_source in initial_thetas:
-        feval.append(_pixel_objective_function_fixed_scatter(
-            initial_theta, design_matrix, flux, ivar, regularization, False))
+        feval.append(
+            _pixel_objective_function_fixed_scatter(
+                initial_theta, design_matrix, flux, ivar, regularization, False
+            )
+        )
 
     initial_theta, initial_theta_source = initial_thetas[np.nanargmin(feval)]
 
-    base_op_kwds = dict(x0=initial_theta,
+    base_op_kwds = dict(
+        x0=initial_theta,
         args=(design_matrix, flux, ivar, regularization),
-        disp=False, maxfun=np.inf, maxiter=np.inf)
+        disp=False,
+        maxfun=np.inf,
+        maxiter=np.inf,
+    )
 
     theta_0 = kwargs.get("__theta_0", None)
     if theta_0 is not None:
@@ -429,8 +490,12 @@ def fit_pixel_fixed_scatter(flux, ivar, initial_thetas, design_matrix,
         # to the design_matrix, then we need to censor the initial theta so that we
         # don't bother solving for those parameters.
         base_op_kwds["x0"] = np.array(base_op_kwds["x0"])[~censored_theta]
-        base_op_kwds["args"] = (design_matrix[:, ~censored_theta], flux, ivar,
-            regularization)
+        base_op_kwds["args"] = (
+            design_matrix[:, ~censored_theta],
+            flux,
+            ivar,
+            regularization,
+        )
 
     # Allow either l_bfgs_b or powell
     t_init = time()
@@ -444,35 +509,45 @@ def fit_pixel_fixed_scatter(flux, ivar, initial_thetas, design_matrix,
         if op_method == "l_bfgs_b":
             op_kwds = dict()
             op_kwds.update(base_op_kwds)
-            op_kwds.update(
-                m=design_matrix.shape[1], maxls=20, factr=10.0, pgtol=1e-6)
+            op_kwds.update(m=design_matrix.shape[1], maxls=20, factr=10.0, pgtol=1e-6)
             op_kwds.update((kwargs.get("op_kwds", {}) or {}))
 
             # If op_bounds are given and we are censoring some theta terms, then we
             # will need to adjust which op_bounds we provide.
             if "bounds" in op_kwds and any(censored_theta):
-                op_kwds["bounds"] = [b for b, is_censored in \
-                    zip(op_kwds["bounds"], censored_theta) if not is_censored]
+                op_kwds["bounds"] = [
+                    b
+                    for b, is_censored in zip(op_kwds["bounds"], censored_theta)
+                    if not is_censored
+                ]
 
             # Just-in-time to remove forbidden keywords.
             _remove_forbidden_op_kwds(op_method, op_kwds)
 
             op_params, fopt, metadata = op.fmin_l_bfgs_b(
                 _pixel_objective_function_fixed_scatter,
-                fprime=None, approx_grad=None, **op_kwds)
+                fprime=None,
+                approx_grad=None,
+                **op_kwds,
+            )
 
             metadata.update(dict(fopt=fopt))
 
             warnflag = metadata.get("warnflag", -1)
             if warnflag > 0:
-                reason = "too many function evaluations or too many iterations" \
-                         if warnflag == 1 else metadata["task"]
-                warn(f"Optimization warning (l_bfgs_b; {reason}; strict = {op_strict}). "\
-                     f"Further optimization warnings will be suppressed!")
+                reason = (
+                    "too many function evaluations or too many iterations"
+                    if warnflag == 1
+                    else metadata["task"]
+                )
+                warn(
+                    f"Optimization warning (l_bfgs_b; {reason}; strict = {op_strict}). "
+                    f"Further optimization warnings will be suppressed!"
+                )
 
                 if op_strict:
                     # Do optimization again.
-                    op_method = "powell" 
+                    op_method = "powell"
                     base_op_kwds.update(x0=op_params)
                 else:
                     break
@@ -486,7 +561,7 @@ def fit_pixel_fixed_scatter(flux, ivar, initial_thetas, design_matrix,
             op_kwds.update(xtol=1e-6, ftol=1e-6)
             op_kwds.update((kwargs.get("op_kwds", {}) or {}))
 
-            # Set 'False' in args so that we don't return the gradient, 
+            # Set 'False' in args so that we don't return the gradient,
             # because fmin doesn't want it.
             args = list(op_kwds["args"])
             args.append(False)
@@ -498,20 +573,33 @@ def fit_pixel_fixed_scatter(flux, ivar, initial_thetas, design_matrix,
             _remove_forbidden_op_kwds(op_method, op_kwds)
 
             op_params, fopt, direc, n_iter, n_funcs, warnflag = op.fmin_powell(
-                _pixel_objective_function_fixed_scatter, 
-                full_output=True, **op_kwds)
+                _pixel_objective_function_fixed_scatter, full_output=True, **op_kwds
+            )
 
-            metadata = dict(fopt=fopt, direc=direc, n_iter=n_iter, 
-                n_funcs=n_funcs, warnflag=warnflag)
+            metadata = dict(
+                fopt=fopt,
+                direc=direc,
+                n_iter=n_iter,
+                n_funcs=n_funcs,
+                warnflag=warnflag,
+            )
             break
 
         else:
-            raise ValueError("unknown optimization method '{}' -- "
-                             "powell or l_bfgs_b are available".format(op_method))
+            raise ValueError(
+                "unknown optimization method '{}' -- "
+                "powell or l_bfgs_b are available".format(op_method)
+            )
 
     # Additional metadata common to both optimizers.
-    metadata.update(dict(op_method=op_method, op_time=time() - t_init,
-        initial_theta=initial_theta, initial_theta_source=initial_theta_source))
+    metadata.update(
+        dict(
+            op_method=op_method,
+            op_time=time() - t_init,
+            initial_theta=initial_theta,
+            initial_theta_source=initial_theta_source,
+        )
+    )
 
     # De-censor the optimized parameters.
     if any(censored_theta):
@@ -526,11 +614,11 @@ def fit_pixel_fixed_scatter(flux, ivar, initial_thetas, design_matrix,
 
     # Fit the scatter.
     op_fmin_kwds = dict(disp=False, maxiter=np.inf, maxfun=np.inf)
-    op_fmin_kwds.update(
-        xtol=op_kwds.get("xtol", 1e-8), ftol=op_kwds.get("ftol", 1e-8))
+    op_fmin_kwds.update(xtol=op_kwds.get("xtol", 1e-8), ftol=op_kwds.get("ftol", 1e-8))
 
-    residuals_squared = (flux - np.dot(theta, design_matrix.T))**2
-    scatter = op.fmin(_scatter_objective_function, 0.0,
-        args=(residuals_squared, ivar), disp=False)
+    residuals_squared = (flux - np.dot(theta, design_matrix.T)) ** 2
+    scatter = op.fmin(
+        _scatter_objective_function, 0.0, args=(residuals_squared, ivar), disp=False
+    )
 
     return (theta, scatter**2, metadata)

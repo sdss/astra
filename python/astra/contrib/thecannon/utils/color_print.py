@@ -10,8 +10,7 @@ This module includes astropy-based functions for colour printing.
 
 """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import sys
 import multiprocessing
@@ -29,6 +28,7 @@ else:
     try:
         from IPython.zmq.iostream import OutStream
         from IPython.utils import io
+
         stdio = io
     except ImportError:
         OutStream = None
@@ -36,7 +36,7 @@ else:
 
 
 IS_PY3 = sys.version_info[0] == 3
-_DEFAULT_ENCODING = 'utf-8'
+_DEFAULT_ENCODING = "utf-8"
 
 
 def _write_with_fallback(s, write, fileobj):
@@ -66,7 +66,7 @@ def _write_with_fallback(s, write, fileobj):
         write(s)
         return write
     except UnicodeEncodeError:
-        Writer = codecs.getwriter('latin-1')
+        Writer = codecs.getwriter("latin-1")
         f = Writer(fileobj)
         write = f.write
 
@@ -83,14 +83,15 @@ def isatty(file):
     but some user-defined types may not, so this assumes those are not
     ttys.
     """
-    if (multiprocessing.current_process().name != 'MainProcess' or
-            threading.current_thread().getName() != 'MainThread'):
+    if (
+        multiprocessing.current_process().name != "MainProcess"
+        or threading.current_thread().getName() != "MainThread"
+    ):
         return False
 
-    if (OutStream is not None and
-            isinstance(file, OutStream) and file.name == 'stdout'):
+    if OutStream is not None and isinstance(file, OutStream) and file.name == "stdout":
         return True
-    elif hasattr(file, 'isatty'):
+    elif hasattr(file, "isatty"):
         return file.isatty()
     return False
 
@@ -116,30 +117,31 @@ def color_text(text, color):
         lightmagenta, lightcyan, white, or '' (the empty string).
     """
     color_mapping = {
-        'black': '0;30',
-        'red': '0;31',
-        'green': '0;32',
-        'brown': '0;33',
-        'blue': '0;34',
-        'magenta': '0;35',
-        'cyan': '0;36',
-        'lightgrey': '0;37',
-        'default': '0;39',
-        'darkgrey': '1;30',
-        'lightred': '1;31',
-        'lightgreen': '1;32',
-        'yellow': '1;33',
-        'lightblue': '1;34',
-        'lightmagenta': '1;35',
-        'lightcyan': '1;36',
-        'white': '1;37'}
+        "black": "0;30",
+        "red": "0;31",
+        "green": "0;32",
+        "brown": "0;33",
+        "blue": "0;34",
+        "magenta": "0;35",
+        "cyan": "0;36",
+        "lightgrey": "0;37",
+        "default": "0;39",
+        "darkgrey": "1;30",
+        "lightred": "1;31",
+        "lightgreen": "1;32",
+        "yellow": "1;33",
+        "lightblue": "1;34",
+        "lightmagenta": "1;35",
+        "lightcyan": "1;36",
+        "white": "1;37",
+    }
 
-    if sys.platform == 'win32' and OutStream is None:
+    if sys.platform == "win32" and OutStream is None:
         # On Windows do not colorize text unless in IPython
         return text
 
-    color_code = color_mapping.get(color, '0;39')
-    return '\033[{0}m{1}\033[0m'.format(color_code, text)
+    color_code = color_mapping.get(color, "0;39")
+    return "\033[{0}m{1}\033[0m".format(color_code, text)
 
 
 def _decode_preferred_encoding(s):
@@ -157,7 +159,7 @@ def _decode_preferred_encoding(s):
             enc = _DEFAULT_ENCODING
         return s.decode(enc)
     except UnicodeDecodeError:
-        return s.decode('latin-1')
+        return s.decode("latin-1")
 
 
 def color_print(*args, **kwargs):
@@ -191,16 +193,16 @@ def color_print(*args, **kwargs):
         be printed after resetting any color or font state.
     """
 
-    file = kwargs.get('file', stdio.stdout)
+    file = kwargs.get("file", stdio.stdout)
 
-    end = kwargs.get('end', '\n')
+    end = kwargs.get("end", "\n")
 
     write = file.write
     if isatty(file):
         for i in range(0, len(args), 2):
             msg = args[i]
             if i + 1 == len(args):
-                color = ''
+                color = ""
             else:
                 color = args[i + 1]
 

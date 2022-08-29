@@ -22,23 +22,38 @@ else:
 torch.set_default_tensor_type(default_tensor_type)
 
 
-def _prepare_data(training_spectra, training_labels, validation_spectra, validation_labels,
-                  label_names):
+def _prepare_data(
+    training_spectra,
+    training_labels,
+    validation_spectra,
+    validation_labels,
+    label_names,
+):
 
     # Check label names are in both sets of labels.
     if isinstance(training_labels, Table):
-        missing_training_labels = set(label_names).difference(training_labels.dtype.names)
+        missing_training_labels = set(label_names).difference(
+            training_labels.dtype.names
+        )
         if missing_training_labels:
-            raise ValueError(f"missing labels {missing_training_labels} in training set labels")
+            raise ValueError(
+                f"missing labels {missing_training_labels} in training set labels"
+            )
 
         training_labels = np.atleast_2d([training_labels[ln] for ln in label_names]).T
 
     if isinstance(validation_labels, Table):
-        missing_validation_labels = set(label_names).difference(validation_labels.dtype.names)
+        missing_validation_labels = set(label_names).difference(
+            validation_labels.dtype.names
+        )
         if missing_validation_labels:
-            raise ValueError(f"missing labels {missing_validation_labels} in validation set labels")
+            raise ValueError(
+                f"missing labels {missing_validation_labels} in validation set labels"
+            )
 
-        validation_labels = np.atleast_2d([validation_labels[ln] for ln in label_names]).T
+        validation_labels = np.atleast_2d(
+            [validation_labels[ln] for ln in label_names]
+        ).T
 
     # Check shapes of data.
     T = len(training_spectra)
@@ -51,8 +66,10 @@ def _prepare_data(training_spectra, training_labels, validation_spectra, validat
 
         _P = list(set([spectrum.flux.size for spectrum in validation_spectra]))
         if len(_P) > 1 or P != _P[0]:
-            raise ValueError("validation spectra have various numbers of pixels or different pixels to "
-                             "the training spectra")
+            raise ValueError(
+                "validation spectra have various numbers of pixels or different pixels to "
+                "the training spectra"
+            )
 
         training_flux = np.zeros((T, P), dtype=float)
         for i, spectrum in enumerate(training_spectra):
@@ -77,18 +94,27 @@ def _whiten_labels(training_labels, validation_labels):
 
     x_min, x_max = (np.min(training_labels, axis=0), np.max(training_labels, axis=0))
 
-    T = (training_labels - x_min)/(x_max - x_min) - 0.5
-    V = (validation_labels - x_min)/(x_max - x_min) - 0.5
+    T = (training_labels - x_min) / (x_max - x_min) - 0.5
+    V = (validation_labels - x_min) / (x_max - x_min) - 0.5
 
     return (T, V, x_min, x_max)
 
 
-
-def train(training_spectra, training_labels, validation_spectra, validation_labels, label_names,
-          num_neurons=300, num_epochs=1e5, learning_rate=0.001, weight_decay=0, **kwargs):
+def train(
+    training_spectra,
+    training_labels,
+    validation_spectra,
+    validation_labels,
+    label_names,
+    num_neurons=300,
+    num_epochs=1e5,
+    learning_rate=0.001,
+    weight_decay=0,
+    **kwargs,
+):
     r"""
     Train a neural network to emulate spectral models.
-    
+
     :param training_spectra:
         A list of :class:`specutils.Spectrum1D` spectra to use for training.
 
@@ -114,7 +140,7 @@ def train(training_spectra, training_labels, validation_spectra, validation_labe
 
     :param weight_decay: [optional]
         The weight decay (regularization) to apply to the model (default: 0).
-    
+
     :returns:
         A three-length tuple containing the state, the model, and the optimizer. All information
         needed to reconstruct the model is saved in the state.
@@ -122,25 +148,50 @@ def train(training_spectra, training_labels, validation_spectra, validation_labe
 
     # Deal with the data.
     training_flux, training_labels, validation_flux, validation_labels = _prepare_data(
-        training_spectra, training_labels, validation_spectra, validation_labels, label_names)
+        training_spectra,
+        training_labels,
+        validation_spectra,
+        validation_labels,
+        label_names,
+    )
 
-    return _train(training_flux, training_labels, validation_flux, validation_labels, label_names,
-                  num_neurons, num_epochs, learning_rate, weight_decay, **kwargs)
+    return _train(
+        training_flux,
+        training_labels,
+        validation_flux,
+        validation_labels,
+        label_names,
+        num_neurons,
+        num_epochs,
+        learning_rate,
+        weight_decay,
+        **kwargs,
+    )
 
 
+def _train(
+    training_flux,
+    training_labels,
+    validation_flux,
+    validation_labels,
+    label_names,
+    num_neurons,
+    num_epochs,
+    learning_rate,
+    weight_decay,
+    **kwargs,
+):
 
-def _train(training_flux, training_labels, validation_flux, validation_labels, label_names,
-           num_neurons, num_epochs, learning_rate, weight_decay, **kwargs):
-    
     num_neurons, num_epochs = (int(num_neurons), int(num_epochs))
     learning_rate, weight_decay = (float(learning_rate), float(weight_decay))
 
     # Normalize.
-    whitened_training_labels, whitened_validation_labels, *scales = _whiten_labels(training_labels,
-                                                                                   validation_labels)
+    whitened_training_labels, whitened_validation_labels, *scales = _whiten_labels(
+        training_labels, validation_labels
+    )
 
-    n_labels = whitened_training_labels.shape[1] # number of labels
-    n_pixels = training_flux.shape[1] # number of pixels
+    n_labels = whitened_training_labels.shape[1]  # number of labels
+    n_pixels = training_flux.shape[1]  # number of pixels
 
     # Define network.
     model = torch.nn.Sequential(
@@ -148,27 +199,36 @@ def _train(training_flux, training_labels, validation_flux, validation_labels, l
         torch.nn.Sigmoid(),
         torch.nn.Linear(num_neurons, num_neurons),
         torch.nn.Sigmoid(),
-        torch.nn.Linear(num_neurons, n_pixels)
+        torch.nn.Linear(num_neurons, n_pixels),
     )
     if torch.cuda.is_available():
         model.cuda()
 
     # L2 loss
     loss_function = torch.nn.MSELoss(reduction="mean")
-    
-    x_train = Variable(torch.from_numpy(whitened_training_labels)).type(default_tensor_type)
-    y_train = Variable(torch.from_numpy(training_flux), requires_grad=False).type(default_tensor_type)
-    x_valid = Variable(torch.from_numpy(whitened_validation_labels)).type(default_tensor_type)
-    y_valid = Variable(torch.from_numpy(validation_flux), requires_grad=False).type(default_tensor_type)
 
+    x_train = Variable(torch.from_numpy(whitened_training_labels)).type(
+        default_tensor_type
+    )
+    y_train = Variable(torch.from_numpy(training_flux), requires_grad=False).type(
+        default_tensor_type
+    )
+    x_valid = Variable(torch.from_numpy(whitened_validation_labels)).type(
+        default_tensor_type
+    )
+    y_valid = Variable(torch.from_numpy(validation_flux), requires_grad=False).type(
+        default_tensor_type
+    )
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    optimizer = torch.optim.Adam(
+        model.parameters(), lr=learning_rate, weight_decay=weight_decay
+    )
 
     # Train the network.
     training_loss = np.zeros(num_epochs, dtype=float)
     validation_loss = np.zeros(num_epochs, dtype=float)
 
-    _BOOSTER = 1e4 # MAGIC HACK
+    _BOOSTER = 1e4  # MAGIC HACK
 
     with trange(num_epochs) as pb:
         for step in range(num_epochs):
@@ -188,15 +248,22 @@ def _train(training_flux, training_labels, validation_flux, validation_labels, l
             # Update progress bar.
             pb.set_description(f"Step {1 + step}")
             pb.set_postfix(
-                train_loss=training_loss[step],
-                valid_loss=validation_loss[step]
+                train_loss=training_loss[step], valid_loss=validation_loss[step]
             )
             pb.update()
 
-    state = dict(epoch=1 + step, model_state=model.state_dict(), scales=scales,
-                 label_names=label_names, losses=(training_loss, validation_loss),
-                 weight_decay=weight_decay, num_neurons=num_neurons, n_pixels=n_pixels,
-                 n_labels=n_labels, learning_rate=learning_rate)
+    state = dict(
+        epoch=1 + step,
+        model_state=model.state_dict(),
+        scales=scales,
+        label_names=label_names,
+        losses=(training_loss, validation_loss),
+        weight_decay=weight_decay,
+        num_neurons=num_neurons,
+        n_pixels=n_pixels,
+        n_labels=n_labels,
+        learning_rate=learning_rate,
+    )
 
     if kwargs.get("full_output", False):
         state["optimizer_state"] = optimizer.state_dict()
@@ -204,23 +271,22 @@ def _train(training_flux, training_labels, validation_flux, validation_labels, l
     return (state, model, optimizer)
 
 
-
 def load_training_data(path, training_fraction=0.8):
-    '''
+    """
     read in the default Kurucz training spectra for APOGEE
 
     Here we only consider 800 training spectra and 200 validation spectra
     for the tutorial (due to the GitHub upload limit); in practice, more
     training spectra will be better. The default neural networks included were
     trained using 10000 training spectra.
-    '''
+    """
 
     if not (1 > training_fraction > 0):
         raise ValueError("training fraction must be within (0, 1)")
-        
+
     with open(path, "rb") as fp:
         contents = pickle.load(fp)
-    
+
     N_labels, N_spectra = contents["labels"].shape
 
     N = int(N_spectra * training_fraction)
@@ -228,4 +294,11 @@ def load_training_data(path, training_fraction=0.8):
     training_spectra = contents["spectra"][:N, :]
     validation_labels = contents["labels"].T[N:, :]
     validation_spectra = contents["spectra"][N:, :]
-    return (contents["wavelength"], contents["label_names"], training_labels, training_spectra, validation_labels, validation_spectra)
+    return (
+        contents["wavelength"],
+        contents["label_names"],
+        training_labels,
+        training_spectra,
+        validation_labels,
+        validation_spectra,
+    )

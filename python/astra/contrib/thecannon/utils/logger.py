@@ -30,7 +30,7 @@ from .color_print import color_text
 
 # Adds custom log level for print and twisted messages
 PRINT = 15
-logging.addLevelName(PRINT, 'PRINT')
+logging.addLevelName(PRINT, "PRINT")
 
 
 def print_log_level(self, message, *args, **kws):
@@ -43,8 +43,8 @@ logging.Logger._print = print_log_level
 def print_exception_formatted(type, value, tb):
     """A custom hook for printing tracebacks with colours."""
 
-    tbtext = ''.join(traceback.format_exception(type, value, tb))
-    lexer = get_lexer_by_name('pytb', stripall=True)
+    tbtext = "".join(traceback.format_exception(type, value, tb))
+    lexer = get_lexer_by_name("pytb", stripall=True)
     formatter = TerminalFormatter()
     sys.stderr.write(highlight(tbtext, lexer, formatter))
 
@@ -52,33 +52,38 @@ def print_exception_formatted(type, value, tb):
 def colored_formatter(record):
     """Prints log messages with colours."""
 
-    colours = {'info': ('blue', 'normal'),
-               'debug': ('magenta', 'normal'),
-               'warning': ('yellow', 'normal'),
-               'print': ('green', 'normal'),
-               'error': ('red', 'bold')}
+    colours = {
+        "info": ("blue", "normal"),
+        "debug": ("magenta", "normal"),
+        "warning": ("yellow", "normal"),
+        "print": ("green", "normal"),
+        "error": ("red", "bold"),
+    }
 
     levelname = record.levelname.lower()
 
-    if levelname == 'error':
+    if levelname == "error":
         return
 
     if levelname.lower() in colours:
         levelname_color = colours[levelname][0]
-        header = color_text('[{}]: '.format(levelname.upper()),
-                            levelname_color)
+        header = color_text("[{}]: ".format(levelname.upper()), levelname_color)
 
     message = record.getMessage()
 
-    if levelname == 'warning':
-        warning_category_groups = re.match(r'^\w*?(.+?Warning) (.*)', message)
+    if levelname == "warning":
+        warning_category_groups = re.match(r"^\w*?(.+?Warning) (.*)", message)
         if warning_category_groups is not None:
             warning_category, warning_text = warning_category_groups.groups()
 
-            warning_category_colour = color_text('({})'.format(warning_category), 'cyan')
-            message = '{} {}'.format(color_text(warning_text, ''), warning_category_colour)
+            warning_category_colour = color_text(
+                "({})".format(warning_category), "cyan"
+            )
+            message = "{} {}".format(
+                color_text(warning_text, ""), warning_category_colour
+            )
 
-    sys.__stdout__.write('{}{}\n'.format(header, message))
+    sys.__stdout__.write("{}{}\n".format(header, message))
     sys.__stdout__.flush()
 
     return
@@ -86,12 +91,12 @@ def colored_formatter(record):
 
 class MyFormatter(logging.Formatter):
 
-    base_fmt = '%(asctime)s - %(levelname)s - %(message)s [%(funcName)s @ %(filename)s]'
+    base_fmt = "%(asctime)s - %(levelname)s - %(message)s [%(funcName)s @ %(filename)s]"
 
-    ansi_escape = re.compile(r'\x1b[^m]*m')
+    ansi_escape = re.compile(r"\x1b[^m]*m")
 
-    def __init__(self, fmt='%(levelname)s - %(message)s [%(funcName)s @ %(filename)s]'):
-        logging.Formatter.__init__(self, fmt, datefmt='%Y-%m-%d %H:%M:%S')
+    def __init__(self, fmt="%(levelname)s - %(message)s [%(funcName)s @ %(filename)s]"):
+        logging.Formatter.__init__(self, fmt, datefmt="%Y-%m-%d %H:%M:%S")
 
     def format(self, record):
 
@@ -104,10 +109,10 @@ class MyFormatter(logging.Formatter):
         if record.levelno == logging.DEBUG:
             self._style = PercentStyle(MyFormatter.base_fmt)
 
-        elif record.levelno == logging.getLevelName('PRINT'):
+        elif record.levelno == logging.getLevelName("PRINT"):
             self._style = PercentStyle(MyFormatter.base_fmt)
 
-        elif record.levelno == logging.getLevelName('IMPORTANT'):
+        elif record.levelno == logging.getLevelName("IMPORTANT"):
             self._style = PercentStyle(MyFormatter.base_fmt)
 
         elif record.levelno == logging.INFO:
@@ -119,7 +124,7 @@ class MyFormatter(logging.Formatter):
         elif record.levelno == logging.WARNING:
             self._style = PercentStyle(MyFormatter.base_fmt)
 
-        record.msg = self.ansi_escape.sub('', record.msg)
+        record.msg = self.ansi_escape.sub("", record.msg)
 
         # Call the original formatter class to do the grunt work
         result = logging.Formatter.format(self, record)
@@ -142,7 +147,7 @@ class LoggerStdout(object):
 
     def write(self, message):
 
-        if message != '\n':
+        if message != "\n":
             self.level(message)
 
     def flush(self):
@@ -174,7 +179,7 @@ class MyLogger(Logger):
         """Catches all exceptions and logs them."""
 
         # Now we log it.
-        self.error('Uncaught exception', exc_info=(exctype, value, tb))
+        self.error("Uncaught exception", exc_info=(exctype, value, tb))
 
         # First, we print to stdout with some colouring.
         print_exception_formatted(exctype, value, tb)
@@ -193,7 +198,7 @@ class MyLogger(Logger):
         if category is None:
             category = UserWarning
 
-        full_msg = '{0} {1}'.format(category.__name__, msg)
+        full_msg = "{0} {1}".format(category.__name__, msg)
 
         n_issued = 0
         if category in self.warning_registry:
@@ -209,11 +214,13 @@ class MyLogger(Logger):
                     category_filter = warnings_filter[0]
                     regex_filter = warnings_filter[1]
 
-            if (category_filter == 'ignore') or (category_filter == 'once' and n_issued >= 1):
+            if (category_filter == "ignore") or (
+                category_filter == "once" and n_issued >= 1
+            ):
                 if regex_filter is None or regex_filter.search(msg) is not None:
                     return
 
-            if category_filter == 'error':
+            if category_filter == "error":
                 raise ValueError(full_msg)
 
         super(MyLogger, self).warning(full_msg)
@@ -260,16 +267,20 @@ class MyLogger(Logger):
                 os.mkdir(logdir)
 
             if os.path.exists(log_file_path):
-                strtime = datetime.datetime.utcnow().strftime(
-                    '%Y-%m-%d_%H:%M:%S')
-                shutil.move(log_file_path, log_file_path + '.' + strtime)
+                strtime = datetime.datetime.utcnow().strftime("%Y-%m-%d_%H:%M:%S")
+                shutil.move(log_file_path, log_file_path + "." + strtime)
 
             self.fh = TimedRotatingFileHandler(
-                str(log_file_path), when='midnight', utc=True)
-            self.fh.suffix = '%Y-%m-%d_%H:%M:%S'
+                str(log_file_path), when="midnight", utc=True
+            )
+            self.fh.suffix = "%Y-%m-%d_%H:%M:%S"
         except (IOError, OSError) as ee:
-            self.warning('log file {0!r} could not be opened for writing: {1}'.format(
-                log_file_path, ee), RuntimeWarning)
+            self.warning(
+                "log file {0!r} could not be opened for writing: {1}".format(
+                    log_file_path, ee
+                ),
+                RuntimeWarning,
+            )
         else:
             self.fh.setFormatter(fmt)
             self.addHandler(self.fh)
