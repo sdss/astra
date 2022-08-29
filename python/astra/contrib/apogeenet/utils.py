@@ -91,6 +91,7 @@ def get_metadata(spectrum=None, headers=None):
         and the last value contains the normalized, clipped values of the metadata, for use with the
         APOGEENet model.
     """
+    
     keys = ("PLX", "GMAG", "BPMAG", "RPMAG", "JMAG", "HMAG", "KMAG")
     if spectrum is not None:
         headers = spectrum.meta["header"]

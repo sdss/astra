@@ -22,6 +22,43 @@ try:
 except ImportError:
     logger.warn("Could not import matplotlib; plotting functionality disabled")    
 
+def plot_gridsearch_sparsity(regularization, sparsity, sparsity_by_feature_type, **kwargs):
+    fig, ax = plt.subplots()
+    ax.plot(regularization, sparsity, c="k", lw=2)
+    for j in range(sparsity_by_feature_type.shape[1]):
+        ax.plot(regularization, sparsity_by_feature_type[:, j], label=f"{j:.0f}")
+    ax.legend()
+    ax.semilogx()
+    ax.set_xlabel(r"Regularization")
+    ax.set_ylabel(r"Sparsity")
+    
+    fig.tight_layout()
+
+    return fig
+
+
+
+def plot_gridsearch_chisq(regularization, train_chisq, validation_chisq, ax=None, **kwargs):
+    if ax is None:
+        fig, ax = plt.subplots()
+        new_figure = True
+    else:
+        fig = ax.figure
+        new_figure = False
+    ax.plot(regularization, validation_chisq/validation_chisq[0], label="validation", c="tab:blue", **kwargs)
+    ax.plot(regularization, train_chisq/train_chisq[0], label="train", c="tab:green", **kwargs)
+
+    if new_figure:            
+        ax.axhline(1, c="#666666", ls=":", lw=0.5, zorder=-1)
+
+        ax.legend()
+        ax.semilogx()
+        ax.set_xlabel(r"Regularization")
+        ax.set_ylabel(r"$\chi^2$ relative to baseline")
+        fig.tight_layout()
+
+    return fig
+
 
 def plot_theta(theta, indices, dispersion=None, label_terms=None, show_label_terms=True,
     normalize=True, common_axis=False, latex_label_names=None, xlim=None, 

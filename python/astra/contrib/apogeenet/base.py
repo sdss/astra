@@ -15,9 +15,9 @@ from astropy.io import fits
 
 class StellarParameters(ExecutableTask):
 
-    model_path = Parameter("model_path", bundled=True)
-    num_uncertainty_draws = Parameter("num_uncertainty_draws", default=100)
-    large_error = Parameter("large_error", default=1e10)
+    model_path = Parameter(bundled=True)
+    num_uncertainty_draws = Parameter(default=100)
+    large_error = Parameter(default=1e10)
     
     def execute(self):
     
@@ -75,11 +75,13 @@ class StellarParameters(ExecutableTask):
 
                 draws = draws.reshape((parameters["num_uncertainty_draws"], N, -1))
 
+                raise a
+
                 median_draw_predictions = np.nanmedian(draws, axis=0)
                 std_draw_predictions = np.nanstd(draws, axis=0)
 
-                log_g_median, log_teff_median, fe_h_median = median_draw_predictions.T
-                log_g_std, log_teff_std, fe_h_std = std_draw_predictions.T
+                log_g_median, teff_median, fe_h_median = median_draw_predictions.T
+                log_g_std, teff_std, fe_h_std = std_draw_predictions.T
 
                 log_g, log_teff, fe_h = predictions.T
 
@@ -94,10 +96,10 @@ class StellarParameters(ExecutableTask):
                     "teff": 10**log_teff,
                     "logg": log_g,
                     "fe_h": fe_h,
-                    "u_teff": 10**log_teff_std,
+                    "u_teff": teff_std,
                     "u_logg": log_g_std,
                     "u_fe_h": fe_h_std,
-                    "teff_sample_median": 10**log_teff_median,
+                    "teff_sample_median": teff_median,
                     "logg_sample_median": log_g_median,
                     "fe_h_sample_median": fe_h_median,
                     "bitmask_flag": bitmask_flag

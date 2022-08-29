@@ -31,6 +31,8 @@ class CreateLabelledSetFromTable(ExecutableTask):
     translate = DictParameter("translate", default=None, bundled=True)
     defaults = DictParameter("defaults", default=None, bundled=True)
 
+    require_finite_labels = Parameter(default=True, bundled=True)
+
     normalization_method = Parameter("normalization_method", default=None, bundled=True)
     normalization_kwds = DictParameter("normalization_kwds", default=None, bundled=True)
     slice_args = TupleParameter("slice_args", default=None, bundled=True)
@@ -84,6 +86,11 @@ class CreateLabelledSetFromTable(ExecutableTask):
         # Define the subset.
         N = len(table)
         subset = np.ones(N, dtype=bool)
+
+        if self.require_finite_labels:
+            for label_name in self.label_names:
+                subset *= np.isfinite(get_column(label_name))
+
         if self.limits is not None:
             for key, value in self.limits.items():
                 if isinstance(value, (tuple, list, np.ndarray)):
@@ -414,7 +421,6 @@ class CreateTrainingSet(CreateTypeSetBase):
     offset_fraction = Parameter("offset")
     release = Parameter("release", default="sdss5")
 
-    # TODO: fix bug where parameters are not inherited by astra tasks
 
 class CreateValidationSet(CreateTypeSetBase):
     random_seed = Parameter("random_seed", default=0)
@@ -422,7 +428,6 @@ class CreateValidationSet(CreateTypeSetBase):
     offset_fraction = Parameter("offset")
     release = Parameter("release", default="sdss5")
 
-    # TODO: fix bug where parameters are not inherited by astra tasks
 
 
 class CreateTestSet(CreateTypeSetBase):
@@ -431,4 +436,3 @@ class CreateTestSet(CreateTypeSetBase):
     offset_fraction = Parameter("offset")
     release = Parameter("release", default="sdss5")
 
-    # TODO: fix bug where parameters are not inherited by astra tasks

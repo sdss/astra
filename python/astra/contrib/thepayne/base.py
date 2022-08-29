@@ -93,14 +93,14 @@ class ThePayne(ExecutableTask):
             for i, (task, data_products, parameters) in enumerate(self.iterable()):
                 task_results = []
                 for j, data_product in enumerate(flatten(data_products)):
+
+                    # Assuming we are using ApStar spectra here, 
+                    # since that's the only training set given so far.
+                    all_spectrum_meta = get_apvisit_metadata(data_product)
                     
                     #spectrum = Spectrum1D.read(data_product.path)
                     spectrum = self.slice_and_normalize_spectrum(data_product)
 
-                    # Assuming we are using ApStar spectra here, since that's the only training set
-                    # given so far.
-                    all_spectrum_meta = get_apvisit_metadata(data_product)
-                    
                     p_opt, p_cov, model_flux, all_opt_meta = testing.test(
                         spectrum.wavelength.value,
                         spectrum.flux.value,
@@ -110,6 +110,7 @@ class ThePayne(ExecutableTask):
                     )
                     L_act = min(p_opt.shape[1], L)
                     
+                    # TODO: include correlation coefficients in database.
                     results = dict_to_list(
                         dict(ChainMap(*[
                             dict(zip(label_names, p_opt.T)),
