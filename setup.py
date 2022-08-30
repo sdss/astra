@@ -11,14 +11,14 @@ from setuptools import setup, find_packages
 import os
 import argparse
 import sys
+import re
 
-root_dir = os.path.dirname(os.path.abspath(__file__))
-with open(os.path.join(root_dir, "VERSION")) as version_file:
-    VERSION = version_file.read().strip()
+# It's nice to have a VERSION file, but it costs every time we import.
+with open("python/astra/__init__.py", "rt") as fp:
+    content = fp.read()
+    NAME = re.search(r"^NAME = ['\"]([^'\"]*)['\"]", content, re.M).group(1)
+    VERSION = re.search(r"^__version__ = ['\"]([^'\"]*)['\"]", content, re.M).group(1)
 
-# The NAME variable should be of the format "sdss-astra".
-# Please check your NAME adheres to that format.
-NAME = "astra"
 RELEASE = "dev" in VERSION
 
 

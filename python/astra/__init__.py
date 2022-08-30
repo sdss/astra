@@ -1,9 +1,9 @@
-import warnings
-from sdsstools import get_config, get_logger, get_package_version
-
 NAME = "astra"
+__version__ = "0.2.3dev"
 
-__version__ = get_package_version(path=__file__, package_name=NAME)
+# TODO: Move these things elsewhere (e.g., utils) to speed up top-level import.
+from sdsstools.configuration import get_config
+from sdsstools.logger import get_logger
 
 # The recommended path for the user configuration file is:
 # ~/.astra/astra.yml
@@ -13,7 +13,3 @@ logger_kwds = {}
 if "logging" in config and "level" in config["logging"]:
     logger_kwds.update(log_level=config["logging"]["level"])
 log = get_logger(NAME, **logger_kwds)
-
-warnings.filterwarnings(
-    "ignore", ".*Skipped unsupported reflection of expression-based index .*q3c.*"
-)
