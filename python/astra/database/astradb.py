@@ -1,5 +1,4 @@
 import datetime
-from distutils import core
 import json
 import os
 import hashlib
@@ -7,7 +6,6 @@ from functools import lru_cache, cached_property
 from sdss_access import SDSSPath
 from peewee import (
     IntegrityError,
-    SQL,
     fn,
     SqliteDatabase,
     BooleanField,
@@ -27,7 +25,6 @@ from astra.utils import flatten
 from astra import __version__
 from tqdm import tqdm
 from time import sleep
-from importlib import import_module
 
 # Environment variable overrides all, for running CI tests.
 _database_url = os.environ.get("ASTRA_DATABASE_URL", None)
@@ -42,7 +39,7 @@ if _database_url is not None:
     )
 
     # The PeeweeDatabaseConnection assumes a postgresql database under the hood. Argh!
-    database = AstraDatabaseConnection(_database_url)
+    database = AstraDatabaseConnection(_database_url, thread_safe=True)
     schema = None
 
 else:
@@ -137,7 +134,7 @@ class DataProduct(AstraBaseModel):
 
     id = AutoField()
 
-    release = TextField()
+    release = TextField(null=True)
     filetype = TextField()
     kwargs = DataProductKeywordsField()
     kwargs_hash = TextField()
@@ -253,9 +250,8 @@ class Status(AstraBaseModel):
 class Task(AstraBaseModel):
     id = AutoField()
     name = TextField()
-    parameters = JSONField(null=True)
-
-    version = TextField()
+    parameters = JSONField(default={})
+    version = TextField(default=__version__)
 
     time_total = FloatField(null=True)
     time_pre_execute = FloatField(null=True)
@@ -277,10 +273,6 @@ class Task(AstraBaseModel):
     status = ForeignKeyField(
         Status, default=1
     )  # default: 1 is the lowest status level ('created' or similar)
-
-    def as_executable(self, strict=True):
-        log.warning(f"as_executable() deprecated -> instance")
-        return self.instance()
 
     def instance(self, strict=True):
         """Return an executable representation of this task."""
@@ -345,7 +337,7 @@ class Bundle(AstraBaseModel):
     status = ForeignKeyField(
         Status, default=1
     )  # default: 1 is the lowest status level ('created' or similar)
-    meta = JSONField(null=True)
+    meta = JSONField(default={})
 
     @property
     def tasks(self):
@@ -403,10 +395,6 @@ class Bundle(AstraBaseModel):
             .first()
         )
         return count
-
-    def as_executable(self):
-        log.warning(f"as_executable() deprecated -> instance")
-        return self.instance()
 
     def instance(self, strict=True):
         from astra.base import TaskInstance
@@ -958,6 +946,14 @@ def create_tables(
     """
     Create all tables for the Astra database.
 
+    :param drop_existing_tables: [optional]
+        Drop existing tables from the database (default: false).
+
+    :param reuse_if_open: [optional]
+        Re-use existing database connection if one is open (default: true).
+
+    :param insert_status_rows: [optional]
+        Insert rows describing the Status of each task (default: true)
     """
 
     log.info(f"Connecting to database to create tables.")
@@ -992,3 +988,5 @@ def create_tables(
         with database.atomic():
             for description in status_descriptions:
                 Status.create(description=description)
+    log.info(f"Done.")
+    return None
