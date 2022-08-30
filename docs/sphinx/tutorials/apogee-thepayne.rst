@@ -21,7 +21,7 @@ In this tutorial you will use *The Payne* to estimate stellar parameters for a s
 
 3. Execute *The Payne* using the trained model.
 
-You can see that Task 3 depends on Task 1 and Task 2 being completed. Here we will just explicitly write that into code and let Astra manage when those tasks are executed. 
+You can see that Task 3 depends on Task 1 and Task 2 being completed. Here we will just explicitly write that into code and let Astra manage when those tasks are executed.
 
 
 Installation
@@ -33,7 +33,7 @@ This workflow assumes that you have `installed Astra <../install.html>`_, run th
   astra setup
 
   # Install the Astra component code for The Payne
-  astra component add astra_thepayne 
+  astra component add astra_thepayne
 
 
 Continuum normalisation
@@ -151,9 +151,9 @@ Having these parameters will uniquely define an apStar file, and tell us where w
                 "observation": ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
             }
 
-        
+
     if __name__ == "__main__":
-            
+
         # Do single star.
         file_params = dict(
             apred="r12",
@@ -171,7 +171,7 @@ Having these parameters will uniquely define an apStar file, and tell us where w
         )
 
         params = {**file_params, **additional_params}
-        
+
         task = StellarParameters(**params)
 
         luigi.build(
@@ -181,7 +181,7 @@ Having these parameters will uniquely define an apStar file, and tell us where w
         )
 
 
-Remember that to run this successfully you will need the `kurucz_data.pkl` file, or your own set of spectra with labels. 
+Remember that to run this successfully you will need the `kurucz_data.pkl` file, or your own set of spectra with labels.
 
 If all goes well, Astra will recognise that the `StellarParameters` task cannot be run until the observations have been continuum-normalised, and until the model has been trained. So you will see that Astra will perform these tasks first, and then estimate stellar parameters given the model you trained. In future if you re-run this workflow Astra will see that a model is already trained, and only train a new model if any of the `Train()` parameters change (e.g., `training_set_path` or `n_neurons` or `n_steps`).
 
@@ -189,4 +189,4 @@ If all goes well, Astra will recognise that the `StellarParameters` task cannot 
 Analysing many stars
 ~~~~~~~~~~~~~~~~~~~~
 
-If we wanted to run this pipeline on many stars we would just generate many tasks, where each task specifies the parameters that point to the observed data (and any custom parameters you want to set on a per-object basis). In practice we can watch a folder for reduced data products and create a `StellarParameters()` task for every observation. Astra won't re-run any tasks that have already been executed, unless there is a change to the input parameters (e.g., specifying a different `initial_teff` would trigger the tasks to re-run). Alternatively we could load in a list of schedduled observations and create tasks for every observation, and then Astra will only execute those tasks once the apStar file exists. 
+If we wanted to run this pipeline on many stars we would just generate many tasks, where each task specifies the parameters that point to the observed data (and any custom parameters you want to set on a per-object basis). In practice we can watch a folder for reduced data products and create a `StellarParameters()` task for every observation. Astra won't re-run any tasks that have already been executed, unless there is a change to the input parameters (e.g., specifying a different `initial_teff` would trigger the tasks to re-run). Alternatively we could load in a list of schedduled observations and create tasks for every observation, and then Astra will only execute those tasks once the apStar file exists.

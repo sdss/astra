@@ -5,9 +5,9 @@ This page describes how you should structure any code that you want to add to As
 ## Contributed components
 
 The contributed components in Astra all live in the {obj}`astra.contrib` namespace.
-Let's imagine you wanted to add a component called 'Rocket'. 
+Let's imagine you wanted to add a component called 'Rocket'.
 
-This component will have some tasks that write results to the database. 
+This component will have some tasks that write results to the database.
 The outputs in the database will need their own database table, `RocketOutput`, so we will need to add a data model for this in `python/astra/database/astradb.py`.
 Let's imagine that Rocket has some *new* method for continuum normalisation, called "Takeoff", which we will add to Astra in a way so that other codes can also use it. To do that, we will add the normalisation code in `python/astra/tools/continuum/takeoff.py`
  (to a new table in the database),

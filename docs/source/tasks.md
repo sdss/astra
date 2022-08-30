@@ -47,7 +47,7 @@ It looks like we just wrapped a function in a class for no reason. When we ran `
 
 - A record of the task (`GreedyPrimes`) was recorded in the `astra` database.
 - The task parameters were also recorded:
-    + `min_value`: 2 
+    + `min_value`: 2
     + `max_value`: 30
 - The version of `astra` was recorded with the task, as well as some other metadata for reproducibility and provenance.
 - The time taken to perform different parts of `GreedyPrimes` is recorded in the database, for tracking performance.
@@ -71,11 +71,11 @@ ti.execute(debug=True, verbose=True)
 
 ## Data products
 
-A data product might be an observation of a single star (e.g., a SDSS apVisit file), or it could be a pickle file produced by someone else. 
+A data product might be an observation of a single star (e.g., a SDSS apVisit file), or it could be a pickle file produced by someone else.
 
-When a task performs some analysis on a data product, the details of the data product are recorded in the database and linked to that task. Similarly, when a task creates an output data product, this is recorded in the database and linke to the task. 
+When a task performs some analysis on a data product, the details of the data product are recorded in the database and linked to that task. Similarly, when a task creates an output data product, this is recorded in the database and linke to the task.
 
-Every sub-class of {obj}`astra.base.TaskInstance` takes an optional keyword argument called `input_data_products`. If you don't care so much for data products, you can just provide a filename path to `input_data_products` and `astra` will handle the recording of data products in the database. 
+Every sub-class of {obj}`astra.base.TaskInstance` takes an optional keyword argument called `input_data_products`. If you don't care so much for data products, you can just provide a filename path to `input_data_products` and `astra` will handle the recording of data products in the database.
 
 
 :::{important}
@@ -85,11 +85,11 @@ In SDSS-V data products are recorded in the `astra` database when the upstream d
 
 ## Using pre- and post-execute hooks
 
-Depending on your analysis, you can also define `pre_execute()` and `post_execute()` methods that will be executed before and after the task execution. Examples where you may want to use these could be if you are pre-loading a model for many executions (`pre_execute`), or if you want to write the outputs of your analysis to a database (`post_execute`). You could just put everything in `execute`, but `astra` reports the time taken for `pre_execute`, `execute`, and `post_execute`, so separating your analysis logic can be good for tracking performance. 
+Depending on your analysis, you can also define `pre_execute()` and `post_execute()` methods that will be executed before and after the task execution. Examples where you may want to use these could be if you are pre-loading a model for many executions (`pre_execute`), or if you want to write the outputs of your analysis to a database (`post_execute`). You could just put everything in `execute`, but `astra` reports the time taken for `pre_execute`, `execute`, and `post_execute`, so separating your analysis logic can be good for tracking performance.
 
 ## Bundling
 
-Often you want to run the same kind of task on many different data products. Here a data product might be an ApStar spectrum, or some kind of observation. Each of those tasks might have slightly different parameters for each data product (e.g., initial estimate of some parameter), but there are some parameters that will be the same for all tasks. If there is some overhead (CPU or I/O) to executing that task, then it is sensible to bundle tasks together wherever possible to minimise the overhead costs. 
+Often you want to run the same kind of task on many different data products. Here a data product might be an ApStar spectrum, or some kind of observation. Each of those tasks might have slightly different parameters for each data product (e.g., initial estimate of some parameter), but there are some parameters that will be the same for all tasks. If there is some overhead (CPU or I/O) to executing that task, then it is sensible to bundle tasks together wherever possible to minimise the overhead costs.
 
 In `Astra` you can bundle tasks together if they share the same *bundled parameters*. A bundled parameter is one that is necessary to load any overheads for a group of tasks. For example, if your task needed to load a model and then estimate the properties of a star given that model, then your parameters might look like:
 
@@ -120,7 +120,7 @@ class AnalysisTask(TaskInstance):
     initial_logg = Parameter()
     initial_fe_h = Parameter()
 
-    sigma_clip_limit = Parameter(default=3)    
+    sigma_clip_limit = Parameter(default=3)
 
     def pre_execute(self):
         """ Pre-execute hook called before execution. """
@@ -139,7 +139,7 @@ class AnalysisTask(TaskInstance):
             for data_product in data_products:
                 assert isinstance(data_product, DataProduct)
 
-                # The path of the data product is given by the 
+                # The path of the data product is given by the
                 # data_product.path attribute
                 assert os.path.exists(data_product.path)
 
@@ -174,7 +174,7 @@ class AnalysisTask(TaskInstance):
 
             # Finished with this task in the bundle
             results.append(task_results)
-        
+
         return results
 
 ```
@@ -197,7 +197,7 @@ A = AnalysisTask(
     initial_fe_h=0
 )
 
-# Here we will use the same un-bundled parameter values for 
+# Here we will use the same un-bundled parameter values for
 # all data products.
 B = AnalysisTask(
     input_data_products=["apStar-1.fits", "apStar-2.fits"],
@@ -217,7 +217,7 @@ C = AnalysisTask(
 )
 ```
 
-The model will only be loaded once when these tasks are executed. If you have a lot of tasks to create but you don't want to figure out the bundling yourself, you can have `astra` do it for you. In the example below we have 10 models and 100 observations. Each observation will be analysed by a random number of models. 
+The model will only be loaded once when these tasks are executed. If you have a lot of tasks to create but you don't want to figure out the bundling yourself, you can have `astra` do it for you. In the example below we have 10 models and 100 observations. Each observation will be analysed by a random number of models.
 
 ```python
 import numpy as np
@@ -252,20 +252,19 @@ for instance in bundler(tasks):
     instance.execute()
 ```
 
-In the database every `AnalysisTask` we created will have it's own record, with performance information. The bundle just describes the context in which those tasks were executed. 
+In the database every `AnalysisTask` we created will have it's own record, with performance information. The bundle just describes the context in which those tasks were executed.
 
 ## Database
 
 
 ## Parameter types
 
-Most parameters are not strictly typed because the parameters of executed tasks are serialized and stored in a database. 
+Most parameters are not strictly typed because the parameters of executed tasks are serialized and stored in a database.
 
 The only parameters that are typed are {obj}`astra.base.DictParameter` and {obj}`astra.base.TupleParameter`, because the lengths of these parameter types are not considered when bundling tasks.
 
 
-## one data product per task? many per task? 
+## one data product per task? many per task?
 
 ## where things live (in contrib.[NAME].base, etc)
 ## where database models live
-

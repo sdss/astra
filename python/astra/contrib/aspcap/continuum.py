@@ -225,7 +225,7 @@ def median_filtered_correction(
         normalised_observed_flux_err = (normalised_observed_flux_err, )
     if isinstance(normalised_model_flux, np.ndarray):
         normalised_model_flux = (normalised_model_flux, )
-        
+
     N = len(normalised_observed_flux)
     if isinstance(width, int):
         width = tuple([width] * N)

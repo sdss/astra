@@ -292,7 +292,7 @@ Training set with initial guess
         <td>0</td>
 </tr>
     <tr>
-        <td><img src="20220523-0-train.png" width=200 /></td> 
+        <td><img src="20220523-0-train.png" width=200 /></td>
     </tr>
 </table>
 
@@ -310,13 +310,13 @@ Validation set, with initial guess
         <td>8</td>
         <td>9</td>
         <td>10</td>
-        <td>11</td>        
+        <td>11</td>
         <td>12</td>
         <td>13</td>
         <td>14</td>
         <td>15</td>
         <td>16</td>
-        <td>17</td>                
+        <td>17</td>
         <td>18</td>
     </tr>
     <tr>
@@ -338,7 +338,7 @@ Validation set, with initial guess
         <td><img src="20220523-15-validation.png" width=200 /></td>
         <td><img src="20220523-16-validation.png" width=200 /></td>
         <td><img src="20220523-17-validation.png" width=200 /></td>
-        <td><img src="20220523-18-validation.png" width=200 /></td> 
+        <td><img src="20220523-18-validation.png" width=200 /></td>
     </tr>
 </table>
 
@@ -355,15 +355,15 @@ Validation set, with initial guess
         <td>8</td>
         <td>9</td>
         <td>10</td>
-        <td>11</td>        
+        <td>11</td>
         <td>12</td>
         <td>13</td>
         <td>14</td>
         <td>15</td>
         <td>16</td>
-        <td>17</td>                
+        <td>17</td>
         <td>18</td>
-    </tr>    
+    </tr>
     <tr>
         <td><img src="20220523-0-theta.png" width=500 /></td>
         <td><img src="20220523-1-theta.png" width=500 /></td>

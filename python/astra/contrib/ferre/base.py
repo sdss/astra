@@ -425,7 +425,7 @@ class Ferre(ExecutableTask):
             time_execute_per_task = np.zeros(len(self.context["tasks"]))
             for name, t in zip(names, timings["time_per_spectrum"]):
                 time_execute_per_task[self.from_name(name)["i"]] += t
-            
+
             # And store the FERRE load time as the bundle overhead.
             # TODO: The only other way around this is to somehow take the number of threads used
             #       into account when timing a task, but that becomes pretty tricky for all tasks.

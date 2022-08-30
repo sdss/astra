@@ -18,10 +18,10 @@ dependencies:
     - tqdm
     # As of PyTorch 1.9 with CUDA 11.1. Your mileage may vary.
     # PyTorch is required for many contributed codes
-    - pytorch 
-    - torchvision 
-    - torchaudio 
-    # For sm_86 support, which some notchpeak GPUs require. 
+    - pytorch
+    - torchvision
+    - torchaudio
+    # For sm_86 support, which some notchpeak GPUs require.
     # See https://github.com/pytorch/pytorch/issues/45028
     #- cudatoolkit=11
     - ipython

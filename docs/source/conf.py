@@ -12,19 +12,18 @@
 #
 import os
 import sys
-sys.path.insert(0, os.path.abspath('../../'))
 
+sys.path.insert(0, os.path.abspath("../../"))
 
 
 # -- Project information -----------------------------------------------------
 
-project = 'astra'
-copyright = '2022, Andy Casey'
-author = 'Andy Casey'
+project = "astra"
+copyright = "2022, Andy Casey"
+author = "Andy Casey"
 
 # The full version, including alpha/beta/rc tags
-release = '0.3'
-
+release = "0.3"
 
 
 extensions = [
@@ -50,7 +49,7 @@ autodoc_default_flags = ["members"]
 autodoc_default_options = {
     "members": True,
     "member-order": "bysource",
-    "special-members": "__init__"
+    "special-members": "__init__",
 }
 templates_path = ["_templates"]
 
@@ -66,12 +65,12 @@ exclude_patterns = []
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'furo'
+html_theme = "furo"
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+html_static_path = ["_static"]
 
 
 html_theme = "furo"
@@ -81,12 +80,12 @@ language = "en"
 html_static_path = ["_static"]
 html_favicon = "_static/sdss-v-icon.png"
 html_logo = "_static/sdss-v-logo-square.png"
-#html_theme_options = {
+# html_theme_options = {
 #    "light_logo": "ads-logo-light-square.png",
 #    "dark_logo": "ads-logo-square.png"
-#}
+# }
 html_css_files = ["pied-piper-admonition.css"]
-'''
+"""
 html_theme_options = {
     "announcement": (
         "If things look broken, try disabling your ad-blocker. "
@@ -94,4 +93,4 @@ html_theme_options = {
         "and there's not much I can do about that!"
     )
 }
-'''
+"""

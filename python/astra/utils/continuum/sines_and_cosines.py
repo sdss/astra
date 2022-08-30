@@ -1,4 +1,4 @@
-""" 
+"""
 Continuum-normalization using sines and cosines.
 """
 

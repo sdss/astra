@@ -14,17 +14,17 @@ if profile is not None:
         log.exception(e)
         log.warning(
             f"""
-        Database profile '{profile}' set in Astra configuration file, but there is no database 
+        Database profile '{profile}' set in Astra configuration file, but there is no database
         profile called '{profile}' found in ~/.config/sdssdb/sdssdb.yml -- it should look like:
-        
+
         {profile}:
             user: [USER]
             host: [HOST]
             port: 5432
             domain: [DOMAIN]
 
-        See https://sdssdb.readthedocs.io/en/stable/intro.html#supported-profiles for more details. 
-        If the profile name '{profile}' is incorrect, you can change the 'database' / 'profile' key 
+        See https://sdssdb.readthedocs.io/en/stable/intro.html#supported-profiles for more details.
+        If the profile name '{profile}' is incorrect, you can change the 'database' / 'profile' key
         in ~/.astra/astra.yml
         """
         )

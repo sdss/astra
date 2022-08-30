@@ -21,7 +21,7 @@ In this tutorial you will use *The Cannon* to estimate stellar parameters for a 
 
 3. Execute *The Cannon* using the trained model.
 
-You can see that Task 3 depends on Task 1 and Task 2 being completed. Here we will just explicitly write that into code and let Astra manage when those tasks are executed. 
+You can see that Task 3 depends on Task 1 and Task 2 being completed. Here we will just explicitly write that into code and let Astra manage when those tasks are executed.
 
 
 Installation
@@ -33,7 +33,7 @@ This workflow assumes that you have `installed Astra <../install.html>`_, run th
   astra setup
 
   # Install the Astra component code for *The Cannon*
-  astra component add astra_thecannon 
+  astra component add astra_thecannon
 
 
 Continuum normalisation
@@ -83,7 +83,7 @@ Training *The Cannon*
 
 We already have a task defined to train *The Cannon*, called `astra_thecannon.tasks.Train` which takes the following parameters:
 
-- `training_set_path`: the path containing the labelled set (spectra and labels) to use for training 
+- `training_set_path`: the path containing the labelled set (spectra and labels) to use for training
 - `label_names`: the label names to use for the model (your training set data can include more labels than what you use in your model)
 - `order`: the polynomial order to use (default: 2)
 - `regularization`: the L1 regularization strength to use (default: 0)
@@ -151,7 +151,7 @@ Having these parameters will uniquely define an apStar file, and tell us where w
 
 
     if __name__ == "__main__":
-            
+
         # Do single star.
         file_params = dict(
             apred="r12",
@@ -179,11 +179,11 @@ Having these parameters will uniquely define an apStar file, and tell us where w
         )
 
 
-Remember that to run this successfully you will need the `dr14-apogee-giant-training-set.pkl` file (`download <https://drive.google.com/file/d/1Fv5nJkowWxAEAy-OaWUQXe01it1jHZH_/view?usp=sharing>`_), or your own set of spectra with labels. 
+Remember that to run this successfully you will need the `dr14-apogee-giant-training-set.pkl` file (`download <https://drive.google.com/file/d/1Fv5nJkowWxAEAy-OaWUQXe01it1jHZH_/view?usp=sharing>`_), or your own set of spectra with labels.
 
 If all goes well, Astra will recognise that the `StellarParameters` task cannot be run until the observations have been continuum-normalised, and until the model has been trained. So you will see that Astra will perform these tasks first, and then estimate stellar parameters given the model you trained. In future if you re-run this workflow Astra will see that a model is already trained, and only train a new model if any of the `Train()` parameters change (e.g., `training_set_path` or `order` or `labels`). Here is what the output looks like for me::
 
-    (astra) io:astra arc$ python workflow_example_tc.py 
+    (astra) io:astra arc$ python workflow_example_tc.py
     DEBUG: Checking if StellarParameters(release=DR16, prefix=ap, obj=2M16505794-2118004, apred=r12, telescope=apo25m, apstar=stars, field=000+14, label_names=('TEFF', 'LOGG', 'FE_H'), order=2, training_set_path=/Users/arc/research/projects/astra_components/data/the-cannon/dr14-apogee-giant-training-set.pkl, regularization=0, N_initialisations=10, use_derivatives=True) is complete
     DEBUG: Checking if Train(label_names=('TEFF', 'LOGG', 'FE_H'), order=2, training_set_path=/Users/arc/research/projects/astra_components/data/the-cannon/dr14-apogee-giant-training-set.pkl, regularization=0) is complete
     DEBUG: Checking if ContinuumNormalize(release=DR16, prefix=ap, obj=2M16505794-2118004, apred=r12, telescope=apo25m, apstar=stars, field=000+14, L=1400, order=2, continuum_regions_path=/Users/arc/research/projects/astra_components/astra_thecannon/python/astra_thecannon/etc/continuum-regions.list) is complete
@@ -199,8 +199,8 @@ If all goes well, Astra will recognise that the `StellarParameters` task cannot 
     INFO: [pid 28197] Worker Worker(salt=593833008, workers=1, host=io.local, username=arc, pid=28197) running   Train(label_names=('TEFF', 'LOGG', 'FE_H'), order=2, training_set_path=/Users/arc/research/projects/astra_components/data/the-cannon/dr14-apogee-giant-training-set.pkl, regularization=0)
     INFO: Training The Cannon model <astra_thecannon.model.CannonModel of 3 labels with a training set of 1624 stars each with 8575 pixels>
     INFO: Training 3-label CannonModel with 1624 stars and 8575 pixels/star
-    [===                                                                                                 ]   3% (258/8575)                          
-    [====================================================================================================] 100% (23s)                                
+    [===                                                                                                 ]   3% (258/8575)
+    [====================================================================================================] 100% (23s)
     INFO: Writing The Cannon model <astra_thecannon.model.CannonModel of 3 labels trained with a training set of 1624 stars each with 8575 pixels> to disk /Users/arc/research/projects/astra_components/data/the-cannon/dr14-apogee-giant-training-set-Train___TEFF____LOGG___2_0_be3efdf318.pkl
     INFO: [pid 28197] Worker Worker(salt=593833008, workers=1, host=io.local, username=arc, pid=28197) done      Train(label_names=('TEFF', 'LOGG', 'FE_H'), order=2, training_set_path=/Users/arc/research/projects/astra_components/data/the-cannon/dr14-apogee-giant-training-set.pkl, regularization=0)
     DEBUG: 1 running tasks, waiting for next task to finish
@@ -209,7 +209,7 @@ If all goes well, Astra will recognise that the `StellarParameters` task cannot 
     DEBUG: Pending tasks: 1
     INFO: [pid 28197] Worker Worker(salt=593833008, workers=1, host=io.local, username=arc, pid=28197) running   StellarParameters(release=DR16, prefix=ap, obj=2M16505794-2118004, apred=r12, telescope=apo25m, apstar=stars, field=000+14, label_names=('TEFF', 'LOGG', 'FE_H'), order=2, training_set_path=/Users/arc/research/projects/astra_components/data/the-cannon/dr14-apogee-giant-training-set.pkl, regularization=0, N_initialisations=10, use_derivatives=True)
     INFO: Running test step on 1 spectra
-    [=                                                                                                   ] 100% (0s)                         
+    [=                                                                                                   ] 100% (0s)
     INFO: Inferred labels: [[3.46238829e-01 2.68048519e+00 4.36294368e+03]]
     INFO: Metadata: ({'fvec': array([-2.70198600e+00, -2.57092485e+00,  7.47612006e+00, ...,
         -3.29431575e+06,  4.42269208e+06,  1.14013214e+06]), 'nfev': 22, 'njev': 14, 'fjac': array([[ 1.35724822e+10, -3.82973307e+06, -4.66779051e+06, ...,
@@ -233,7 +233,7 @@ If all goes well, Astra will recognise that the `StellarParameters` task cannot 
     DEBUG: Done
     DEBUG: There are no more tasks to run at this time
     INFO: Worker Worker(salt=593833008, workers=1, host=io.local, username=arc, pid=28197) was stopped. Shutting down Keep-Alive thread
-    INFO: 
+    INFO:
     ===== Luigi Execution Summary =====
 
     Scheduled 4 tasks of which:
@@ -269,4 +269,4 @@ Here you can see that because we asked Astra (or Luigi, rather) to estimate stel
 Analysing many stars
 ~~~~~~~~~~~~~~~~~~~~
 
-If we wanted to run this pipeline on many stars we would just generate many tasks, where each task specifies the parameters that point to the observed data (and any custom parameters you want to set on a per-object basis). In practice we can watch a folder for reduced data products and create a `StellarParameters()` task for every observation. Astra won't re-run any tasks that have already been executed, unless there is a change to the input parameters (e.g., specifying a different `initial_teff` would trigger the tasks to re-run). Alternatively we could load in a list of schedduled observations and create tasks for every observation, and then Astra will only execute those tasks once the apStar file exists. 
+If we wanted to run this pipeline on many stars we would just generate many tasks, where each task specifies the parameters that point to the observed data (and any custom parameters you want to set on a per-object basis). In practice we can watch a folder for reduced data products and create a `StellarParameters()` task for every observation. Astra won't re-run any tasks that have already been executed, unless there is a change to the input parameters (e.g., specifying a different `initial_teff` would trigger the tasks to re-run). Alternatively we could load in a list of schedduled observations and create tasks for every observation, and then Astra will only execute those tasks once the apStar file exists.

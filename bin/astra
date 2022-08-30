@@ -16,7 +16,7 @@ def cli(context, verbose):
 @cli.command()
 @click.option("--drop-tables", is_flag=True)
 def initdb(drop_tables):
-    """Initialize the database.""" 
+    """Initialize the database."""
     from astra.database.astradb import create_tables
     create_tables(
         drop_existing_tables=drop_tables,
@@ -61,7 +61,7 @@ def vacuum(dry_run):
 
     for name, pks in grouped.items():
         log.info(f"There are {len(pks)} {name} tasks with no outputs that can be deleted.")
-    
+
     for name, pks in grouped.items():
         log.info(f"Deleting {name} tasks (N={len(pks)}) with no outputs.")
 
@@ -88,7 +88,7 @@ def vacuum(dry_run):
                 .execute()
         )
         log.info(f"\tDeleted {rows} rows of tasks")
-    
+
     # Any empty bundles?
     q_empty_bundles = (
         Bundle.select()
@@ -145,13 +145,13 @@ def more(bundle_id):
     from astra.database.astradb import Bundle
 
     bundle = Bundle.get(bundle_id)
-    
+
     # bundle.
     job_key = bundle.meta["slurm_job_key"]
     label = bundle.meta["slurm_kwargs"]["label"]
 
     dir = f"/scratch/general/nfs1/u6020307/pbs/{label}/{job_key}/"
-    '''    
+    '''
     found_path, expected_index = None, None
     for path in glob(os.path.join(dir, "node*_proc*.slurm")):
         with open(path, "r") as fp:
@@ -168,9 +168,9 @@ def more(bundle_id):
     import subprocess
     output = subprocess.check_output(f'grep -n "id={bundle_id}$" {dir}/*.e', shell=True)
     path, line, *_ = output.decode().split(":")
-    
+
     os.system(f"more +{line} {path}")
-    
+
 
 @cli.group()
 def status():
@@ -202,7 +202,7 @@ def bundles(bundle_ids):
         N_tasks += len(bundle.tasks)
         tasks_by_status[description] += T
 
-    
+
     log.info(f"Summary:")
     for status, bundles in statuses.items():
         count_bundles = len(bundles)
@@ -218,7 +218,7 @@ def bundles(bundle_ids):
 
 @cli.group()
 def execute():
-    """Execute a task or bundle.""" 
+    """Execute a task or bundle."""
     pass
 
 def do_work(ids, is_bundle):
@@ -242,7 +242,7 @@ def do_work(ids, is_bundle):
             log.exception(f"Exception when executing item {item}")
         else:
             log.info(f"Completed item {i}/{N}: {item}")
-            
+
     return None
 
 def _execute_task(task_id):
@@ -254,7 +254,7 @@ def _execute_task(task_id):
 @execute.command(hidden=True)
 @click.argument("task_ids", type=int, nargs=-1, required=True)
 def tasks(task_ids):
-    """Execute multiple tasks""" 
+    """Execute multiple tasks"""
     return do_work(task_ids, False)
 
 
@@ -268,7 +268,7 @@ def task(task_id):
 @execute.command(hidden=True)
 @click.argument("bundle_ids", type=int, nargs=-1, required=True)
 def bundles(bundle_ids):
-    """Execute multiple task bundles""" 
+    """Execute multiple task bundles"""
     return do_work(bundle_ids, True)
 
 
@@ -298,7 +298,7 @@ def bundle(bundle_id, parallelism):
 
 
         Parallel(parallelism, prefer="processes")(delayed(f)(task) for task in tasks)
-        
+
     else:
         return do_work([bundle_id], True)
 

@@ -15,5 +15,4 @@ If you dont already have it, you will need to install the FERRE component in Ast
 
     astra component add astra_ferre --install-args --install-ferre
 
-The ``astra_ferre`` part of this statement is the Python code that wraps FERRE and works with Astra. The optional arguments ``--install-args --install-ferre`` will download FERRE 4.6 and install it for you. 
-
+The ``astra_ferre`` part of this statement is the Python code that wraps FERRE and works with Astra. The optional arguments ``--install-args --install-ferre`` will download FERRE 4.6 and install it for you.

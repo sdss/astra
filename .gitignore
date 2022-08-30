@@ -116,3 +116,6 @@ reinstall_astra # sandbox tool
 stash/
 reinstall
 .gitignore
+
+*.pkl
+*.png

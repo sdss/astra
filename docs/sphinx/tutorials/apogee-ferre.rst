@@ -42,7 +42,7 @@ This workflow assumes that you have `installed Astra <../install.html>`_, run th
 
   # Install the Astra component code for FERRE
   # (and optionally install the FERRE code itself with the --install-ferre flag)
-  astra component add astra_ferre --install-ferre 
+  astra component add astra_ferre --install-ferre
 
 
 Continuum normalisation
@@ -80,10 +80,10 @@ FERRE is a component in Astra, and that means it has a FERRE task already define
   from astra_ferre.tasks import Ferre
 
   class StellarParameters(Ferre, ApStarFile):
-      
+
       def requires(self):
           return ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
-      
+
 Again you can see our task extends the behaviour from the `Ferre` and `ApStarFile` tasks. All we have to do here is define that our `StellarParameters` task requires the `ContinuumNormalize` task to finish first.
 
 
@@ -114,13 +114,13 @@ Having these parameters will uniquely define an apStar file, and tell us where w
 
 
   class StellarParameters(Ferre, ApStarFile):
-      
+
       def requires(self):
           return ContinuumNormalize(**self.get_common_param_kwargs(ContinuumNormalize))
-      
+
 
   if __name__ == "__main__":
-          
+
       # Let's run our workflow on a single star.
       import luigi
 
@@ -185,5 +185,4 @@ After running this you should get a figure that looks something like this:
 Analysing many stars
 ~~~~~~~~~~~~~~~~~~~~
 
-If we wanted to run this pipeline on many stars we would just generate many tasks, where each task specifies the parameters that point to the observed data (and any custom FERRE parameters you want to set on a per-object basis). In practice we can watch a folder for reduced data products and create a `StellarParameters()` task for every observation. Astra won't re-run any tasks that have already been executed, unless there is a change to the input parameters (e.g., specifying a different `initial_teff` would trigger the tasks to re-run). Alternatively we could load in a list of schedduled observations and create tasks for every observation, and then Astra will only execute those tasks once the apStar file exists. 
-
+If we wanted to run this pipeline on many stars we would just generate many tasks, where each task specifies the parameters that point to the observed data (and any custom FERRE parameters you want to set on a per-object basis). In practice we can watch a folder for reduced data products and create a `StellarParameters()` task for every observation. Astra won't re-run any tasks that have already been executed, unless there is a change to the input parameters (e.g., specifying a different `initial_teff` would trigger the tasks to re-run). Alternatively we could load in a list of schedduled observations and create tasks for every observation, and then Astra will only execute those tasks once the apStar file exists.

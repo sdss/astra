@@ -1,5 +1,5 @@
 import warnings
-from sdsstools import (get_config, get_logger, get_package_version)
+from sdsstools import get_config, get_logger, get_package_version
 
 NAME = "astra"
 
@@ -15,6 +15,5 @@ if "logging" in config and "level" in config["logging"]:
 log = get_logger(NAME, **logger_kwds)
 
 warnings.filterwarnings(
-    'ignore', 
-    '.*Skipped unsupported reflection of expression-based index .*q3c.*'
+    "ignore", ".*Skipped unsupported reflection of expression-based index .*q3c.*"
 )

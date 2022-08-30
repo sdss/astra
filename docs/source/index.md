@@ -55,5 +55,3 @@ Astra is the analysis framework for the [Milky Way Mapper](https://www.sdss5.org
 
 
 Milky Way Mapper will produce data products that differ from previous generations of SDSS. High-resolution infrared spectra will continue to be acquired using the APOGEE spectrographs, but this will be complemented with low-resolution optical spectra. A wide range of scientific targets (e.g., red giants, main-sequence exoplanet host stars, white dwarfs) will be observed by both instruments. This change in strategy requires a framework to manage the analysis of targets, to encourage improvements to existing analysis approaches, and to streamline the data release process.
-
-

@@ -29,33 +29,33 @@ class EstimateStellarLabels(ExecutableTask):
     verbose = Parameter(default=5)
 
     """
-    # TODO: make this nicer    
+    # TODO: make this nicer
     :param model_path:
         The disk path of the pre-trained model.
-        
+
     :param dwave_slam: float
         binning width
-        
+
     :param p_slam: tuple of 2 ps [optional]
         smoothing parameter between 0 and 1: (default: 1E-8, 1E-7)
         0 -> LS-straight line
         1 -> cubic spline interpolant
-        
+
     :param q_slam: float in range of [0, 100] [optional]
         percentile, between 0 and 1 (default: 0.7)
-        
+
     :param ivar_block_slam: ndarray (n_pix, ) | None [optional]
         ivar array (default: None)
-        
+
     :param eps_slam: float [optional]
         the ivar threshold (default: 1E-19)
-    
+
     :param rsv_frac_slam: float [optional]
         the fraction of pixels reserved in terms of std. default is 3.
-    
+
     :param n_jobs_slam: int [optional]
         number of processes launched by joblib (default: 1)
-        
+
     :param verbose_slam: int / bool [optional]
         verbose level (default: 5)
     """

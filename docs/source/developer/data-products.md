@@ -4,7 +4,7 @@ If a task does some work on a data product (e.g., an observed spectrum of a star
 
 ## Input data products
 
-In theory you could define a parameter for your task like `observed_data`. 
+In theory you could define a parameter for your task like `observed_data`.
 This is a useful thing to do when testing your code so that you don't have to do any extra work.
 But if you want your code to run on large amounts of data, it's a better idea to record the input data paths in a different way so that you can easily cross-match results from different tasks on the same input data, or link data paths to the same source object (e.g., different observations of the same star).
 
@@ -27,8 +27,8 @@ print(observed_data.path)
 # my_observed_data.csv
 ```
 
-Every task instance has an optional keyword argument called `input_data_products` where you can provide a list of data products. 
-When you use this method to supply the input data products to your task, a reference is created in the Astra database that links the data products and tasks together, allowing you to easily query which tasks have executed on what data products, or vice versa. 
+Every task instance has an optional keyword argument called `input_data_products` where you can provide a list of data products.
+When you use this method to supply the input data products to your task, a reference is created in the Astra database that links the data products and tasks together, allowing you to easily query which tasks have executed on what data products, or vice versa.
 Specifically, a record is created in the {obj}`astra.database.astradb.TaskInputDataProducts` table, which allows for a many-to-many relationship between tasks and data products.
 Usually a task might only have one input data product, and that's OK. In that case you should still use the `input_data_products` (note the plural) keyword. Once you've tested your code, this is the right way to supply data products to tasks.
 
@@ -45,7 +45,7 @@ class EstimateSNR(TaskInstance):
         for data_product in self.input_data_products:
             data = Table.read(data_product.path)
             snr.append(np.mean(data["flux"]/data["flux_error"]))
-        
+
         return snr
 
 task = EstimateSNR(input_data_products=[observed_data])
@@ -55,7 +55,7 @@ task.execute()
 
 ## Output data products
 
-If your task creates data products that will be used by end-users or by other tasks, then it's good practice for your task to create a {obj}`astra.database.astradb.DataProduct` for those outputs. 
+If your task creates data products that will be used by end-users or by other tasks, then it's good practice for your task to create a {obj}`astra.database.astradb.DataProduct` for those outputs.
 The way this is achieved is by creating an entry in the {obj}`astra.database.astradb.TaskOutputDataProducts` table, which acts as a many-to-many join between tasks and data products.
 
 Linking the input and output data products in this way lets us efficiently query to see how intermediate data products are used between tasks. In SDSS, this could be intermediate data products in a complex pipeline like ASPCAP. Or it could be a trained Cannon model -- the output data product from a `TrainTheCannon` task -- where the input data products to the `TrainTheCannon` model were thousands of ApStar spectra. Linking the data products like this lets us easily ask questions like: was this random SDSS star part of the training set used for that model?
@@ -70,7 +70,7 @@ TO DO: add code example for linking output data products
 
 The {obj}`astra.database.astradb.DataProduct` references a database record for a data product, which we earlier said we could use to *reconstruct* the path. If you are not using SDSS data, then this part is not relevant to you.
 
-Every SDSS product released must have a corresponding 'data model' that defines the path to the file and describes its form and content. 
+Every SDSS product released must have a corresponding 'data model' that defines the path to the file and describes its form and content.
 If you want to reference a data product then instead of using the path, you can store the variables that describe the path. For example, in SDSS-V if you want to retrieve an 'ApStar' spectrum then you need to know the following keywords:
 - `healpix`: the identifier of the healpix bin that the star position (right ascension and declination) falls in
 - `apred`: the version of the APOGEE reduction pipeline used
@@ -144,7 +144,7 @@ kwargs = dict(
 path = SDSSPath(release=release).full(filetype, **kwargs)
 
 # This is BAD because we could have created the data product with the
-# 'apStar' file type, which would have been easier to later query 
+# 'apStar' file type, which would have been easier to later query
 # data products by object name, healpix, etc.
 
 data_product, _ = DataProduct.get_or_create(

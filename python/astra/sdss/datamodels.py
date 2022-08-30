@@ -653,9 +653,9 @@ def combine_boss_visits(
 
 
             bd, = np.where(image[hdu_bitmask].data[chip] & pixelmask.badval())
-            if len(bd) > 0: 
-                chip_flux[bd] = cont[bd] 
-                chip_flux_error[bd] = cont_error[bd] 
+            if len(bd) > 0:
+                chip_flux[bd] = cont[bd]
+                chip_flux_error[bd] = cont_error[bd]
             """
 
             # Do the sinc interpolation
@@ -754,7 +754,7 @@ catalogid = 27021597917837494
 visits = get_boss_visits(catalogid)
 combine_boss_visits(visits)
  [14]: Counter(data[ok]["CATALOGID"]).most_common(10)
-Out[14]: 
+Out[14]:
 [(27021597917837494, 13),
  (27021597917837548, 13),
  (27021597917837925, 13),

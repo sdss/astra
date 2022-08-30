@@ -88,7 +88,7 @@ def estimate_stellar_labels(
     log.debug(f"CUDA_VISIBLE_DEVICES = '{os.environ.get('CUDA_VISIBLE_DEVICES')}'")
 
     log.debug(f"Using torch version {torch.__version__} in {torch.__path__}")
-    
+
     # Load the model.
     ### model = Model(model_path, device)
     """
@@ -114,7 +114,7 @@ def estimate_stellar_labels(
         """
         ### original code in apogeenet
         flux = np.nan_to_num(spectrum.flux.value).astype(np.float32).reshape((N, 1, P))
-        
+
         ### original code in MDwarfMachine
         fluxes, invars = [], []
         for i in tqdm(range(len(obs_spec))):

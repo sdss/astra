@@ -27,7 +27,7 @@ For example::
     single_kwds = dict(
         release="dr16",
         apred="r12",
-        telescope="apo25m", 
+        telescope="apo25m",
         field="218-04",
         prefix="ap",
         obj="2M06440890-0610126",
@@ -48,7 +48,7 @@ For example::
 Note that even if *all* of your observations share the same keyword (e.g., `release` or `apstar`),
 the length of the tuple for all `ApStarFile` parameters must be the same.
 You should keep other (e.g., non-`ApStarFile`) parameters as they are.
-For example, if you were to execute APOGEENet, the other parameters would remain the same 
+For example, if you were to execute APOGEENet, the other parameters would remain the same
 even if you were analysing 1 spectrum, or 100 spectra::
 
     from astra.contrib.apogeenet.tasks import EstimateStellarParametersGivenApStarFile
@@ -57,13 +57,13 @@ even if you were analysing 1 spectrum, or 100 spectra::
 
     # Estimate stellar parameters for single star.
     task = EstimateStellarParametersGivenApStarFile(
-        model_path=model_path, 
+        model_path=model_path,
         **single_kwds
     )
 
     # Estimate stellar parameters for two stars.
     task = EstimateStellarParametersGivenApStarFile(
-        model_path=model_path, 
+        model_path=model_path,
         **multiple_kwds
     )
 
@@ -75,11 +75,11 @@ Writing tasks for batch mode
 Writing tasks to make use of batch mode is easy. The main things you have to do are to
 make sure your task inherits from :py:mod:`astra.tasks.BaseTask`, and to use the
 :py:mod:`astra.tasks.BaseTask.get_batch_tasks()` function to get a single-task's worth
-of work. 
+of work.
 This function is an iterator that will yield individual tasks, regardless of whether
 the task is being run in batch mode or not.
 If the task is not being executed in batch mode, then only one task (`self`) will be
-yielded. 
+yielded.
 
 Below is an example where the task can be executed in single-mode or batch-mode, without
 any extra information being supplied by the user::
@@ -93,7 +93,7 @@ any extra information being supplied by the user::
 
             # Do some expensive operation here that we otherwise would have
             # to do for many tasks (for example, load a model).
-            model = self.read_model()        
+            model = self.read_model()
 
             for task in self.get_batch_tasks():
                 # Read the observation for this individual single task.
@@ -104,9 +104,9 @@ any extra information being supplied by the user::
 
                 # Write the result of this task.
                 task.write_output(result)
-            
+
             return None
-        
+
 
         def requires(self):
             requirements = dict(model=LocalTargetTask(self.model_path))
@@ -128,7 +128,7 @@ Scheduling batch tasks
 ----------------------
 
 Even if you do not explicitly batch a bunch of stars to be analysed together, Astra may schedule
-tasks together to run in batch mode to minimise overhead. 
+tasks together to run in batch mode to minimise overhead.
 Let's go through an example to see how this works in practice.
 
 - Let's assume that `Observation` represents an observed spectrum, and you need to supply a `field` and `name` to uniquely identify a single observation::
@@ -148,34 +148,33 @@ Let's go through an example to see how this works in practice.
           MyAnalysisTask(a=3, order=10, field="omegaCen", name="2M003341+289732"),
           MyAnalysisTask(a=-1, order=5, field="250+00", name="2M004562-1234872"),
       ]
-    
+
 You have submitted these as individual tasks, but Astra can see that `MyAnalysisTask` is batchable,
 and that there are tasks where the non-`Observation` parameters are the same (e.g., these should be batched
 together to minimise overhead).
 In practice these tasks would be grouped together into just three batch tasks::
 
     MyAnalysisTask(
-        a=3, 
-        order=5, 
-        field=("250+00", "omegaCen"), 
+        a=3,
+        order=5,
+        field=("250+00", "omegaCen"),
         name=("2M123456+123456", "2M003341+289732")
     )
 
     MyAnalysisTask(
-        a=3, 
-        order=10, 
-        field=("250+00", "omegaCen"), 
+        a=3,
+        order=10,
+        field=("250+00", "omegaCen"),
         name=("2M123456+123456", "2M003341+289732"),
     )
 
     MyAnalysisTask(a=-1, order=5, field="250+00", name="2M123456+123456")
 
 Even though changing `a=-1` from `a=3` might not have any change on how the analysis is performed,
-Astra doesn't know that. 
+Astra doesn't know that.
 All it can assume is that if a non-`Observation` parameter is different, then that should be run
-in a separate batch. 
-That's because Astra isn't smart enough to know that changing `a` is unimportant, but changing 
+in a separate batch.
+That's because Astra isn't smart enough to know that changing `a` is unimportant, but changing
 something like `model_path` is important.
 All parameters are assumed to have an effect on the output, unless you specify them to be insignificant
 when writing the task class.
-
