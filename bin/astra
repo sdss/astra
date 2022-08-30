@@ -2,15 +2,14 @@ import click
 
 # Common options.
 @click.group()
-@click.option("-v", "verbose", default=False, is_flag=True,
-              help="verbose mode")
+@click.option("-v", "verbose", default=False, is_flag=True, help="verbose mode")
 @click.pass_context
 def cli(context, verbose):
     context.ensure_object(dict)
     context.obj["verbose"] = verbose
     # Overwrite settings in ~/.astra/astra.yml
-    #from astra import log
-    #log.set_level(10 if verbose else 20)
+    # from astra import log
+    # log.set_level(10 if verbose else 20)
 
 
 @cli.command()
@@ -18,12 +17,14 @@ def cli(context, verbose):
 def initdb(drop_tables):
     """Initialize the database."""
     from astra.database.astradb import create_tables
+
     create_tables(
         drop_existing_tables=drop_tables,
         reuse_if_open=True,
         insert_status_rows=True,
     )
     return None
+
 
 @cli.command()
 @click.option("--dry-run", is_flag=True)
@@ -34,7 +35,13 @@ def vacuum(dry_run):
     from peewee import JOIN, fn
     from time import sleep
     from astra import log
-    from astra.database.astradb import Task, Bundle, TaskBundle, TaskOutput, TaskInputDataProducts
+    from astra.database.astradb import (
+        Task,
+        Bundle,
+        TaskBundle,
+        TaskOutput,
+        TaskInputDataProducts,
+    )
 
     if not dry_run:
         log.warning(
@@ -49,89 +56,97 @@ def vacuum(dry_run):
     # Remove tasks that don't have outputs.
     q_zombie_tasks = (
         Task.select()
-            .join(TaskOutput, JOIN.LEFT_OUTER)
-            .group_by(Task.pk)
-            .having(fn.count(TaskOutput.pk) == 0)
+        .join(TaskOutput, JOIN.LEFT_OUTER)
+        .group_by(Task.pk)
+        .having(fn.count(TaskOutput.pk) == 0)
     )
     grouped = {}
     for task in q_zombie_tasks:
-        #log.debug(f"Task {task} (created {task.created}; {len(task.parameters)} parameters) has no outputs.")
+        # log.debug(f"Task {task} (created {task.created}; {len(task.parameters)} parameters) has no outputs.")
         grouped.setdefault(task.name, [])
         grouped[task.name].append(task.pk)
 
     for name, pks in grouped.items():
-        log.info(f"There are {len(pks)} {name} tasks with no outputs that can be deleted.")
+        log.info(
+            f"There are {len(pks)} {name} tasks with no outputs that can be deleted."
+        )
 
     for name, pks in grouped.items():
         log.info(f"Deleting {name} tasks (N={len(pks)}) with no outputs.")
 
         # Delete input data product references first.
-        rows = 0 if dry_run else (
-            TaskInputDataProducts.delete()
-                                 .where(TaskInputDataProducts.task_id.in_(pks))
-                                 .execute()
+        rows = (
+            0
+            if dry_run
+            else (
+                TaskInputDataProducts.delete()
+                .where(TaskInputDataProducts.task_id.in_(pks))
+                .execute()
+            )
         )
         log.info(f"\tDeleted {rows} rows of task input data products")
 
         # Delete any bundles.
-        rows = 0 if dry_run else (
-            TaskBundle.delete()
-                      .where(TaskBundle.task_id.in_(pks))
-                      .execute()
+        rows = (
+            0
+            if dry_run
+            else (TaskBundle.delete().where(TaskBundle.task_id.in_(pks)).execute())
         )
         log.info(f"\tDeleted {rows} rows of task bundles")
 
         # Delete the tasks.
-        rows = 0 if dry_run else (
-            Task.delete()
-                .where(Task.pk.in_(pks))
-                .execute()
-        )
+        rows = 0 if dry_run else (Task.delete().where(Task.pk.in_(pks)).execute())
         log.info(f"\tDeleted {rows} rows of tasks")
 
     # Any empty bundles?
     q_empty_bundles = (
         Bundle.select()
-              .join(TaskBundle, JOIN.LEFT_OUTER)
-              .group_by(Bundle)
-              .having(fn.count(TaskBundle) == 0)
+        .join(TaskBundle, JOIN.LEFT_OUTER)
+        .group_by(Bundle)
+        .having(fn.count(TaskBundle) == 0)
     )
     log.info(f"There are {len(q_empty_bundles)} empty bundles.")
-    rows = 0 if dry_run else (
-        Bundle.delete()
-              .where(Bundle.pk.in_([bundle.pk for bundle in q_empty_bundles]))
-              .execute()
+    rows = (
+        0
+        if dry_run
+        else (
+            Bundle.delete()
+            .where(Bundle.pk.in_([bundle.pk for bundle in q_empty_bundles]))
+            .execute()
+        )
     )
     log.info(f"\tDeleted {rows} rows of empty bundles.")
 
     # Find tasks with the same input data products, name, version, and parameters.
-    log.info(f"Finding tasks with at least one output that have the same name, version, parameters, and input data")
+    log.info(
+        f"Finding tasks with at least one output that have the same name, version, parameters, and input data"
+    )
     q = (
         Task.select(
-                fn.max(Task.pk),
-                Task.name,
-                Task.version,
-                Task.parameters,
-                TaskInputDataProducts.data_product_id,
-                fn.count(Task)
-            )
-            .join(TaskInputDataProducts)
-            .switch(Task)
-            .join(TaskOutput)
-            .group_by(
-                TaskInputDataProducts.data_product_id,
-                Task.name,
-                Task.version,
-                Task.parameters
-            )
-            .having(
-                (fn.count(Task) > 1)
-            )
-            .order_by(fn.count(Task).desc())
-            .tuples()
+            fn.max(Task.pk),
+            Task.name,
+            Task.version,
+            Task.parameters,
+            TaskInputDataProducts.data_product_id,
+            fn.count(Task),
+        )
+        .join(TaskInputDataProducts)
+        .switch(Task)
+        .join(TaskOutput)
+        .group_by(
+            TaskInputDataProducts.data_product_id,
+            Task.name,
+            Task.version,
+            Task.parameters,
+        )
+        .having((fn.count(Task) > 1))
+        .order_by(fn.count(Task).desc())
+        .tuples()
     )
     for i, (eg_pk, name, version, parameters, data_product_id, count) in enumerate(q):
-        log.info(f"{i}: {name} {version} on data_product_id={data_product_id} (eg task {eg_pk}) with {count} tasks and {len(parameters)} parameters")
+        log.info(
+            f"{i}: {name} {version} on data_product_id={data_product_id} (eg task {eg_pk}) with {count} tasks and {len(parameters)} parameters"
+        )
 
     log.warning(f"Not doing anything about these duplicates yet!")
 
@@ -151,7 +166,7 @@ def more(bundle_id):
     label = bundle.meta["slurm_kwargs"]["label"]
 
     dir = f"/scratch/general/nfs1/u6020307/pbs/{label}/{job_key}/"
-    '''
+    """
     found_path, expected_index = None, None
     for path in glob(os.path.join(dir, "node*_proc*.slurm")):
         with open(path, "r") as fp:
@@ -164,8 +179,9 @@ def more(bundle_id):
     if found_path is None:
         log.exception(f"Cannot find '{bundle_id}' among slurm files in {dir}")
         return None
-    '''
+    """
     import subprocess
+
     output = subprocess.check_output(f'grep -n "id={bundle_id}$" {dir}/*.e', shell=True)
     path, line, *_ = output.decode().split(":")
 
@@ -176,6 +192,7 @@ def more(bundle_id):
 def status():
     """Check the status of a task or bundle."""
     pass
+
 
 @status.command()
 @click.argument("bundle_ids", type=int, nargs=-1, required=True)
@@ -202,12 +219,13 @@ def bundles(bundle_ids):
         N_tasks += len(bundle.tasks)
         tasks_by_status[description] += T
 
-
     log.info(f"Summary:")
     for status, bundles in statuses.items():
         count_bundles = len(bundles)
         count_tasks = tasks_by_status[status]
-        log.info(f"    {count_bundles} {status} bundles ({100 * count_bundles / N_bundles:.0f}%); {count_tasks} tasks ({100 * count_tasks / N_tasks:.0f}%)")
+        log.info(
+            f"    {count_bundles} {status} bundles ({100 * count_bundles / N_bundles:.0f}%); {count_tasks} tasks ({100 * count_tasks / N_tasks:.0f}%)"
+        )
 
     log.debug(f"Bundles by status:")
     for status, bundles in statuses.items():
@@ -216,10 +234,12 @@ def bundles(bundle_ids):
 
     return None
 
+
 @cli.group()
 def execute():
     """Execute a task or bundle."""
     pass
+
 
 def do_work(ids, is_bundle):
     from astra import log
@@ -234,21 +254,13 @@ def do_work(ids, is_bundle):
     for i, item in enumerate(items, start=1):
         log.info(f"Executing item {i}/{N}: {item}")
         try:
-            result = (
-                item.as_executable()
-                    .execute()
-            )
+            result = item.as_executable().execute()
         except:
             log.exception(f"Exception when executing item {item}")
         else:
             log.info(f"Completed item {i}/{N}: {item}")
 
     return None
-
-def _execute_task(task_id):
-    print(f"executing task {task_id}")
-    from astra.database.astradb import Task
-    Task.get(task_id).instance().execute()
 
 
 @execute.command(hidden=True)
@@ -273,9 +285,22 @@ def bundles(bundle_ids):
 
 
 @execute.command()
-@click.option("-p", "--parallelism", type=int, nargs=1, default=1)
+@click.option(
+    "--parallelism",
+    "-p",
+    type=int,
+    nargs=1,
+    default=1,
+    help="Number of parallel processes to use",
+)
+@click.option(
+    "--all",
+    "-a",
+    is_flag=True,
+    help="Execute all tasks in bundle, not just incomplete tasks",
+)
 @click.argument("bundle_id", type=int, nargs=1, required=True)
-def bundle(bundle_id, parallelism):
+def bundle(bundle_id, parallelism, a):
     """Execute a task bundle"""
 
     if parallelism > 1:
@@ -284,18 +309,16 @@ def bundle(bundle_id, parallelism):
 
         from astra.database.astradb import Task, TaskBundle
 
-        tasks = (
-            Task.select()
-                .join(TaskBundle)
-                .where(TaskBundle.bundle_id == bundle_id)
-        )
+        tasks = Task.select().join(TaskBundle).where(TaskBundle.bundle_id == bundle_id)
+        if not a:
+            tasks = tasks.where(Task.status_id == 1)
+            log.info(f"Restricting to tasks with 'created' status only")
 
         def f(task):
             try:
                 task.instance().execute()
             except:
                 log.exception(f"Exception in executing task {task}:")
-
 
         Parallel(parallelism, prefer="processes")(delayed(f)(task) for task in tasks)
 
