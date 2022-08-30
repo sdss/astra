@@ -1,4 +1,4 @@
-from astra.utils.bitmask.base import BitMask
+from astra.tools.bitmask import BitMask
 
 
 class Apogee2Target1(BitMask):

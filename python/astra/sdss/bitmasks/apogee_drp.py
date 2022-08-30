@@ -1,4 +1,4 @@
-from astra.utils.bitmask import BitMask
+from astra.tools.bitmask import BitMask
 
 
 class StarBitMask(BitMask):
