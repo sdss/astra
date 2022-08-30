@@ -29,8 +29,6 @@ except ImportError:
     )
 
 
-from .catalog import get_sky_position
-
 from healpy import ang2pix
 
 BLANK_CARD = (" ", " ", None)
@@ -567,7 +565,9 @@ def add_check_sums(hdu_list: fits.HDUList):
 
 
 def create_primary_hdu_cards(
-    source: Union[Source, int], hdu_descriptions: Optional[List[str]] = None
+    source: Union[Source, int],
+    hdu_descriptions: Optional[List[str]] = None,
+    nside: Optional[int] = 128,
 ) -> List:
     """
     Create primary HDU (headers only) for a Milky Way Mapper data product, given some source.
@@ -577,12 +577,20 @@ def create_primary_hdu_cards(
 
     :param hdu_descriptions: [optional]
         A list of strings describing all HDUs.
+
+    :param nside: [optional]
+        Number of sides used in Healpix (lon, lat) mapping (default: 128).
     """
     catalogid = get_catalog_identifier(source)
 
     # Sky position.
-    ra, dec = get_sky_position(catalogid)
-    nside = 128
+    ra, dec = (
+        Catalog.select(Catalog.ra, Catalog.dec)
+        .where(Catalog.catalogid == catalogid)
+        .tuples()
+        .first()
+    )
+
     healpix = ang2pix(nside, ra, dec, lonlat=True)
 
     # I would like to use .isoformat(), but it is too long and makes headers look disorganised.

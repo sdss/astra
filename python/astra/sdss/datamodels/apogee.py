@@ -7,7 +7,7 @@ from astra.database.astradb import DataProduct
 from astra.utils import log, list_to_dict
 from astra.sdss.dm import base, combine, util
 
-from astra.sdss.apogee_bitmask import StarBitMask, PixelBitMask  # TODO: put elsewhere
+from astra.sdss.bitmask.apogee_drp import StarBitMask, PixelBitMask
 
 
 def create_apogee_hdus(
@@ -98,8 +98,8 @@ def create_apogee_hdus(
     for i, data_product in enumerate(data_products):
         with fits.open(data_product.path) as image:
             starflag = np.uint64(image[0].header["STARFLAG"])
-            use_in_stack *= ((starflag & starmask.badval()) == 0) & (
-                (starflag & starmask.getval("RV_REJECT")) == 0
+            use_in_stack *= ((starflag & starmask.bad_value) == 0) & (
+                (starflag & starmask.get_value("RV_REJECT")) == 0
             )
             dithered[i] = 1.0 if image[1].data.size == (3 * 4096) else 0.0
 
@@ -439,7 +439,7 @@ def resample_apogee_visit_spectra(
             flux_error.append(image[hdu_flux_error].data)
             # We resample the bitmask, and we provide a bad pixel mask.
             bitmask.append(image[hdu_bitmask].data)
-            bad_pixel_mask.append((bitmask[-1] & pixel_mask.badval()) > 0)
+            bad_pixel_mask.append((bitmask[-1] & pixel_mask.bad_value) > 0)
 
         include_visits.append(visit)
 
@@ -502,9 +502,9 @@ def increase_flux_uncertainties_due_to_persistence(
 
     V, P = resampled_bitmask.shape
     pixel_mask = PixelBitMask()
-    is_high = (resampled_bitmask & pixel_mask.getval("PERSIST_HIGH")) > 0
-    is_medium = (resampled_bitmask & pixel_mask.getval("PERSIST_MED")) > 0
-    is_low = (resampled_bitmask & pixel_mask.getval("PERSIST_LOW")) > 0
+    is_high = (resampled_bitmask & pixel_mask.get_value("PERSIST_HIGH")) > 0
+    is_medium = (resampled_bitmask & pixel_mask.get_value("PERSIST_MED")) > 0
+    is_low = (resampled_bitmask & pixel_mask.get_value("PERSIST_LOW")) > 0
 
     resampled_flux_error[is_high] *= np.sqrt(5)
     resampled_flux_error[is_medium & ~is_high] *= np.sqrt(4)
@@ -522,7 +522,7 @@ def increase_flux_uncertainties_due_to_skylines(
         https://github.com/sdss/apogee_drp/blob/73cfd3f7a7fbb15963ddd2190e24a15261fb07b1/python/apogee_drp/apred/rv.py#L780-L791
     """
     is_significant_skyline = (
-        resampled_bitmask & PixelBitMask().getval("SIG_SKYLINE")
+        resampled_bitmask & PixelBitMask().get_value("SIG_SKYLINE")
     ) > 0
     resampled_flux_error[is_significant_skyline] *= np.sqrt(100)
     return None

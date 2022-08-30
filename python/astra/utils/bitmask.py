@@ -1,47 +1,59 @@
 import numpy as np
-from collections import OrderedDict
+from functools import cached_property
 
 
-class BitFlagNameMap(object):
-    def get_names(self, value):
-        names = []
-        for k, entry in self.__class__.__dict__.items():
-            if k.startswith("_") or k != k.upper():
-                continue
+class BitMask(object):
 
-            if isinstance(entry, int):
-                v = entry
-            else:
-                v, comment = entry
+    """Base class for bitmasks."""
 
-            if value & (2**v):
-                names.append(k)
+    def get_name(self, val, level=0, strip=True):
+        """
+        Given input value, returns names of all set bits, optionally of a given level
+        """
+        strflag = ""
+        for ibit, name in enumerate(self.name):
+            if (np.uint64(val) & np.uint64(2**ibit)) > 0 and (
+                level == 0 or self.level == level
+            ):
+                strflag = strflag + name + ","
+        if strip:
+            return strflag.strip(",")
+        else:
+            return strflag
 
-        return tuple(names)
-
-    def get_value(self, *names):
-        value = np.int64(0)
-
-        for name in names:
+    def get_value(self, name):
+        """
+        Get the numerical bit value of a given character name(s)
+        """
+        if type(name) is str:
+            name = [name]
+        bitval = np.uint64(0)
+        for n in name:
             try:
-                entry = getattr(self, name)
-            except KeyError:
-                raise ValueError(f"no bit flag found named '{name}'")
+                j = self.name.index(n.strip())
+                bitval |= np.uint64(2**j)
+            except:
+                print("WARNING: undefined name: ", n)
+        return bitval
 
-            if isinstance(entry, int):
-                entry = (entry, "")
+    @cached_property
+    def bad_value(self):
+        """
+        Return bitmask value of all bits that indicate BAD in input bitmask
+        """
+        val = np.uint64(0)
+        for i, level in enumerate(self.level):
+            if level == 1:
+                val = val | np.uint64(2**i)
+        return val
 
-            v, comment = entry
-            value |= np.int64(2**v)
-
-        return value
-
-    def get_level_value(self, level):
-        try:
-            names = self.levels[level]
-        except KeyError:
-            raise ValueError(
-                f"No level name '{level}' found (available: {' '.join(list(self.levels.keys()))})"
-            )
-
-        return self.get_value(*names)
+    @cached_property
+    def warn_value(self):
+        """
+        Return bitmask value of all bits that indicate BAD in input bitmask
+        """
+        val = np.uint64(0)
+        for i, level in enumerate(self.level):
+            if level == 2:
+                val = val | np.uint64(2**i)
+        return val
