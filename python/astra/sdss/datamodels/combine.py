@@ -13,7 +13,55 @@ from astra.utils import flatten
 C_KM_S = c.to(u.km / u.s).value
 
 
-def pixel_weighted_spectrum(flux, flux_error, continuum, bitmask):
+def pixel_weighted_spectrum(
+    flux: np.ndarray,
+    flux_error: np.ndarray,
+    bitmask: np.ndarray,
+    scale_by_pseudo_continuum=False,
+    median_filter_size=501,
+    median_filter_mode="reflect",
+    gaussian_filter_size=100,
+    **kwargs,
+):
+    """
+    Combine input spectra to produce a single pixel-weighted spectrum.
+
+    :param flux:
+        An array of flux values, resampled to the same wavelength values.
+
+    :param flux_error:
+        Error in flux values, same shape as `flux`.
+
+    :param bitmask:
+        A pixel bitmask, same shape as `flux`.
+
+    :param scale_by_pseudo_continuum: [optional]
+        Optionally scale each visit spectrum by its pseudo-continuum (a gaussian median filter) when
+        stacking to keep them on the same relative scale (default: False).
+
+    :param median_filter_size: [optional]
+        The filter width (in pixels) to use for any median filters (default: 501).
+
+    :param median_filter_mode: [optional]
+        The mode to use for any median filters (default: reflect).
+
+    :param gaussian_filter_size: [optional]
+        The filter size (in pixels) to use for any gaussian filter applied.
+    """
+
+    V, P = flux.shape
+    continuum = np.ones((V, P), dtype=float)
+    if scale_by_pseudo_continuum:
+        smooth_filter = lambda f: gaussian_filter(
+            median_filter(f, [median_filter_size], mode=median_filter_mode),
+            gaussian_filter_size,
+        )
+        # TODO: If there are gaps in `finite` then this will cause issues because median filter and gaussian filter
+        #       don't receive the x array
+        # TODO: Take a closer look at this process.
+        for v in range(V):
+            finite = np.isfinite(flux)
+            continuum[v, finite] = smooth_filter(flux[v, finite])
 
     # Pixel-by-pixel weighted average
     resampled_ivar = 1.0 / flux_error**2
@@ -25,8 +73,12 @@ def pixel_weighted_spectrum(flux, flux_error, continuum, bitmask):
     stacked_flux_error = np.sqrt(1.0 / stacked_ivar) * cont
 
     stacked_bitmask = np.bitwise_or.reduce(bitmask, 0)
-
-    return (stacked_flux, stacked_flux_error, stacked_bitmask)
+    meta = dict(
+        scale_by_pseudo_continuum=scale_by_pseudo_continuum,
+        median_filter_mode=median_filter_mode,
+        gaussian_filter_size=gaussian_filter_size,
+    )
+    return (stacked_flux, stacked_flux_error, stacked_bitmask, continuum, meta)
 
 
 def separate_bitmasks(bitmasks):
@@ -47,15 +99,6 @@ def separate_bitmasks(bitmasks):
     return separated
 
 
-"""
-from astra.database.astradb import Source
-source = Source.get(catalogid=4551536934)
-from astra.sdss.dm.mwm import create_mwm_data_products
-
-foo = create_mwm_data_products(source)
-"""
-
-
 def resample_visit_spectra(
     resampled_wavelength,
     num_pixels_per_resolution_element,
@@ -64,12 +107,12 @@ def resample_visit_spectra(
     flux,
     flux_error=None,
     bitmask=None,
-    scale_by_pseudo_continuum=False,
     use_smooth_filtered_spectrum_for_bad_pixels=False,
     bad_pixel_mask=None,
     median_filter_size=501,
     median_filter_mode="reflect",
     gaussian_filter_size=100,
+    **kwargs,
 ):
     """
     Resample visit spectra onto a common wavelength array.
@@ -92,10 +135,6 @@ def resample_visit_spectra(
 
     :param bitmask: [optional]
         A bitmask array the same shape as `flux`.
-
-    :param scale_by_pseudo_continuum: [optional]
-        Optionally scale each visit spectrum by its pseudo-continuum (a gaussian median filter) when
-        stacking to keep them on the same relative scale (default: False).
 
     :param use_smooth_filtered_spectrum_for_bad_pixels: [optional]
         For any bad pixels (defined by the `bad_pixel_mask`), use a smooth filtered spectrum (a median
@@ -122,7 +161,6 @@ def resample_visit_spectra(
 
     resampled_flux = np.zeros(shape)
     resampled_flux_error = np.zeros(shape)
-    resampled_pseudo_cont = np.ones(shape)
 
     visit_and_chip = (
         lambda f, i, j: None
@@ -175,8 +213,9 @@ def resample_visit_spectra(
             )
             (finite,) = np.where(np.isfinite(pixel))
 
+            # NOTE: sincint() takes in variance, but returns error
             ((resampled_chip_flux, resampled_chip_flux_error),) = sincint(
-                pixel[finite], n_res, [[chip_flux, chip_flux_error]]
+                pixel[finite], n_res, [[chip_flux, chip_flux_error**2]]
             )
 
             resampled_flux[i, finite] = resampled_chip_flux
@@ -219,16 +258,6 @@ def resample_visit_spectra(
                         resampled_bitmask_flag >= metric
                     ).astype(int)
 
-            # Scale by continuum?
-            if scale_by_pseudo_continuum:
-                # TODO: If there are gaps in `finite` then this will cause issues because median filter and gaussian filter
-                #       don't receive the x array
-                # TODO: Take a closer look at this process.
-                resampled_pseudo_cont[i, finite] = smooth_filter(resampled_chip_flux)
-
-                resampled_flux[i, finite] /= resampled_pseudo_cont[i, finite]
-                resampled_flux_error[i, finite] /= resampled_pseudo_cont[i, finite]
-
     # TODO: return flux ivar instead?
     resampled_bitmask = np.zeros(resampled_flux.shape, dtype=np.uint64)
     if bitmask is not None:
@@ -241,7 +270,6 @@ def resample_visit_spectra(
     return (
         resampled_flux,
         resampled_flux_error,
-        resampled_pseudo_cont,
         resampled_bitmask,
     )
 
@@ -274,6 +302,8 @@ def sincint(x, nres, speclist):
     x : desired positions
     nres : number of pixels per resolution element (2=Nyquist)
     speclist : list of [quantity, variance] pairs (variance can be None)
+
+    NOTE: This takes in variance, but returns ERROR.
     """
 
     dampfac = 3.25 * nres / 2.0
@@ -312,7 +342,6 @@ def sincint(x, nres, speclist):
 
         lobe = np.arange(ksize) - nhalf + ix[i]
         vals = np.zeros(ksize)
-        vars = np.zeros(ksize)
         gd = np.where((lobe >= 0) & (lobe < nf))[0]
 
         for spec, out in zip(speclist, outlist):

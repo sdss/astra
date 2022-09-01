@@ -4,10 +4,11 @@ from functools import partial
 from typing import Union, List, Callable, Optional, Dict, Tuple
 
 from astra.database.astradb import DataProduct
-from astra.utils import log, list_to_dict
-from astra.sdss.dm import base, combine, util
+from astra import log
+from astra.utils import list_to_dict
+from astra.sdss.datamodels import base, combine, util
 
-from astra.sdss.bitmask.apogee_drp import StarBitMask, PixelBitMask
+from astra.sdss.bitmasks.apogee_drp import StarBitMask, PixelBitMask
 
 
 def create_apogee_hdus(
@@ -71,7 +72,7 @@ def create_apogee_hdus(
         tuple(map(get_apogee_visit_radial_velocity, data_products))
     )
 
-    flux, flux_error, continuum, bitmask, meta = resample_apogee_visit_spectra(
+    flux, flux_error, bitmask, meta = resample_apogee_visit_spectra(
         data_products,
         crval=crval,
         cdelt=cdelt,
@@ -107,12 +108,13 @@ def create_apogee_hdus(
         combined_flux,
         combined_flux_error,
         combined_bitmask,
+        continuum,
+        meta_combine,
     ) = combine.pixel_weighted_spectrum(
-        flux[use_in_stack],
-        flux_error[use_in_stack],
-        continuum[use_in_stack],
-        bitmask[use_in_stack],
+        flux[use_in_stack], flux_error[use_in_stack], bitmask[use_in_stack], **kwargs
     )
+    meta.update(meta_combine)
+
     snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
     wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)
 
@@ -351,7 +353,6 @@ def resample_apogee_visit_spectra(
     num_pixels_per_resolution_element=(5, 4.25, 3.5),
     radial_velocities: Optional[Union[Callable, List[float]]] = None,
     use_smooth_filtered_spectrum_for_bad_pixels: bool = True,
-    scale_by_pseudo_continuum: bool = True,
     median_filter_size: int = 501,
     median_filter_mode: str = "reflect",
     gaussian_filter_size: float = 100,
@@ -388,10 +389,6 @@ def resample_apogee_visit_spectra(
     :param use_smooth_filtered_spectrum_for_bad_pixels: [optional]
         For any bad pixels (defined by the bad pixel mask) use a smooth filtered spectrum (a median
         filtered spectrum with a gaussian convolution) to fill in bad pixel values (default: True).
-
-    :param scale_by_pseudo_continuum: [optional]
-        Optionally scale each visit spectrum by its pseudo-continuum (a gaussian median filter) when
-        stacking to keep them on the same relative scale (default: True).
 
     :param median_filter_size: [optional]
         The filter width (in pixels) to use for any median filters (default: 501).
@@ -452,7 +449,6 @@ def resample_apogee_visit_spectra(
     )
 
     kwds = dict(
-        scale_by_pseudo_continuum=scale_by_pseudo_continuum,
         use_smooth_filtered_spectrum_for_bad_pixels=use_smooth_filtered_spectrum_for_bad_pixels,
         bad_pixel_mask=bad_pixel_mask,
         median_filter_size=median_filter_size,
@@ -464,7 +460,6 @@ def resample_apogee_visit_spectra(
     (
         resampled_flux,
         resampled_flux_error,
-        resampled_pseudo_cont,
         resampled_bitmask,
     ) = combine.resample_visit_spectra(*args, flux, flux_error, bitmask, **kwds)
     # TODO: have combine.resample_visit_spectra return this so we dont repeat ourselves
@@ -478,13 +473,11 @@ def resample_apogee_visit_spectra(
         median_filter_size=median_filter_size,
         median_filter_mode=median_filter_mode,
         gaussian_filter_size=gaussian_filter_size,
-        scale_by_pseudo_continuum=scale_by_pseudo_continuum,
     )
 
     return (
         resampled_flux,
         resampled_flux_error,
-        resampled_pseudo_cont,
         resampled_bitmask,
         meta,
     )
@@ -508,7 +501,7 @@ def increase_flux_uncertainties_due_to_persistence(
 
     resampled_flux_error[is_high] *= np.sqrt(5)
     resampled_flux_error[is_medium & ~is_high] *= np.sqrt(4)
-    resampled_flux_error[is_low & ~is_medium & ~is_low] *= np.sqrt(3)
+    resampled_flux_error[is_low & ~is_medium & ~is_high] *= np.sqrt(3)
     return None
 
 

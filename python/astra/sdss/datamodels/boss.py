@@ -7,7 +7,7 @@ from astra import log
 from astra.database.astradb import DataProduct
 from astra.utils import list_to_dict
 
-from astra.sdss.dm import base, util, combine
+from astra.sdss.datamodels import base, util, combine
 
 
 def create_boss_hdus(
@@ -80,7 +80,7 @@ def create_boss_hdus(
     # Data reduction pipeline keywords
     drp_cards = base.headers_as_cards(data_products[0], common_headers)
 
-    flux, flux_error, continuum, bitmask, meta = resample_boss_visit_spectra(
+    flux, flux_error, bitmask, meta = resample_boss_visit_spectra(
         data_products,
         crval=crval,
         cdelt=cdelt,
@@ -123,7 +123,10 @@ def create_boss_hdus(
         combined_flux,
         combined_flux_error,
         combined_bitmask,
-    ) = combine.pixel_weighted_spectrum(flux, flux_error, continuum, bitmask)
+        continuum,
+        meta_combine,
+    ) = combine.pixel_weighted_spectrum(flux, flux_error, bitmask, **kwargs)
+    meta.update(meta_combine)
 
     snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
     wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)
@@ -271,7 +274,6 @@ def resample_boss_visit_spectra(
     num_pixels: int,
     num_pixels_per_resolution_element: int,
     radial_velocities: Optional[Union[Callable, List[float]]] = None,
-    scale_by_pseudo_continuum: bool = True,
     median_filter_size: int = 501,
     median_filter_mode: str = "reflect",
     gaussian_filter_size: float = 100,
@@ -301,10 +303,6 @@ def resample_boss_visit_spectra(
         in units of km/s.
 
         If `None` is given then we use `get_boss_relative_velocity`.
-
-    :param scale_by_pseudo_continuum: [optional]
-        Optionally scale each visit spectrum by its pseudo-continuum (a gaussian median filter) when
-        stacking to keep them on the same relative scale (default: True).
 
     :param median_filter_size: [optional]
         The filter width (in pixels) to use for any median filters (default: 501).
@@ -353,14 +351,12 @@ def resample_boss_visit_spectra(
         median_filter_size=median_filter_size,
         median_filter_mode=median_filter_mode,
         gaussian_filter_size=gaussian_filter_size,
-        scale_by_pseudo_continuum=scale_by_pseudo_continuum,
     )
     kwds.update(kwargs)
 
     (
         resampled_flux,
         resampled_flux_error,
-        resampled_pseudo_cont,
         resampled_bitmask,
     ) = combine.resample_visit_spectra(*args, flux, flux_error, **kwds)
 
@@ -375,7 +371,6 @@ def resample_boss_visit_spectra(
         median_filter_size=median_filter_size,
         median_filter_mode=median_filter_mode,
         gaussian_filter_size=gaussian_filter_size,
-        scale_by_pseudo_continuum=scale_by_pseudo_continuum,
     )
     if additional_meta:
         meta["v_meta"] = list_to_dict(additional_meta)
@@ -383,7 +378,6 @@ def resample_boss_visit_spectra(
     return (
         resampled_flux,
         resampled_flux_error,
-        resampled_pseudo_cont,
         resampled_bitmask,
         meta,
     )

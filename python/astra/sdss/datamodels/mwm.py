@@ -3,7 +3,7 @@ from typing import Union, List, Callable, Optional, Dict, Tuple
 
 from astra.database.astradb import Source, DataProduct
 
-from astra.sdss.dm import base, apogee, boss
+from astra.sdss.datamodels import base, apogee, boss
 from astra import log
 
 

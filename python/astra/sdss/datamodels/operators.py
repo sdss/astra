@@ -16,7 +16,7 @@ from astra import log, __version__ as astra_version
 
 from typing import List, Tuple, Dict, Union, Optional
 
-from astra.sdss.dm.mwm import create_mwm_data_products
+from astra.sdss.datamodels.mwm import create_mwm_data_products
 
 
 class CreateMWMVisitStarProducts(TaskInstance):
@@ -154,7 +154,7 @@ class MWMVisitStarFactory(BaseOperator):
             # Create a task
             with database.atomic():
                 created_task = Task.create(
-                    name="astra.sdss.dm.operators.CreateMWMVisitStarProducts",
+                    name="astra.sdss.datamodels.operators.CreateMWMVisitStarProducts",
                     parameters=dict(
                         release=self.product_release,
                         catalogid=catalogid,
