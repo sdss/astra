@@ -70,6 +70,8 @@ class CreateMWMVisitStarProducts(TaskInstance):
                         os.unlink(path)
 
             else:
+                log.info(f"Wrote mwmVisits product to {mwmVisit_path}")
+                log.info(f"Wrote mwmStar product to {mwmStar_path}")
 
                 # Create output data product records that link to this task.
                 dp_visit, visit_created = DataProduct.get_or_create(

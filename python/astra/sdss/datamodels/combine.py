@@ -91,7 +91,7 @@ def separate_bitmasks(bitmasks):
 
     q_max = max([int(np.log2(np.max(bitmask))) for bitmask in bitmasks])
     separated = OrderedDict()
-    for q in range(q_max):
+    for q in range(1 + q_max):
         separated[q] = []
         for bitmask in bitmasks:
             is_set = (bitmask & np.uint64(2**q)) > 0
@@ -112,6 +112,7 @@ def resample_visit_spectra(
     median_filter_size=501,
     median_filter_mode="reflect",
     gaussian_filter_size=100,
+    min_bitmask_value=0.10,
     **kwargs,
 ):
     """
@@ -148,6 +149,9 @@ def resample_visit_spectra(
 
     :param gaussian_filter_size: [optional]
         The filter size (in pixels) to use for any gaussian filter applied.
+
+    :param min_bitmask_value: [optional]
+        The minimum absolute value of a bitmask (after resampling) for that pixel to be flagged (default: 0.1).
     """
 
     try:
@@ -253,12 +257,10 @@ def resample_visit_spectra(
                     # print(f"Took metric={metric:.1f} for bitmask {flag} on visit {i} chip {j}")
 
                     # Turns out that this was not a good idea. Let's be more conservative.
-                    metric = 0.1
                     resampled_bitmasks[i, finite, k] = (
-                        resampled_bitmask_flag >= metric
+                        np.abs(resampled_bitmask_flag) > min_bitmask_value
                     ).astype(int)
 
-    # TODO: return flux ivar instead?
     resampled_bitmask = np.zeros(resampled_flux.shape, dtype=np.uint64)
     if bitmask is not None:
         # Sum them together.

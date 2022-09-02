@@ -92,7 +92,9 @@ def create_apogee_hdus(
 
     # Let's define some quality criteria of what to include in a stack.
     # This logic follows from https://github.com/sdss/apogee_drp/blob/73cfd3f7a7fbb15963ddd2190e24a15261fb07b1/python/apogee_drp/apred/rv.py
-    use_in_stack = np.isfinite(snr_visit) & (snr_visit > 3)
+    use_in_stack = (
+        np.isfinite(snr_visit) & (snr_visit > 3) & np.isfinite(velocity_meta["V_RAD"])
+    )
 
     starmask = StarBitMask()
     dithered = np.zeros(len(data_products), dtype=float)
@@ -285,6 +287,10 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct) -> dict:
     )
     result = q.first()
     if result is None:
+        log.warning(
+            f"No entry found for data product {data_product} in apogee_drp.RvVisit table"
+        )
+
         # No RV measurement for this visit.
         return {
             "V_BC": np.nan,
