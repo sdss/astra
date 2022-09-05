@@ -3,43 +3,23 @@ hide-toc: true
 ---
 
 
+
 ```{toctree}
 :caption: User Guide
 :hidden:
 
-install
-database
-tutorials/index
+user/index
 ```
-
-```{toctree}
-:caption: Reference
-:hidden:
-
-components/index
-api
-cli
-```
-
 
 ```{toctree}
 :caption: Developer Guide
 :hidden:
 
+api
+cli
 developer/index
 developer/airflow-index
 developer/software-index
-```
-
-
-```{toctree}
-:caption: Astra & SDSS-V
-:hidden:
-
-sdss/airflow
-sdss/dags
-sdss/operators
-sdss/results
 ```
 
 

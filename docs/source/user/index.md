@@ -7,6 +7,6 @@ hide-toc: true
 
 ```{toctree}
 install
-database
-tutorials/index
+datamodels
+components/index
 ```

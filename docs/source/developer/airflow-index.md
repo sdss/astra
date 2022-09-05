@@ -4,12 +4,6 @@ hide-toc: true
 
 # SDSS-V
 
-```{toctree}
-airflow
-operators
-dags
-```
-
 In the Milky Way Mapper (MWM) of SDSS-V, we use Astra to analyse spectroscopic data. The data are hosted on the [Science Archive Server](#), and there is a dedicated cluster for performing these analyses. We use [Airflow](#) to schedule and orchestrate analysis tasks for the MWM. In Airflow, we define a [directed acyclic graph (DAG)](developer/dags) that performs tasks in a pre-defined sequence, and each step can have logic that re-directs the tasks that need executing.
 
 
@@ -22,3 +16,9 @@ If we think of a task is the smallest unit of work, then you might imagine a tas
 Operators are necessary for running Airflow and Astra together in an efficient way. An example of an SDSS-V operator in Astra is {obj}`astra.operators.sdss.ApStarOperator`: an operator to find all ApStar files that have been created in the previous execution period. If the DAG has a weekly execution schedule, then the {obj}`astra.operators.sdss.ApStarOperator` will find and create {obj}`astra.database.astradb.DataProduct` records for every ApStar file created in the previous week.
 
 We can pass the results of this operator down to other operators in the DAG to perform analyses on the ApStar products created in the last execution period. However, the {obj}`astra.operators.sdss.ApStarOperator` is an example of a **SDSS-V only** operator that won't work on your local computer without a bit of work. In particular, that operator requires read-access to the SDSS-V database, which can only be accessed from the SDSS systems at Utah. You can write DAGs to analyse data locally, but you need to have access to the SDSS-V data (e.g., database access and/or a mirror of the Science Archive Server) to be able to analyse SDSS-V data locally.
+
+```{toctree}
+airflow
+operators
+dags
+```
