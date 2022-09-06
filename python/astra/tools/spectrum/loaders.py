@@ -165,6 +165,17 @@ def load_sdss_apStar(path, **kwargs):
 
 
 @data_loader(
+    "apStar",
+    identifier=is_filetype("apStar"),
+    dtype=SpectrumList,
+    priority=10,
+    extensions=["fits"],
+)
+def load_sdss_apStar_list(path, **kwargs):
+    return SpectrumList([load_sdss_apStar(path, **kwargs)])
+
+
+@data_loader(
     "apVisit",
     identifier=is_filetype("apVisit"),
     dtype=Spectrum1D,
@@ -203,7 +214,7 @@ def load_sdss_apVisit(path, **kwargs):
                 continue
             meta[key.lower()] = image[0].header[key]
 
-        meta["BITMASK"] = ordered(image[3].data)
+        meta["bitmask"] = ordered(image[3].data)
         # TODO: Include things like sky flux, sky error, telluric flux, telluric error?
         #       wavelength coefficients? lsf coefficients?
 
@@ -268,14 +279,17 @@ def load_sdss_apVisit_multi(path, **kwargs):
 
 @data_loader(
     "specFull",
-    identifier=is_filetype("specFull"),
+    # Note the path definition here is not the same as other SDSS-V data models.
+    identifier=is_filetype("spec"),
     dtype=Spectrum1D,
     priority=10,
     extensions=["fits"],
 )
 def load_sdss_specFull(path, **kwargs):
     with fits.open(path) as image:
-        flux_unit = u.Unit(image[0].header["BUNIT"])
+        # The flux unit is stored in the `BUNIT` keyword, but not in a form that astropy
+        # will accept.
+        flux_unit = u.Unit("1e-17 erg / (Angstrom cm2 s)")  # TODO
         spectral_axis = u.Quantity(10 ** image[1].data["LOGLAM"], unit=u.Angstrom)
 
         flux = u.Quantity(image[1].data["FLUX"], unit=flux_unit)
@@ -364,6 +378,7 @@ def _load_mwmVisit_or_mwmStar_hdu(image, hdu):
 
     # Add bitmask
     meta["BITMASK"] = np.array(image[hdu_idx].data["BITMASK"])
+    meta["SNR"] = np.array(image[hdu_idx].data["SNR"])
 
     return Spectrum1D(
         spectral_axis=spectral_axis, flux=flux, uncertainty=e_flux, meta=meta

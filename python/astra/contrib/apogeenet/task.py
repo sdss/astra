@@ -1,16 +1,14 @@
 import numpy as np
 import torch
-from tqdm import tqdm
-
 from astra import log
-from astra.utils import dict_to_list
+from astra.utils import dict_to_list, logarithmic_tqdm
 from astra.base import ExecutableTask, Parameter
-from astra.database.astradb import Output, TaskOutput
-from astra.tools.spectrum import Spectrum1D
-
+from astra.database.astradb import database, ApogeeNetOutput
+from astra.tools.spectrum import SpectrumList
 from astra.contrib.apogeenet.model import Model
-from astra.contrib.apogeenet.database import ApogeeNet
 from astra.contrib.apogeenet.utils import get_metadata, create_bitmask
+from astropy.nddata import StdDevUncertainty
+from astropy import units as u
 
 
 class StellarParameters(ExecutableTask):
@@ -22,115 +20,124 @@ class StellarParameters(ExecutableTask):
     def execute(self):
 
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        log.info(f"Executing on {device}")
+
         model = Model(self.model_path, device)
 
-        results = []
-        total = len(self.input_data_products)
-        for i, (task, data_products, parameters) in enumerate(
-            tqdm(self.iterable(), total=total)
-        ):
+        all_results = []
+        # Since this could be a long process, we update the progress bar only ~100 times on ~pseudo
+        # uniform steps in log iterations so that we don't fill the log file with crap.
+        with logarithmic_tqdm(total=len(self.context["tasks"]), miniters=100) as pb:
+            for i, (task, data_products, parameters) in enumerate(self.iterable()):
 
-            assert len(data_products) == 1
+                # Input data products could be apStar, mwmVisit, or mwmStar files.
+                # If they are mwmVisit/mwmStar files then those could include BOSS spectra.
+                # Since we don't know yet, just load as SpectrumList.
+                flux, e_flux, meta, snrs = ([], [], [], [])
+                for spectrum in SpectrumList.read(data_products[0].path):
+                    if spectrum.wavelength[0] < (15_000 * u.Angstrom):
+                        continue
 
-            spectrum = Spectrum1D.read(data_products[0].path)
-            keys, metadata, metadata_norm = get_metadata(spectrum)
+                    N, P = np.atleast_2d(spectrum.flux).shape
+                    flux.append(np.nan_to_num(spectrum.flux.value).astype(np.float32))
+                    e_flux.append(
+                        np.nan_to_num(
+                            spectrum.uncertainty.represent_as(StdDevUncertainty).array
+                        ).astype(np.float32)
+                    )
+                    meta_dict, metadata_norm = get_metadata(spectrum)
+                    meta.append(np.tile(metadata_norm, N).reshape((N, -1)))
+                    snrs.append(spectrum.meta["SNR"])
 
-            N, P = spectrum.flux.shape
-            flux = (
-                np.nan_to_num(spectrum.flux.value).astype(np.float32).reshape((N, 1, P))
-            )
-            meta = np.tile(metadata_norm, N).reshape((N, -1))
+                if len(flux) == 0:
+                    log.warning(
+                        f"No infrared spectra found in {data_products[0]}: {data_products[0].path} -- skipping!"
+                    )
+                    continue
 
-            flux = torch.from_numpy(flux).to(device)
-            meta = torch.from_numpy(meta).to(device)
+                flux, e_flux, meta, snrs = [
+                    np.vstack(ea) for ea in (flux, e_flux, meta, snrs)
+                ]
+                median_error = 5 * np.median(e_flux, axis=1)
+                for j, value in enumerate(median_error):
+                    bad_pixel = (e_flux[j] == parameters["large_error"]) | (
+                        e_flux[j] >= value
+                    )
+                    e_flux[j][bad_pixel] = value
 
-            with torch.set_grad_enabled(False):
-                predictions = model.predict_spectra(flux, meta)
-                if device != "cpu":
-                    predictions = predictions.cpu().data.numpy()
+                N, P = flux.shape
+                flux = flux.reshape((N, 1, P))
+                e_flux = e_flux.reshape((N, 1, P))
 
-            # Replace infinites with non-finite.
-            predictions[~np.isfinite(predictions)] = np.nan
+                flux = torch.from_numpy(flux).to(device)
+                e_flux = torch.from_numpy(e_flux).to(device)
+                meta = torch.from_numpy(meta).to(device)
 
-            flux_error = (
-                np.nan_to_num(spectrum.uncertainty.array**-0.5)
-                .astype(np.float32)
-                .reshape((N, 1, P))
-            )
-            median_error = 5 * np.median(flux_error, axis=(1, 2))
+                with torch.set_grad_enabled(False):
+                    predictions = model.predict_spectra(flux, meta)
+                    if device != "cpu":
+                        predictions = predictions.cpu().data.numpy()
 
-            for j, value in enumerate(median_error):
-                bad_pixel = (flux_error[j] == self.large_error) | (
-                    flux_error[j] >= value
+                # Replace infinites with non-finite.
+                predictions[~np.isfinite(predictions)] = np.nan
+
+                inputs = (
+                    torch.randn(
+                        (parameters["num_uncertainty_draws"], N, 1, P), device=device
+                    )
+                    * e_flux
+                    + flux
                 )
-                flux_error[j][bad_pixel] = value
+                inputs = inputs.reshape((parameters["num_uncertainty_draws"] * N, 1, P))
 
-            flux_error = torch.from_numpy(flux_error).to(device)
+                meta_draws = meta.repeat(parameters["num_uncertainty_draws"], 1)
+                with torch.set_grad_enabled(False):
+                    draws = model.predict_spectra(inputs, meta_draws)
+                    if device != "cpu":
+                        draws = draws.cpu().data.numpy()
 
-            inputs = (
-                torch.randn((self.num_uncertainty_draws, N, 1, P), device=device)
-                * flux_error
-                + flux
-            )
-            inputs = inputs.reshape((self.num_uncertainty_draws * N, 1, P))
+                draws = draws.reshape((parameters["num_uncertainty_draws"], N, -1))
 
-            meta_error = meta.repeat(self.num_uncertainty_draws, 1)
-            with torch.set_grad_enabled(False):
-                draws = model.predict_spectra(inputs, meta_error)
-                if device != "cpu":
-                    draws = draws.cpu().data.numpy()
+                # un-log10-ify the draws before calculating summary statistics
+                predictions[:, 1] = 10 ** predictions[:, 1]
+                draws[:, :, 1] = 10 ** draws[:, :, 1]
 
-            draws = draws.reshape((self.num_uncertainty_draws, N, -1))
+                median_draw_predictions = np.nanmedian(draws, axis=0)
+                std_draw_predictions = np.nanstd(draws, axis=0)
 
-            # Re-scale the temperature draws before calculating statistics.
-            raise a
+                logg_median, teff_median, fe_h_median = median_draw_predictions.T
+                logg_std, teff_std, fe_h_std = std_draw_predictions.T
 
-            median_draw_predictions = np.nanmedian(draws, axis=0)
-            std_draw_predictions = np.nanstd(draws, axis=0)
+                logg, teff, fe_h = predictions.T
 
-            log_g_median, teff_median, fe_h_median = median_draw_predictions.T
-            log_g_std, teff_std, fe_h_std = std_draw_predictions.T
+                bitmask_flag = create_bitmask(
+                    predictions,
+                    meta_dict,
+                    median_draw_predictions=median_draw_predictions,
+                    std_draw_predictions=std_draw_predictions,
+                )
 
-            log_g, teff, fe_h = predictions.T
+                result = {
+                    "snr": snrs.flatten(),
+                    "teff": teff,
+                    "logg": logg,
+                    "fe_h": fe_h,
+                    "u_teff": teff_std,
+                    "u_logg": logg_std,
+                    "u_fe_h": fe_h_std,
+                    "teff_sample_median": teff_median,
+                    "logg_sample_median": logg_median,
+                    "fe_h_sample_median": fe_h_median,
+                    "bitmask_flag": bitmask_flag,
+                }
 
-            bitmask_flag = create_bitmask(
-                predictions,
-                median_draw_predictions=median_draw_predictions,
-                std_draw_predictions=std_draw_predictions,
-            )
+                results = dict_to_list(result)
 
-            result = {
-                "snr": spectrum.meta["snr"],
-                "teff": teff,
-                "logg": log_g,
-                "fe_h": fe_h,
-                "u_teff": teff_std,
-                "u_logg": log_g_std,
-                "u_fe_h": fe_h_std,
-                "teff_sample_median": teff_median,
-                "logg_sample_median": log_g_median,
-                "fe_h_sample_median": fe_h_median,
-                "bitmask_flag": bitmask_flag,
-            }
+                # Create or update rows.
+                with database.atomic():
+                    task.create_or_update_outputs(ApogeeNetOutput, results)
 
-            results.append(dict_to_list(result))
+                pb.update()
+                all_results.append(results)
 
         return results
-
-    def post_execute(self):
-
-        if not ApogeeNet.table_exists():
-            log.info(f"Creating database table for ApogeeNet")
-            ApogeeNet.create_table()
-
-        # Create rows in the database.
-        total = sum(map(len, self.result))
-        with tqdm(total=total) as pb:
-            for (task, data_products, parameters), results in zip(
-                self.iterable(), self.result
-            ):
-                for result in results:
-                    output = Output.create()
-                    TaskOutput.create(task=task, output=output)
-                    ApogeeNet.create(task=task, output=output, **result)
-                    pb.update()
