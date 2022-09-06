@@ -1,7 +1,7 @@
 import os
 
 
-__all__ = ['PACKAGE_PATH', 'WELCOME', 'AUTHOR', 'PACKAGE_URL']
+__all__ = ["PACKAGE_PATH", "WELCOME", "AUTHOR", "PACKAGE_URL"]
 
 
 PACKAGE_PATH = os.path.dirname(__file__)

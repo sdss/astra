@@ -3,6 +3,3 @@
 
 from . import vectorizer
 from .model import CannonModel
-
-
-

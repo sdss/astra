@@ -12,7 +12,7 @@
 
 Astra includes many external analysis methods as contributed components.
 Many of these components include bespoke analysis methods for specialised types of stars.
-Below you can find a summary of what components are currently available to run on 
+Below you can find a summary of what components are currently available to run on
 APOGEE or BOSS spectra. In all cases a component *could* be executed on both APOGEE or
 BOSS spectra, but we do not have the current models (e.g., spectral grids) to do so.
 
@@ -66,8 +66,8 @@ The most relevant tasks for APOGEENet in Astra are:
 - :py:mod:`astra.contrib.apogeenet.tasks.EstimateStellarParameters`
 
 `EstimateStellarParametersGivenApStarFile` will estimate stellar parameters given some
-APOGEENet model and an `ApStarFile` object. 
-The `EstimateStellarParametersGivenApStarFile` class is a sub-class of the 
+APOGEENet model and an `ApStarFile` object.
+The `EstimateStellarParametersGivenApStarFile` class is a sub-class of the
 `EstimateStellarParameters` class (see below), which is a base task that does not specify what kind
 of APOGEE product to expect.
 
@@ -83,7 +83,7 @@ The `EstimateStellarParametersGivenApStarFile` task requires the `model_path` pa
 and any parameters required by `ApStarFile`.
 
 The `EstimateStellarParametersGivenApStarFile` task is `batchable <batch.html>`_: you can analyse many APOGEE observations at once,
-minimising the computational overhead in loading the model. 
+minimising the computational overhead in loading the model.
 
 Workflow
 --------
@@ -101,7 +101,7 @@ The code to run the analysis is relatively straightforward::
     from astropy.table import Table
     import astra
     from astra.contrib.apogeenet.tasks import (
-        TrainedAPOGEENetModel, 
+        TrainedAPOGEENetModel,
         EstimateStellarParametersGivenApStarFile
     )
 
@@ -138,7 +138,7 @@ The code to run the analysis is relatively straightforward::
     )
 
 
-This will run APOGEENet on ~5,000 `ApStarFile` spectra in batch mode. 
+This will run APOGEENet on ~5,000 `ApStarFile` spectra in batch mode.
 Now let's see how the results compare to what we expect for these stars::
 
     # Let's make a plot comparing the outputs to what we expected.
@@ -157,7 +157,7 @@ Now let's see how the results compare to what we expect for these stars::
 
         with open(output.path, "r") as fp:
             result = yaml.load(fp, Loader=yaml.FullLoader)
-        
+
         Y[i] = [result[pn.lower()] for pn in ("teff", "logg", "fe_h")]
         Y_err[i] = [result[f"u_{pn}"] for pn in ("teff", "logg", "fe_h")]
 
@@ -229,7 +229,7 @@ Classifier
 **Contributor:** Gabriella Contardo (Flatiron Institute)
 
 This component uses a deep convolutional neural network with drop-out to classify sources
-by their spectral type. 
+by their spectral type.
 Training sets for APOGEE/apVisit and BOSS/spec spectra were coordinated by David Nidever.
 
 The most relevant tasks for this classifier are:
@@ -245,7 +245,7 @@ All classifier tasks inherit from :py:mod:`astra.contrib.classifier.mixin.Classi
 the following parameters:
 
 - `training_spectra_path`: A path that contains the spectra for the training set.
-    
+
 - `training_set_labels`: A path that contains the labels for the training set.
 
 - `validation_spectra_path`: A path that contains the spectra for the validation set.
@@ -253,17 +253,17 @@ the following parameters:
 - `validation_labels_path`: A path that contains the labels for the validation set.
 
 - `test_spectra_path`: A path that contains the spectra for the test set.
-    
+
 - `test_labels_path`: A path that contains ths labels for the test set.
 
 - `class_names`: A tuple of names for the object classes.
-    
+
 - `n_epochs`: The number of epochs to use for training (default: 200).
-    
+
 - `batch_size`: The number of objects to use per batch in training (default: 100).
-    
+
 - `weight_decay`: The weight decay to use during training (default: 1e-5).
-    
+
 - `learning_rate`: The learning rate to use during training (default: 1e-4).
 
 
@@ -278,8 +278,8 @@ to identify the location of the observation.
 
 The training, validation, and test set for these networks are `available for download <https://drive.google.com/drive/folders/1b4HNfOrPxJsJFvaqyX3lZ5-HZH9HD2Xc?usp=sharing>`_.
 
-Note that all classifier tasks (e.g., `ClassifySourceGivenApVisitFile`) are `batchable <batch.html>`_: 
-you can analyse many observations at once, minimising the computational overhead in loading the neural network. 
+Note that all classifier tasks (e.g., `ClassifySourceGivenApVisitFile`) are `batchable <batch.html>`_:
+you can analyse many observations at once, minimising the computational overhead in loading the neural network.
 
 Workflow
 --------
@@ -297,7 +297,7 @@ In this workflow example we will train a near-infrared classifer and use it to c
   # Load the DR16 AllVisit file to get the parameters we need to locate ApVisit files.
   # Notes: In future we will do this from a SQL query.
   #        If you don't have the AllVisitSum file then you can use this to get it:
-  #           
+  #
   #          AllVisitSum(release=release, apred=apred, use_remote=True).run()
 
   release, apred = ("dr16", "r12")
@@ -352,7 +352,7 @@ In this workflow example we will train a near-infrared classifer and use it to c
 
 Astra will build the acyclic graph, and if you haven't previously trained a classifier using these parameters, then it will train one before classifying sources.
 
-For every `ApVisitFile` the classifier will estimate the probability that the source belongs to each of the classes. This is not really a probability, but is usually taken as one. 
+For every `ApVisitFile` the classifier will estimate the probability that the source belongs to each of the classes. This is not really a probability, but is usually taken as one.
 You can take the class with the highest probability as being the 'predicted class', or trigger tasks to occur if the probability of belonging to a particular class is higher than some value.
 
 
@@ -362,7 +362,7 @@ One of the outputs produced from training the network is a confusion matrix show
   :align: center
 
     Unnormalized confusion matrix for the near-infrared test set.
-  
+
 This confusion matrix is based on the _test set_, not the training set used to train the model.
 You can see that in general the classifier is doing very well and predicting the correct class almost every time.
 
@@ -387,7 +387,7 @@ FERRE is a code to interpolate pre-computed grids of model spectra and compare w
 observations.
 The best-fitting model spectrum by chi-squared minimisation, with a few optimisation
 algorithms available.
-FERRE was used (as part of ASPCAP) for the APOGEE analysis of SDSS-IV data. 
+FERRE was used (as part of ASPCAP) for the APOGEE analysis of SDSS-IV data.
 Astra has tasks that reproduce the functionality of ASPCAP, but this functionality all exists within the `astra.contrib.ferre` module.
 
 
@@ -429,10 +429,10 @@ The Cannon
 
 **Contributors:** Melissa Ness (Columbia University; Flatiron Institute), Andy Casey (Monash), and others
 
-The Cannon :cite:`2015ApJ16N` is a data-driven method to estimate stellar labels 
+The Cannon :cite:`2015ApJ16N` is a data-driven method to estimate stellar labels
 (e.g., effective temperature, surface gravity, and chemical abundances).
 A training set of stars with high-fidelity labels is required to train a model
-to predict stellar spectra. 
+to predict stellar spectra.
 
 If you want to use The Cannon as a task in Astra then the most relevant classes are:
 
@@ -448,7 +448,7 @@ Train The Cannon using a pre-prepared training set
 --------------------------------------------------
 
 You can train The Cannon in Astra using a `pickle` file that contains the training set.
-The training set file should contain a dictionary with the following entries:    
+The training set file should contain a dictionary with the following entries:
     - `wavelength`: an array of shape `(P, )` where `P` is the number of pixels
     - `flux`: an array of flux values with shape `(N, P)` where `N` is the number of observed spectra and `P` is the number of pixels
     - `ivar`: an array of inverse variance values with shape `(N, P)` where `N` is the number of observed spectra and `P` is the number of pixels
@@ -541,8 +541,8 @@ This should be a pickle file that stores a dictionary with the following keys:
 
 
 `EstimateStellarParametersGivenApStarFile` will estimate stellar parameters given some
-pre-trained neural network (trained by `TrainThePayne`) and an `ApStarFile` object. 
-The `EstimateStellarParametersGivenApStarFile` class is a sub-class of the 
+pre-trained neural network (trained by `TrainThePayne`) and an `ApStarFile` object.
+The `EstimateStellarParametersGivenApStarFile` class is a sub-class of the
 `EstimateStellarParameters` class (see below), which is a base task that does not specify what kind
 of observation.
 
@@ -570,21 +570,21 @@ Now let's look at the code::
   from astra.tasks.continuum import Sinusoidal
   from astra.tasks.io import ApStarFile
   from astra.contrib.thepayne.tasks import (
-      EstimateStellarParametersGivenApStarFile, 
+      EstimateStellarParametersGivenApStarFile,
       TrainThePayne
   )
 
   # Let's define a continuum normalization task for ApStarFiles using a sum of sines
   # and cosines.
   class ContinuumNormalize(Sinusoidal, ApStarFile):
-      
+
       # Just take the first spectrum, which is stacked by individual pixel weighting.
       # (We will ignore individual visits).
       spectrum_kwds = dict(data_slice=(slice(0, 1), slice(None)))
 
       def requires(self):
           return ApStarFile(**self.get_common_param_kwargs(ApStarFile))
-      
+
 
   # The EstimateStellarParametersGivenApStarFile task performs no continuum normalisation.
   # Here we will create a new class that requires that the observations are continuum normalised.
@@ -628,7 +628,7 @@ Now let's look at the code::
 The first time you run this workflow it will train a neural network, download the `ApStarFile` (if it does not exist already), perform continuum normalisation, and then estimate stellar parameters given the trained neural network and the psuedo-continuum-normalised spectrum.
 
 The `EstimateStellarParametersGivenApStarFile` task is `batchable <batch.html>`_: you can analyse many observations at once,
-minimising the computational overhead in loading the network. 
+minimising the computational overhead in loading the network.
 
 
 API
@@ -651,7 +651,7 @@ If you want to use this white dwarf analysis code in Astra then the most relevan
 - :py:mod:`astra.contrib.wd.tasks.classify.ClassifyWhiteDwarfGivenSpecFile`
 
 The only required parameters for `ClassifyWhiteDwarfGivenSpecFile` is the `model_path`,
-which is the location of a pre-trained random forest classifier, 
+which is the location of a pre-trained random forest classifier,
 and the parameters required to locate the `SpecFile`.
 
 .. inheritance-diagram:: astra.contrib.wd.tasks.classify.ClassifyWhiteDwarfGivenSpecFile
@@ -676,7 +676,7 @@ Here we will use the sample of known WDs observed in SDSS-IV, and the pre-traine
 
     directory = "../astra-components/data/wd/"
 
-    # Get the expected classes for 
+    # Get the expected classes for
     with open(os.path.join(directory, "sdss-wd-examples.yml"), "r") as fp:
         examples = yaml.load(fp, Loader=yaml.FullLoader)
 

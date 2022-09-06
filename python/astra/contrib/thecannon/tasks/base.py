@@ -1,4 +1,3 @@
-
 import pickle
 import luigi
 import numpy as np
@@ -8,12 +7,12 @@ from astra.tasks.base import BaseTask
 
 class TheCannonMixin(BaseTask):
 
-    """ 
-    A mixin class all tasks related to The Cannon. 
-    
+    """
+    A mixin class all tasks related to The Cannon.
+
     :param label_names:
         A list of label names.
-    
+
     :param order: (optional)
         The polynomial order to use for this model (default: 2).
     """
@@ -25,10 +24,8 @@ class TheCannonMixin(BaseTask):
         config_path=dict(section=task_namespace, name="label_names")
     )
     order = luigi.IntParameter(
-        default=2,
-        config_path=dict(section=task_namespace, name="order")
+        default=2, config_path=dict(section=task_namespace, name="order")
     )
-    
 
 
 def read_training_set(path, default_inverse_variance=1e6):
@@ -46,7 +43,7 @@ def read_training_set(path, default_inverse_variance=1e6):
 
     :param path:
         The location of the training set on disk.
-    
+
     :param default_inverse_variance: (optional)
         The default inverse variance value to set, if no inverse variances values are found.
     """
@@ -61,25 +58,26 @@ def read_training_set(path, default_inverse_variance=1e6):
             training_set_flux = training_set[key]
         except KeyError:
             continue
-            
+
         else:
             break
-    
+
     else:
         raise KeyError("no flux specified in training set file")
 
     try:
         training_set_ivar = training_set["ivar"]
     except KeyError:
-        training_set_ivar = np.ones_like(training_set_flux) * self.default_inverse_variance
+        training_set_ivar = (
+            np.ones_like(training_set_flux) * self.default_inverse_variance
+        )
 
     label_values = training_set["labels"]
     label_names = training_set["label_names"]
 
     # Create a table from the labels and their names.
     labels = Table(
-        data=label_values.T,
-        names=label_names[:label_values.shape[0]] # TODO HACK
+        data=label_values.T, names=label_names[: label_values.shape[0]]  # TODO HACK
     )
 
     return (labels, dispersion, training_set_flux, training_set_ivar)

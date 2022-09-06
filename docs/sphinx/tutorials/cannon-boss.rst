@@ -26,7 +26,7 @@ Create a training set
 A good training set should include high signal-to-noise spectra of sources (e.g., stars)
 with high fidelity labels. In other words, it should include high quality stellar spectra
 where we know the astrophysical parameters very well. The training set should cover the
-range of stellar parameters that we are interested in testing. 
+range of stellar parameters that we are interested in testing.
 
 Here we will use BOSS spectra with APOGEE labels. That means our first step is to
 cross-match the BOSS and APOGEE data sets.

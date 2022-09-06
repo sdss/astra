@@ -24,6 +24,7 @@ import sphinx_bootstrap_theme
 
 # Insert a path to get inheritance diagrams working on readthedocs
 import sys
+
 sys.path.insert(0, "../../python/")
 
 from astra import __version__
@@ -39,17 +40,21 @@ from pkg_resources import parse_version
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = ['sphinx.ext.autodoc', 'sphinx.ext.napoleon', 'sphinx.ext.autosummary',
-              'sphinx.ext.todo', 
-              #'sphinx.ext.viewcode', 
-              'sphinx.ext.mathjax',
-              'sphinx.ext.intersphinx', #'sphinx_click.ext',
-              'autoapi.extension',
-              'sphinxcontrib.bibtex',
-              'sphinx.ext.inheritance_diagram']
+extensions = [
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.autosummary",
+    "sphinx.ext.todo",
+    #'sphinx.ext.viewcode',
+    "sphinx.ext.mathjax",
+    "sphinx.ext.intersphinx",  #'sphinx_click.ext',
+    "autoapi.extension",
+    "sphinxcontrib.bibtex",
+    "sphinx.ext.inheritance_diagram",
+]
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
+templates_path = ["_templates"]
 
 autoapi_dirs = ["../../python/"]
 autoapi_template_dir = "_templates/api"
@@ -61,33 +66,32 @@ autoapi_options = [
     "undoc-members",
     "private-members",
     "special-members",
-    #"show-inheritance",
-    #"show-inheritance-diagram",
+    # "show-inheritance",
+    # "show-inheritance-diagram",
     "show-module-summary",
-    "imported-members"
+    "imported-members",
 ]
 
 inheritance_graph_attrs = dict(rankdir="BT", size='""')
 
 
-
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #
-source_suffix = ['.rst', '.md']
+source_suffix = [".rst", ".md"]
 # source_suffix = '.rst'
 
 source_parsers = {
-    '.md': 'recommonmark.parser.CommonMarkParser',
+    ".md": "recommonmark.parser.CommonMarkParser",
 }
 
 # The master toctree document.
-master_doc = 'index'
+master_doc = "index"
 
 # General information about the project.
-project = 'astra'
-copyright = '{0}, {1}'.format('2019', 'Andy Casey')
-author = 'Andy Casey'
+project = "astra"
+copyright = "{0}, {1}".format("2019", "Andy Casey")
+author = "Andy Casey"
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -108,11 +112,11 @@ language = None
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This patterns also effect to html_static_path and html_extra_path
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
-default_role = 'py:obj'
+default_role = "py:obj"
 
 # If true, '()' will be appended to :func: etc. cross-reference text.
 # add_function_parentheses = True
@@ -126,7 +130,7 @@ add_module_names = True
 # show_authors = False
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = 'sphinx'
+pygments_style = "sphinx"
 
 # A list of ignored prefixes for module index sorting.
 # modindex_common_prefix = []
@@ -138,12 +142,14 @@ pygments_style = 'sphinx'
 todo_include_todos = False
 
 # Intersphinx mappings
-intersphinx_mapping = {'python': ('https://docs.python.org/3.6', None),
-                       'astropy': ('http://docs.astropy.org/en/latest', None),
-                       'numpy': ('http://docs.scipy.org/doc/numpy/', None)}
+intersphinx_mapping = {
+    "python": ("https://docs.python.org/3.6", None),
+    "astropy": ("http://docs.astropy.org/en/latest", None),
+    "numpy": ("http://docs.scipy.org/doc/numpy/", None),
+}
 
-autodoc_mock_imports = ['_tkinter']
-autodoc_member_order = 'groupwise'
+autodoc_mock_imports = ["_tkinter"]
+autodoc_member_order = "groupwise"
 
 napoleon_use_rtype = False
 napoleon_use_ivar = True
@@ -159,7 +165,7 @@ rst_epilog = """
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'bootstrap'
+html_theme = "bootstrap"
 
 html_sidebars = {}
 
@@ -168,11 +174,9 @@ html_sidebars = {}
 # documentation.
 html_theme_options = {
     # Navigation bar title. (Default: ``project`` value)
-    'navbar_title': "SDSS: {0}".format(project),
-
+    "navbar_title": "SDSS: {0}".format(project),
     # Tab name for entire site. (Default: "Site")
-    'navbar_site_name': "Site",
-
+    "navbar_site_name": "Site",
     # A list of tuples containing pages or urls to link to.
     # Valid tuples should be in the following forms:
     #    (name, page)                 # a link to a page
@@ -180,33 +184,27 @@ html_theme_options = {
     #    (name, "http://example.com", True) # arbitrary absolute url
     # Note the "1" or "True" value above as the third argument to indicate
     # an arbitrary url.
-    'navbar_links': [
+    "navbar_links": [
         ("Install", "install"),
         ("Components", "components"),
         ("Tutorials", "tutorials"),
         ("API", "api/index"),
         ("Road map", "roadmap")
-        #("Tasks", "tasks"),
- #       ("Data", "data"),
-
-#        ("Tools", "tools"),
-#        ("API", "api"),
- #       ("Road map", "roadmap"),
+        # ("Tasks", "tasks"),
+        #       ("Data", "data"),
+        #        ("Tools", "tools"),
+        #        ("API", "api"),
+        #       ("Road map", "roadmap"),
     ],
-
     # Render the next and previous page links in navbar. (Default: true)
-    'navbar_sidebarrel': False,
-
+    "navbar_sidebarrel": False,
     # Render the current pages TOC in the navbar. (Default: true)
-    'navbar_pagenav': False,
-
+    "navbar_pagenav": False,
     # Tab name for the current pages TOC. (Default: "Page")
-    'navbar_pagenav_name': "Page",
-
+    "navbar_pagenav_name": "Page",
     # Global TOC depth for "site" navbar tab. (Default: 1)
     # Switching to -1 shows all levels.
-    'globaltoc_depth': 2,
-
+    "globaltoc_depth": 2,
     # Include hidden TOCs in Site navbar?
     #
     # Note: If this is "false", you cannot have mixed ``:hidden:`` and
@@ -214,51 +212,43 @@ html_theme_options = {
     # will break.
     #
     # Values: "true" (default) or "false"
-    'globaltoc_includehidden': "true",
-
+    "globaltoc_includehidden": "true",
     # HTML navbar class (Default: "navbar") to attach to <div> element.
     # For black navbar, do "navbar navbar-inverse"
-    'navbar_class': "navbar",
-
+    "navbar_class": "navbar",
     # Fix navigation bar to top of page?
     # Values: "true" (default) or "false"
-    'navbar_fixed_top': "true",
-
+    "navbar_fixed_top": "true",
     # Location of link to source.
     # Options are "nav" (default), "footer" or anything else to exclude.
-    'source_link_position': "",
-
+    "source_link_position": "",
     # Bootswatch (http://bootswatch.com/) theme.
     #
     # Options are nothing (default) or the name of a valid theme
     # such as "amelia" or "cosmo".
-    'bootswatch_theme': "paper",
-
+    "bootswatch_theme": "paper",
     # Choose Bootstrap version.
     # Values: "3" (default) or "2" (in quotes)
-    'bootstrap_version': "3",
+    "bootstrap_version": "3",
 }
 
 # Add any paths that contain custom themes here, relative to this directory.
 html_theme_path = sphinx_bootstrap_theme.get_html_theme_path()
 
-html_favicon = './_static/favicon.ico'
+html_favicon = "./_static/favicon.ico"
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+html_static_path = ["_static"]
 
 
-html_sidebars = {
-    '**': ['localtoc.html']
-    
-    }
+html_sidebars = {"**": ["localtoc.html"]}
 
 # -- Options for HTMLHelp output ------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = '{0}pdoc'.format('astra')
+htmlhelp_basename = "{0}pdoc".format("astra")
 
 
 # -- Options for LaTeX output ---------------------------------------------
@@ -267,15 +257,12 @@ latex_elements = {
     # The paper size ('letterpaper' or 'a4paper').
     #
     # 'papersize': 'letterpaper',
-
     # The font size ('10pt', '11pt' or '12pt').
     #
     # 'pointsize': '10pt',
-
     # Additional stuff for the LaTeX preamble.
     #
     # 'preamble': '',
-
     # Latex figure (float) alignment
     #
     # 'figure_align': 'htbp',
@@ -285,18 +272,20 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, '{0}.tex'.format(project), u'{0} Documentation'.format(project),
-     author, 'manual'),
+    (
+        master_doc,
+        "{0}.tex".format(project),
+        "{0} Documentation".format(project),
+        author,
+        "manual",
+    ),
 ]
 
 # -- Options for manual page output ---------------------------------------
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [
-    (master_doc, 'astra', u'{0} Documentation'.format(project),
-     [author], 1)
-]
+man_pages = [(master_doc, "astra", "{0} Documentation".format(project), [author], 1)]
 
 # -- Options for Texinfo output -------------------------------------------
 
@@ -304,7 +293,13 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, project, u'{0} Documentation'.format(project),
-     author, project, 'One line description of project.',
-     'Miscellaneous'),
+    (
+        master_doc,
+        project,
+        "{0} Documentation".format(project),
+        author,
+        project,
+        "One line description of project.",
+        "Miscellaneous",
+    ),
 ]

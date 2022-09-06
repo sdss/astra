@@ -39,22 +39,24 @@ from sklearn.metrics import mean_squared_error
 METHOD_ALL = ["simple", "grid"]
 
 MODEL_ALL = ["svr", "nusvr", "nn", "dt"]
-MODEL_MAP = {'svr': SVR,
-             'nusvr': NuSVR,
-             'nn': MLPRegressor,
-             # the three types above are recommended
-             'dt': DecisionTreeRegressor,
-             'abr': ensemble.AdaBoostRegressor,
-             'br': ensemble.BaggingRegressor,
-             'etr': ensemble.ExtraTreesRegressor,
-             'gbr': ensemble.GradientBoostingRegressor,
-             'rfr': ensemble.RandomForestRegressor
-             }
+MODEL_MAP = {
+    "svr": SVR,
+    "nusvr": NuSVR,
+    "nn": MLPRegressor,
+    # the three types above are recommended
+    "dt": DecisionTreeRegressor,
+    "abr": ensemble.AdaBoostRegressor,
+    "br": ensemble.BaggingRegressor,
+    "etr": ensemble.ExtraTreesRegressor,
+    "gbr": ensemble.GradientBoostingRegressor,
+    "rfr": ensemble.RandomForestRegressor,
+}
 
-SCORING_ALL = ["neg_mean_absolute_error",
-               "neg_mean_squared_error",
-               "neg_median_absolute_error"
-               "r2"]
+SCORING_ALL = [
+    "neg_mean_absolute_error",
+    "neg_mean_squared_error",
+    "neg_median_absolute_error" "r2",
+]
 
 
 class SlamModel(object):
@@ -71,9 +73,15 @@ class SlamModel(object):
     # GridSearchCV attributes
     cv_results_ = None
 
-    def __init__(self, model="nn", method="grid",
-                 param_grid=None, cv=8, scoring="neg_mean_squared_error",
-                 **kwargs):
+    def __init__(
+        self,
+        model="nn",
+        method="grid",
+        param_grid=None,
+        cv=8,
+        scoring="neg_mean_squared_error",
+        **kwargs
+    ):
 
         try:
             assert model in MODEL_ALL
@@ -101,9 +109,12 @@ class SlamModel(object):
             assert self.cv > 2
             assert self.scoring in SCORING_ALL
 
-            self.regressor = GridSearchCV(MODEL_MAP[model](**kwargs),
-                                          cv=self.cv, param_grid=param_grid,
-                                          scoring=self.scoring)
+            self.regressor = GridSearchCV(
+                MODEL_MAP[model](**kwargs),
+                cv=self.cv,
+                param_grid=param_grid,
+                scoring=self.scoring,
+            )
 
     def update(self):
         sm = SlamModel()
@@ -130,12 +141,13 @@ class SlamModel(object):
         return self.regressor.score(*args, **kwargs)
 
     def cross_val_score(self, X, y):
-        """ retrun NMSE if cv<2 """
+        """retrun NMSE if cv<2"""
         if self.cv < 2:
             return mean_squared_error(y, self.predict(X), None)
         else:
-            return cross_val_score(self.regressor, X, y, cv=self.cv,
-                                   scoring=self.scoring).mean()
+            return cross_val_score(
+                self.regressor, X, y, cv=self.cv, scoring=self.scoring
+            ).mean()
 
     def fit(self, X, y, weight=None):
         mock = False
@@ -189,10 +201,18 @@ class SlamModel(object):
         return self.regressor.predict(X)
 
     @staticmethod
-    def train(X, y, sample_weight=None, model="nn", method="grid",
-              param_grid=None, cv=8, scoring="neg_mean_squared_error",
-              **kwargs):
-        """ train a single pixel using GridSearchCV
+    def train(
+        X,
+        y,
+        sample_weight=None,
+        model="nn",
+        method="grid",
+        param_grid=None,
+        cv=8,
+        scoring="neg_mean_squared_error",
+        **kwargs
+    ):
+        """train a single pixel using GridSearchCV
 
         Parameters
         ----------
@@ -225,9 +245,14 @@ class SlamModel(object):
         if CV is not performed, score = np.nan
 
         """
-        sm = SlamModel(model=model, method=method,
-                       param_grid=param_grid, cv=cv, scoring=scoring,
-                       **kwargs)
+        sm = SlamModel(
+            model=model,
+            method=method,
+            param_grid=param_grid,
+            cv=cv,
+            scoring=scoring,
+            **kwargs
+        )
 
         # fit data
         sm.fit(X, y, sample_weight)
@@ -252,7 +277,7 @@ class Model(object):
 
 
 def nmse(model, X, y, sample_weight=None):
-    """ return NMSE for svr, X, y and sample_weight """
+    """return NMSE for svr, X, y and sample_weight"""
     if sample_weight is None:
         sample_weight = np.ones_like(y, int)
 
@@ -263,4 +288,4 @@ def nmse(model, X, y, sample_weight=None):
         # sample_weight_ = sample_weight[ind_use]
         return -np.mean(np.square(model.predict(X_) - y_))
     else:
-        return 0.
+        return 0.0

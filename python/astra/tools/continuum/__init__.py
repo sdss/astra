@@ -1,6 +1,6 @@
-
 import numpy as np
 from astra.utils import log
+
 
 def slice_and_shape(spectrum, slice_args, shape, repeat=None, **kwargs):
 
@@ -25,20 +25,19 @@ def slice_and_shape(spectrum, slice_args, shape, repeat=None, **kwargs):
     return spectrum
 
 
-
 def median(spectrum, axis=None, slice_args=None, shape=None, **kwargs):
     """
     Rectify the spectrum by dividing through the median of (finite) flux values.
-    
+
     :param spectrum:
         The spectrum to rectify.
-    
+
     :param axis: [optional]
         The axis to take the median across (default: 1).
-    
+
     :param slice_args: [optional]
         Slice the spectrum given these arguments.
-    
+
     :param shape: [optional]
         Re-shape the spectrum.
     """
@@ -49,7 +48,7 @@ def median(spectrum, axis=None, slice_args=None, shape=None, **kwargs):
     continuum = np.nanmedian(spectrum.flux.value, axis=axis).reshape((-1, 1))
 
     spectrum._data /= continuum
-    spectrum._uncertainty.array *= continuum**2 # TODO: check this.
+    spectrum._uncertainty.array *= continuum**2  # TODO: check this.
 
     return spectrum
 
@@ -63,10 +62,10 @@ def mean(spectrum, axis=1, slice_args=None, shape=None, **kwargs):
 
     :param axis: [optional]
         The axis to take the median across (default: 1).
-    
+
     :param slice_args: [optional]
         Slice the spectrum given these arguments.
-    
+
     :param shape: [optional]
         Re-shape the spectrum.
     """
@@ -75,7 +74,7 @@ def mean(spectrum, axis=1, slice_args=None, shape=None, **kwargs):
 
     spectrum._data /= continuum
     spectrum._uncertainty.array *= continuum**2
-    
+
     if slice_args is not None or shape is not None:
         spectrum = slice_and_shape(spectrum, slice_args, shape, **kwargs)
 

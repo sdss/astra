@@ -1,105 +1,331 @@
+#!/usr/bin/env python3
 import click
-import os
-import logging
-import sys
 
 # Common options.
 @click.group()
-@click.option("-v", "verbose", default=False, is_flag=True,
-              help="verbose mode")
+@click.option("-v", "verbose", default=False, is_flag=True, help="verbose mode")
 @click.pass_context
 def cli(context, verbose):
     context.ensure_object(dict)
     context.obj["verbose"] = verbose
-
-    # TODO: Check this is propagated to:
-    #       [ ] astra
-    #       [ ] airflow
-    #       [ ] sqlalchemy
-    #logging.set_level(logging.DEBUG if verbose else logging.INFO)
+    # Overwrite settings in ~/.astra/astra.yml
+    # from astra import log
+    # log.set_level(10 if verbose else 20)
 
 
-# Add 'run' sub-commands.
-@click.group()
-@click.pass_context
-def run(context):
-    pass
+@cli.command()
+@click.option("--drop-tables", is_flag=True)
+def initdb(drop_tables):
+    """Initialize the database."""
+    from astra.database.astradb import create_tables
 
-
-class FlexiblePrimaryKeyInput(click.Argument):
-
-    def __init__(self, *args, **kwargs):
-        kwargs['nargs'] = -1
-        kwargs['type'] = click.File('r')
-        super().__init__(*args, **kwargs)
-
-    def full_process_value(self, ctx, value):
-        """
-        Parse the input primary key as either being a set of integers, an input filename that
-        contains integers (either as space-separated values, or a JSON-formatted tuple), or
-        from stdin.
-        """
-
-        try:
-            result = tuple(map(int, value))
-            assert len(value) > 0
-        except:
-            # Process as filename.
-            fps = super().process_value(ctx, value or ('-', ))
-            content = fps[0].read()
-
-            try:
-                result = tuple(map(int, content.split()))
-            except:
-                # Try as JSON.
-                import json
-                try:
-                    result = tuple(json.loads(content))
-                except:
-                    raise TypeError("Cannot parse input primary key file")
-
-        return result
-
-
-@click.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("primary_keys", cls=FlexiblePrimaryKeyInput)
-@click.pass_context
-def execute(context, primary_keys, **kwargs):
-    """
-    Execute a set of task instances.
-    """
-
-    # We're going to assume that they all have the same python_callable!
-    from astra.utils import log
-    from astra.database import (astradb, session)
-    from astra.operators.utils import string_to_callable
-
-    instance = session.query(astradb.TaskInstance)\
-                      .filter(astradb.TaskInstance.pk == primary_keys[0])\
-                      .one_or_none()
-    if instance is None:
-        raise ValueError(f"Cannot find instance matching primary key {primary_keys[0]}")
-    
-    parameters = instance.parameters.copy()
-    python_callable = parameters.pop("python_callable", None)
-    if python_callable is None:
-        raise ValueError(f"No python_callable for instance {instance}")
-    
-    function = string_to_callable(python_callable)
-    
-    log.info(f"Calling {function} ({python_callable}) with primary keys {primary_keys} and {parameters}")
-    
-    result = function(
-        pks=primary_keys,
-        **parameters
+    create_tables(
+        drop_existing_tables=drop_tables,
+        reuse_if_open=True,
+        insert_status_rows=True,
     )
-
-    log.info(f"Result from {function} was: {result}")
-    
     return None
 
 
-cli.add_command(execute)
+@cli.command()
+@click.option("--dry-run", is_flag=True)
+def vacuum(dry_run):
+    """
+    Vacuum up the database.
+    """
+    from peewee import JOIN, fn
+    from time import sleep
+    from astra import log
+    from astra.database.astradb import (
+        Task,
+        Bundle,
+        TaskBundle,
+        TaskOutput,
+        TaskInputDataProducts,
+    )
+
+    if not dry_run:
+        log.warning(
+            "This is *not* a dry run. "
+            "We are about to delete things in the database! "
+            "You have 5 seconds to cancel."
+        )
+        sleep(5)
+    else:
+        log.info(f"This is a dry run.")
+
+    # Remove tasks that don't have outputs.
+    q_zombie_tasks = (
+        Task.select()
+        .join(TaskOutput, JOIN.LEFT_OUTER)
+        .group_by(Task.pk)
+        .having(fn.count(TaskOutput.pk) == 0)
+    )
+    grouped = {}
+    for task in q_zombie_tasks:
+        # log.debug(f"Task {task} (created {task.created}; {len(task.parameters)} parameters) has no outputs.")
+        grouped.setdefault(task.name, [])
+        grouped[task.name].append(task.pk)
+
+    for name, pks in grouped.items():
+        log.info(
+            f"There are {len(pks)} {name} tasks with no outputs that can be deleted."
+        )
+
+    for name, pks in grouped.items():
+        log.info(f"Deleting {name} tasks (N={len(pks)}) with no outputs.")
+
+        # Delete input data product references first.
+        rows = (
+            0
+            if dry_run
+            else (
+                TaskInputDataProducts.delete()
+                .where(TaskInputDataProducts.task_id.in_(pks))
+                .execute()
+            )
+        )
+        log.info(f"\tDeleted {rows} rows of task input data products")
+
+        # Delete any bundles.
+        rows = (
+            0
+            if dry_run
+            else (TaskBundle.delete().where(TaskBundle.task_id.in_(pks)).execute())
+        )
+        log.info(f"\tDeleted {rows} rows of task bundles")
+
+        # Delete the tasks.
+        rows = 0 if dry_run else (Task.delete().where(Task.pk.in_(pks)).execute())
+        log.info(f"\tDeleted {rows} rows of tasks")
+
+    # Any empty bundles?
+    q_empty_bundles = (
+        Bundle.select()
+        .join(TaskBundle, JOIN.LEFT_OUTER)
+        .group_by(Bundle)
+        .having(fn.count(TaskBundle) == 0)
+    )
+    log.info(f"There are {len(q_empty_bundles)} empty bundles.")
+    rows = (
+        0
+        if dry_run
+        else (
+            Bundle.delete()
+            .where(Bundle.pk.in_([bundle.pk for bundle in q_empty_bundles]))
+            .execute()
+        )
+    )
+    log.info(f"\tDeleted {rows} rows of empty bundles.")
+
+    # Find tasks with the same input data products, name, version, and parameters.
+    log.info(
+        f"Finding tasks with at least one output that have the same name, version, parameters, and input data"
+    )
+    q = (
+        Task.select(
+            fn.max(Task.pk),
+            Task.name,
+            Task.version,
+            Task.parameters,
+            TaskInputDataProducts.data_product_id,
+            fn.count(Task),
+        )
+        .join(TaskInputDataProducts)
+        .switch(Task)
+        .join(TaskOutput)
+        .group_by(
+            TaskInputDataProducts.data_product_id,
+            Task.name,
+            Task.version,
+            Task.parameters,
+        )
+        .having((fn.count(Task) > 1))
+        .order_by(fn.count(Task).desc())
+        .tuples()
+    )
+    for i, (eg_pk, name, version, parameters, data_product_id, count) in enumerate(q):
+        log.info(
+            f"{i}: {name} {version} on data_product_id={data_product_id} (eg task {eg_pk}) with {count} tasks and {len(parameters)} parameters"
+        )
+
+    log.warning(f"Not doing anything about these duplicates yet!")
+
+
+@cli.command(hidden=True)
+@click.argument("bundle_id", type=int, required=True)
+def more(bundle_id):
+    import os
+    from astra import log
+    from glob import glob
+    from astra.database.astradb import Bundle
+
+    bundle = Bundle.get(bundle_id)
+
+    # bundle.
+    job_key = bundle.meta["slurm_job_key"]
+    label = bundle.meta["slurm_kwargs"]["label"]
+
+    dir = f"/scratch/general/nfs1/u6020307/pbs/{label}/{job_key}/"
+    """
+    found_path, expected_index = None, None
+    for path in glob(os.path.join(dir, "node*_proc*.slurm")):
+        with open(path, "r") as fp:
+            content = fp.readlines()
+        for line in content:
+            if line.startswith("astra execute bundles ") and str(bundle_id) in line.split()[3:]:
+                found_path = path
+                expected_index = line.split()[3:].index(str(bundle_id))
+                break
+    if found_path is None:
+        log.exception(f"Cannot find '{bundle_id}' among slurm files in {dir}")
+        return None
+    """
+    import subprocess
+
+    output = subprocess.check_output(f'grep -n "id={bundle_id}$" {dir}/*.e', shell=True)
+    path, line, *_ = output.decode().split(":")
+
+    os.system(f"more +{line} {path}")
+
+
+@cli.group()
+def status():
+    """Check the status of a task or bundle."""
+    pass
+
+
+@status.command()
+@click.argument("bundle_ids", type=int, nargs=-1, required=True)
+def bundles(bundle_ids):
+    """Check the status of bundles."""
+    from astra import log
+    from astra.utils import deserialize
+    from astra.database.astradb import Bundle
+
+    N_tasks, N_bundles = (0, 0)
+    statuses = {}
+    tasks_by_status = {}
+    for bundle in Bundle.select().where(Bundle.id.in_(bundle_ids)):
+        description = bundle.status.description
+
+        statuses.setdefault(description, [])
+        tasks_by_status.setdefault(description, 0)
+
+        T = len(bundle.tasks)
+
+        statuses[description].append(bundle)
+
+        N_bundles += 1
+        N_tasks += len(bundle.tasks)
+        tasks_by_status[description] += T
+
+    log.info(f"Summary:")
+    for status, bundles in statuses.items():
+        count_bundles = len(bundles)
+        count_tasks = tasks_by_status[status]
+        log.info(
+            f"    {count_bundles} {status} bundles ({100 * count_bundles / N_bundles:.0f}%); {count_tasks} tasks ({100 * count_tasks / N_tasks:.0f}%)"
+        )
+
+    log.debug(f"Bundles by status:")
+    for status, bundles in statuses.items():
+        desc = " ".join([f"{bundle.id:.0f}" for bundle in bundles])
+        log.debug(f"    {status}: {desc}")
+
+    return None
+
+
+@cli.group()
+def execute():
+    """Execute a task or bundle."""
+    pass
+
+
+def do_work(ids, is_bundle):
+    from astra import log
+    from astra.utils import deserialize
+    from astra.database.astradb import Task, Bundle
+
+    model = Bundle if is_bundle else Task
+    items = deserialize(ids, model)
+    N = len(items)
+    log.debug(f"Loading {type(ids)} {N} of {ids}")
+
+    for i, item in enumerate(items, start=1):
+        log.info(f"Executing item {i}/{N}: {item}")
+        try:
+            result = item.as_executable().execute()
+        except:
+            log.exception(f"Exception when executing item {item}")
+        else:
+            log.info(f"Completed item {i}/{N}: {item}")
+
+    return None
+
+
+@execute.command(hidden=True)
+@click.argument("task_ids", type=int, nargs=-1, required=True)
+def tasks(task_ids):
+    """Execute multiple tasks"""
+    return do_work(task_ids, False)
+
+
+@execute.command()
+@click.argument("task_id", type=int, nargs=1, required=True)
+def task(task_id):
+    """Execute a single task"""
+    return do_work([task_id], False)
+
+
+@execute.command(hidden=True)
+@click.argument("bundle_ids", type=int, nargs=-1, required=True)
+def bundles(bundle_ids):
+    """Execute multiple task bundles"""
+    return do_work(bundle_ids, True)
+
+
+@execute.command()
+@click.option(
+    "--parallelism",
+    "-p",
+    type=int,
+    nargs=1,
+    default=1,
+    help="Number of parallel processes to use",
+)
+@click.option(
+    "--all",
+    "-a",
+    is_flag=True,
+    help="Execute all tasks in the bundle (even completed tasks)",
+)
+@click.argument("bundle_id", type=int, nargs=1, required=True)
+def bundle(bundle_id, parallelism, a):
+    """Execute a task bundle"""
+
+    if parallelism > 1:
+        from astra import log
+        from joblib import Parallel, delayed
+
+        from astra.database.astradb import Task, TaskBundle
+
+        tasks = Task.select().join(TaskBundle).where(TaskBundle.bundle_id == bundle_id)
+        if not a:
+            tasks = tasks.where(Task.status_id == 1)
+            log.info(f"Restricting to tasks with 'created' status only")
+
+        def f(task):
+            try:
+                task.instance().execute()
+            except:
+                log.exception(f"Exception in executing task {task}:")
+
+        Parallel(parallelism, prefer="processes")(delayed(f)(task) for task in tasks)
+
+    else:
+        return do_work([bundle_id], True)
+
 
 if __name__ == "__main__":
     cli(obj=dict())

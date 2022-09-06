@@ -1,6 +1,9 @@
 -r requirements.txt
 
-Sphinx==1.8.5
-sphinx_bootstrap_theme>=0.4.12
+sphinx
 sphinx-autoapi
-sphinxcontrib-bibtex
+myst_parser
+furo
+sphinx_copybutton
+sphinx_design
+sphinx_inline_tabs

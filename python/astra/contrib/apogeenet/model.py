@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,8 +9,8 @@ LOGTEFF_MEAN = 3.6705732345581055
 FE_STD = 0.25668784976005554
 FE_MEAN = -0.13088105618953705
 
-class Model():
 
+class Model:
     class MetadataNet(nn.Module):
         """A simple feed-forward network for metadata."""
 
@@ -29,7 +28,7 @@ class Model():
 
         def forward(self, x):
             """Feeds some metadata through the network.
-            
+
             Args:
                 x: A minibatch of metadata.
 
@@ -42,13 +41,14 @@ class Model():
             x = self.activation(self.l3(x))
             x = self.activation(self.l4(x))
             x = self.activation(self.l5(x))
-            return x   
-
+            return x
 
     class APOGEENet(nn.Module):
-        """ This is the basic VGG network used in APOGEE_Net_I. Weights used are Model 24. """
+        """This is the basic VGG network used in APOGEE_Net_I. Weights used are Model 24."""
 
-        def __init__(self, num_layers: int = 1, num_targets: int = 3, drop_p: float = 0.0):
+        def __init__(
+            self, num_layers: int = 1, num_targets: int = 3, drop_p: float = 0.0
+        ):
             super(Model.APOGEENet, self).__init__()
             # 3 input channels, 6 output channels,  convolution
             # kernel
@@ -68,7 +68,7 @@ class Model():
             self.metadata = Model.MetadataNet()
 
             # an affine operation: y = Wx + b
-            self.fc1 = nn.Linear(64*133*1 + 64, 512)
+            self.fc1 = nn.Linear(64 * 133 * 1 + 64, 512)
             self.fc1_dropout = nn.Dropout(p=drop_p)
             self.fc2 = nn.Linear(512, 512)
             self.fc3 = nn.Linear(512, num_targets)
@@ -106,13 +106,14 @@ class Model():
                 num_features *= s
             return num_features
 
-
     def __init__(self, model_path, device):
         """TODO: Docstring this"""
 
         self.model = self.APOGEENet()
-        #model_path = os.path.join(os.path.split(os.path.abspath(__file__))[0], "model.pt")
-        self.model.load_state_dict(torch.load(model_path, map_location=device), strict=True)
+        # model_path = os.path.join(os.path.split(os.path.abspath(__file__))[0], "model.pt")
+        self.model.load_state_dict(
+            torch.load(model_path, map_location=device), strict=True
+        )
         self.model.to(device)
         self.model.eval()
 

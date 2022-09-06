@@ -19,7 +19,7 @@ Astra uses the concept of a "task" to define some work to do. This is usually so
 2. Perform some work.
 3. Output the results to a new file or a database.
 
-Each task can define some set of tasks that it needs (requires) to be complete before it can run. That way we can evaluate whether a task is ready to be executed, and how tasks depend on each other. 
+Each task can define some set of tasks that it needs (requires) to be complete before it can run. That way we can evaluate whether a task is ready to be executed, and how tasks depend on each other.
 
 Tasks can have complex dependency chains, and even recurrent dependencies. We use `Luigi <https://luigi.readthedocs.io/en/stable/>`_ to manage task dependencies so that workflows are automagically created and tasks are only scheduled for execution if they are needed. Most users of SDSS data do not need to know about how Astra manages tasks and their dependencies. However, if you are developing or testing an analysis component for Astra, or you'd like to analyse some SDSS data using non-custom parameters, then you will need to know about how Astra defines tasks.
 
@@ -47,9 +47,9 @@ If you're still uncomfortable about intermediate data products just remember: yo
 Building a workflow
 -------------------
 
-By having tasks define their own requirements, and where their outputs will be written, Luigi will execute which tasks are required. 
+By having tasks define their own requirements, and where their outputs will be written, Luigi will execute which tasks are required.
 
-# TODO 
+# TODO
 
 Common Tasks
 ------------
@@ -81,7 +81,7 @@ Let's go through a simple (yet complete!) example::
             # We require an ApVisitFile to exist!
             # (Here it is good practice to only give ApVisitFile the parameters that it needs.)
             return ApVisitFile(**self.get_common_param_kwargs(ApVisitFile))
-        
+
         def output(self):
             # Let's store the S/N in a file in the same directory as the input file.
             output_path_prefix, ext = os.path.splitext(self.input().path)

@@ -7,8 +7,8 @@ Analysis framework for SDSS-V/Milky Way Mapper
 
 ------------
 
-Astra is the analysis framework for the Sloan Digital Sky Survey (SDSS V) Milky 
-Way Mapper. The purpose of Astra is to manage the analysis of reduced data 
+Astra is the analysis framework for the Sloan Digital Sky Survey (SDSS V) Milky
+Way Mapper. The purpose of Astra is to manage the analysis of reduced data
 products from SDSS V and to streamline data releases.
 
 .. |Docs Status| image:: https://readthedocs.org/projects/sdss-astra/badge/?version=latest

@@ -1,151 +1,241 @@
-import inspect
+from email.utils import decode_params
+import os
 import importlib
-from ast import literal_eval
-from astropy.time import Time
+import json
+from re import A
+from typing import OrderedDict
+from astropy.io import fits
+from airflow.models.baseoperator import BaseOperator
+from airflow.exceptions import AirflowFailException, AirflowSkipException
 
-from sdss_access import SDSSPath
+from peewee import fn, JOIN
+from astra.database.astradb import (
+    database,
+    TaskOutput,
+    DataProduct,
+    Task,
+    TaskInputDataProducts,
+    Bundle,
+    TaskBundle,
+    Status,
+)
+from astra.utils import flatten, deserialize
+from astra import __version__, log
 
-from astra.database import (astradb, session)
-from astra.database.utils import deserialize_pks
-from astra.tools.spectrum import Spectrum1D
-from astra.utils import log
+
+def to_callable(string):
+    module_name, func_name = string.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, func_name)
 
 
-def get_data_model_path(instance, trees=None, full_output=False):
-    release = instance.parameters["release"]
-    trees = trees or dict()
-    tree = trees.get(release, None)
-    if tree is None:
-        trees[release] = tree = SDSSPath(release=release)
+def create_task_bundle(executable_task_name, input_data_products, parameters):
 
-    # Monkey-patch BOSS Spec paths.
-    try:
-        path = tree.full(**instance.parameters)
-    except:
-        if instance.parameters["filetype"] == "spec":
-            from astra.utils import monkey_patch_get_boss_spec_path
-            path = monkey_patch_get_boss_spec_path(**instance.parameters)
+    log.info(f"Creating task for {executable_task_name} with {parameters}")
+    log.debug(f"Input data products {type(input_data_products)}: {input_data_products}")
+
+    executable_class = to_callable(executable_task_name)
+
+    if isinstance(input_data_products, str):
+        input_data_products = json.loads(input_data_products)
+
+    with database.atomic() as txn:
+        bundle = Bundle.create()
+
+        for i, idp in enumerate(input_data_products):
+            bundle_size, parsed_parameters = executable_class.parse_parameters(
+                **parameters
+            )
+            parameters = {k: v for k, (p, v, *_) in parsed_parameters.items()}
+
+            task = Task.create(
+                name=executable_task_name, parameters=parameters, version=__version__
+            )
+            for data_product_id in flatten(idp):
+                TaskInputDataProducts.create(task=task, data_product_id=data_product_id)
+            TaskBundle.create(task=task, bundle=bundle)
+
+    log.info(f"Created task bundle {bundle} with {i + 1} tasks")
+
+    return bundle.id
+
+
+def create_tasks(executable_task_name, input_data_products, parameters):
+
+    log.debug(
+        f"Creating tasks for {executable_task_name} with {parameters} and {input_data_products} ({type(input_data_products)}"
+    )
+
+    executable_class = to_callable(executable_task_name)
+    if isinstance(input_data_products, str):
+        input_data_products = json.loads(input_data_products)
+
+    task_ids = []
+    with database.atomic() as txn:
+        for i, idp in enumerate(input_data_products):
+            bundle_size, parsed_parameters = executable_class.parse_parameters(
+                **parameters
+            )
+            parameters = {k: v for k, (p, v, *_) in parsed_parameters.items()}
+            task = Task.create(
+                name=executable_task_name, parameters=parameters, version=__version__
+            )
+            for data_product_id in flatten(idp):
+                TaskInputDataProducts.create(task=task, data_product_id=data_product_id)
+            task_ids.append(task.id)
+
+    return task_ids
+
+
+def get_or_create_bundle(executable_task_name, parameters, status="created"):
+    """
+    Get an existing bundle that only contains tasks of the given name and bundle parameters
+    and has the same status, or create one.
+
+    :param executable_task_name:
+
+    :param parameters:
+
+    :param status: [optional]
+        The status required for any existing bundle.
+    """
+
+    if isinstance(status, str):
+        status = Status.get(description=status)
+
+    # May need to fill in parameters with default values.
+    executable_class = to_callable(executable_task_name)
+    bundle_size, parsed_parameters = executable_class.parse_parameters(**parameters)
+    parameters = {k: v for k, (p, v, *_) in parsed_parameters.items()}
+
+    q = (
+        Bundle.select()
+        .join(TaskBundle)
+        .join(Task)
+        .where(
+            (Task.name == executable_task_name)
+            & (Task.parameters == parameters)
+            & (Bundle.status == status)
+        )
+        .group_by(Bundle)
+    )
+
+    bundle = q.first() or Bundle.create()
+    return bundle.id
+
+
+def add_to_bundle(bundle_id, task_ids):
+
+    if isinstance(task_ids, str):
+        task_ids = json.loads(task_ids)
+
+    for task_id in task_ids:
+        TaskBundle.create(bundle_id=int(bundle_id), task_id=int(task_id))
+        log.debug(f"Assigned task {task_id} to bundle {bundle_id}")
+
+    return None
+
+
+from airflow.sensors.base import BaseSensorOperator
+
+
+class BundleStatusSensor(BaseSensorOperator):
+
+    template_fields = ("bundle", "wait_for_status")
+
+    def __init__(self, bundle, wait_for_status, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.bundle = bundle
+        self.wait_for_status = wait_for_status
+
+    def poke(self, context):
+        # First check that we don't have too many jobs submitted/running already.
+
+        bundle = Bundle.get_by_id(int(self.bundle))
+        return bundle.status.description != self.wait_for_status
+
+
+def check_task_outputs(tasks):
+    tasks = deserialize(tasks, Task)
+
+    success, error, total = (0, 0, 0)
+    for task in tasks:
+        N = task.count_outputs()
+        if N == 0:
+            log.error(f"Task {task} has no outputs.")
+            error += 1
         else:
-            raise
-    
-    return (path, trees) if full_output else path
+            success += 1
+            total += N
+
+    log.info(
+        f"Recorded {success} tasks with a total of {total} outputs and and {error} tasks without any"
+    )
+
+    if error > 0:
+        raise RuntimeError(f"Some tasks had no outputs.")
+
+    return None
 
 
-def prepare_data(pks):
+def check_bundle_outputs(bundles, raise_on_error=True):
+
+    bundles = deserialize(bundles, Bundle)
+
+    total, error, failed_bundles = (0, 0, [])
+    for bundle in bundles:
+        log.info(f"Checking all tasks in bundle {bundle} have outputs")
+
+        n_tasks = bundle.count_tasks()
+        log.info(f"  There are {n_tasks} tasks in this bundle.")
+
+        q_no_outputs = (
+            Task.select(Task.id)
+            .join(TaskBundle)
+            .join(Bundle)
+            .where(Bundle.id == bundle.id)
+            .switch(Task)
+            .join(TaskOutput, JOIN.LEFT_OUTER)
+            .group_by(Task)
+            .having(fn.count(TaskOutput) == 0)
+            .tuples()
+        )
+        n_no_outputs = q_no_outputs.count()
+        if n_no_outputs > 0:
+            log.info(
+                f"  There are {n_no_outputs} tasks in this bundle without outputs."
+            )
+            for (task_id,) in q_no_outputs:
+                log.warning(f"    Task {task_id} has no outputs.")
+            failed_bundles.append(bundle.id)
+
+        total += n_tasks
+        error += n_no_outputs
+
+    if failed_bundles:
+        bundle_str = " ".join([f"{bundle_id:.0f}" for bundle_id in failed_bundles])
+        log.warning(
+            f"The following {len(failed_bundles)} bundles have at least one failed task:\n{bundle_str}"
+        )
+
+    if raise_on_error and error > 0:
+        raise RuntimeError(f"There are tasks without outputs.")
+    return None
+
+
+import pendulum
+
+
+def skip_if_backfill(dag, next_execution_date, **kwargs):
     """
-    Return the task instance, data model path, and spectrum for each given primary key,
-    and apply any spectrum callbacks to the spectrum as it is loaded.
-
-    :param pks:
-        Primary keys of task instances to load data products for.
-
-    :returns:
-        Yields a four length tuple containing the task instance, the spectrum path, the
-        original spectrum, and the modified spectrum after any spectrum callbacks have been
-        executed. If no spectrum callback is executed, then the modified spectrum will be
-        `None`.
+    Raise an AirflowSkipException if there are more recent DAG executions to take place.
     """
-    
-    trees = {}
+    run_dates = dag.get_run_dates(
+        start_date=next_execution_date + pendulum.duration(seconds=1)
+    )
+    if run_dates:
+        raise AirflowSkipException(
+            f"There are more recent DAG executions to take place: {run_dates}"
+        )
 
-    for pk in deserialize_pks(pks, flatten=True):
-        q = session.query(astradb.TaskInstance).filter(astradb.TaskInstance.pk == pk)
-        instance = q.one_or_none()
-
-        if instance is None:
-            log.warning(f"No task instance found for primary key {pk}")
-            path = spectrum = None
-
-        else:
-            release = instance.parameters["release"]
-            tree = trees.get(release, None)
-            if tree is None:
-                trees[release] = tree = SDSSPath(release=release)
-
-            # Monkey-patch BOSS Spec paths.
-            try:
-                path = tree.full(**instance.parameters)
-            except:
-                if instance.parameters["filetype"] == "spec":
-                    from astra.utils import monkey_patch_get_boss_spec_path
-                    path = monkey_patch_get_boss_spec_path(**instance.parameters)
-                else:
-                    raise
-
-            try:
-                spectrum = Spectrum1D.read(path)
-            except:
-                log.exception(f"Unable to load Spectrum1D from path {path} on task instance {instance}")
-                spectrum = None
-            else:
-                # Are there any spectrum callbacks?
-                spectrum_callback = instance.parameters.get("spectrum_callback", None)
-                if spectrum_callback is not None:
-                    spectrum_callback_kwargs = instance.parameters.get("spectrum_callback_kwargs", "{}")
-                    try:
-                        spectrum_callback_kwargs = literal_eval(spectrum_callback_kwargs)
-                    except:
-                        log.exception(f"Unable to literally evalute spectrum callback kwargs for {instance}: {spectrum_callback_kwargs}")
-                        raise
-
-                    try:
-                        func = string_to_callable(spectrum_callback)
-
-                        spectrum = func(
-                            spectrum=spectrum,
-                            path=path,
-                            instance=instance,
-                            **spectrum_callback_kwargs
-                        )
-
-                    except:
-                        log.exception(f"Unable to execute spectrum callback '{spectrum_callback}' on {instance}")
-                        raise
-                                        
-        yield (instance, path, spectrum)
-    
-
-def parse_as_mjd(mjd):
-    """
-    Parse Modified Julian Date, which might be in the form of an execution date
-    from Apache Airflow (e.g., YYYY-MM-DD), or as a MJD integer. The order of
-    checks here is:
-
-        1. if it is not a string, just return the input
-        2. if it is a string, try to parse the input as an integer
-        3. if it is a string and cannot be parsed as an integer, parse it as
-           a date time string
-
-    :param mjd:
-        the Modified Julian Date, in various possible forms.
-    
-    :returns:
-        the parsed Modified Julian Date
-    """
-    if isinstance(mjd, str):
-        try:
-            mjd = int(mjd)
-        except:
-            return Time(mjd).mjd
-    return mjd
-
-
-def callable_to_string(function):
-    if callable(function):
-        module = inspect.getmodule(function)
-        return f"{module.__name__}.{function.__name__}"
-    elif isinstance(function, str):
-        return function
-    else:
-        raise TypeError(f"function must be a callable, or a string representation of a callable (not {type(function)}: {function})")
-
-def string_to_callable(function_string):
-    if callable(function_string):
-        return function_string
-    elif isinstance(function_string, str):
-        mod_name, func_name = function_string.rsplit('.', 1)
-        module = importlib.import_module(mod_name)
-        return getattr(module, func_name)
-    else:
-        raise TypeError(f"function must be a callable, or a string representation of a callable (not {type(function_string)}: {function_string})s")
-    
+    return None

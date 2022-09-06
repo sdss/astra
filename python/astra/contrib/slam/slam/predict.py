@@ -34,7 +34,7 @@ from .postprocessing import do_post
 
 
 def predict_pixel(svr, X_, mask=True):
-    """ predict single pixels for a given wavelength
+    """predict single pixels for a given wavelength
 
     Parameters
     ----------
@@ -64,7 +64,7 @@ def predict_pixel(svr, X_, mask=True):
 
 
 def predict_spectrum(svrs, X_, mask=None, scaler=None):
-    """ predict a single spectrum given a list of svrs & mask
+    """predict a single spectrum given a list of svrs & mask
 
     Parameters
     ----------
@@ -103,10 +103,18 @@ def predict_spectrum(svrs, X_, mask=None, scaler=None):
     return ys
 
 
-def predict_labels(X0, svrs, test_flux, test_ivar=None, mask=None,
-                   flux_scaler=None, ivar_scaler=None, labels_scaler=None,
-                   **kwargs):
-    """ predict scaled labels for test_flux
+def predict_labels(
+    X0,
+    svrs,
+    test_flux,
+    test_ivar=None,
+    mask=None,
+    flux_scaler=None,
+    ivar_scaler=None,
+    labels_scaler=None,
+    **kwargs
+):
+    """predict scaled labels for test_flux
 
     Parameters
     ----------
@@ -144,8 +152,9 @@ def predict_labels(X0, svrs, test_flux, test_ivar=None, mask=None,
 
     # print ("Xshape in predict_labels: ", X0.shape)
     # print costfun_for_label(X0, svrs, test_flux, test_ivar, mask)
-    X_pred, ier = leastsq(costfun_for_label, X0,
-                          args=(svrs, test_flux, test_ivar, mask), **kwargs)
+    X_pred, ier = leastsq(
+        costfun_for_label, X0, args=(svrs, test_flux, test_ivar, mask), **kwargs
+    )
     # do minimization using Nelder-Mead method [tol=1.e-8 set by user!]
     # X_pred = minimize(costfun_for_label, X0,
     #                   args=(svrs, test_flux, test_ivar, mask),
@@ -154,23 +163,30 @@ def predict_labels(X0, svrs, test_flux, test_ivar=None, mask=None,
     # X_pred = minimize(nll, X0,
     #                   args=(svrs, test_flux, test_ivar, mask),
     #                   method='Nelder-Mead', **kwargs)
-    print('@Cham: X_init=', X0, 'X_final=', X_pred, 'ier', ier)
+    print("@Cham: X_init=", X0, "X_final=", X_pred, "ier", ier)
     # , 'nit=', X_pred['nit']
 
     # scale X_pred back if necessary
     if labels_scaler is not None:
-        X_pred = labels_scaler.inverse_transform(
-            X_pred.reshape(1, -1)).flatten()
+        X_pred = labels_scaler.inverse_transform(X_pred.reshape(1, -1)).flatten()
     else:
         X_pred = X_pred.flatten()
 
     return X_pred
 
 
-def predict_labels3(X0, svrs, test_flux, test_ivar=None, mask=None,
-                    flux_scaler=None, ivar_scaler=None, labels_scaler=None,
-                    **kwargs):
-    """ predict scaled labels for test_flux
+def predict_labels3(
+    X0,
+    svrs,
+    test_flux,
+    test_ivar=None,
+    mask=None,
+    flux_scaler=None,
+    ivar_scaler=None,
+    labels_scaler=None,
+    **kwargs
+):
+    """predict scaled labels for test_flux
 
     Parameters
     ----------
@@ -206,12 +222,22 @@ def predict_labels3(X0, svrs, test_flux, test_ivar=None, mask=None,
     if ivar_scaler is not None:
         test_ivar = ivar_scaler.transform(test_ivar.reshape(1, -1)).flatten()
 
-    ls_r = least_squares(costfun_for_label, X0, method="trf", loss="soft_l1",
-                         args=(svrs, test_flux, test_ivar, mask), **kwargs)
+    ls_r = least_squares(
+        costfun_for_label,
+        X0,
+        method="trf",
+        loss="soft_l1",
+        args=(svrs, test_flux, test_ivar, mask),
+        **kwargs
+    )
     pp_r = do_post(ls_r, labels_scaler)
 
     # verbose
-    print("@SLAM3: nfev={}, status={}, pstd={}".format(pp_r["nfev"], pp_r["status"], pp_r["pstd"]))
+    print(
+        "@SLAM3: nfev={}, status={}, pstd={}".format(
+            pp_r["nfev"], pp_r["status"], pp_r["pstd"]
+        )
+    )
 
     # print ("Xshape in predict_labels: ", X0.shape)
     # print costfun_for_label(X0, svrs, test_flux, test_ivar, mask)
@@ -239,7 +265,7 @@ def predict_labels3(X0, svrs, test_flux, test_ivar=None, mask=None,
 
 
 def costfun_for_label(X_, svrs, test_flux, test_ivar, mask):
-    """ calculate (ivar weighted) chi2 for a single spectrum
+    """calculate (ivar weighted) chi2 for a single spectrum
 
     Parameters
     ----------
@@ -263,7 +289,7 @@ def costfun_for_label(X_, svrs, test_flux, test_ivar, mask):
     if test_ivar is None:
         test_ivar = np.ones_like(test_flux)
     else:
-        test_ivar[test_ivar < 0] = 0.
+        test_ivar[test_ivar < 0] = 0.0
         # kick more pixels using 0.01 ivar --> NON-PHYSICAL
         # mask = np.logical_and(mask, test_ivar > 0.01 * np.median(test_ivar))
 
@@ -277,14 +303,15 @@ def costfun_for_label(X_, svrs, test_flux, test_ivar, mask):
 
     # calculate chi2
     # return chi2_simple_1d(test_flux, pred_flux, ivar=test_ivar)
-    res = (test_flux.flatten()-pred_flux.flatten())*np.sqrt(test_ivar.flatten())
-    res[np.isnan(res)] = 0.
+    res = (test_flux.flatten() - pred_flux.flatten()) * np.sqrt(test_ivar.flatten())
+    res[np.isnan(res)] = 0.0
     return res
 
 
-def predict_labels_chi2(tplt_flux, tplt_ivar, tplt_labels, test_flux, test_ivar,
-                        n_jobs=1, verbose=False):
-    """ a quick search for initial values of test_labels for test_flux
+def predict_labels_chi2(
+    tplt_flux, tplt_ivar, tplt_labels, test_flux, test_ivar, n_jobs=1, verbose=False
+):
+    """a quick search for initial values of test_labels for test_flux
 
     NOTE
     ----
@@ -300,8 +327,12 @@ def predict_labels_chi2(tplt_flux, tplt_ivar, tplt_labels, test_flux, test_ivar,
         assert tplt_flux.shape[1] == test_flux.shape[0]
 
         i_min = np.argsort(
-            np.nanmean((tplt_flux - test_flux) ** 2. * test_ivar * np.where(
-                tplt_ivar > 0, 1., np.nan), axis=1)
+            np.nanmean(
+                (tplt_flux - test_flux) ** 2.0
+                * test_ivar
+                * np.where(tplt_ivar > 0, 1.0, np.nan),
+                axis=1,
+            )
         ).flatten()[0]
 
         return tplt_labels[i_min, :]
@@ -310,18 +341,17 @@ def predict_labels_chi2(tplt_flux, tplt_ivar, tplt_labels, test_flux, test_ivar,
         n_test = test_flux.shape[0]
         results = Parallel(n_jobs=n_jobs, verbose=verbose)(
             delayed(predict_labels_chi2)(
-                tplt_flux, tplt_ivar, tplt_labels, test_flux[i, :], test_ivar[i, :])
+                tplt_flux, tplt_ivar, tplt_labels, test_flux[i, :], test_ivar[i, :]
+            )
             for i in range(n_test)
         )
 
         return np.array(results)
 
 
-def predict_pixel_for_diagnostic(svr,
-                                 test_labels,
-                                 labels_scaler=None,
-                                 flux_mean_=0.,
-                                 flux_scale_=1.):
+def predict_pixel_for_diagnostic(
+    svr, test_labels, labels_scaler=None, flux_mean_=0.0, flux_scale_=1.0
+):
     """
 
     Parameters
