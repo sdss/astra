@@ -90,7 +90,9 @@ The `mwmVisit` files can be given to nearly every component in Astra. `mwmVisit`
 - `run2d`: the BOSS data reduction pipeline used to create the input `specFull` files
 - `astra_version`: the version of Astra that created the file
 
-```{A note about spectroscopic binaries}
+```{Note}
+**Spectroscopic binaries**
+
 In future the `mwmVisit` and `mwmStar` products will have an optional keyword `component` to describe a stellar component that has been disentangled from the existing spectra. For example, in the case of a spectroscopic binary, the individual spectra of the two stars can often be disentangled by using multiple visits. In these cases there will be additional data products produced by a component of Astra. If the `catalogid` is 123456789 then the `mwmVisit` filenames will be:
 
 1. `mwmVisit-...-123456789.fits`: the original spectra without any disentangling (e.g., `component=None` or `component=''`)
