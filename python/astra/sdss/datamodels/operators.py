@@ -7,7 +7,11 @@ from astra.database.astradb import (
     TaskBundle,
     TaskInputDataProducts,
     Source,
+    Output,
+    MWMSourceStatus,
     DataProduct,
+    SourceDataProduct,
+    TaskOutput,
     TaskOutputDataProducts,
 )
 from astra.base import TaskInstance, Parameter
@@ -31,7 +35,7 @@ class CreateMWMVisitStarProducts(TaskInstance):
         for task, data_products, parameters in self.iterable():
 
             catalogid = parameters["catalogid"]
-            hdu_visit_list, hdu_star_list = create_mwm_data_products(
+            hdu_visit_list, hdu_star_list, meta = create_mwm_data_products(
                 catalogid, input_data_products=data_products
             )
             # Get healpix.
@@ -68,7 +72,6 @@ class CreateMWMVisitStarProducts(TaskInstance):
                 for path in (mwmVisit_path, mwmStar_path):
                     if os.path.exists(path):
                         os.unlink(path)
-
             else:
                 log.info(f"Wrote mwmVisits product to {mwmVisit_path}")
                 log.info(f"Wrote mwmStar product to {mwmStar_path}")
@@ -77,12 +80,21 @@ class CreateMWMVisitStarProducts(TaskInstance):
                 dp_visit, visit_created = DataProduct.get_or_create(
                     release=self.release, filetype="mwmVisit", kwargs=path_kwargs
                 )
-                TaskOutputDataProducts.create(task=task, data_product=dp_visit)
+                TaskOutputDataProducts.get_or_create(task=task, data_product=dp_visit)
+                SourceDataProduct.get_or_create(
+                    data_product=dp_visit, source_id=catalogid
+                )
 
                 dp_star, star_created = DataProduct.get_or_create(
                     release=self.release, filetype="mwmStar", kwargs=path_kwargs
                 )
-                TaskOutputDataProducts.create(task=task, data_product=dp_star)
+                TaskOutputDataProducts.get_or_create(task=task, data_product=dp_star)
+                SourceDataProduct.get_or_create(
+                    data_product=dp_star, source_id=catalogid
+                )
+
+            # Get or create an output record.
+            task.create_or_update_outputs(MWMSourceStatus, [meta])
 
             log.info(
                 f"Created data products {dp_visit} and {dp_star} for catalogid {catalogid}"

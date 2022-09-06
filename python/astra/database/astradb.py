@@ -325,6 +325,56 @@ class Task(AstraBaseModel):
     def count_outputs(self):
         return TaskOutput.select().where(TaskOutput.task == self).count()
 
+    def create_or_update_outputs(
+        self, model, results, delete_existing_unused_outputs=True
+    ):
+        """
+        Create outputs in the database (or update existing ones) for this task.
+
+        :param model:
+            The output model table (e.g., `astra.database.astradb.ApogeeNetOutput`).
+
+        :param results:
+            A list of dictionaries, where each dictionary represents an output row.
+
+        :param delete_existing_unusued_outputs: [optional]
+            Delete any existing output rows for this task that are no longer used (default: True).
+        """
+
+        N = len(results)
+        existing_outputs = (
+            model.select(model.output_id)
+            .where(model.task == self)
+            .order_by(model.output_id.asc())
+            .tuples()
+        )
+
+        for i, result in enumerate(results):
+            try:
+                (existing_output_id,) = existing_outputs[i]
+            except:
+                output = Output.create()
+                TaskOutput.create(task=self, output=output)
+                g = model.create(task=self, output=output, **result)
+                log.debug(f"Created output {output} and {g}")
+
+            else:
+                log.debug(
+                    f"Updating existing output {existing_output_id} with {result}"
+                )
+                model.update(**result).where(
+                    model.output_id == existing_output_id
+                ).execute()
+
+        if delete_existing_unused_outputs and len(existing_outputs) > N:
+            unused_output_ids = flatten(existing_outputs[N:])
+            model.delete().where(model.output_id.in_(unused_output_ids)).execute()
+            TaskOutput.delete().where(
+                TaskOutput.output_id.in_(unused_output_ids)
+            ).execute()
+            Output.delete().where(Output.id.in_(unused_output_ids)).execute()
+        return None
+
 
 class TaskOutput(AstraBaseModel):
     id = AutoField()
@@ -454,6 +504,35 @@ class AstraOutputBaseModel(AstraBaseModel):
     # xxxOutput -> Task -> TaskInputDataProducts -> DataProduct -> Source
     # TODO: update existing schema to reflect this
     # source = ForeignKeyField(Source, on_delete="CASCADE", null=True)
+
+
+class MWMSourceStatus(AstraOutputBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+
+    num_apogee_apo_visits = IntegerField(default=0)
+    num_apogee_lco_visits = IntegerField(default=0)
+    num_boss_apo_visits = IntegerField(default=0)
+    num_boss_lco_visits = IntegerField(default=0)
+
+    num_apogee_apo_visits_in_stack = IntegerField(default=0)
+    num_apogee_lco_visits_in_stack = IntegerField(default=0)
+    num_boss_apo_visits_in_stack = IntegerField(default=0)
+    num_boss_lco_visits_in_stack = IntegerField(default=0)
+
+    obs_start_apogee_apo = DateTimeField(null=True)
+    obs_end_apogee_apo = DateTimeField(null=True)
+    obs_start_apogee_lco = DateTimeField(null=True)
+    obs_end_apogee_lco = DateTimeField(null=True)
+
+    obs_start_boss_apo = DateTimeField(null=True)
+    obs_end_boss_apo = DateTimeField(null=True)
+    obs_start_boss_lco = DateTimeField(null=True)
+    obs_end_boss_lco = DateTimeField(null=True)
+
+    updated = DateTimeField(default=datetime.datetime.now)
 
 
 # Output tables.

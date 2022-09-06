@@ -1,4 +1,6 @@
+import datetime
 from astropy.io import fits
+from astropy.time import Time
 from typing import Union, List, Callable, Optional, Dict, Tuple
 
 from astra.database.astradb import Source, DataProduct
@@ -105,5 +107,43 @@ def create_mwm_data_products(
     base.add_check_sums(hdu_visit_list)
     base.add_check_sums(hdu_star_list)
 
+    # Create a metadata dictionary
+    is_empty_hdu = lambda hdu: hdu.data is None or hdu.data.size == 0
+    get_num_visits = lambda hdu: 0 if is_empty_hdu(hdu) else len(hdu.data)
+    get_num_visits_in_stack = (
+        lambda hdu: 0 if is_empty_hdu(hdu) else sum(hdu.data["IN_STACK"])
+    )
+    get_obs_start = (
+        lambda hdu: None
+        if is_empty_hdu(hdu)
+        else Time(min(hdu.data["MJD"][hdu.data["IN_STACK"]]), format="mjd").datetime
+    )
+    get_obs_end = (
+        lambda hdu: None
+        if is_empty_hdu(hdu)
+        else Time(max(hdu.data["MJD"][hdu.data["IN_STACK"]]), format="mjd").datetime
+    )
+
+    meta = {
+        "num_apogee_apo_visits": get_num_visits(apogee_north_visits),
+        "num_apogee_lco_visits": get_num_visits(apogee_south_visits),
+        "num_boss_apo_visits": get_num_visits(boss_north_visits),
+        "num_boss_lco_visits": get_num_visits(boss_south_visits),
+        "num_apogee_apo_visits_in_stack": get_num_visits_in_stack(apogee_north_visits),
+        "num_apogee_lco_visits_in_stack": get_num_visits_in_stack(apogee_south_visits),
+        "num_boss_apo_visits_in_stack": get_num_visits_in_stack(boss_north_visits),
+        "num_boss_lco_visits_in_stack": get_num_visits_in_stack(boss_south_visits),
+        # These obs start/end just refer to those used in the stack.
+        "obs_start_apogee_apo": get_obs_start(apogee_north_visits),
+        "obs_end_apogee_apo": get_obs_end(apogee_north_visits),
+        "obs_start_apogee_lco": get_obs_start(apogee_south_visits),
+        "obs_end_apogee_lco": get_obs_end(apogee_south_visits),
+        "obs_start_boss_apo": get_obs_start(boss_north_visits),
+        "obs_end_boss_apo": get_obs_end(boss_north_visits),
+        "obs_start_boss_lco": get_obs_start(boss_south_visits),
+        "obs_end_boss_lco": get_obs_end(boss_south_visits),
+        "updated": datetime.datetime.now(),
+    }
+
     # Define the paths, return data products
-    return (hdu_visit_list, hdu_star_list)
+    return (hdu_visit_list, hdu_star_list, meta)

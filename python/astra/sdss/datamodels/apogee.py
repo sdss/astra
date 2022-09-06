@@ -123,12 +123,14 @@ def create_apogee_hdus(
     # Calculate the visits that were dithered that went into the stack
 
     DATA_HEADER_CARD = ("SPECTRAL DATA", None)
+    star_data_shape = (1, -1)
     star_mappings = [
         DATA_HEADER_CARD,
-        ("LAMBDA", wavelength),
-        ("FLUX", combined_flux),
-        ("E_FLUX", combined_flux_error),
-        ("BITMASK", combined_bitmask),
+        ("SNR", np.array([snr_star])),
+        ("LAMBDA", wavelength.reshape(star_data_shape)),
+        ("FLUX", combined_flux.reshape(star_data_shape)),
+        ("E_FLUX", combined_flux_error.reshape(star_data_shape)),
+        ("BITMASK", combined_bitmask.reshape(star_data_shape)),
     ]
 
     visit_mappings = [
@@ -246,9 +248,9 @@ def create_apogee_hdus(
     hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, visit_header)
 
     # Add S/N for the stacked spectrum.
-    hdu_star.header.insert("TTYPE1", "SNR")
-    hdu_star.header["SNR"] = np.round(snr_star, 1)
-    hdu_star.header.comments["SNR"] = base.GLOSSARY.get("SNR", None)
+    # hdu_star.header.insert("TTYPE1", "SNR")
+    # hdu_star.header["SNR"] = np.round(snr_star, 1)
+    # hdu_star.header.comments["SNR"] = base.GLOSSARY.get("SNR", None)
 
     return (hdu_visit, hdu_star)
 
