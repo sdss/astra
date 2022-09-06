@@ -1,5 +1,5 @@
 NAME = "astra"
-__version__ = "0.2.3dev"
+__version__ = "0.2.4dev"
 
 # TODO: Move these things elsewhere (e.g., utils) to speed up top-level import.
 from sdsstools.configuration import get_config
