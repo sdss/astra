@@ -66,7 +66,15 @@ Astra produces some data products that only contain observations (`mwmVisit` and
 
 #### `mwmVisit`
 
-A `mwmVisit` file contains **all spectra** for a Milky Way Mapper (MWM) source. This includes optical BOSS spectra, infrared spectra from the APOGEE instrument at Apache Point Observatory, and infrared spectra from the APOGEE instrument on the du Pont telescope at Las Campanas Observatory. Spectra from each telescope/instrument combination are stored in a their own header data unit (HDU).
+The `mwmVisit` file contains **all spectra** for a Milky Way Mapper (MWM) source, from all telescope/instrument combinations. It has 5 header data units (HDUs):
+
+0. A primary HDU containing information about the source (e.g., photometry, astrometry).
+1. All BOSS spectra from Apache Point Observatory
+2. All BOSS spectra from Las Campanas Observatory
+3. All APOGEE spectra from Apache Point Observatory
+4. All APOGEE spectra from Las Campanas Observatory
+
+The `mwmStar` files are similar in form, but they contain only a single stacked spectrum per HDU instead of individual visits. All `mwmVisit` and `mwmStar` spectra are redshifted to the source rest frame, and resampled onto a common wavelength array.
 
 Creating a `mwmVisit` data product requires `apVisit` products and `specFull` products as inputs. However, the `mwmVisit` files differ slightly to `apVisit` and `specFull` files in a few important ways:
 - The wavelengths of all `mwmVisit` spectra are in the source rest frame. The `apStar` spectra were all in the source rest frame, but `apVisit` spectra are in the observed frame, and `specFull` are in the Solar system barycentric rest frame.
@@ -96,7 +104,7 @@ The original spectra without disentangling will always be available, because dis
 
 #### `mwmStar`
 
-A `mwmStar` file contains **all stacked spectra** for a MWM source. This includes a stacked optical BOSS spectrum, and a stacked infrared spectrum from the APOGEE instrument at Apache Point Observatory, and a stacked infrared spectrum from the APOGEE instrument on the du Pont telescope at Las Campanas Observatory. Currently we do not stack spectra from different APOGEE instruments because of their different line spread function profiles. Stacked spectra from each telescope/instrument combination are stored in their own HDU.
+A `mwmStar` file contains **all stacked spectra** for a MWM source. This includes a stacked optical BOSS spectrum, and a stacked infrared spectrum from the APOGEE instrument at Apache Point Observatory, and a stacked infrared spectrum from the APOGEE instrument on the du Pont telescope at Las Campanas Observatory. Currently we do not stack spectra from different APOGEE instruments because of their different line spread function profiles. Stacked spectra from each telescope/instrument combination are stored in their own HDU (see `mwmVisit` HDU definition).
 
 The `mwmVisit` and `mwmStar` files are created simultaneously so that they will always remain synchronised. Any spectra in the `mwmVisit` file that has `IN_STACK` marked as `True` contributed to the stacked spectrum in the `mwmStar` file. The `mwmVisit` and `mwmStar` files have the same (resampled) wavelength array, which is in vacuum and in the source rest frame. The `mwmStar` spectra are ready for scientific analysis, **and represent our current "best spectrum" for a source**. 
 
