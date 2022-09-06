@@ -119,6 +119,8 @@ Documentation TBD. Very similar to `mwmVisit`, but contains best-fitting model s
 
 Documentation TBD. Very similar to `mwmStar`, but contains best-fitting model spectrum from an analysis pipeline.
 
+### Summary products
+
 #### `astraAllStar`
 
 Documentation TBD. Contains stellar parameter estimates from one or many pipelines. There could/should be two types of files:
