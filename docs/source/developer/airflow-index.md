@@ -2,7 +2,7 @@
 hide-toc: true
 ---
 
-# SDSS-V
+# How data are processed
 
 In the Milky Way Mapper (MWM) of SDSS-V, we use Astra to analyse spectroscopic data. The data are hosted on the [Science Archive Server](#), and there is a dedicated cluster for performing these analyses. We use [Airflow](#) to schedule and orchestrate analysis tasks for the MWM. In Airflow, we define a [directed acyclic graph (DAG)](developer/dags) that performs tasks in a pre-defined sequence, and each step can have logic that re-directs the tasks that need executing.
 

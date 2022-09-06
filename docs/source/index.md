@@ -8,15 +8,23 @@ hide-toc: true
 :caption: User Guide
 :hidden:
 
-user/index
+user/install
+user/datamodels
+user/components/index
 ```
+
+```{toctree}
+:caption: Reference
+:hidden:
+api
+cli
+```
+
 
 ```{toctree}
 :caption: Developer Guide
 :hidden:
 
-api
-cli
 developer/index
 developer/airflow-index
 developer/software-index
