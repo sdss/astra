@@ -6,7 +6,8 @@ channels:
 dependencies:
     - python=3.8.5
     - numpy
-    - astropy
+    - astropy>=5.1
+    - typing_extensions>=4.3
     - pyyaml
     - healpy
     # scipy and scikit-learn are required by many contributed codes

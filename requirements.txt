@@ -1,6 +1,7 @@
 apache-airflow>=2.1.2
-astropy
-click==7.1.2
+astropy>=5.1
+typing_extensions>=4.3
+click
 healpy
 matplotlib
 numpy
