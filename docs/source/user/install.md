@@ -157,3 +157,20 @@ Once you've installed `astra` you will need to run a script to setup the local d
 [INFO]: Inserting Status rows
 >
 ```
+
+
+## Building the documentation
+
+If you want to build the Astra documentation locally then there are some additional packages that you will require.
+From the parent directory, run this command:
+```bash
+pip install -r requirements_doc.txt
+```
+
+Then if you want to build the documentation in HTML:
+```bash
+cd docs/
+make html
+```
+
+You will find the constructed documentation pages in the `docs/build/html` folder.

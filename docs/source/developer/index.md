@@ -2,7 +2,7 @@
 hide-toc: true
 ---
 
-# Astra
+# A developer's guide to Astra 
 
 The aim of this guide is to provide a comprehensive introduction on how Astra works.
 The expected audience has experience with Python, and falls into one or more of the following categories:
