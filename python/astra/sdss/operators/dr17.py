@@ -6,25 +6,28 @@ from astra.database.astradb import DataProduct, Source, SourceDataProduct
 from astropy.time import Time
 from airflow.exceptions import AirflowSkipException
 from peewee import fn
-from typing import Optional
-from sdssdb.peewee.sdss5db import catalogdb
+from typing import Optional, List
+from astra.database.catalogdb import (
+    Catalog,
+    CatalogToGaia_DR3,
+    Gaia_DR3,
+    SDSS_DR17_APOGEE_Allstarmerge as Star,
+    # SDSS_DR17_APOGEE_Allvisits as Visit
+)
 
 from astra.sdss.operators.base import SDSSOperator
 
-try:
-    catalogdb.database.set_profile(config["sdss5_database"]["profile"])
-except (KeyError, TypeError):
-    None
 
 try:
-    catalogdb.SDSS_DR17_APOGEE_Allvisits
-except AttributeError:
+    from astra.database.catalogdb import SDSS_DR17_APOGEE_Allvisits
+except ImportError:
+    from astra.database.catalogdb import CatalogdbModel, TextField
 
     # TODO: this table not yet in sdssdb, will be in next version
     #       remove this after sdssdb 0.5.4
-    class SDSS_DR17_APOGEE_Allvisits(catalogdb.CatalogdbModel):
+    class SDSS_DR17_APOGEE_Allvisits(CatalogdbModel):
 
-        visit_id = catalogdb.TextField(primary_key=True)
+        visit_id = TextField(primary_key=True)
 
         class Meta:
             table_name = "sdss_dr17_apogee_allvisits"
@@ -32,28 +35,34 @@ except AttributeError:
     Visit = SDSS_DR17_APOGEE_Allvisits
 
 else:
-    Visit = catalogdb.SDSS_DR17_APOGEE_Allvisits
+    Visit = SDSS_DR17_APOGEE_Allvisits
     print(f"ANDY: remove SDSS_DR17_APOGEE_Allvisits in {__file__}")
 
-Star = catalogdb.SDSS_DR17_APOGEE_Allstarmerge
 
-
-class ApStarOperator(SDSSOperator):
-
-    """An operator to retrieve and ingest ApStar data products created in SDSS-IV."""
-
-    release = "dr17"
-    filetype = "apVisit"
-
-    def __init__(self, return_id_kind: Optional[str] = "data_product", **kwargs):
-        super(SDSSOperator, self).__init__(**kwargs)
+class ApogeeOperator(SDSSOperator):
+    def __init__(
+        self,
+        return_id_kind: Optional[str] = "data_product",
+        apogee_ids: Optional[List[str]] = None,
+        **kwargs,
+    ) -> None:
+        super(ApogeeOperator, self).__init__(**kwargs)
         self._available_return_id_kinds = ["data_product", "catalog"]
         if return_id_kind not in self._available_return_id_kinds:
             raise ValueError(
                 f"return_id_kind must be one of {self._available_return_id_kinds}"
             )
         self.return_id_kind = return_id_kind
+        self.apogee_ids = apogee_ids
         return None
+
+
+class ApStarOperator(ApogeeOperator):
+
+    """An operator to retrieve and ingest ApStar data products created in SDSS-IV."""
+
+    release = "dr17"
+    filetype = "apStar"
 
     def execute(self, context: dict):
         """
@@ -77,6 +86,9 @@ class ApStarOperator(SDSSOperator):
             .distinct()
             .join(Star, on=(Star.apogee_id == Visit.apogee_id))
         )
+        if self.apogee_ids is not None:
+            log.info(f"Restricting to APOGEE_ID: {self.apogee_ids}")
+            q = q.where(Visit.apogee_id.in_(self.apogee_ids))
 
         if not (ds is None and prev_ds is None):
             # Only retrieve stars by their most recent MJD, which requires an internal match on Visit
@@ -110,11 +122,10 @@ class ApStarOperator(SDSSOperator):
             else:
                 # Cross-match to catalogdb.
                 (catalogid,) = (
-                    catalogdb.Catalog.select(catalogdb.Catalog.catalogid)
-                    .join(catalogdb.CatalogToTIC_v8)
-                    .join(catalogdb.TIC_v8)
-                    .join(catalogdb.Gaia_DR3)
-                    .where(catalogdb.Gaia_DR3.source_id == star.gaia_source_id)
+                    Catalog.select(Catalog.catalogid)
+                    .join(CatalogToGaia_DR3)
+                    .join(Gaia_DR3)
+                    .where(Gaia_DR3.source_id == star.gaia_source_id)
                     .tuples()
                     .first()
                 )
@@ -136,25 +147,15 @@ class ApStarOperator(SDSSOperator):
             raise AirflowSkipException(f"No data products ingested.")
 
         index = self._available_return_id_kinds.index(self.return_id_kind)
-        return [each[index] for each in ids]
+        return list(set([each[index] for each in ids]))
 
 
-class ApVisitOperator(SDSSOperator):
+class ApVisitOperator(ApogeeOperator):
 
     """An operator to retrieve and ingest ApVisit data products created in SDSS-IV."""
 
     release = "dr17"
     filetype = "apVisit"
-
-    def __init__(self, return_id_kind: Optional[str] = "data_product", **kwargs):
-        super(SDSSOperator, self).__init__(**kwargs)
-        self._available_return_id_kinds = ["data_product", "catalog"]
-        if return_id_kind not in self._available_return_id_kinds:
-            raise ValueError(
-                f"return_id_kind must be one of {self._available_return_id_kinds}"
-            )
-        self.return_id_kind = return_id_kind
-        return None
 
     def execute(self, context: dict):
         """
@@ -167,6 +168,7 @@ class ApVisitOperator(SDSSOperator):
         prev_ds = context.get("prev_ds", None)
 
         fields = (
+            Visit.visit_id,
             Visit.apogee_id,
             Visit.mjd,
             Visit.plate,
@@ -177,14 +179,24 @@ class ApVisitOperator(SDSSOperator):
         if not (ds is None and prev_ds is None):
             # Doing a direct query between Visit and Star causes a sequential scan across Star, which is really
             # slow. Instead let's try a sub-query.
-            sq = (
-                Visit.select(*fields)
-                .where(Visit.mjd.between(Time(prev_ds).mjd, Time(ds).mjd))
-                .alias("sq")
-            )
+            if self.apogee_ids is not None:
+                log.info(f"Restricting to APOGEE_ID: {self.apogee_ids}")
+                sq = (
+                    Visit.select(*fields)
+                    .where(Visit.apogee_id.in_(self.apogee_ids))
+                    .where(Visit.mjd.between(Time(prev_ds).mjd, Time(ds).mjd))
+                    .alias("sq")
+                )
+            else:
+                sq = (
+                    Visit.select(*fields)
+                    .where(Visit.mjd.between(Time(prev_ds).mjd, Time(ds).mjd))
+                    .alias("sq")
+                )
             q = (
                 Star.select(
                     Star.gaia_source_id,
+                    sq.c.visit_id,
                     sq.c.apogee_id,
                     sq.c.mjd,
                     sq.c.plate,
@@ -199,11 +211,14 @@ class ApVisitOperator(SDSSOperator):
         else:
             # When catalog_to_sdss_dr17_apogee_allvisits exists, we won't need to cross-match via Stars at all
             # This will do a sequential scan across Star, its slow..
-            q = (
-                Visit.select(Star.gaia_source_id, *fields)
-                .join(Star, on=(Star.apogee_id == Visit.apogee_id))
-                .objects()
+            q = Visit.select(Star.gaia_source_id, *fields).join(
+                Star, on=(Star.apogee_id == Visit.apogee_id)
             )
+            if self.apogee_ids is not None:
+                log.info(f"Restricting to APOGEE_ID: {self.apogee_ids}")
+                q = q.where(Visit.apogee_id.in_(self.apogee_ids))
+
+            q = q.objects()
 
         ids, errors = ([], [])
         for visit in q:
@@ -232,11 +247,10 @@ class ApVisitOperator(SDSSOperator):
             else:
                 # Cross-match to catalogdb.
                 (catalogid,) = (
-                    catalogdb.Catalog.select(catalogdb.Catalog.catalogid)
-                    .join(catalogdb.CatalogToTIC_v8)
-                    .join(catalogdb.TIC_v8)
-                    .join(catalogdb.Gaia_DR3)
-                    .where(catalogdb.Gaia_DR3.source_id == visit.gaia_source_id)
+                    Catalog.select(Catalog.catalogid)
+                    .join(CatalogToGaia_DR3)
+                    .join(Gaia_DR3)
+                    .where(Gaia_DR3.source_id == visit.gaia_source_id)
                     .tuples()
                     .first()
                 )
@@ -258,4 +272,4 @@ class ApVisitOperator(SDSSOperator):
             raise AirflowSkipException(f"No data products ingested.")
 
         index = self._available_return_id_kinds.index(self.return_id_kind)
-        return [each[index] for each in ids]
+        return list(set([each[index] for each in ids]))
