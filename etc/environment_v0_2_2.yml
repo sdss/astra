@@ -1,0 +1,38 @@
+name: astra_v0_2_2
+channels:
+  - conda-forge
+  - defaults
+  - pytorch
+dependencies:
+    - python=3.8.5
+    - numpy
+    - astropy>=5.1
+    - typing_extensions>=4.3
+    - pyyaml
+    - healpy
+    # scipy and scikit-learn are required by many contributed codes
+    - scipy
+    - scikit-learn
+    # If your platform supports it:
+    # - scikit-learn-intelex
+    - matplotlib
+    - tqdm
+    # As of PyTorch 1.9 with CUDA 11.1. Your mileage may vary.
+    # PyTorch is required for many contributed codes
+    - pytorch
+    - torchvision
+    - torchaudio
+    # For sm_86 support, which some notchpeak GPUs require.
+    # See https://github.com/pytorch/pytorch/issues/45028
+    #- cudatoolkit=11
+    - ipython
+    - ipyparallel # for slam
+    - pip
+    - pip:
+        # Doppler requires: emcee, corner
+        - passlib
+        - sdss-access
+        - sdssdb
+        - specutils
+        - sdsstools
+        - apache-airflow[async,postgres,google,http]==2.1.2 --constraint https://raw.githubusercontent.com/apache/airflow/constraints-2.1.2/constraints-3.8.txt

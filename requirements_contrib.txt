@@ -1,0 +1,16 @@
+scikit-learn
+matplotlib
+# If your platform supports it:
+# - scikit-learn-intelex
+# As of PyTorch 1.9 with CUDA 11.1. Your mileage may vary.
+# PyTorch is required for many contributed codes
+#pytorch
+#torchvision
+#torchaudio
+torch
+torchvision
+# For sm_86 support, which some notchpeak GPUs require.
+# See https://github.com/pytorch/pytorch/issues/45028
+#- cudatoolkit=11
+ipyparallel # for slam
+passlib
