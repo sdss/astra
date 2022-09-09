@@ -1,34 +1,60 @@
 import numpy as np
-from numpy.polynomial.chebyshev import chebval
-from astra.tools.continuum.base import NormalizationBase
+from astra.tools.spectrum import Spectrum1D
+from typing import Optional, Union, Tuple, List
+from astropy.nddata import StdDevUncertainty
+from astra.tools.continuum.base import Continuum
 
 
-class ChebyshevPolynomial(NormalizationBase):
+class Chebyshev(Continuum):
 
-    """
-    Represent the stellar continuum with a Chebyshev polynomial.
+    """Represent the stellar continuum with a Chebyshev polynomial."""
 
-    :param order:
-        The order of the Chebyshev polynomial to use.
-    """
+    def __init__(self, *args, deg, **kwargs):
+        """Represent the stellar continuum with a Chebyshev polynomial.
 
-    parameter_names = ()
-
-    def __init__(self, order) -> None:
-        super().__init__()
-        self.order = int(order)
-        self.parameter_names = tuple([f"c_{i}" for i in range(self.order)])
+        :param deg:
+            The deg of the Chebyshev polynomial.
+        """
+        super(Chebyshev, self).__init__(*args, **kwargs)
+        self.deg = deg
         return None
 
-    def initial_guess(self, spectrum):
-        try:
-            N, P = spectrum.flux.shape
-        except:
-            P = spectrum.flux.size
-        self.x = np.linspace(-1, 1, P)
-        x0 = np.zeros(self.n_chebyshev)
-        x0[0] = 1
-        return x0
+    def fit(self, spectrum: Spectrum1D):
+        _initialized_args = self._initialize(spectrum)
+        N, P = self._get_shape(spectrum)
 
-    def __call__(self, *theta, **kwargs):
-        return chebval(self.x, theta)
+        flux = spectrum.flux.value.reshape((N, P))
+        e_flux = spectrum.uncertainty.represent_as(StdDevUncertainty).array.reshape(
+            (N, P)
+        )
+
+        self.theta = np.empty((N, self.num_regions, self.deg + 1))
+        for i in range(N):
+            for j, ((lower, upper), indices) in enumerate(zip(*_initialized_args)):
+                x = np.linspace(-1, 1, upper - lower)
+                f = np.polynomial.Chebyshev.fit(
+                    x[indices - lower],
+                    flux[i, indices],
+                    self.deg,
+                    w=1.0 / e_flux[i, indices],
+                )
+                self.theta[i, j] = f.convert().coef
+        return self
+
+    def __call__(
+        self, spectrum: Spectrum1D, theta: Optional[Union[List, np.array, Tuple]] = None
+    ) -> np.ndarray:
+        if theta is None:
+            theta = self.theta
+
+        _initialized_args = self._initialize(spectrum)
+
+        N, P = self._get_shape(spectrum)
+        continuum = self.fill_value * np.ones((N, P))
+
+        for i in range(N):
+            for j, ((lower, upper), _) in enumerate(zip(*_initialized_args)):
+                continuum[i, slice(lower, upper)] = np.polynomial.chebyshev.chebval(
+                    np.linspace(-1, 1, upper - lower), self.theta[i, j]
+                )
+        return continuum.reshape(spectrum.flux.shape)
