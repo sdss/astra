@@ -1,1 +1,1 @@
-from astra.tools.spectrum.loaders import Spectrum1D, SpectrumList
+from astra.tools.spectrum.loaders import SpectralAxis, Spectrum1D, SpectrumList

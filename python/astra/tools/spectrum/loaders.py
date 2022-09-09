@@ -4,7 +4,7 @@ import numpy as np
 from astropy.io import fits
 from astropy import units as u
 from astropy.nddata import StdDevUncertainty, InverseVariance
-from specutils import Spectrum1D, SpectrumList
+from specutils import SpectralAxis, Spectrum1D, SpectrumList
 from specutils.io.registers import get_loaders_by_extension, io_registry
 
 """
@@ -111,7 +111,7 @@ def load_sdss_mwmStar_list(path, **kwargs):
 
 @data_loader(
     "apStar",
-    identifier=is_filetype("apStar"),
+    identifier=is_filetype("apStar") or is_filetype("asStar"),
     dtype=Spectrum1D,
     priority=10,
     extensions=["fits"],
@@ -166,7 +166,7 @@ def load_sdss_apStar(path, **kwargs):
 
 @data_loader(
     "apStar",
-    identifier=is_filetype("apStar"),
+    identifier=is_filetype("apStar") or is_filetype("asStar"),
     dtype=SpectrumList,
     priority=10,
     extensions=["fits"],
@@ -331,6 +331,7 @@ def _load_mwmVisit_or_mwmStar(path):
     with fits.open(path) as image:
         for hdu in range(1, len(image)):
             if image[hdu].header["DATASUM"] == "0":
+                spectra.append(None)
                 continue
             spectra.append(_load_mwmVisit_or_mwmStar_hdu(image, hdu))
     return spectra
