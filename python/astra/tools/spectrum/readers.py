@@ -1,3 +1,4 @@
+"""Register reader functions for various spectral formats."""
 from collections import OrderedDict
 from functools import wraps
 import numpy as np
