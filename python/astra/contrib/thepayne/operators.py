@@ -8,11 +8,12 @@ from sdss_access import SDSSPath
 from inspect import signature
 from collections import OrderedDict
 
+from astra import log
 from astra.database import astradb, session
 from astra.tools.spectrum import Spectrum1D
 from astra.database.utils import create_task_output, deserialize_pks
 from astra.contrib.thepayne import training, test
-from astra.utils import hashify, log, get_base_output_path
+from astra.utils import hashify, get_base_output_path
 from astra.operators import ApStarOperator, AstraOperator
 from astra.operators.utils import prepare_data
 

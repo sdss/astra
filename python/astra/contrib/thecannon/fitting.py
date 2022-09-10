@@ -20,7 +20,7 @@ import scipy.optimize as op
 from time import time
 from warnings import filterwarnings, warn
 
-from astra.utils import log
+from astra import log
 
 filterwarnings("ignore", category=RuntimeWarning)
 

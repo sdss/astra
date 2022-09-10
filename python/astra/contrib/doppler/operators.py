@@ -3,8 +3,7 @@ import numpy as np
 from astra.database import astradb
 from astra.database.utils import create_task_output
 from astra.operators.utils import prepare_data
-from astra.utils import log
-
+from astra import log
 
 def estimate_radial_velocity(
     pks,

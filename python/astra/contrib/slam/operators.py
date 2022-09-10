@@ -4,7 +4,7 @@ from tqdm import tqdm
 
 from astra.operators.utils import prepare_data
 from astra.database.utils import create_task_output, deserialize_pks
-from astra.utils import log
+from astra import log
 from astra.database import astradb
 
 ### from astra.contrib.apogeenet.model import Model

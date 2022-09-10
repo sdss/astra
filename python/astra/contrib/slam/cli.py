@@ -34,7 +34,7 @@ def slam(context, primary_keys, model_path, dwave, p, q, ivar_block, eps, rsv_fr
             verbose_slam=verbose
         )
     except:
-        from astra.utils import log
+        from astra import log
         log.exception(f"Exception occurred:")
         # Click always returns 0 exit code, even if an exception occurred.
         # See https://github.com/pallets/click/issues/747

@@ -15,7 +15,7 @@ from scipy.spatial import Delaunay
 from warnings import warn
 from tqdm import tqdm
 
-from astra.utils import log
+from astra import log
 
 from astra.contrib.thecannon import censoring, fitting, vectorizer as vectorizer_module
 from astra.contrib.thecannon.vectorizer.base import BaseVectorizer

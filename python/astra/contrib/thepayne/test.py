@@ -15,7 +15,7 @@ from astropy.constants import c
 from scipy.optimize import curve_fit
 from collections import OrderedDict
 
-from astra.utils import log
+from astra import log
 
 # TODO: put this elsewhere
 # Check for CUDA support.

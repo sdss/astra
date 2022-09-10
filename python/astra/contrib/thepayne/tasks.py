@@ -6,7 +6,8 @@ from tqdm import tqdm
 from time import time
 from astropy.io import fits
 from astropy.table import Table
-from astra.utils import log, timer
+from astra import log
+from astra.utils import timer
 from astra.tasks import BaseTask
 from astra.tasks.io import LocalTargetTask
 from astra.tasks.io.sdss5 import ApStarFile

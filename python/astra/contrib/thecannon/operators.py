@@ -5,7 +5,7 @@ import numpy as np
 
 from astra.database import AstraBase, astradb, catalogdb, session
 from astra.database.utils import get_or_create_task_instance
-from astra.utils import log
+from astra import log
 from tqdm import tqdm
 from sqlalchemy import func
 
