@@ -1,3 +1,5 @@
+"""Represent the stellar continuum with a scalar."""
+
 from __future__ import annotations
 import numpy as np
 from astra.tools.spectrum import SpectralAxis, Spectrum1D
@@ -8,7 +10,7 @@ from astra.tools.continuum.base import Continuum
 
 class Scalar(Continuum):
 
-    """Represent the stellar continuum as a scalar."""
+    """Represent the stellar continuum with a scalar."""
 
     available_methods = {
         "mean": np.mean,
@@ -26,8 +28,6 @@ class Scalar(Continuum):
     ) -> None:
         (
             """
-        Represent the stellar continuum as a scalar.
-
         :param methods: [optional]
             The method used to estimate the continuum. Must be one of `Scalar.available_methods`.
 

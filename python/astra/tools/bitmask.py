@@ -1,3 +1,4 @@
+"""Represent metadata as bit flags."""
 import numpy as np
 from functools import cached_property
 

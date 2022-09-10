@@ -1,3 +1,5 @@
+"""Represent the stellar continuum with sine and cosine functions."""
+
 from __future__ import annotations
 import numpy as np
 from typing import Optional, Union, Tuple, List
@@ -8,7 +10,7 @@ from astra.tools.continuum.base import Continuum, _pixel_slice_and_mask
 
 class Sinusoids(Continuum):
 
-    """Represent the stellar continuum as a sum of sine and cosine functions."""
+    """Represent the stellar continuum with sine and cosine functions."""
 
     def __init__(
         self,
@@ -23,8 +25,6 @@ class Sinusoids(Continuum):
     ) -> None:
         (
             """
-        Represent the stellar continuum as a sum of sine and cosine functions.
-
         :param deg: [optional]
             The degree of sinusoids to include.
 

@@ -49,7 +49,8 @@ autodoc_default_flags = ["members"]
 autodoc_default_options = {
     "members": True,
     "member-order": "bysource",
-    "special-members": "__init__",
+    "special-members": "__init__,__call__",
+    'show-inheritance': True,
 }
 templates_path = ["_templates"]
 

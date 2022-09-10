@@ -1,3 +1,5 @@
+"""Represent the stellar continuum with a Chebyshev polynomial."""
+
 from __future__ import annotations
 import numpy as np
 from astra.tools.spectrum import SpectralAxis, Spectrum1D
@@ -21,8 +23,6 @@ class Chebyshev(Continuum):
     ) -> None:
         (
             """
-        Represent the stellar continuum with a Chebyshev polynomial.
-
         :param deg:
             The deg of the Chebyshev polynomial.
         """

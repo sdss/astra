@@ -1,3 +1,5 @@
+"""A base to represent the stellar continuum."""
+
 from __future__ import annotations
 import numpy as np
 from astra.tools.spectrum import SpectralAxis, Spectrum1D
