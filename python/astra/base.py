@@ -26,6 +26,12 @@ from astra.database.astradb import (
 
 
 class TaskStageTimer:
+    
+    """
+    A context manager to record the timing of a task stage (e.g., ``execute``,
+    ``pre_execute``, or ``post_execute``).
+    """
+
     def __init__(self, task, stage):
         self.task = task
         self.stage = stage
@@ -108,6 +114,14 @@ class TaskStageTimer:
 
 
 def decorate_pre_post_execute(f):
+    """
+    A decorator to record timing and update status entries for pre- or 
+    post-execute functions on task instances.
+
+    :param f:
+        A ``TaskInstance.pre_execute`` or ``TaskInstance.post_execute`` callable.
+    """ 
+
     stage = f.__name__
 
     def wrapper(task, *args, **kwargs):
@@ -130,6 +144,14 @@ def decorate_pre_post_execute(f):
 
 
 def decorate_execute(f):
+    """
+    A decorator to record timing and to update the task status for for execute 
+    functions on task instances.
+
+    :param f:
+        A ``TaskInstance.execute`` function.
+    """"
+
     def wrapper(task, *args, **kwargs):
 
         decorate_pre_execute = kwargs.pop("decorate_pre_execute", True)
@@ -204,6 +226,9 @@ class DictParameter(Parameter):
 
 
 class TaskInstanceMeta(type):
+   
+    """A metaclass for decorating ``TaskInstance`` execute functions."""
+
     def __new__(cls, class_name, bases, attrs):
         # Decorate stages for timing / exception tracking.
         stages = {
@@ -608,10 +633,18 @@ def _update_status(instance, description, tasks_where):
     return count
 
 
-ExecutableTask = TaskInstance
-
-
 def get_or_create_data_products(iterable):
+    """
+    Get or create ``DataProduct`` entries given an iterable of inputs, which could
+    contain file paths, another iterable, or ``DataProduct`` entries.
+
+    :param iterable:
+        An iterable of entries that can be resolved to ``DataProducts``.
+    
+    :returns:
+        An iterable of ``DataProduct`` objects.
+    """
+
     if iterable is None:
         return None
 
