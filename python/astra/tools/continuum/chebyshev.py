@@ -1,5 +1,6 @@
+from __future__ import annotations
 import numpy as np
-from astra.tools.spectrum import Spectrum1D
+from astra.tools.spectrum import SpectralAxis, Spectrum1D
 from typing import Optional, Union, Tuple, List
 from astropy.nddata import StdDevUncertainty
 from astra.tools.continuum.base import Continuum
@@ -9,17 +10,36 @@ class Chebyshev(Continuum):
 
     """Represent the stellar continuum with a Chebyshev polynomial."""
 
-    def __init__(self, *args, deg, **kwargs):
-        """Represent the stellar continuum with a Chebyshev polynomial.
+    def __init__(
+        self,
+        deg: int,
+        spectral_axis: Optional[SpectralAxis] = None,
+        regions: Optional[List[Tuple[float, float]]] = None,
+        mask: Optional[np.array] = None,
+        fill_value: Optional[Union[int, float]] = np.nan,
+        **kwargs,
+    ) -> None:
+        (
+            """
+        Represent the stellar continuum with a Chebyshev polynomial.
 
         :param deg:
             The deg of the Chebyshev polynomial.
         """
-        super(Chebyshev, self).__init__(*args, **kwargs)
+            + Continuum.__init__.__doc__
+        )
+
+        super(Chebyshev, self).__init__(
+            spectral_axis=spectral_axis,
+            regions=regions,
+            mask=mask,
+            fill_value=fill_value,
+            **kwargs,
+        )
         self.deg = deg
         return None
 
-    def fit(self, spectrum: Spectrum1D):
+    def fit(self, spectrum: Spectrum1D) -> Chebyshev:
         _initialized_args = self._initialize(spectrum)
         N, P = self._get_shape(spectrum)
 

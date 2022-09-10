@@ -1,5 +1,6 @@
+from __future__ import annotations
 import numpy as np
-from astra.tools.spectrum import Spectrum1D
+from astra.tools.spectrum import SpectralAxis, Spectrum1D
 from typing import Optional, Union, Tuple, List
 
 from astra.tools.continuum.base import Continuum
@@ -14,15 +15,32 @@ class Scalar(Continuum):
         "median": np.median,
     }
 
-    def __init__(self, *args, method="mean", **kwargs):
-        """
+    def __init__(
+        self,
+        method="mean",
+        spectral_axis: Optional[SpectralAxis] = None,
+        regions: Optional[List[Tuple[float, float]]] = None,
+        mask: Optional[np.array] = None,
+        fill_value: Optional[Union[int, float]] = np.nan,
+        **kwargs,
+    ) -> None:
+        (
+            """
         Represent the stellar continuum as a scalar.
 
         :param methods: [optional]
             The method used to estimate the continuum. Must be one of `Scalar.available_methods`.
 
         """
-        super(Scalar, self).__init__(*args, **kwargs)
+            + Continuum.__init__.__doc__
+        )
+        super(Scalar, self).__init__(
+            spectral_axis=spectral_axis,
+            regions=regions,
+            mask=mask,
+            fill_value=fill_value,
+            **kwargs,
+        )
         try:
             self.callable_method = self.available_methods[method]
         except KeyError:
@@ -33,7 +51,7 @@ class Scalar(Continuum):
             self.method = method
         return None
 
-    def fit(self, spectrum: Spectrum1D):
+    def fit(self, spectrum: Spectrum1D) -> Scalar:
         _initialized_args = self._initialize(spectrum)
         N, P = self._get_shape(spectrum)
 

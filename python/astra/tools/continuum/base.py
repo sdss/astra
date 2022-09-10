@@ -1,3 +1,4 @@
+from __future__ import annotations
 import numpy as np
 from astra.tools.spectrum import SpectralAxis, Spectrum1D
 from typing import Optional, Union, Tuple, List
@@ -65,7 +66,7 @@ class Continuum:
             N, P = (1, spectrum.flux.size)
         return (N, P)
 
-    def fit(self, spectrum: Spectrum1D):
+    def fit(self, spectrum: Spectrum1D) -> Continuum:
         """
         Fit the continuum in the given spectrum.
 

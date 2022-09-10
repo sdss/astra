@@ -1,7 +1,8 @@
+from __future__ import annotations
 import numpy as np
 from typing import Optional, Union, Tuple, List
 from astropy.nddata import InverseVariance
-from astra.tools.spectrum import Spectrum1D
+from astra.tools.spectrum import SpectralAxis, Spectrum1D
 from astra.tools.continuum.base import Continuum, _pixel_slice_and_mask
 
 
@@ -9,8 +10,19 @@ class Sinusoids(Continuum):
 
     """Represent the stellar continuum as a sum of sine and cosine functions."""
 
-    def __init__(self, *args, deg=3, L=1400, scalar=1e-6, **kwargs):
-        """
+    def __init__(
+        self,
+        deg: Optional[int] = 3,
+        L: Optional[float] = 1400,
+        scalar: Optional[float] = 1e-6,
+        spectral_axis: Optional[SpectralAxis] = None,
+        regions: Optional[List[Tuple[float, float]]] = None,
+        mask: Optional[np.array] = None,
+        fill_value: Optional[Union[int, float]] = np.nan,
+        **kwargs,
+    ) -> None:
+        (
+            """
         Represent the stellar continuum as a sum of sine and cosine functions.
 
         :param deg: [optional]
@@ -19,13 +31,21 @@ class Sinusoids(Continuum):
         :param L: [optional]
             The length scale for the sines and cosines.
         """
-        super(Sinusoids, self).__init__(*args, **kwargs)
+            + Continuum.__init__.__doc__
+        )
+        super(Sinusoids, self).__init__(
+            spectral_axis=spectral_axis,
+            regions=regions,
+            mask=mask,
+            fill_value=fill_value,
+            **kwargs,
+        )
         self.deg = int(deg)
         self.L = float(L)
-        self.scalar = scalar
+        self.scalar = float(scalar)
         return None
 
-    def fit(self, spectrum: Spectrum1D):
+    def fit(self, spectrum: Spectrum1D) -> Sinusoids:
         _initialized_args = self._initialize(spectrum)
         N, P = self._get_shape(spectrum)
         all_flux = spectrum.flux.value.reshape((N, P))
@@ -48,7 +68,7 @@ class Sinusoids(Continuum):
 
     def __call__(
         self, spectrum: Spectrum1D, theta: Optional[Union[List, np.array, Tuple]] = None
-    ):
+    ) -> np.ndarray:
         if theta is None:
             theta = self.theta
 
