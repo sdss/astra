@@ -6,9 +6,7 @@
     :recursive:
 
     astra.base
-    astra.contrib
     astra.database
-    astra.hooks
     astra.operators
     astra.tools
     astra.utils
