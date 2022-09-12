@@ -26,7 +26,7 @@ from astra.database.astradb import (
 
 
 class TaskStageTimer:
-    
+
     """
     A context manager to record the timing of a task stage (e.g., ``execute``,
     ``pre_execute``, or ``post_execute``).
@@ -115,12 +115,12 @@ class TaskStageTimer:
 
 def decorate_pre_post_execute(f):
     """
-    A decorator to record timing and update status entries for pre- or 
+    A decorator to record timing and update status entries for pre- or
     post-execute functions on task instances.
 
     :param f:
         A ``TaskInstance.pre_execute`` or ``TaskInstance.post_execute`` callable.
-    """ 
+    """
 
     stage = f.__name__
 
@@ -145,12 +145,12 @@ def decorate_pre_post_execute(f):
 
 def decorate_execute(f):
     """
-    A decorator to record timing and to update the task status for for execute 
+    A decorator to record timing and to update the task status for for execute
     functions on task instances.
 
     :param f:
         A ``TaskInstance.execute`` function.
-    """"
+    """
 
     def wrapper(task, *args, **kwargs):
 
@@ -204,6 +204,7 @@ def decorate_execute(f):
 
 
 class Parameter:
+
     """A task parameter."""
 
     def __init__(self, name=None, bundled=False, **kwargs):
@@ -214,19 +215,21 @@ class Parameter:
 
 
 class TupleParameter(Parameter):
+
     """A task parameter that expects a tuple as input."""
 
     pass
 
 
 class DictParameter(Parameter):
+
     """A task parameter that expects a dictionary as input."""
 
     pass
 
 
 class TaskInstanceMeta(type):
-   
+
     """A metaclass for decorating ``TaskInstance`` execute functions."""
 
     def __new__(cls, class_name, bases, attrs):
@@ -430,7 +433,7 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         """
         Iterate over the tasks in the bundle.
 
-        This generator yields tuples of `(task, input_data_products, parameters)`
+        This generator yields tuples of ``(task, input_data_products, parameters)``
         for each task in the bundle, even if it is a single task (not in any bundle).
         """
         if stage is None:
@@ -640,7 +643,7 @@ def get_or_create_data_products(iterable):
 
     :param iterable:
         An iterable of entries that can be resolved to ``DataProducts``.
-    
+
     :returns:
         An iterable of ``DataProduct`` objects.
     """
