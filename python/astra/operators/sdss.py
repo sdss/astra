@@ -196,10 +196,6 @@ class BossSpectrumOperator(BaseOperator):
                     filetype=self.filetype,
                     kwargs=kwds,
                 )
-                # Update the ZWARNING metadata, even if this data product already exists.
-                data_product.metadata = {"ZWARNING": row["ZWARNING"]}
-                data_product.save()
-
                 source, _ = Source.get_or_create(catalogid=catalogid)
                 SourceDataProduct.get_or_create(
                     source=source, data_product=data_product

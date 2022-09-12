@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 import numpy as np
-from astra.tools.spectrum import SpectralAxis, Spectrum1D
 from typing import Optional, Union, Tuple, List
+from astra.utils import expand_path
+from astra.tools.spectrum import SpectralAxis, Spectrum1D
 
 
 class Continuum:
@@ -14,7 +15,7 @@ class Continuum:
         self,
         spectral_axis: Optional[SpectralAxis] = None,
         regions: Optional[List[Tuple[float, float]]] = None,
-        mask: Optional[np.array] = None,
+        mask: Optional[Union[str, np.array]] = None,
         fill_value: Optional[Union[int, float]] = np.nan,
     ):
         """
@@ -32,7 +33,10 @@ class Continuum:
         :param fill_value: [optional]
             The value to use for pixels where the continuum is not defined.
         """
-        self.mask = mask
+        if isinstance(mask, str):
+            self.mask = np.load(expand_path(mask))
+        else:
+            self.mask = mask
         self.regions = regions
         self.fill_value = fill_value
         self.spectral_axis = spectral_axis

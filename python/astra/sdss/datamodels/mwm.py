@@ -8,6 +8,14 @@ from astra.database.astradb import Source, DataProduct
 from astra.sdss.datamodels import base, apogee, boss
 from astra import log
 
+HDU_DESCRIPTIONS = [
+    "Source information only",
+    "BOSS spectra from Apache Point Observatory",
+    "BOSS spectra from Las Campanas Observatory",
+    "APOGEE spectra from Apache Point Observatory",
+    "APOGEE spectra from Las Campanas Observatory",
+]
+
 
 def create_mwm_data_products(
     source: Union[Source, int],
@@ -45,14 +53,7 @@ def create_mwm_data_products(
                 f"Ignoring file type '{dp.filetype}' ({dp}: {dp.path}). It's not used for creating MWM Visit/Star products."
             )
 
-    hdu_descriptions = [
-        "Source information only",
-        "BOSS spectra from Apache Point Observatory",
-        "BOSS spectra from Las Campanas Observatory",
-        "APOGEE spectra from Apache Point Observatory",
-        "APOGEE spectra from Las Campanas Observatory",
-    ]
-    cards = base.create_primary_hdu_cards(source, hdu_descriptions)
+    cards = base.create_primary_hdu_cards(source, HDU_DESCRIPTIONS)
     primary_visit_hdu = fits.PrimaryHDU(header=fits.Header(cards))
     primary_star_hdu = fits.PrimaryHDU(header=fits.Header(cards))
 
@@ -147,3 +148,23 @@ def create_mwm_data_products(
 
     # Define the paths, return data products
     return (hdu_visit_list, hdu_star_list, meta)
+
+
+def get_hdu_index(filetype, telescope):
+    if filetype == "specFull":
+        return 1  # TODO: revise when we have BOSS spectra from LCO
+    if filetype in ("apStar", "apVisit", "apStar-1m"):
+        if telescope in ("apo25m", "apo1m"):
+            return 3
+        elif telescope == "lco25m":
+            return 4
+    raise ValueError(f"Unknown filetype/telescope combination: {filetype}/{telescope}")
+
+
+def get_data_hdu_observatory_and_instrument():
+    return [
+        ("APO", "BOSS"),
+        ("LCO", "BOSS"),
+        ("APO", "APOGEE"),
+        ("LCO", "APOGEE"),
+    ]

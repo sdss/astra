@@ -19,15 +19,17 @@ from sdssdb.peewee.sdss5db.catalogdb import (
 )
 from sdssdb.peewee.sdss5db.targetdb import Target, CartonToTarget, Carton
 
+from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR2 as Gaia
+
+"""
 try:
     from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR3 as Gaia
 except ImportError:
     from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR2 as Gaia
-
     log.warning(
         f"Gaia DR3 not yet available in sdssdb.peewee.sdss5db.catalogdb. Using Gaia DR2."
     )
-
+"""
 
 from healpy import ang2pix
 
@@ -167,6 +169,12 @@ GLOSSARY = {
     "V_REL_XCORR": "Relative velocity from XCORR [km/s]",
     "E_V_RAD_XCORR": "Error in relative velocity from XCORR [km/s]",
     "V_RAD_XCORR": "Radial velocity in Solar barycentric rest frame [km/s]",
+    # Model fitting keys
+    "TASK_ID": "Astra unique task identifier",
+    "CHI_SQ": "\chi-squared of model fit",
+    "R_CHI_SQ": "Reduced \chi-squared of model fit",
+    "MODEL_FLUX": "Best-fitting model of source flux",
+    "CONTINUUM": "Continuum flux used in model fit",
 }
 for key, comment in GLOSSARY.items():
     if len(comment) > 80:

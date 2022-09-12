@@ -33,6 +33,9 @@ clear_fits_registry_for_spectrum_objects(
 
 # The `specutils.io.registers.data_loader` doesn't respect the `priority` keyword,
 # and does some funky incompatible shit by double-registering things as SpectrumList objects
+from astra import log
+
+
 def data_loader(label, identifier, dtype, extensions=None, priority=0, force=False):
     def identifier_wrapper(ident):
         def wrapper(*args, **kwargs):
@@ -112,13 +115,15 @@ def load_sdss_mwmStar_list(path, **kwargs):
 
 @data_loader(
     "apStar",
-    identifier=is_filetype("apStar") or is_filetype("asStar"),
+    identifier=is_filetype(("apStar", "asStar")),
     dtype=Spectrum1D,
     priority=10,
     extensions=["fits"],
 )
-def load_sdss_apStar(path, **kwargs):
+def load_sdss_apStar(path, data_slice=None, **kwargs):
     flux_unit = u.Unit("1e-17 erg / (Angstrom cm2 s)")  # TODO
+
+    slicer = slice(*data_slice) if data_slice is not None else slice(None)
 
     with fits.open(path) as image:
         wavelength = _wcs_log_linear(
@@ -128,8 +133,8 @@ def load_sdss_apStar(path, **kwargs):
         )
         spectral_axis = u.Quantity(wavelength, unit=u.Angstrom)
 
-        flux = u.Quantity(image[1].data, unit=flux_unit)
-        e_flux = StdDevUncertainty(image[2].data)
+        flux = u.Quantity(image[1].data[slicer], unit=flux_unit)
+        e_flux = StdDevUncertainty(image[2].data[slicer])
 
         snr = [image[0].header["SNR"]]
         n_visits = image[0].header["NVISITS"]
@@ -157,8 +162,8 @@ def load_sdss_apStar(path, **kwargs):
                 continue
             meta[key.lower()] = image[0].header[key]
 
-        meta["SNR"] = np.array(snr)
-        meta["BITMASK"] = image[3].data
+        meta["SNR"] = np.array(snr)[slicer]
+        meta["BITMASK"] = image[3].data[slicer]
 
     return Spectrum1D(
         spectral_axis=spectral_axis, flux=flux, uncertainty=e_flux, meta=meta
@@ -167,7 +172,7 @@ def load_sdss_apStar(path, **kwargs):
 
 @data_loader(
     "apStar",
-    identifier=is_filetype("apStar") or is_filetype("asStar"),
+    identifier=is_filetype(("apStar", "asStar")),
     dtype=SpectrumList,
     priority=10,
     extensions=["fits"],

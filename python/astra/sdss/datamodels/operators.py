@@ -1,5 +1,6 @@
 import os
 from airflow.models.baseoperator import BaseOperator
+from sdss_access import SDSSPath
 from astra.database.astradb import (
     database,
     Task,
@@ -41,21 +42,16 @@ class CreateMWMVisitStarProducts(TaskInstance):
             # Get healpix.
             healpix = int(hdu_visit_list[0].header["HEALPIX"])
 
-            path_kwargs = dict(
+            kwds = dict(
                 catalogid=catalogid,
                 astra_version=astra_version,
                 run2d=self.run2d,
                 apred=self.apred,
-                healpix=healpix,
             )
             # Write to disk.
-            mwmVisit_path = expand_path(
-                f"$MWM_ASTRA/{astra_version}/{self.run2d}_{self.apred}/spectra/visit/{healpix // 1000}/{healpix}/mwmVisit-{astra_version}-{catalogid}.fits"
-            )
-            mwmStar_path = expand_path(
-                f"$MWM_ASTRA/{astra_version}/{self.run2d}_{self.apred}/spectra/star/{healpix // 1000}/{healpix}/mwmStar-{astra_version}-{catalogid}.fits"
-            )
-
+            p = SDSSPath(self.release)
+            mwmVisit_path = p.full("mwmVisit", **kwds)
+            mwmStar_path = p.full("mwmStar", **kwds)
             # Create necessary folders
             for path in (mwmVisit_path, mwmStar_path):
                 os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -78,7 +74,7 @@ class CreateMWMVisitStarProducts(TaskInstance):
 
                 # Create output data product records that link to this task.
                 dp_visit, visit_created = DataProduct.get_or_create(
-                    release=self.release, filetype="mwmVisit", kwargs=path_kwargs
+                    release=self.release, filetype="mwmVisit", kwargs=kwds
                 )
                 TaskOutputDataProducts.get_or_create(task=task, data_product=dp_visit)
                 SourceDataProduct.get_or_create(
@@ -86,7 +82,7 @@ class CreateMWMVisitStarProducts(TaskInstance):
                 )
 
                 dp_star, star_created = DataProduct.get_or_create(
-                    release=self.release, filetype="mwmStar", kwargs=path_kwargs
+                    release=self.release, filetype="mwmStar", kwargs=kwds
                 )
                 TaskOutputDataProducts.get_or_create(task=task, data_product=dp_star)
                 SourceDataProduct.get_or_create(
@@ -100,6 +96,11 @@ class CreateMWMVisitStarProducts(TaskInstance):
                 f"Created data products {dp_visit} and {dp_star} for catalogid {catalogid}"
             )
 
+        return None
+
+    def post_execute(self):
+        """Generate JSON files for the spectra inspecta."""
+        # TODO
         return None
 
 
