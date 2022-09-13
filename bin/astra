@@ -255,7 +255,7 @@ def do_work(ids, is_bundle):
     for i, item in enumerate(items, start=1):
         log.info(f"Executing item {i}/{N}: {item}")
         try:
-            result = item.as_executable().execute()
+            result = item.instance().execute()
         except:
             log.exception(f"Exception when executing item {item}")
         else:

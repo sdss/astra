@@ -356,7 +356,7 @@ class Task(AstraBaseModel):
                 output = Output.create()
                 TaskOutput.create(task=self, output=output)
                 g = model.create(task=self, output=output, **result)
-                log.debug(f"Created output {output} and {g}")
+                log.debug(f"Created output {output} and {g} for task {self}")
 
             else:
                 log.debug(

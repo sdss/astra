@@ -26,12 +26,14 @@ def get_slurm_queue():
         "\s+(?P<account>[-\w]+)\s+(?P<partition>[-\w]+)\s+(?P<time_limit>[-\d\:]+)\s+"
         "(?P<time_left>[-\d\:]+)\s+(?P<status>\w*)\s+(?P<nodelist>[\w\d\(\)]+)"
     )
+    popen_args = [
+        "/uufs/chpc.utah.edu/sys/installdir/slurm/std/bin/squeue",
+        "--account=sdss-np,notchpeak-gpu,sdss-np-fast",
+        '--format="%14i %50j %10u %10g %13a %13P %11l %11L %2t %R"',
+    ]
+
     process = Popen(
-        [
-            "/uufs/notchpeak.peaks/sys/installdir/slurm/std/bin/squeue",
-            "--account=sdss-np,notchpeak-gpu,sdss-np-fast",
-            '--format="%14i %50j %10u %10g %13a %13P %11l %11L %2t %R"',
-        ],
+        popen_args,
         stdin=PIPE,
         stdout=PIPE,
         stderr=PIPE,
@@ -98,8 +100,10 @@ class SlurmOperator(BaseOperator):
     def execute(self, context):
 
         # Load the bundles, which will be an int or list of ints.
+        print(f"Loading bundles {self.bundles}")
         primary_keys = flatten(json.loads(self.bundles))
         bundles = Bundle.select().where(Bundle.id.in_(primary_keys))
+        print(f"OK")
 
         # It's bad practice to import here, but the slurm package is
         # not easily installable outside of Utah, and is not a "must-have"

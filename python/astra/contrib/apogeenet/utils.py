@@ -144,6 +144,7 @@ def get_metadata(spectrum: Spectrum1D):
         "K_MAG": ["KMAG"],
     }
 
+    de_nanify = lambda x: x if (x != "NaN" and x != -999999) else np.nan
     meta = OrderedDict()
     for preferred_key, alternate_keys in keys.items():
         for key in [preferred_key] + alternate_keys:
@@ -155,18 +156,13 @@ def get_metadata(spectrum: Spectrum1D):
                 except KeyError:
                     continue
                 else:
-                    meta[preferred_key] = value
+                    meta[preferred_key] = de_nanify(value)
                     break
             else:
-                meta[preferred_key] = value
+                meta[preferred_key] = de_nanify(value)
                 break
 
-    metadata = np.array(
-        [
-            (value if (value != "NaN" and value != -999999) else np.nan)
-            for value in meta.values()
-        ]
-    )
+    metadata = np.array([de_nanify(value) for value in meta.values()])
     mdata_replacements = np.array(
         [-84.82700, 21.40844, 24.53892, 20.26276, 18.43900, 24.00000, 17.02500]
     )

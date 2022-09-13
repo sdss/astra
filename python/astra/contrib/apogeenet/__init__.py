@@ -1,1 +1,1 @@
-from .tasks import StellarParameters
+from .base import StellarParameters

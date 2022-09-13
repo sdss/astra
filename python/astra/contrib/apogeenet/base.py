@@ -1,28 +1,36 @@
+from scipy import optimize  # if you remove this, everything at Utah breaks. seriously.
 import numpy as np
 import torch
 from astra import log
-from astra.utils import dict_to_list, logarithmic_tqdm
-from astra.base import ExecutableTask, Parameter
+from astra.utils import expand_path, dict_to_list, logarithmic_tqdm
+from astra.base import TaskInstance, Parameter
 from astra.database.astradb import database, ApogeeNetOutput
-from astra.tools.spectrum import SpectrumList
-from astra.contrib.apogeenet.model import Model
-from astra.contrib.apogeenet.utils import get_metadata, create_bitmask
 from astropy.nddata import StdDevUncertainty
 from astropy import units as u
 
+from astra.tools.spectrum import SpectrumList
+from astra.tools.spectrum.utils import spectrum_overlaps
+from astra.contrib.apogeenet.model import Model
+from astra.contrib.apogeenet.utils import get_metadata, create_bitmask
 
-class StellarParameters(ExecutableTask):
+
+class StellarParameters(TaskInstance):
+
+    """Estimate stellar parameters for APOGEE spectra given a pre-trained neural network."""
 
     model_path = Parameter(bundled=True)
     num_uncertainty_draws = Parameter(default=100)
     large_error = Parameter(default=1e10)
 
+    data_slice = Parameter(default=[0, 1])  # only affects apStar data products
+
     def execute(self):
+        """Execute the task."""
 
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         log.info(f"Executing on {device}")
 
-        model = Model(self.model_path, device)
+        model = Model(expand_path(self.model_path), device)
 
         all_results = []
         # Since this could be a long process, we update the progress bar only ~100 times on ~pseudo
@@ -34,8 +42,11 @@ class StellarParameters(ExecutableTask):
                 # If they are mwmVisit/mwmStar files then those could include BOSS spectra.
                 # Since we don't know yet, just load as SpectrumList.
                 flux, e_flux, meta, snrs = ([], [], [], [])
-                for spectrum in SpectrumList.read(data_products[0].path):
-                    if spectrum.wavelength[0] < (15_000 * u.Angstrom):
+                for spectrum in SpectrumList.read(
+                    data_products[0].path, data_slice=parameters.get("data_slice", None)
+                ):
+                    # Check for APOGEE spectral range
+                    if not spectrum_overlaps(spectrum, 16_500 * u.Angstrom):
                         continue
 
                     N, P = np.atleast_2d(spectrum.flux).shape
@@ -140,4 +151,4 @@ class StellarParameters(ExecutableTask):
                 pb.update()
                 all_results.append(results)
 
-        return results
+        return all_results
