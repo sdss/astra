@@ -18,7 +18,9 @@ class StellarParameters(TaskInstance):
 
     """Estimate stellar parameters for APOGEE spectra given a pre-trained neural network."""
 
-    model_path = Parameter(bundled=True)
+    model_path = Parameter(
+        default="$MWM_ASTRA/component_data/APOGEENet/model.pt", bundled=True
+    )
     num_uncertainty_draws = Parameter(default=100)
     large_error = Parameter(default=1e10)
 

@@ -1,13 +1,13 @@
-from astra.utils import expand_path, executable
+from astra import log
+from astra.utils import executable
 from astra.base import Parameter, TaskInstance, DictParameter
 from astra.tools.spectrum import SpectrumList
 from astra.tools.spectrum.utils import spectrum_overlaps
 from astra.database.astradb import database, ThePayneOutput
 
-from astra.contrib.thepayne_new.utils import read_mask, read_model
-from astra.contrib.thepayne_new.model import estimate_labels
+from astra.contrib.thepayne.utils import read_mask, read_model
+from astra.contrib.thepayne.model import estimate_labels
 
-from astra.sdss.datamodels.mwm import get_hdu_index
 from astra.sdss.datamodels.pipeline import create_pipeline_product
 
 
@@ -18,7 +18,11 @@ class ThePayne(TaskInstance):
     model_path = Parameter(
         default="$MWM_ASTRA/component_data/ThePayne/payne_apogee_nn.pkl", bundled=True
     )
-    mask_path = Parameter(default=None, bundled=True)
+    # Note: mask should be relative to the model pixels, not the observed pixels.
+    # TODO: document this somewhere, or better yet, put it in the model file itself.
+    mask_path = Parameter(
+        default="$MWM_ASTRA/component_data/ThePayne/payne_apogee_mask.npy", bundled=True
+    )
 
     opt_tolerance = Parameter(default=5e-4)
     v_rad_tolerance = Parameter(default=0)
@@ -39,16 +43,14 @@ class ThePayne(TaskInstance):
 
     def execute(self):
 
-        model = read_model(expand_path(self.model_path))
+        model = read_model(self.model_path)
 
         if self.continuum_method is not None:
             f_continuum = executable(self.continuum_method)(**self.continuum_kwargs)
         else:
             f_continuum = None
 
-        mask = (
-            None if self.mask_path is None else read_mask(expand_path(self.mask_path))
-        )
+        mask = None if self.mask_path is None else read_mask(self.mask_path)
         # Here we are assuming the mask is the same size as the number of model pixels.
 
         args = [
@@ -94,27 +96,19 @@ class ThePayne(TaskInstance):
                 # Create or update rows.
                 label_results = []
                 for spectrum_results in results:
-                    if spectrum_results is None:
-                        continue
-                    for labels, model_spectrum, meta in spectrum_results:
-                        label_results.append(labels)
+                    if spectrum_results is not None:
+                        for labels, model_spectrum, meta in spectrum_results:
+                            label_results.append(labels)
 
                 with database.atomic():
                     task.create_or_update_outputs(ThePayneOutput, label_results)
 
-                # Most input data products will be mwmVisit/mwmStar files, so len(results) == 4 always.
-                # If it's an ApStar file, then len(results) == 1. So we should pad the results list.
-                # TODO: Put this somewhere common.
-                if data_product.filetype in ("apStar", "apStar-1m"):
-                    _results = [None, None, None, None]
-                    index = get_hdu_index(
-                        data_product.filetype, data_product.kwargs["telescope"]
-                    )
-                    # This gives us the index including the primary index, so we need to subtract 1.
-                    _results[index - 1] = results[0]
-                    results = _results
-
                 # Create astraStar/astraVisit data product and link it to this task.
-                create_pipeline_product(
-                    task, data_product, results, pipeline=self.__class__.__name__
-                )
+                try:
+                    create_pipeline_product(
+                        task, data_product, results, pipeline=self.__class__.__name__
+                    )
+                except:
+                    log.exception(
+                        f"Failed to create pipeline product for task {task} and data product {data_product}:"
+                    )

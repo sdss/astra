@@ -511,12 +511,15 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         for i in range(self.bundle_size):
 
             parameters = {}
-            for name, (
-                parameter,
-                value,
-                bundled,
-                length,
-                indexed,
+            for (
+                name,
+                (
+                    parameter,
+                    value,
+                    bundled,
+                    length,
+                    indexed,
+                ),
             ) in self._parameters.items():
                 parameters[name] = value[i] if indexed else value
 
@@ -665,7 +668,11 @@ def get_or_create_data_products(iterable):
     for dp in iterable:
         if isinstance(dp, DataProduct) or dp is None:
             dps.append(dp)
-        elif isinstance(dp, str) and os.path.exists(dp):
+        elif isinstance(dp, str) and os.path.exists(
+            os.path.expandvars(os.path.expanduser(dp))
+        ):
+            # full_path = os.path.expandvars(os.path.expanduser(dp))
+            # TODO: put in full path?
             dp, _ = DataProduct.get_or_create(filetype="full", kwargs=dict(full=dp))
             dps.append(dp)
         elif isinstance(dp, (list, tuple, set)):
