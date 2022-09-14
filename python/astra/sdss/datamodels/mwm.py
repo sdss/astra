@@ -1,12 +1,22 @@
 import datetime
+import os
 from astropy.io import fits
 from astropy.time import Time
+from sdss_access import SDSSPath
 from typing import Union, List, Callable, Optional, Dict, Tuple
 
-from astra.database.astradb import Source, DataProduct
+from astra import log, __version__ as astra_version
 
+from astra.base import TaskInstance, Parameter
+from astra.database.astradb import (
+    Source,
+    MWMSourceStatus,
+    DataProduct,
+    SourceDataProduct,
+    TaskOutputDataProducts,
+)
 from astra.sdss.datamodels import base, apogee, boss
-from astra import log
+
 
 HDU_DESCRIPTIONS = [
     "Source information only",
@@ -168,3 +178,112 @@ def get_data_hdu_observatory_and_instrument():
         ("APO", "APOGEE"),
         ("LCO", "APOGEE"),
     ]
+
+
+def verify_pipeline_results_are_correct_length(data_product, results):
+    """
+    Most input data products will be mwmVisit/mwmStar files, so the length of the ``results`` list
+    will be 4: one for each of the four HDUs that hold spectra.
+
+    If it's an apStar file then the length of results will be 1, but we need to pad it out to 4
+    so that the results are put in the appropriate HDU of the pipeline product.
+
+    :param data_product:
+        The data product that generated these results.
+
+    :param results:
+        A list of results, where the length of ``results`` is equal to the number of spectral axes in
+        the ``data_product``. For example, apStar data products will only have one spectral axis
+        even if there are many visits. In this case, ``len(results)`` will be 1. But mwmVisit/mwmStar
+        files will have room for 4 spectral axes, so ``len(results)`` will be 4.
+
+    :returns:
+        A list of padded ``results`` with the input results in the appropriate HDU index.
+    """
+    if data_product.filetype in ("apStar", "apStar-1m"):
+        _results = [None, None, None, None]
+        index = get_hdu_index(data_product.filetype, data_product.kwargs["telescope"])
+        # This gives us the index including the primary index, so we need to subtract 1.
+        _results[index - 1] = results[0]
+        results = _results
+    return results
+
+
+class CreateMWMVisitStarProducts(TaskInstance):
+
+    """A task to create mwmVisit and mwmStar data products."""
+
+    catalogid = Parameter()
+    release = Parameter()
+    run2d = Parameter()
+    apred = Parameter()
+
+    def execute(self):
+
+        for task, data_products, parameters in self.iterable():
+
+            catalogid = parameters["catalogid"]
+            hdu_visit_list, hdu_star_list, meta = create_mwm_data_products(
+                catalogid, input_data_products=data_products
+            )
+
+            kwds = dict(
+                catalogid=catalogid,
+                astra_version=astra_version,
+                run2d=self.run2d,
+                apred=self.apred,
+            )
+            # Write to disk.
+            p = SDSSPath(self.release)
+            mwmVisit_path = p.full("mwmVisit", **kwds)
+            mwmStar_path = p.full("mwmStar", **kwds)
+            # Create necessary folders
+            for path in (mwmVisit_path, mwmStar_path):
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+
+            # Ensure mwmVisit and mwmStar files are always synchronised.
+            try:
+                hdu_visit_list.writeto(mwmVisit_path, overwrite=True)
+                hdu_star_list.writeto(mwmStar_path, overwrite=True)
+            except:
+                log.exception(
+                    f"Exception when trying to write to either:\n{mwmVisit_path}\n{mwmStar_path}"
+                )
+                # Delete both.
+                for path in (mwmVisit_path, mwmStar_path):
+                    if os.path.exists(path):
+                        os.unlink(path)
+            else:
+                log.info(f"Wrote mwmVisits product to {mwmVisit_path}")
+                log.info(f"Wrote mwmStar product to {mwmStar_path}")
+
+                # Create output data product records that link to this task.
+                dp_visit, visit_created = DataProduct.get_or_create(
+                    release=self.release, filetype="mwmVisit", kwargs=kwds
+                )
+                TaskOutputDataProducts.get_or_create(task=task, data_product=dp_visit)
+                SourceDataProduct.get_or_create(
+                    data_product=dp_visit, source_id=catalogid
+                )
+
+                dp_star, star_created = DataProduct.get_or_create(
+                    release=self.release, filetype="mwmStar", kwargs=kwds
+                )
+                TaskOutputDataProducts.get_or_create(task=task, data_product=dp_star)
+                SourceDataProduct.get_or_create(
+                    data_product=dp_star, source_id=catalogid
+                )
+
+            # Get or create an output record.
+            task.create_or_update_outputs(MWMSourceStatus, [meta])
+
+            log.info(
+                f"Created data products {dp_visit} and {dp_star} for catalogid {catalogid}"
+            )
+
+        return None
+
+    def post_execute(self):
+        """Generate JSON files for the spectra inspecta."""
+        # TODO
+        return None

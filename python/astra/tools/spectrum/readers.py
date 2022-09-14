@@ -332,7 +332,7 @@ def _wcs_log_linear(naxis, cdelt, crval):
     return 10 ** (np.arange(naxis) * cdelt + crval)
 
 
-def _load_mwmVisit_or_mwmStar(path):
+def _load_mwmVisit_or_mwmStar(path, **kwargs):
     spectra = SpectrumList()
     with fits.open(path) as image:
         for hdu in range(1, len(image)):
@@ -343,14 +343,14 @@ def _load_mwmVisit_or_mwmStar(path):
     return spectra
 
 
-def _load_mwmVisit_or_mwmStar_hdu(image, hdu):
+def _load_mwmVisit_or_mwmStar_hdu(image, hdu, **kwargs):
     if image[hdu].header["DATASUM"] == "0":
         # TODO: What should we return?
         return None
 
     flux_unit = u.Unit("1e-17 erg / (Angstrom cm2 s)")  # TODO
     try:
-        wavelength = np.array(image[hdu].data["LAMBDA"][0])
+        wavelength = np.array(image[hdu].data["LAMBDA"])
     except:
         wavelength = _wcs_log_linear(
             image[hdu].header["NPIXELS"],
@@ -359,6 +359,7 @@ def _load_mwmVisit_or_mwmStar_hdu(image, hdu):
         )
     finally:
         spectral_axis = u.Quantity(wavelength, unit=u.Angstrom)
+
     flux = u.Quantity(image[hdu].data["FLUX"], unit=flux_unit)
     e_flux = StdDevUncertainty(array=image[hdu].data["E_FLUX"])
 
@@ -385,7 +386,12 @@ def _load_mwmVisit_or_mwmStar_hdu(image, hdu):
 
     # Add bitmask
     meta["BITMASK"] = np.array(image[hdu_idx].data["BITMASK"])
-    meta["SNR"] = np.array(image[hdu_idx].data["SNR"])
+    try:
+        meta["SNR"] = np.array(image[hdu_idx].data["SNR"])
+    except KeyError:
+        # Early versions of mwmStar had this differently.
+        # TODO: Remove this later on.
+        meta["SNR"] = np.array([image[hdu_idx].header["SNR"]])
 
     return Spectrum1D(
         spectral_axis=spectral_axis, flux=flux, uncertainty=e_flux, meta=meta
