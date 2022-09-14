@@ -9,6 +9,7 @@
     astra.base
     astra.database
     astra.operators
+    astra.sdss
     astra.tools
     astra.utils
 ```
