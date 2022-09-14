@@ -4,8 +4,6 @@ from astra.database.astradb import DataProduct, Source, SourceDataProduct
 from astra import log
 from astra.utils import flatten
 
-from astra.database.targetdb import Target, CartonToTarget, Carton
-
 
 class CartonOperator(BaseOperator):
     """
@@ -347,6 +345,8 @@ class MilkyWayMapperCartonOperator(BaseOperator):
         catalogids = tuple(lookup.keys())
 
         log.info(f"Lookup table contains {len(catalogids)} sources.")
+
+        from astra.database.targetdb import Target, CartonToTarget, Carton
 
         q = (
             Target.select(Target.catalogid)
