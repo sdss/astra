@@ -4,7 +4,7 @@ from astra.database.astradb import DataProduct, Source, SourceDataProduct
 from astra import log
 from astra.utils import flatten
 
-from astra.database.sdss5db.targetdb import Target, CartonToTarget, Carton
+from astra.database.targetdb import Target, CartonToTarget, Carton
 
 
 class CartonOperator(BaseOperator):
