@@ -40,12 +40,14 @@ class BossSpectrumOperator(BaseOperator):
         release: Optional[str] = None,
         filetype: Optional[str] = "specFull",
         run2d: Optional[str] = None,
+        require_mwm_carton: Optional[bool] = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.release = release
         self.filetype = filetype
         self.run2d = run2d
+        self.require_mwm_carton = require_mwm_carton
         return None
 
     def execute(self, context):
@@ -54,7 +56,7 @@ class BossSpectrumOperator(BaseOperator):
             expand_path(f"$BOSS_SPECTRO_REDUX/{self.run2d}/spAll-{self.run2d}.fits")
         )
 
-        prev_ds, ds = (context["prev_ds"], context["ds"])
+        prev_ds, ds = (context.get("prev_ds", None), context.get("ds", None))
         if prev_ds is None:
             # Schedule once only
             mask = np.ones(len(data), dtype=bool)
@@ -67,6 +69,37 @@ class BossSpectrumOperator(BaseOperator):
             raise AirflowSkipException(
                 f"No products for {self} observed between {prev_ds} and {ds}"
             )
+
+        if self.require_mwm_carton:
+            log.info(f"Requiring a MWM carton")
+            from astra.sdss.operators.mwm import STELLAR_CARTONS
+            from astra.database.targetdb import Target, CartonToTarget, Carton
+
+            sq_carton = (
+                Carton.select(Carton.pk)
+                .where(Carton.carton.in_(STELLAR_CARTONS))
+                .alias("sq_carton")
+            )
+
+            done = {}
+            indices = np.where(mask)[0]
+            count = len(indices)
+            log.info(f"This could take up to {count/(60 * 200):.0f} minutes")
+
+            for index, catalogid in zip(indices, data["CATALOGID"][mask]):
+                try:
+                    mask[index] = done[catalogid]
+                except KeyError:
+                    q = (
+                        Target.select(Target.pk)
+                        .join(CartonToTarget)
+                        .join(
+                            sq_carton, on=(CartonToTarget.carton_pk == sq_carton.c.pk)
+                        )
+                        .where(Target.catalogid == catalogid)
+                    )
+                    mask[index] = done[catalogid] = q.exists()
+            log.info(f"Found {np.sum(mask)} products with MWM cartons (of {count})")
 
         errors = []
         ids = []

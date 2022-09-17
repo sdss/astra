@@ -96,7 +96,7 @@ GLOSSARY = {
     "SKYCHI2": "Mean \chi^2 of sky subtraction",
     "SCHI2MIN": "Minimum \chi^2 of sky subtraction",
     "SCHI2MAX": "Maximum \chi^2 of sky subtraction",
-    "ZWARNING": "See sdss.org/dr14/algorithms/bitmasks/#ZWARNING",
+    "ZWARNING": "See sdss.org/dr17/algorithms/bitmasks/#ZWARNING",
     "FIBER_OFFSET": "Position offset applied during observations",
     "DELTA_RA": "Offset in right ascension [arcsecond]",
     "DELTA_DEC": "Offset in declination [arcsecond]",
@@ -413,10 +413,30 @@ def metadata_cards(observatory: str, instrument: str) -> List:
     return [
         BLANK_CARD,
         (" ", "METADATA"),
-        ("EXTNAME", f"{instrument}/{observatory}"),
+        ("EXTNAME", _get_extname(instrument, observatory)),
         ("OBSRVTRY", observatory),
         ("INSTRMNT", instrument),
     ]
+
+
+def _get_extname(instrument, observatory):
+    return f"{instrument}/{observatory}"
+
+
+def get_extname(spectrum, data_product):
+    if data_product.filetype in ("specLite", "specFull"):
+        observatory, instrument = ("APO", "BOSS")
+    elif data_product.filetype in ("apStar", "apStar-1m", "apVisit"):
+        instrument = "APOGEE"
+        if data_product.kwargs["telescope"] == "lco25m":
+            observatory = "LCO"
+        else:
+            observatory = "APO"
+    elif data_product.filetype in ("mwmVisit", "mwmStar"):
+        observatory, instrument = (spectrum.meta["OBSRVTRY"], spectrum.meta["INSTRMNT"])
+    else:
+        raise ValueError(f"Cannot get extension name for file {data_product}")
+    return _get_extname(instrument, observatory)
 
 
 def spectrum_sampling_cards(

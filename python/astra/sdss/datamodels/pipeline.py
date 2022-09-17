@@ -1,9 +1,10 @@
+from ast import Name
 import os
 import numpy as np
 from typing import Dict, List, Union
 from sdss_access import SDSSPath
 from astra import log, __version__ as astra_version
-from astra.database.astradb import Task, DataProduct, TaskOutputDataProducts
+from astra.database.astradb import Task, DataProduct, Source, TaskOutputDataProducts
 from astropy.io import fits
 from astra.sdss.datamodels.base import (
     create_empty_hdu,
@@ -13,6 +14,7 @@ from astra.sdss.datamodels.base import (
     metadata_cards,
     FILLER_CARD,
     add_glossary_comments,
+    _get_extname,
 )
 
 from astra.sdss.datamodels.mwm import (
@@ -25,9 +27,9 @@ from astra.utils import list_to_dict, expand_path
 def create_pipeline_product(
     task: Task,
     data_product: DataProduct,
-    results: List[List[Dict]],
-    pipeline,
-    release="sdss5",
+    results: Dict,
+    release: str = "sdss5",
+    source: Source = None,
 ):
     """
     Create a data product containing the best-fitting model parameters and model spectra from an
@@ -40,10 +42,17 @@ def create_pipeline_product(
         The input data product.
 
     :param results:
-        A list of list of dicts, where `len(results)` should equal the number of HDUs in the given
-        data product. Each element of `results` should be a list with length equal to the number
-        of spectra in that HDU, and each element (sub-element of `results`) should be a dictionary
-        that contains ..... #TODO
+        A dictionary of results, where each key should be a string describing the HDU for those
+        results (e.g., 'APOGEE/APO', 'APOGEE/LCO', 'BOSS/APO'). The values should be a dictionary
+        that will be converted into a binary FITS table.
+
+    :param release: [optional]
+        The name of the release to create the data product in. Defaults to 'sdss5'.
+
+    :param source: [optional]
+        A database source for the object that the ``data_product`` is associated with. This is
+        only used if the data product is not a mwmVisit or mwmStar product, and if the data
+        product has no single source associated to it.
     """
 
     if data_product.filetype in ("mwmVisit", "mwmStar"):
@@ -52,13 +61,13 @@ def create_pipeline_product(
             primary_hdu = image[0].copy()
     else:
         # If it's a `full` file then we will have a bad time.
-        try:
-            (source,) = data_product.sources
-        except:
-            log.exception(
-                f"Could not find unique source associated with data product {data_product}"
-            )
-
+        if source is None:
+            try:
+                (source,) = data_product.sources
+            except:
+                log.exception(
+                    f"Could not find unique source associated with data product {data_product}"
+                )
         cards = create_primary_hdu_cards(source, HDU_DESCRIPTIONS)
         primary_hdu = fits.PrimaryHDU(header=fits.Header(cards))
 
@@ -70,24 +79,28 @@ def create_pipeline_product(
         primary_hdu.header["COMMENT"][i] = f"{prefix}: Model fits to {desc}"
     primary_hdu.add_checksum()
 
-    observatory_instrument = get_data_hdu_observatory_and_instrument()
-
     hdus = [primary_hdu]
-    for i, hdu_results in enumerate(results):
-        observatory, instrument = observatory_instrument[i]
-        if hdu_results is None or len(hdu_results) == 0:
-            # blank frame
+    for i, (observatory, instrument) in enumerate(
+        get_data_hdu_observatory_and_instrument()
+    ):
+        key = _get_extname(instrument, observatory)
+        if key not in results or len(results[key]) == 0:
             hdus.append(create_empty_hdu(observatory, instrument))
         else:
             hdus.append(
                 create_pipeline_hdu(
                     task,
                     data_product,
-                    hdu_results,
+                    results[key],
                     observatory=observatory,
                     instrument=instrument,
                 )
             )
+    # TODO: Warn about result keys that don't match any HDU.
+
+    # Parse pipeline name from the task name
+    pipeline = task.name.split(".")[2]
+    task_id = task.id
 
     image = fits.HDUList(hdus)
     kwds = dict(
@@ -99,14 +112,7 @@ def create_pipeline_product(
         catalogid=data_product.kwargs.get("catalogid", image[0].header["SDSS_ID"]),
     )
 
-    if data_product.filetype in ("apStar", "apStar-1m", "mwmStar"):
-        filetype = "astraStar"
-    elif data_product.filetype in ("mwmVisit",):
-        filetype = "astraVisit"
-    else:
-        raise ValueError(
-            f"Unknown output file type for {data_product} {data_product.filetype}"
-        )
+    filetype = "astraVisit" if data_product.filetype == "mwmVisit" else "astraStar"
 
     try:
         path = SDSSPath(release).full(filetype, **kwds)
@@ -116,11 +122,11 @@ def create_pipeline_product(
         apred, run2d, catalogid = (kwds["apred"], kwds["run2d"], kwds["catalogid"])
         if filetype == "astraVisit":
             path = expand_path(
-                f"$MWM_ASTRA/{astra_version}/{run2d}-{apred}/results/visit/{catalogid % 10000:.0f}/{catalogid % 100:.0f}/astraVisit-{astra_version}-{pipeline}-{catalogid}.fits"
+                f"$MWM_ASTRA/{astra_version}/{run2d}-{apred}/results/visit/{catalogid % 10000:.0f}/{catalogid % 100:.0f}/astraVisit-{astra_version}-{pipeline}-{catalogid}-{task_id}.fits"
             )
         elif filetype == "astraStar":
             path = expand_path(
-                f"$MWM_ASTRA/{astra_version}/{run2d}-{apred}/results/star/{catalogid % 10000:.0f}/{catalogid % 100:.0f}/astraStar-{astra_version}-{pipeline}-{catalogid}.fits"
+                f"$MWM_ASTRA/{astra_version}/{run2d}-{apred}/results/star/{catalogid % 10000:.0f}/{catalogid % 100:.0f}/astraStar-{astra_version}-{pipeline}-{catalogid}-{task_id}.fits"
             )
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -140,7 +146,7 @@ def create_pipeline_product(
 def create_pipeline_hdu(
     task: Task,
     data_product: DataProduct,
-    results: List[Dict],
+    results: Dict,
     observatory: str,
     instrument: str,
 ):
@@ -154,43 +160,20 @@ def create_pipeline_hdu(
     :param data_product:
         The input data product.
     """
-    label_columns = list_to_dict([ea[0] for ea in results])
-    model_spectra = [ea[1] for ea in results]
-    meta_columns = list_to_dict([ea[2] for ea in results])
 
-    N = len(label_columns[list(label_columns.keys())[0]])
-    task_ids = [task.id] * N
-    columns = [
-        fits.Column(
-            name="TASK_ID", array=task_ids, unit=None, **fits_column_kwargs(task_ids)
-        )
-    ]
-    for name, values in label_columns.items():
+    # Only special keyword is the wavelength array
+    spectral_axis = results.pop("spectral_axis", None)
+    if spectral_axis is not None:
+        # Put in header as CDELT, etc.
+        None
+
+    columns = []
+    for name, values in results.items():
         columns.append(
             fits.Column(
-                name=name.upper(), array=values, unit=None, **fits_column_kwargs(values)
+                name=name, array=values, unit=None, **fits_column_kwargs(values)
             )
         )
-
-    # TODO: put in breaks to break up labels / model / meta
-    for name, values in meta_columns.items():
-        values = np.array(values)
-        columns.append(
-            fits.Column(
-                name=name.upper(), array=values, unit=None, **fits_column_kwargs(values)
-            )
-        )
-    # TODO: Put wavelength information in headers
-
-    model_flux = np.atleast_2d([ea.flux.value for ea in model_spectra])
-    columns.append(
-        fits.Column(
-            name="MODEL_FLUX",
-            array=model_flux,
-            unit=None,
-            **fits_column_kwargs(model_flux),
-        )
-    )
 
     header = fits.Header(
         cards=[

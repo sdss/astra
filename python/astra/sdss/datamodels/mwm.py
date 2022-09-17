@@ -180,35 +180,6 @@ def get_data_hdu_observatory_and_instrument():
     ]
 
 
-def verify_pipeline_results_are_correct_length(data_product, results):
-    """
-    Most input data products will be mwmVisit/mwmStar files, so the length of the ``results`` list
-    will be 4: one for each of the four HDUs that hold spectra.
-
-    If it's an apStar file then the length of results will be 1, but we need to pad it out to 4
-    so that the results are put in the appropriate HDU of the pipeline product.
-
-    :param data_product:
-        The data product that generated these results.
-
-    :param results:
-        A list of results, where the length of ``results`` is equal to the number of spectral axes in
-        the ``data_product``. For example, apStar data products will only have one spectral axis
-        even if there are many visits. In this case, ``len(results)`` will be 1. But mwmVisit/mwmStar
-        files will have room for 4 spectral axes, so ``len(results)`` will be 4.
-
-    :returns:
-        A list of padded ``results`` with the input results in the appropriate HDU index.
-    """
-    if data_product.filetype in ("apStar", "apStar-1m"):
-        _results = [None, None, None, None]
-        index = get_hdu_index(data_product.filetype, data_product.kwargs["telescope"])
-        # This gives us the index including the primary index, so we need to subtract 1.
-        _results[index - 1] = results[0]
-        results = _results
-    return results
-
-
 class CreateMWMVisitStarProducts(TaskInstance):
 
     """A task to create mwmVisit and mwmStar data products."""

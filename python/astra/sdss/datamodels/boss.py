@@ -10,6 +10,14 @@ from astra.utils import list_to_dict
 from astra.sdss.datamodels import base, util, combine
 
 
+def _safe_read_header_value(image, hdu, key, default_value):
+    # TODO: put this somewhere common?
+    try:
+        return image[hdu].header[key]
+    except:
+        return default_value
+
+
 def create_boss_hdus(
     data_products: List[DataProduct],
     crval: float = 3.5523,
@@ -133,22 +141,27 @@ def create_boss_hdus(
 
     DATA_HEADER_CARD = ("SPECTRAL DATA", None)
 
+    nanify = lambda x: np.nan if x == "NaN" else x
     star_mappings = [
         DATA_HEADER_CARD,
+        ("SNR", np.array([snr_star])),
         ("LAMBDA", wavelength),
         ("FLUX", combined_flux),
         ("E_FLUX", combined_flux_error),
         ("BITMASK", combined_bitmask),
     ]
+    log.info(
+        f"Using default 'sdss5' for data product release if not specified. TODO: Andy, you can remove this in next database burn."
+    )
     visit_mappings = [
         DATA_HEADER_CARD,
         ("SNR", snr_visit),
-        ("LAMBDA", wavelength),
+        # ("LAMBDA", wavelength), --> too big
         ("FLUX", flux),
         ("E_FLUX", flux_error),
         ("BITMASK", bitmask),
         ("INPUT DATA MODEL KEYWORDS", None),
-        ("RELEASE", lambda dp, image: dp.release),
+        ("RELEASE", lambda dp, image: dp.release or "sdss5"),
         ("FILETYPE", lambda dp, image: dp.filetype),
         # https://stackoverflow.com/questions/6076270/lambda-function-in-list-comprehensions
         *[
@@ -160,14 +173,34 @@ def create_boss_hdus(
         ("AZ", lambda dp, image: image[0].header["AZ"]),
         ("SEEING", lambda dp, image: image[2].data["SEEING50"][0]),
         ("AIRMASS", lambda dp, image: image[2].data["AIRMASS"][0]),
-        ("AIRTEMP", lambda dp, image: image[0].header["AIRTEMP"]),
-        ("DEWPOINT", lambda dp, image: image[0].header["DEWPOINT"]),
-        ("HUMIDITY", lambda dp, image: image[0].header["HUMIDITY"]),
-        ("PRESSURE", lambda dp, image: image[0].header["PRESSURE"]),
-        ("GUSTD", lambda dp, image: image[0].header["GUSTD"]),
-        ("GUSTS", lambda dp, image: image[0].header["GUSTS"]),
-        ("WINDD", lambda dp, image: image[0].header["WINDD"]),
-        ("WINDS", lambda dp, image: image[0].header["WINDS"]),
+        (
+            "AIRTEMP",
+            lambda dp, image: nanify(
+                _safe_read_header_value(image, 0, "AIRTEMP", np.nan)
+            ),
+        ),
+        (
+            "DEWPOINT",
+            lambda dp, image: nanify(
+                _safe_read_header_value(image, 0, "DEWPOINT", np.nan)
+            ),
+        ),
+        (
+            "HUMIDITY",
+            lambda dp, image: nanify(
+                _safe_read_header_value(image, 0, "HUMIDITY", np.nan)
+            ),
+        ),
+        (
+            "PRESSURE",
+            lambda dp, image: nanify(
+                _safe_read_header_value(image, 0, "PRESSURE", np.nan)
+            ),
+        ),
+        ("GUSTD", lambda dp, image: nanify(image[0].header["GUSTD"])),
+        ("GUSTS", lambda dp, image: nanify(image[0].header["GUSTS"])),
+        ("WINDD", lambda dp, image: nanify(image[0].header["WINDD"])),
+        ("WINDS", lambda dp, image: nanify(image[0].header["WINDS"])),
         (
             "MOON_DIST_MEAN",
             lambda dp, image: np.mean(
@@ -194,7 +227,15 @@ def create_boss_hdus(
         ("RXC_XCSAO", lambda dp, image: image[2].data["XCSAO_RXC"][0]),
         # We're using radial velocities in the Solar system barycentric rest frame, not heliocentric rest frame.
         # ("V_HC", lambda dp, image: image[0].header["HELIO_RV"]),
-        ("V_BC", lambda dp, image: image[0].header["BARY_RV"]),
+        # Casey (22-09-17): I calculated the barycentric correction for
+        #   /uufs/chpc.utah.edu/common/home/sdss50/sdsswork/bhm/boss/spectro/redux/v6_0_9/spectra/full/019092/59630/spec-019092-59630-27021597919936514.fits
+        # and confirmed it matched the HELIO_RV:
+        # from astropy: -15.22828104 km/s (using only MJD, not precise)
+        #   header:    15.9146695709
+        # so there is a sign difference.
+        # v_true = v_measured + v_barycentric + (v_barycentric * v_measured)/c
+        # See https://docs.astropy.org/en/stable/coordinates/velocities.html
+        ("V_BC", lambda dp, image: image[0].header["HELIO_RV"]),
         ("TEFF_XCSAO", lambda dp, image: image[2].data["XCSAO_TEFF"][0]),
         ("E_TEFF_XCSAO", lambda dp, image: image[2].data["XCSAO_ETEFF"][0]),
         ("LOGG_XCSAO", lambda dp, image: image[2].data["XCSAO_LOGG"][0]),
@@ -204,6 +245,7 @@ def create_boss_hdus(
         ("SPECTRUM SAMPLING AND STACKING", None),
         ("V_SHIFT", meta["v_shift"]),
         ("IN_STACK", use_in_stack),
+        ("ZWARNING", zwarnings),
     ]
 
     spectrum_sampling_cards = base.spectrum_sampling_cards(**meta)
@@ -224,11 +266,13 @@ def create_boss_hdus(
     hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, header)
 
     # Add S/N for the stacked spectrum.
-    hdu_star.header.insert("TTYPE1", "SNR")
-    hdu_star.header["SNR"] = snr_star
-    hdu_star.header.comments["SNR"] = base.GLOSSARY.get("SNR", None)
+    # hdu_star.header.insert("TTYPE1", "SNR")
+    # hdu_star.header["SNR"] = snr_star
+    # hdu_star.header.comments["SNR"] = base.GLOSSARY.get("SNR", None)
 
     return (hdu_visit, hdu_star)
+
+    # v_true = v_measured + v_barycentric + (v_barycentric * v_measured)/c
 
 
 def get_boss_relative_velocity(
@@ -238,12 +282,35 @@ def get_boss_relative_velocity(
     Return the (current) best-estimate of the relative velocity (in km/s) of this
     visit spectrum from the image headers.
 
-    This defaults to returning `V_REL`:
+    The true radial velocity is (approximately) related to the measured radial velocity by:
 
-        V_REL = XCSAO_RV - HELIO_RV
+        v_true = v_measured + v_bc + (v_bc * v_measured)/c
 
-    where XCSAO_RV is the measured heliocentric velocity (HDU 2) and
-          HELIO_RV is the heliocentric correction (HDU 0).
+    Where v_true is the true radial velocity, v_measured is the measured radial
+    velocity, and v_bc is the barycentric velocity correction. The keywords for each
+    quantity are:
+
+        v_true: XCSAO_RV
+        v_measured: V_REL
+        v_bc: HELIO_RV
+
+    This function returns -v_measured. Imagine an absorption line at rest:
+
+                    At rest
+                    x
+          --------------------
+          01234567890123456789
+
+    The barycentric motion places it +2
+                    x-|
+    The radial motion places it at -6
+              |-----x
+    Together, the barycentric and radial motion place it at -4
+                |---x
+    Then the BOSS data reduction pipeline shifts the wavelength solution to account
+    for barycentric motion (-2), placing the line at -6:
+              |-----x
+    We want the source to be at rest frame, so we need to shift it by +6
 
     :param image:
         The FITS image of the BOSS SpecLite data product.
@@ -258,13 +325,13 @@ def get_boss_relative_velocity(
         log.warning(f"No 'VHELIO_RV' key found in HDU 0 of visit {visit}")
         v_correction = 0
 
-    v = image[2].data["XCSAO_RV"][0] - v_correction
+    v_measured = image[2].data["XCSAO_RV"][0] - v_correction
     meta = {
         "RXC_XCSAO": image[2].data["XCSAO_RXC"][0],
         "V_HELIO_XCSAO": image[2].data["XCSAO_RV"][0],
         "E_V_HELIO_XCSAO": image[2].data["XCSAO_ERV"][0],
     }
-    return (v, meta)
+    return (-v_measured, meta)
 
 
 def resample_boss_visit_spectra(
