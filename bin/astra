@@ -297,11 +297,12 @@ def bundles(bundle_ids):
 @click.option(
     "--all",
     "-a",
+    "all_tasks",
     is_flag=True,
     help="Execute all tasks in the bundle (even completed tasks)",
 )
 @click.argument("bundle_id", type=int, nargs=1, required=True)
-def bundle(bundle_id, parallelism, a):
+def bundle(bundle_id, parallelism, all_tasks):
     """Execute a task bundle"""
 
     if parallelism > 1:
@@ -311,7 +312,7 @@ def bundle(bundle_id, parallelism, a):
         from astra.database.astradb import Task, TaskBundle
 
         tasks = Task.select().join(TaskBundle).where(TaskBundle.bundle_id == bundle_id)
-        if not a:
+        if not all_tasks:
             tasks = tasks.where(Task.status_id == 1)
             log.info(f"Restricting to tasks with 'created' status only")
 

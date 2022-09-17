@@ -328,6 +328,17 @@ def load_sdss_specFull(path, **kwargs):
     )
 
 
+@data_loader(
+    "specFull",
+    identifier=is_filetype("spec"),
+    dtype=SpectrumList,
+    priority=1,
+    extensions=["fits"],
+)
+def load_sdss_specFull_multi(path, **kwargs):
+    return SpectrumList([load_sdss_specFull(path, **kwargs)])
+
+
 def _wcs_log_linear(naxis, cdelt, crval):
     return 10 ** (np.arange(naxis) * cdelt + crval)
 

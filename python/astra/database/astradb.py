@@ -85,9 +85,7 @@ class AstraBaseModel(BaseModel):
         schema = schema
 
 
-@lru_cache
-def _lru_sdsspath(release):
-    return SDSSPath(release=release)
+_sdss_path_instances = {}
 
 
 class Source(AstraBaseModel):
@@ -205,8 +203,11 @@ class DataProduct(AstraBaseModel):
 
     @cached_property
     def path(self):
-        kwds = self.kwargs.copy()
-        return _lru_sdsspath(self.release).full(self.filetype, **kwds)
+        try:
+            p = _sdss_path_instances[self.release]
+        except KeyError:
+            p = _sdss_path_instances[self.release] = SDSSPath(self.release)
+        return p.full(self.filetype, **self.kwargs)
 
     @property
     def sources(self):
