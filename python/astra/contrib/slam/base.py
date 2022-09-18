@@ -1,20 +1,23 @@
 import numpy as np
-import os
+from astropy.nddata import InverseVariance
 from astra import log
-from astra.tools.spectrum import Spectrum1D
-from astra.utils import dict_to_list
+from astra.tools.spectrum import Spectrum1D, SpectrumList
+from astra.tools.spectrum.utils import spectrum_overlaps
 from scipy.interpolate import interp1d
+from astropy import units as u
 
-from astra.utils import expand_path
-from astra.contrib.slam.slam.slam3 import Slam3 as Slam
+from astra.utils import expand_path, list_to_dict, dict_to_list
+from astra.contrib.slam.slam.slam3 import Slam3
 from astra.contrib.slam.slam.normalization import normalize_spectra_block
-from astra.database.astradb import database, Output, TaskOutput, SlamOutput
+from astra.database.astradb import database, SlamOutput
 
-from astra.base import ExecutableTask, Parameter, TupleParameter, DictParameter
-from astra.sdss.datamodels import create_AstraStar_product
+from astra.base import TaskInstance, Parameter, TupleParameter, DictParameter
+
+from astra.sdss.datamodels.base import get_extname
+from astra.sdss.datamodels.pipeline import create_pipeline_product
 
 
-class EstimateStellarLabels(ExecutableTask):
+class Slam(TaskInstance):
 
     model_path = Parameter(
         default="$MWM_ASTRA/component_data/slam/ASPCAP_DR16_astra.dump", bundled=True
@@ -62,19 +65,24 @@ class EstimateStellarLabels(ExecutableTask):
 
     def execute(self):
 
-        model = Slam.load_dump(expand_path(self.model_path))
+        model = Slam3.load_dump(expand_path(self.model_path))
         wave_interp = model.wave
 
         log.info(f"Loaded model from {self.model_path}")
 
         for i, (task, data_products, parameters) in enumerate(self.iterable()):
-            for j, data_product in enumerate(data_products):
+            # Only use the first data product
+            data_product, = data_products
 
-                spectrum = Spectrum1D.read(data_product.path)
+            all_results = {}
+            database_results = []
+            for spectrum in SpectrumList.read(data_product.path):
+                if not spectrum_overlaps(spectrum, model.wave): 
+                    continue
 
                 wave = spectrum.spectral_axis.value
-                fluxes = spectrum.flux.value
-                invars = spectrum.uncertainty.array
+                fluxes = np.atleast_2d(spectrum.flux.value)
+                invars = np.atleast_2d(spectrum.uncertainty.represent_as(InverseVariance).array)
 
                 N, P = fluxes.shape
 
@@ -85,9 +93,8 @@ class EstimateStellarLabels(ExecutableTask):
                     )
                     fluxes_resamp += [fluxes_temp]
                     invars_resamp += [invars_temp]
-                fluxes_resamp, invars_resamp = np.array(fluxes_resamp), np.array(
-                    invars_resamp
-                )
+                fluxes_resamp = np.array(fluxes_resamp)
+                invars_resamp = np.array(invars_resamp)
 
                 fluxes_norm, fluxes_cont = normalize_spectra_block(
                     wave_interp,
@@ -120,17 +127,20 @@ class EstimateStellarLabels(ExecutableTask):
 
                 # Create results array.
                 teff = label_pred[:, 0]
-                u_teff = std_pred[:, 0]
+                e_teff = std_pred[:, 0]
                 log_g = label_pred[:, 1]
-                u_log_g = std_pred[:, 1]
+                e_log_g = std_pred[:, 1]
                 fe_h = label_pred[:, 2]
-                u_fe_h = std_pred[:, 2]
+                e_fe_h = std_pred[:, 2]
                 # alpha_m = label_pred[:,3]
                 # u_alpha_m = std_pred[:,3]
 
-                snr = fluxes * np.sqrt(invars)
-                snr[snr <= 0] = np.nan
-                snr = np.nanmean(snr, axis=1)
+                try:
+                    snr = spectrum.meta["SNR"]
+                except:
+                    snr = fluxes * np.sqrt(invars)
+                    snr[snr <= 0] = np.nan
+                    snr = np.nanmean(snr, axis=1)
 
                 # TODO: use 'pcov' covariance matrix and store correlation coefficients?
                 #       Store cost? or any other things about fitting?
@@ -139,60 +149,45 @@ class EstimateStellarLabels(ExecutableTask):
                 chi_sq = (prediction - fluxes_norm) ** 2 * invars_norm
                 reduced_chi_sq = np.sum(chi_sq, axis=1) / (P - L - 1)
 
-                results = dict(
-                    snr=snr.tolist(),
-                    teff=teff.tolist(),
-                    u_teff=u_teff.tolist(),
-                    fe_h=fe_h.tolist(),
-                    u_fe_h=u_fe_h.tolist(),
-                    logg=log_g.tolist(),
-                    u_logg=u_log_g.tolist(),
-                    reduced_chi_sq=reduced_chi_sq.tolist()
-                    # alpha_m=alpha_m.tolist(),
-                    # u_alpha_m=u_alpha_m.tolist(),
-                )
-
-                # Create database records first, because these will be populated into the AstraStar product.
-                with database.atomic():
-                    for result in dict_to_list(results):
-                        output = Output.create()
-                        TaskOutput.create(task=task, output=output)
-                        table_output = SlamOutput.create(
-                            task=task, output=output, **result
-                        )
-
-                    log.info(
-                        f"Created outputs {output} and {table_output} with {result}"
-                    )
-
                 # Create AstraStar product.
-                continuum = fluxes_temp / fluxes_norm
+                model_continuum = fluxes_temp / fluxes_norm
 
-                # Re-sample the predicted spectra back to the observed frame.
-                f = interp1d(
-                    wave_interp, prediction[0], kind="cubic", bounds_error=False
+                resampled_continuum = np.empty((N, P))
+                resampled_model_flux = np.empty((N, P))
+                for i in range(N):
+                    f = interp1d(wave_interp, prediction[i], kind="cubic", bounds_error=False)
+                    c = interp1d(wave_interp, model_continuum[i], kind="cubic", bounds_error=False)
+
+                    # Re-sample the predicted spectra back to the observed frame.
+                    resampled_model_flux[i] = f(wave)
+                    resampled_continuum[i] = c(wave)
+
+                results = dict(
+                    snr=snr,
+                    teff=teff,
+                    e_teff=e_teff,
+                    logg=log_g,
+                    e_logg=e_log_g,
+                    fe_h=fe_h,
+                    e_fe_h=e_fe_h,
+                    chi_sq=chi_sq,
+                    reduced_chi_sq=reduced_chi_sq,
                 )
-                c = interp1d(
-                    wave_interp, continuum[0], kind="cubic", bounds_error=False
+                database_results.extend(dict_to_list(results))
+                results.update(
+                    spectral_axis=spectrum.spectral_axis,  
+                    model_flux=resampled_model_flux,
+                    continuum=resampled_continuum,
                 )
 
-                rectified_flux = f(wave)
-                model_flux = rectified_flux * c(wave)
-                model_ivar = np.zeros_like(model_flux)
+                # Which extname should this go to?
+                all_results[get_extname(spectrum, data_product)] = results
 
-                crval = spectrum.meta["header"]["CRVAL1"]
-                cdelt = spectrum.meta["header"]["CD1_1"]
-                crpix = spectrum.meta["header"]["CRPIX1"]
+            with database.atomic():
+                task.create_or_update_outputs(SlamOutput, database_results)
 
-                output_product = create_AstraStar_product(
-                    task,
-                    model_flux=model_flux,
-                    model_ivar=model_ivar,
-                    rectified_flux=rectified_flux,
-                    crval=crval,
-                    cdelt=cdelt,
-                    crpix=crpix,
-                )
+                # Create astraStar/astraVisit data product and link it to this task.
+                create_pipeline_product(task, data_product, all_results)
 
 
 def resample(wave, flux, err, wave_resamp, bounds_error=None):

@@ -1,15 +1,14 @@
 from astra import log
-from astra.utils import executable
+from astra.utils import executable, list_to_dict
 from astra.base import Parameter, TaskInstance, DictParameter
 from astra.tools.spectrum import SpectrumList
 from astra.tools.spectrum.utils import spectrum_overlaps
 from astra.database.astradb import database, ThePayneOutput
-
 from astra.contrib.thepayne.utils import read_mask, read_model
 from astra.contrib.thepayne.model import estimate_labels
 
+from astra.sdss.datamodels.base import get_extname
 from astra.sdss.datamodels.pipeline import create_pipeline_product
-
 
 class ThePayne(TaskInstance):
 
@@ -66,49 +65,39 @@ class ThePayne(TaskInstance):
         ]
 
         for task, data_products, parameters in self.iterable():
-            data_slice = parameters.get("data_slice", None)
-            for data_product in data_products:
-                results = []
-                for spectrum in SpectrumList.read(
-                    data_product.path, data_slice=data_slice
-                ):
-                    if spectrum_overlaps(spectrum, model["wavelength"]):
-                        if f_continuum is not None:
-                            f_continuum.fit(spectrum)
-                            continuum = f_continuum(spectrum)
-                        else:
-                            continuum = None
+            data_product, = data_products
+            results, database_results = ({}, [])
+            for spectrum in SpectrumList.read(
+                data_product.path, data_slice=parameters.get("data_slice", None)
+            ):
+                if not spectrum_overlaps(spectrum, model["wavelength"]):
+                    continue
+            
+                if f_continuum is not None:
+                    f_continuum.fit(spectrum)
+                    continuum = f_continuum(spectrum)
+                else:
+                    continuum = None
 
-                        results.append(
-                            estimate_labels(
-                                spectrum,
-                                *args,
-                                mask=mask,
-                                initial_labels=parameters["initial_labels"],
-                                v_rad_tolerance=parameters["v_rad_tolerance"],
-                                opt_tolerance=parameters["opt_tolerance"],
-                                continuum=continuum,
-                            )
-                        )
-                    else:
-                        results.append(None)
+                extname = get_extname(spectrum, data_product)
+                
+                labels, meta = estimate_labels(
+                    spectrum,
+                    *args,
+                    mask=mask,
+                    initial_labels=parameters["initial_labels"],
+                    v_rad_tolerance=parameters["v_rad_tolerance"],
+                    opt_tolerance=parameters["opt_tolerance"],
+                    continuum=continuum,
+                )
+                database_results.extend(labels)
 
-                # Create or update rows.
-                label_results = []
-                for spectrum_results in results:
-                    if spectrum_results is not None:
-                        for labels, model_spectrum, meta in spectrum_results:
-                            label_results.append(labels)
+                hdu_results = list_to_dict(labels)
+                hdu_results.update(list_to_dict(meta))
+                results[extname] = hdu_results
 
-                with database.atomic():
-                    task.create_or_update_outputs(ThePayneOutput, label_results)
+            with database.atomic():
+                task.create_or_update_outputs(ThePayneOutput, database_results)
 
-                # Create astraStar/astraVisit data product and link it to this task.
-                try:
-                    create_pipeline_product(
-                        task, data_product, results, pipeline=self.__class__.__name__
-                    )
-                except:
-                    log.exception(
-                        f"Failed to create pipeline product for task {task} and data product {data_product}:"
-                    )
+            # Create astraStar/astraVisit data product and link it to this task.
+            create_pipeline_product(task, data_product, results)

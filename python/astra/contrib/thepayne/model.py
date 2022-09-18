@@ -5,6 +5,7 @@ from astropy import units as u
 from astropy.nddata import StdDevUncertainty
 from astra import log
 from astra.tools.spectrum import Spectrum1D, SpectrumList
+#from astra.utils import
 from typing import Union, Tuple, Optional
 from collections import OrderedDict
 
@@ -82,6 +83,7 @@ def estimate_labels(
         ), "Mask and model wavelengths do not have the same shape"
 
     results = []
+    meta_results = []
     kwds = kwargs.copy()
     for i in range(N):
 
@@ -127,7 +129,7 @@ def estimate_labels(
 
             result = OrderedDict([("snr", spectrum.meta["SNR"][i])])
             result.update(OrderedDict(zip(label_names, labels)))
-            result.update(OrderedDict(zip([f"u_{ln}" for ln in label_names], e_labels)))
+            result.update(OrderedDict(zip([f"e_{ln}" for ln in label_names], e_labels)))
 
             rho = np.corrcoef(p_cov)
             for j, k in zip(*np.triu_indices(L, 1)):
@@ -141,22 +143,17 @@ def estimate_labels(
             chi_sq = np.sum(((model_flux - flux) / e_flux) ** 2)
             reduced_chi_sq = chi_sq / (model_flux.size - L - 1)
             result.update(chi_sq=chi_sq, reduced_chi_sq=reduced_chi_sq)
-
-            meta = dict(
-                continuum=None,
-            )
-            # Multiply by continuum?
+            meta = dict(continuum=None)
             if continuum is not None:
                 resampled_model_flux *= continuum[i]
                 meta["continuum"] = continuum[i]
 
-            model_spectrum = Spectrum1D(
-                spectral_axis=spectrum.wavelength,
-                flux=u.Quantity(resampled_model_flux, unit=spectrum.flux.unit),
-            )
-            results.append((result, model_spectrum, meta))
+            meta["model_flux"] = resampled_model_flux
+            
+            results.append(result)
+            meta_results.append(meta)
 
-    return results
+    return (results, meta_results)
 
 
 def leaky_relu(z):
