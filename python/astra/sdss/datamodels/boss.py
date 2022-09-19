@@ -142,13 +142,14 @@ def create_boss_hdus(
     DATA_HEADER_CARD = ("SPECTRAL DATA", None)
 
     nanify = lambda x: np.nan if x == "NaN" else x
+    star_data_shape = ((1, -1))
     star_mappings = [
         DATA_HEADER_CARD,
-        ("SNR", np.array([snr_star])),
-        ("LAMBDA", wavelength),
-        ("FLUX", combined_flux),
-        ("E_FLUX", combined_flux_error),
-        ("BITMASK", combined_bitmask),
+        ("SNR", np.array([snr_star]).reshape(star_data_shape)),
+        ("LAMBDA", wavelength.reshape(star_data_shape)),
+        ("FLUX", combined_flux.reshape(star_data_shape)),
+        ("E_FLUX", combined_flux_error.reshape(star_data_shape)),
+        ("BITMASK", combined_bitmask.reshape(star_data_shape)),
     ]
     log.info(
         f"Using default 'sdss5' for data product release if not specified. TODO: Andy, you can remove this in next database burn."
@@ -265,14 +266,7 @@ def create_boss_hdus(
     hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, header)
     hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, header)
 
-    # Add S/N for the stacked spectrum.
-    # hdu_star.header.insert("TTYPE1", "SNR")
-    # hdu_star.header["SNR"] = snr_star
-    # hdu_star.header.comments["SNR"] = base.GLOSSARY.get("SNR", None)
-
     return (hdu_visit, hdu_star)
-
-    # v_true = v_measured + v_barycentric + (v_barycentric * v_measured)/c
 
 
 def get_boss_relative_velocity(

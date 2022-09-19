@@ -242,7 +242,7 @@ def execute():
     pass
 
 
-def do_work(ids, is_bundle):
+def do_work(ids, is_bundle, parallelism=1):
     from astra import log
     from astra.utils import deserialize
     from astra.database.astradb import Task, Bundle
@@ -252,15 +252,27 @@ def do_work(ids, is_bundle):
     N = len(items)
     log.debug(f"Loading {type(ids)} {N} of {ids}")
 
-    for i, item in enumerate(items, start=1):
-        log.info(f"Executing item {i}/{N}: {item}")
-        try:
-            result = item.instance().execute()
-        except:
-            log.exception(f"Exception when executing item {item}")
-        else:
-            log.info(f"Completed item {i}/{N}: {item}")
+    if parallelism > 1:
+        from astra import log
+        from joblib import Parallel, delayed
 
+        def f(task):
+            try:
+                task.instance().execute()
+            except:
+                log.exception(f"Exception in executing task {task}:")
+
+        Parallel(parallelism, prefer="processes")(delayed(f)(item) for item in items)    
+    else:
+            
+        for i, item in enumerate(items, start=1):
+            log.info(f"Executing item {i}/{N}: {item}")
+            try:
+                result = item.instance().execute()
+            except:
+                log.exception(f"Exception when executing item {item}")
+            else:
+                log.info(f"Completed item {i}/{N}: {item}")
     return None
 
 
@@ -279,10 +291,18 @@ def task(task_id):
 
 
 @execute.command(hidden=True)
+@click.option(
+    "--parallelism",
+    "-p",
+    type=int,
+    nargs=1,
+    default=1,
+    help="Number of parallel processes to use",
+)
 @click.argument("bundle_ids", type=int, nargs=-1, required=True)
-def bundles(bundle_ids):
+def bundles(bundle_ids, parallelism):
     """Execute multiple task bundles"""
-    return do_work(bundle_ids, True)
+    return do_work(bundle_ids, True, parallelism)
 
 
 @execute.command()
@@ -309,18 +329,22 @@ def bundle(bundle_id, parallelism, all_tasks):
         from astra import log
         from joblib import Parallel, delayed
 
-        from astra.database.astradb import Task, TaskBundle
+        from astra.database.astradb import Task, TaskBundle, Status
 
         tasks = Task.select().join(TaskBundle).where(TaskBundle.bundle_id == bundle_id)
         if not all_tasks:
-            tasks = tasks.where(Task.status_id == 1)
-            log.info(f"Restricting to tasks with 'created' status only")
+            description = "completed"
+            tasks = tasks.where(Task.status_id != Status.get(description=description).id)
+            log.info(f"Restricting to tasks that are not marked '{description}'")
 
         def f(task):
             try:
                 task.instance().execute()
             except:
                 log.exception(f"Exception in executing task {task}:")
+            else:
+                log.info(f"Completed task {task}")
+                print(f"Completed task {task} (print)")
 
         Parallel(parallelism, prefer="processes")(delayed(f)(task) for task in tasks)
 

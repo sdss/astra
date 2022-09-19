@@ -510,6 +510,7 @@ class AstraOutputBaseModel(AstraBaseModel):
 class MWMSourceStatus(AstraOutputBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    source = ForeignKeyField(Source)
     task = ForeignKeyField(Task)
     meta = JSONField(null=True)
 

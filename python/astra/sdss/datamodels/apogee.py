@@ -126,7 +126,7 @@ def create_apogee_hdus(
     star_data_shape = (1, -1)
     star_mappings = [
         DATA_HEADER_CARD,
-        ("SNR", np.array([snr_star])),
+        ("SNR", np.array([snr_star]).reshape(star_data_shape)),
         ("LAMBDA", wavelength.reshape(star_data_shape)),
         ("FLUX", combined_flux.reshape(star_data_shape)),
         ("E_FLUX", combined_flux_error.reshape(star_data_shape)),

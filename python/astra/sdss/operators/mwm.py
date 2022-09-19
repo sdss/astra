@@ -8,12 +8,116 @@ from astra.database.astradb import (
     Source,
     DataProduct,
     SourceDataProduct,
+    MWMSourceStatus
 )
 from airflow.exceptions import AirflowSkipException
 from astra.utils import flatten
 from astra import log, __version__ as astra_version
+from tqdm import tqdm
 
 from typing import Optional
+
+
+#class MWMVisitOperator(BaseOperator):
+#    ui_color = "#BDD9B0"
+
+
+class MWMStarOperator(BaseOperator):
+    
+    ui_color = "#CAD9BF"
+
+    def __init__(
+        self,
+        *,
+        require_apogee=False,
+        require_boss=False,
+        cartons=None,
+        **kwargs
+    ) -> None:
+        super().__init__(**kwargs)
+        self.require_apogee = require_apogee
+        self.require_boss = require_boss
+        self.cartons = cartons
+        return None
+
+
+    def execute(self, context):
+        prev_ds, ds = (context["prev_ds"], context["ds"])
+
+        log.info(f"Running {self} between {prev_ds} and {ds} (boss={self.require_boss}; apogee={self.require_apogee})")
+
+        q = (
+            MWMSourceStatus
+            .select(MWMSourceStatus.source_id)
+        )
+        if self.require_boss:
+            q = q.where(
+                (
+                    (MWMSourceStatus.obs_end_boss_lco.between(prev_ds, ds))
+                &   (MWMSourceStatus.num_boss_lco_visits_in_stack > 1)
+                )
+            |  
+                (
+                    (MWMSourceStatus.obs_end_boss_apo.between(prev_ds, ds))
+                &   (MWMSourceStatus.num_boss_apo_visits_in_stack > 1)
+                )
+            )
+        if self.require_apogee:
+            q = q.where(
+                (
+                    (MWMSourceStatus.obs_end_apogee_lco.between(prev_ds, ds))
+                &   (MWMSourceStatus.num_apogee_lco_visits_in_stack > 1)
+                )
+            |
+                (
+                    (MWMSourceStatus.obs_end_apogee_apo.between(prev_ds, ds))
+                &   (MWMSourceStatus.num_apogee_apo_visits_in_stack > 1)
+                )
+            )
+
+        catalogids = flatten(list(q.tuples()))
+        log.info(f"There are {len(catalogids)} sources matched to require")
+        
+        if len(catalogids) == 0:
+            raise AirflowSkipException("No sources matched to require")
+        
+        if self.cartons is not None:
+            # Now restrict to those that are in the requested cartons
+            log.info(f"Restricting to cartons: {self.cartons}")
+
+            from astra.database.targetdb import Target, CartonToTarget, Carton
+
+            q = (
+                Target.select(Target.catalogid)
+                .distinct()
+                .join(CartonToTarget)
+                .join(Carton)
+                .where(Target.catalogid.in_(catalogids) & Carton.carton.in_(self.cartons))
+            )
+
+            catalogids = flatten(list(q.tuples()))
+            log.info(f"There are {len(catalogids)} sources matched to those cartons")
+    
+        # We need to return mwmStar data product identifiers.
+        q = (
+            SourceDataProduct
+            .select(SourceDataProduct.data_product_id)
+            .join(DataProduct)
+            .where(
+                (DataProduct.filetype == "mwmStar")
+            &   (SourceDataProduct.source_id.in_(catalogids))
+            )
+        )
+
+        data_product_ids = flatten(list(q.tuples()))
+        log.info(f"Matched against {len(data_product_ids)} data product identifiers")
+        if len(data_product_ids) == 0:
+            raise AirflowSkipException("No data products")
+            
+        return data_product_ids
+        
+
+        
 
 
 class MWMVisitStarFactory(BaseOperator):
@@ -42,64 +146,86 @@ class MWMVisitStarFactory(BaseOperator):
 
         ti, task = (context["ti"], context["task"])
 
+        #if catalogids is None:
+        #    catalogids = map(
+        #        int, tuple(set(flatten(ti.xcom_pull(task_ids=task.upstream_task_ids))))
+        #    )
+        #else:
+        catalogids = flatten(Source.select(Source.catalogid).tuples())
+        
+        parameters = dict(
+            release=self.product_release,
+            run2d=self.run2d,
+            apred=self.apred,
+        )
+
+        expression = DataProduct.filetype.in_(("apVisit", "specFull"))
+
+        if self.apred_release is not None and self.apred is not None:
+            sub = DataProduct.filetype == "apVisit"
+            if self.apred_release is not None:
+                sub &= DataProduct.release == self.apred_release
+            if self.apred is not None:
+                sub &= DataProduct.kwargs["apred"] == self.apred
+
+            expression |= sub
+
+        if self.run2d_release is not None and self.run2d is not None:
+            sub = DataProduct.filetype == "specFull"
+            if self.run2d_release is not None:
+                sub &= DataProduct.release == self.run2d_release
+            if self.run2d is not None:
+                sub &= DataProduct.kwargs["run2d"] == self.run2d
+
+            expression |= sub
+
+        # Create the tasks first in bulk.
+        tasks = []
+        for catalogid in tqdm(catalogids, desc="Creating tasks"):
+            tasks.append(
+                Task(
+                    name="astra.sdss.datamodels.mwm.CreateMWMVisitStarProducts",
+                    parameters={ "catalogid": catalogid, **parameters},
+                    version=astra_version,
+                )
+            )
+        N_tasks = len(tasks)
+
+        log.info(f"Inserting {N_tasks} tasks in bulk")
+        with database.atomic():
+            Task.bulk_create(tasks)
+        log.info(f"Done.")
+
+        # Create TaskInputDataProducts.
+        log.info(f"Linking data products to tasks")
+        with database.atomic():
+            for catalogid, task in zip(catalogids, tqdm(tasks)):
+                (
+                    TaskInputDataProducts
+                    .insert_from(
+                        SourceDataProduct.select(SourceDataProduct.data_product_id, task.id)
+                        .join(DataProduct)
+                        .where(SourceDataProduct.source_id == catalogid)
+                        .where(expression),
+                        fields=[TaskInputDataProducts.data_product_id, TaskInputDataProducts.task_id]
+                    )
+                    .execute()
+                )
+        log.info(f"Done.")
+        
         bundle = Bundle.create()
         log.info(f"Created task bundle {bundle}")
 
-        catalogids = map(
-            int, tuple(set(flatten(ti.xcom_pull(task_ids=task.upstream_task_ids))))
-        )
-        for catalogid in catalogids:
-
-            log.info(
-                f"Creating mwmVisit and mwmStar products for catalogid={catalogid}"
+        log.info(f"Adding {N_tasks} tasks to bundle {bundle}")
+        with database.atomic():
+            (
+                TaskBundle.insert_many(
+                    [
+                        { "task_id": task.id, "bundle_id": bundle.id } for task in tasks
+                    ]
+                ).execute()
             )
-
-            expression = DataProduct.filetype.in_(("apVisit", "specFull"))
-
-            if self.apred_release is not None and self.apred is not None:
-                sub = DataProduct.filetype == "apVisit"
-                if self.apred_release is not None:
-                    sub &= DataProduct.release == self.apred_release
-                if self.apred is not None:
-                    sub &= DataProduct.kwargs["apred"] == self.apred
-
-                expression |= sub
-
-            if self.run2d_release is not None and self.run2d is not None:
-                sub = DataProduct.filetype == "specFull"
-                if self.run2d_release is not None:
-                    sub &= DataProduct.release == self.run2d_release
-                if self.run2d is not None:
-                    sub &= DataProduct.kwargs["run2d"] == self.run2d
-
-                expression |= sub
-
-            input_data_products = tuple(
-                Source.get(catalogid).data_products.where(expression)
-            )
-
-            # Create a task
-            with database.atomic():
-                created_task = Task.create(
-                    name="astra.sdss.datamodels.mwm.CreateMWMVisitStarProducts",
-                    parameters=dict(
-                        release=self.product_release,
-                        catalogid=catalogid,
-                        run2d=self.run2d,
-                        apred=self.apred,
-                    ),
-                    version=astra_version,
-                )
-
-                for data_product in input_data_products:
-                    TaskInputDataProducts.create(
-                        task=created_task, data_product=data_product
-                    )
-
-                TaskBundle.create(task=created_task, bundle=bundle)
-            log.info(f"Created task {created_task}")
-
-        log.info(f"Final task bundle {bundle} now ready.")
+        log.info(f"Done.")
 
         return bundle.id
 

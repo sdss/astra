@@ -350,6 +350,44 @@ def get_auxiliary_source_data(source: Union[Source, int]):
     )
     row = q.first()
 
+    if row is None:
+        log.warning(f"Trouble getting auxillary data for Source {catalogid}. Using separate queries and cone searches.")
+
+        only_fields_of = lambda model: [c for k, c, comment in field_descriptors if not ignore(c) and not isinstance(c, Alias) and c.model == model]
+        # Fill it with what we can.
+        row = (
+            Catalog
+            .select(*only_fields_of(Catalog))
+            .where(Catalog.catalogid == catalogid)
+            .dicts()
+            .first()
+        )
+        row.update(
+            CatalogToTIC_v8
+            .select(CatalogToTIC_v8.target_id.alias("tic_id"))
+            .where(CatalogToTIC_v8.catalogid == catalogid)
+            .dicts()
+            .first()
+            or {"tic_id": None}
+        )
+        # Cone search Gaia and 2MASS
+        # TODO: Don't do this!
+        row.update(
+            Gaia
+            .select(*only_fields_of(Gaia))
+            .where(Gaia.cone_search(row["ra"], row["dec"], 1.0 / 3600.0))
+            .dicts()
+            .first()
+        )
+        # TODO: Don't do this!
+        row.update(
+            TwoMassPSC
+            .select(*only_fields_of(TwoMassPSC))
+            .where(TwoMassPSC.cone_search(row["ra"], row["dec"], 1.0 / 3600.0, dec_col="decl"))
+            .dicts()
+            .first()
+        )
+
     # Return as a list of entries suitable for a FITS header card.
     data = []
     for key, field, comment in field_descriptors:

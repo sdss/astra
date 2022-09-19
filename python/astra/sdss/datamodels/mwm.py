@@ -118,6 +118,13 @@ def create_mwm_data_products(
     base.add_check_sums(hdu_visit_list)
     base.add_check_sums(hdu_star_list)
 
+    def _safe_datetime_from_mjd_in_stack(hdu, statistic):
+        # If there are no data in the stack then we are taking a min/max of empty sequence
+        try:
+            return Time(statistic(hdu.data["MJD"][hdu.data["IN_STACK"]]), format="mjd").datetime
+        except ValueError:
+            return None
+
     # Create a metadata dictionary
     is_empty_hdu = lambda hdu: hdu.data is None or hdu.data.size == 0
     get_num_visits = lambda hdu: 0 if is_empty_hdu(hdu) else len(hdu.data)
@@ -127,15 +134,18 @@ def create_mwm_data_products(
     get_obs_start = (
         lambda hdu: None
         if is_empty_hdu(hdu)
-        else Time(min(hdu.data["MJD"][hdu.data["IN_STACK"]]), format="mjd").datetime
+        else _safe_datetime_from_mjd_in_stack(hdu, min)
     )
     get_obs_end = (
         lambda hdu: None
         if is_empty_hdu(hdu)
-        else Time(max(hdu.data["MJD"][hdu.data["IN_STACK"]]), format="mjd").datetime
+        else _safe_datetime_from_mjd_in_stack(hdu, max)
     )
 
+    source_id = source.id if isinstance(source, Source) else source
+
     meta = {
+        "source_id": source_id,
         "num_apogee_apo_visits": get_num_visits(apogee_north_visits),
         "num_apogee_lco_visits": get_num_visits(apogee_south_visits),
         "num_boss_apo_visits": get_num_visits(boss_north_visits),
@@ -185,18 +195,23 @@ class CreateMWMVisitStarProducts(TaskInstance):
     """A task to create mwmVisit and mwmStar data products."""
 
     catalogid = Parameter()
-    release = Parameter()
-    run2d = Parameter()
-    apred = Parameter()
+    release = Parameter(bundled=True)
+    run2d = Parameter(bundled=True)
+    apred = Parameter(bundled=True)
 
     def execute(self):
+
+        sdss_path = SDSSPath(self.release)
 
         for task, data_products, parameters in self.iterable():
 
             catalogid = parameters["catalogid"]
+
+            print(f"Creating products for {catalogid}")
             hdu_visit_list, hdu_star_list, meta = create_mwm_data_products(
                 catalogid, input_data_products=data_products
             )
+            print(f"Created HDUs for {catalogid}")
 
             kwds = dict(
                 catalogid=catalogid,
@@ -205,9 +220,8 @@ class CreateMWMVisitStarProducts(TaskInstance):
                 apred=self.apred,
             )
             # Write to disk.
-            p = SDSSPath(self.release)
-            mwmVisit_path = p.full("mwmVisit", **kwds)
-            mwmStar_path = p.full("mwmStar", **kwds)
+            mwmVisit_path = sdss_path.full("mwmVisit", **kwds)
+            mwmStar_path = sdss_path.full("mwmStar", **kwds)
             # Create necessary folders
             for path in (mwmVisit_path, mwmStar_path):
                 os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -245,12 +259,12 @@ class CreateMWMVisitStarProducts(TaskInstance):
                     data_product=dp_star, source_id=catalogid
                 )
 
-            # Get or create an output record.
-            task.create_or_update_outputs(MWMSourceStatus, [meta])
+                # Get or create an output record.
+                task.create_or_update_outputs(MWMSourceStatus, [meta])
 
-            log.info(
-                f"Created data products {dp_visit} and {dp_star} for catalogid {catalogid}"
-            )
+                log.info(
+                    f"Created data products {dp_visit} and {dp_star} for catalogid {catalogid}"
+                )
 
         return None
 

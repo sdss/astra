@@ -19,11 +19,6 @@ def path_instance(release):
     return SDSSPath(release=release)
 
 
-@lru_cache
-def lookup_keys(release, filetype):
-    return path_instance(release).lookup_keys(filetype)
-
-
 class BossSpectrumOperator(BaseOperator):
     """
     A base operator for working with SDSS-V BOSS spectrum data products.
@@ -41,6 +36,7 @@ class BossSpectrumOperator(BaseOperator):
         filetype: Optional[str] = "specFull",
         run2d: Optional[str] = None,
         require_mwm_carton: Optional[bool] = False,
+        return_id_type: Optional[str] = "data_product",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -48,6 +44,10 @@ class BossSpectrumOperator(BaseOperator):
         self.filetype = filetype
         self.run2d = run2d
         self.require_mwm_carton = require_mwm_carton
+        self.return_id_type = return_id_type
+        available_return_id_types = ("source", "data_product")
+        if return_id_type not in available_return_id_types:
+            raise ValueError(f"return_id_type must be one of {', '.join(available_return_id_types)}, not {return_id_type}")
         return None
 
     def execute(self, context):
@@ -102,7 +102,8 @@ class BossSpectrumOperator(BaseOperator):
             log.info(f"Found {np.sum(mask)} products with MWM cartons (of {count})")
 
         errors = []
-        ids = []
+        source_ids = []
+        data_product_ids = []
         for row in data[mask]:
             catalogid = row["CATALOGID"]
             # From Sean Morrison:
@@ -123,7 +124,6 @@ class BossSpectrumOperator(BaseOperator):
                 errors.append(error)
                 continue
 
-            # We need the ZWARNING metadata downstream.
             with database.atomic() as txn:
                 data_product, _ = DataProduct.get_or_create(
                     release=self.release,
@@ -131,16 +131,17 @@ class BossSpectrumOperator(BaseOperator):
                     kwargs=kwds,
                 )
                 source, _ = Source.get_or_create(catalogid=catalogid)
+                source_ids.append(int(catalogid))
                 SourceDataProduct.get_or_create(
                     source=source, data_product=data_product
                 )
 
             log.info(f"Data product {data_product} matched to {source}")
-            ids.append(data_product.id)
+            data_product_ids.append(int(data_product.id))
 
         N = sum(mask)
         log.info(f"Found {N} rows.")
-        log.info(f"Created {len(ids)} data products.")
+        log.info(f"Created {len(data_product_ids)} data products.")
         if len(errors):
             log.warning(f"Encountered {len(errors)} errors:")
             for error in errors:
@@ -148,4 +149,7 @@ class BossSpectrumOperator(BaseOperator):
 
         if len(errors) == N:
             raise AirflowSkipException(f"{N}/{N} data products had errors")
-        return ids
+        if self.return_id_type == "data_product":
+            return data_product_ids
+        elif self.return_id_type == "source":
+            return list(set(source_ids))
