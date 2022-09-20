@@ -538,6 +538,10 @@ def hdu_from_data_mappings(data_products, mappings, header):
                         except KeyError:
                             log.warning(f"No {key} found in {data_product.path}")
                             value = np.nan
+                        except:
+                            log.exception(f"Exception trying to read {key} in {data_product.path}")
+                            value = np.nan
+
                         values[key].append(value)
                     else:
                         values[key] = function
@@ -610,6 +614,9 @@ def headers_as_cards(data_product, input_header_keys):
                 comment = image[0].header.comments[old_key]
             except KeyError:
                 log.warning(f"No {old_key} header of HDU 0 in {data_product.path}")
+                value = comment = None
+            except:
+                log.exception(f"Exception trying to read {old_key} in HDU0 of {data_product.path}")
                 value = comment = None
 
             cards.append((new_key, value, GLOSSARY.get(new_key, comment)))

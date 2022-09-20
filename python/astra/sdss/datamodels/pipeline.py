@@ -169,6 +169,7 @@ def create_pipeline_hdu(
 
     columns = []
     for name, values in results.items():
+        values = np.atleast_1d(np.array(values))
         columns.append(
             fits.Column(
                 name=name, array=values, unit=None, **fits_column_kwargs(values)

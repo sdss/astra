@@ -342,38 +342,55 @@ class Task(AstraBaseModel):
             Delete any existing output rows for this task that are no longer used (default: True).
         """
 
-        N = len(results)
-        existing_outputs = (
-            model.select(model.output_id)
+        existing_outputs = list(
+            model.select()
             .where(model.task == self)
             .order_by(model.output_id.asc())
-            .tuples()
         )
 
-        for i, result in enumerate(results):
-            try:
-                (existing_output_id,) = existing_outputs[i]
-            except:
-                output = Output.create()
-                TaskOutput.create(task=self, output=output)
-                g = model.create(task=self, output=output, **result)
-                log.debug(f"Created output {output} and {g} for task {self}")
+        # Update existing outputs.
+        N_existing = len(existing_outputs)
+        N_results = len(results)
 
-            else:
-                log.debug(
-                    f"Updating existing output {existing_output_id} with {result}"
-                )
-                model.update(**result).where(
-                    model.output_id == existing_output_id
+        if N_existing > 0:
+            with database.atomic():
+                fields = []
+                for output, result in zip(existing_outputs, results):
+                    for key, value in result.items():
+                        setattr(output, key, value)
+                        fields.append(key)
+                fields = list(set(fields))
+                model.bulk_update(existing_outputs[:N_results], fields)
+
+            log.info(f"Updated {min(N_existing, N_results)} existing results in {model}")
+
+        N_new_results = N_results - N_existing
+        if N_new_results > 0:
+            new_outputs = [Output() for i in range(N_new_results)]
+            with database.atomic():
+                Output.bulk_create(new_outputs)
+                TaskOutput.insert_many([
+                    {"task_id": self.id, "output_id": o.id} for o in new_outputs
+                ]).execute()
+
+            # Now create the model new_outputs.
+            with database.atomic():
+                model.insert_many([
+                    {"task_id": self.id, "output_id": o.id, **r} for o, r in zip(new_outputs, results[N_existing:])
+                ]).execute()
+            
+            log.info(f"Created {N_new_results} new results in {model}")
+
+        if delete_existing_unused_outputs and N_existing > N_results:
+            unused_output_ids = [o.output_id for o in existing_outputs[N_results:]]
+            with database.atomic():
+                model.delete().where(model.output_id.in_(unused_output_ids)).execute()
+                TaskOutput.delete().where(
+                    TaskOutput.output_id.in_(unused_output_ids)
                 ).execute()
-
-        if delete_existing_unused_outputs and len(existing_outputs) > N:
-            unused_output_ids = flatten(existing_outputs[N:])
-            model.delete().where(model.output_id.in_(unused_output_ids)).execute()
-            TaskOutput.delete().where(
-                TaskOutput.output_id.in_(unused_output_ids)
-            ).execute()
-            Output.delete().where(Output.id.in_(unused_output_ids)).execute()
+                Output.delete().where(Output.id.in_(unused_output_ids)).execute()
+            log.info(f"Deleted {len(unused_output_ids)} existing unused results in {model}")
+        
         return None
 
 
@@ -1299,9 +1316,20 @@ class WhiteDwarfOutput(AstraOutputBaseModel):
     logg = FloatField()
     e_logg = FloatField()
 
-    conditioned_on_parallax = FloatField(null=True)
-    conditioned_on_absolute_G_mag = FloatField(null=True)
+    v_rel = FloatField()
+    chi_sq = FloatField()
+    reduced_chi_sq = FloatField()
 
+    conditioned_on_parallax = FloatField(null=True)
+    conditioned_on_phot_g_mean_mag = FloatField(null=True)
+
+
+class WhiteDwarfLineRatiosOutput(AstraOutputBaseModel):
+
+    wavelength_start = FloatField()
+    wavelength_end = FloatField()
+    line_ratio = FloatField()
+    
 
 class SlamOutput(AstraOutputBaseModel):
 

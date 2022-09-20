@@ -361,7 +361,7 @@ def _load_mwmVisit_or_mwmStar_hdu(image, hdu, **kwargs):
 
     flux_unit = u.Unit("1e-17 erg / (Angstrom cm2 s)")  # TODO
     try:
-        wavelength = np.array(image[hdu].data["LAMBDA"])
+        wavelength = np.array(image[hdu].data["LAMBDA"])[0]
     except:
         wavelength = _wcs_log_linear(
             image[hdu].header["NPIXELS"],

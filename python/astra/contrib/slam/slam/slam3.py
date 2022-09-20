@@ -38,7 +38,10 @@ from .hyperparameter import (
     summarize_table,
     hyperparameter_grid_stats,
 )
-from .mcmc import predict_label_mcmc
+try:
+    from .mcmc import predict_label_mcmc
+except ImportError:
+    print(f"Import error for Slam MCMC functionality, ignoring")
 from .predict import (
     predict_labels3,
     predict_labels_chi2,

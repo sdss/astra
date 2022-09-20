@@ -1,5 +1,8 @@
 import numpy as np
 from astropy.io import fits
+from astropy.time import Time
+from astropy import units as u
+from astropy.coordinates import SkyCoord, EarthLocation
 from functools import partial
 from typing import Union, List, Callable, Optional, Dict, Tuple
 
@@ -170,8 +173,8 @@ def create_boss_hdus(
             for k in data_products[0].kwargs.keys()
         ],
         ("OBSERVING CONDITIONS", None),
-        ("ALT", lambda dp, image: image[0].header["ALT"]),
-        ("AZ", lambda dp, image: image[0].header["AZ"]),
+        ("ALT", lambda dp, image: nanify(_safe_read_header_value(image, 0, "ALT", np.nan))),
+        ("AZ", lambda dp, image: nanify(_safe_read_header_value(image, 0, "AZ", np.nan))),
         ("SEEING", lambda dp, image: image[2].data["SEEING50"][0]),
         ("AIRMASS", lambda dp, image: image[2].data["AIRMASS"][0]),
         (
@@ -198,10 +201,10 @@ def create_boss_hdus(
                 _safe_read_header_value(image, 0, "PRESSURE", np.nan)
             ),
         ),
-        ("GUSTD", lambda dp, image: nanify(image[0].header["GUSTD"])),
-        ("GUSTS", lambda dp, image: nanify(image[0].header["GUSTS"])),
-        ("WINDD", lambda dp, image: nanify(image[0].header["WINDD"])),
-        ("WINDS", lambda dp, image: nanify(image[0].header["WINDS"])),
+        ("GUSTD", lambda dp, image: nanify(_safe_read_header_value(image, 0, "GUSTD", np.nan))),
+        ("GUSTS", lambda dp, image: nanify(_safe_read_header_value(image, 0, "GUSTS", np.nan))),
+        ("WINDD", lambda dp, image: nanify(_safe_read_header_value(image, 0, "WINDD", np.nan))),
+        ("WINDS", lambda dp, image: nanify(_safe_read_header_value(image, 0, "WINDS", np.nan))),
         (
             "MOON_DIST_MEAN",
             lambda dp, image: np.mean(
@@ -223,7 +226,7 @@ def create_boss_hdus(
         ("DELTA_RA", lambda dp, image: image[2].data["DELTA_RA"][0]),
         ("DELTA_DEC", lambda dp, image: image[2].data["DELTA_DEC"][0]),
         ("RADIAL VELOCITIES (XCSAO)", None),
-        ("V_RAD", lambda dp, image: image[2].data["XCSAO_RV"][0]),
+        ("V_RAD", get_radial_velocity),
         ("E_V_RAD", lambda dp, image: image[2].data["XCSAO_ERV"][0]),
         ("RXC_XCSAO", lambda dp, image: image[2].data["XCSAO_RXC"][0]),
         # We're using radial velocities in the Solar system barycentric rest frame, not heliocentric rest frame.
@@ -236,7 +239,7 @@ def create_boss_hdus(
         # so there is a sign difference.
         # v_true = v_measured + v_barycentric + (v_barycentric * v_measured)/c
         # See https://docs.astropy.org/en/stable/coordinates/velocities.html
-        ("V_BC", lambda dp, image: image[0].header["HELIO_RV"]),
+        ("V_BC", get_or_calculate_barycentric_velocity_correction),
         ("TEFF_XCSAO", lambda dp, image: image[2].data["XCSAO_TEFF"][0]),
         ("E_TEFF_XCSAO", lambda dp, image: image[2].data["XCSAO_ETEFF"][0]),
         ("LOGG_XCSAO", lambda dp, image: image[2].data["XCSAO_LOGG"][0]),
@@ -267,6 +270,58 @@ def create_boss_hdus(
     hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, header)
 
     return (hdu_visit, hdu_star)
+
+
+def get_radial_velocity(dp, image):
+    """
+    Return the radial velocity of the source.
+    
+    Often this is measured from the Solar system barycentric rest frame, so we can
+    just report the value ``XCSAO_RV`` from the HDU index 2. 
+    
+    But when there was an error in the calculation of the Solar system barycentric
+    velocity correction, ``HELIO_RV`` in HDU0 will be NaN, and no shift was applied.
+    In this case, we need to calculate the correction ourselves and add it to the
+    measured radial velocity.
+    """
+
+    # Try get HELIO_RV
+    try:
+        v_bc = image[0].header["HELIO_RV"]
+    except:
+        v_bc = np.nan
+    else:
+        if isinstance(v_bc, str): v_bc = np.nan
+    
+    v_measured = image[2].data["XCSAO_RV"][0]
+    if np.isfinite(v_bc):
+        return v_measured
+    else:
+        # No barycentric correction applied yet
+        # TODO: Silly that we are doing this twice, but I am time-poor.
+        v_bc = get_or_calculate_barycentric_velocity_correction(dp, image)
+        # TODO: Be consistent with V_BC sign
+        return v_measured - v_bc
+
+
+def get_or_calculate_barycentric_velocity_correction(dp, image):
+    value = _safe_read_header_value(image, 0, "HELIO_RV", np.nan)
+    value = np.nan if value == "NaN" else value
+    
+    if not np.isfinite(value):
+        log.warning("HELIO_RV is not finite, calculating barycentric velocity")
+        apo = EarthLocation.of_site("APO")
+
+        coord = SkyCoord(
+            ra=image[0].header["RA"] * u.deg,
+            dec=image[0].header["DEC"] * u.deg
+        )
+        beg_time = image[0].header["TAI-BEG"]/86400.0
+        end_time = image[0].header["TAI-END"]/86400.0
+        mid_time = Time((beg_time + end_time) / 2, format="mjd")
+        value = -coord.radial_velocity_correction(obstime=mid_time, location=apo).to(u.km/u.s).value
+
+    return value
 
 
 def get_boss_relative_velocity(
@@ -317,6 +372,7 @@ def get_boss_relative_velocity(
         v_correction = image[0].header["HELIO_RV"]
     except:
         log.warning(f"No 'VHELIO_RV' key found in HDU 0 of visit {visit}")
+        # No shift was applied!
         v_correction = 0
 
     v_measured = image[2].data["XCSAO_RV"][0] - v_correction

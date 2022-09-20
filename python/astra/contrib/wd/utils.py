@@ -57,30 +57,29 @@ def line_features(
         An array of line ratios for the given wavelength regions.
     """
 
-    # To make it easier for any future data-slicing we have to do.
     wavelength = spectrum.wavelength.value
-    flux = spectrum.flux.value[0]
+    all_flux = np.atleast_2d(spectrum.flux.value)
+    N, P = all_flux.shape
 
-    mask = np.zeros(wavelength.size, dtype=bool)
+    region_mask = np.zeros(wavelength.size, dtype=bool)
     for start, end in polyfit_regions:
-        mask += (end > wavelength) * (wavelength > start)
-
-    # Only consider finite values.
-    mask *= np.isfinite(flux)
-
-    # NOTE: "sigma" is referred to in the original line_info but is never used when fitting.
-    func_poly = np.polyfit(wavelength[mask], flux[mask], polyfit_order)
-
-    p = np.poly1d(func_poly)
+        region_mask += (end > wavelength) * (wavelength > start)
 
     # Go through the feature list.
     F = len(wavelength_regions)
-    features = np.empty(F)
-    for i, (start, end) in enumerate(wavelength_regions):
-        line_mask = (end > wavelength) * (wavelength > start)
-        mean_f_s = flux[line_mask]
-        features[i] = np.mean(flux[line_mask]) / np.mean(p(wavelength[line_mask]))
+    features = np.empty((N, F))
+    for i, flux in enumerate(all_flux):
+        # Only consider finite values.
+        mask = region_mask * np.isfinite(flux)
 
+        # NOTE: "sigma" is referred to in the original line_info but is never used when fitting.
+        func_poly = np.polyfit(wavelength[mask], flux[mask], polyfit_order)
+
+        p = np.poly1d(func_poly)
+
+        for j, (start, end) in enumerate(wavelength_regions):
+            line_mask = (end > wavelength) * (wavelength > start)
+            features[i, j] = np.mean(flux[line_mask]) / np.mean(p(wavelength[line_mask]))
     return features
 
 
