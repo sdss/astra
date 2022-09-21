@@ -1,0 +1,1 @@
+from astra.contrib.wd.base import WhiteDwarfStellarParameters, LineRatios

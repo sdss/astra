@@ -110,7 +110,7 @@ class WhiteDwarfStellarParameters(TaskInstance):
     model_grid = Parameter(default="da2014", bundled=True)
     parallax = Parameter(default=None)
     phot_g_mean_mag = Parameter(default=None)
-    plot = Parameter(default=False)
+    plot = Parameter(default=False, bundled=True)
 
     def execute(self):
 
@@ -280,7 +280,7 @@ class WhiteDwarfStellarParameters(TaskInstance):
             )
 
             lines_s, lines_m, mod_n = fit_func(
-                (Teff, logg, rv), spec_n, l_crop, models=self.model_grid, mode=1
+                (final_T, 100 * final_g, rv), spec_n, l_crop, models=self.model_grid, mode=1
             )
             spec_w = data[:, 0]
             mod_n[np.isnan(mod_n)] = 0.0
@@ -323,9 +323,9 @@ class WhiteDwarfStellarParameters(TaskInstance):
             )
 
             # Create result row in the database.
-            output, wd_output = self.create_output(WhiteDwarfOutput, result)
-            log.info(f"Created database outputs {output} and {wd_output}")
-
+            task.create_or_update_outputs(WhiteDwarfOutput, [result])
+            
+            # Create the astraStar/astraVisit object
             result.update(
                 spectral_axis=spectrum.spectral_axis,
                 model_flux=np.atleast_2d(resampled_model_flux),
@@ -424,7 +424,7 @@ class WhiteDwarfStellarParameters(TaskInstance):
                 fls = spectrum.flux.value[0, m]
 
                 ax2.set_xlim(3000, 10_000)
-                ax2.set_ylim(0, 2 * np.median(fls))
+                ax2.set_ylim(0, np.max(mod_n[:, 1] / adjust))
 
                 ax2.set_ylabel(
                     r"F$_{\lambda}$ [erg cm$^{-2}$ s$^{-1} \AA^{-1}$]", fontsize=12
@@ -433,9 +433,9 @@ class WhiteDwarfStellarParameters(TaskInstance):
                 fig.tight_layout()
 
                 basename = os.path.basename(data_product.path[:-5])
-                fig_path = expand_path(f"$MWM_ASTRA/{__version__}/plots/wd/{basename}.png")
+                fig_path = expand_path(f"$MWM_ASTRA/{__version__}/{data_product.kwargs['run2d']}-{data_product.kwargs['apred']}/plots/wd/{basename}.png")
                 os.makedirs(os.path.dirname(fig_path), exist_ok=True)
-                fig.savefig(fig_path)
+                fig.savefig(fig_path, dpi=300)
                 log.info(f"Created figure {fig_path}")
 
                 del fig
