@@ -124,9 +124,16 @@ def create_boss_hdus(
         )
 
     # Let's define some quality criteria of what to include in a stack.
+    # Check if it's in a WD carton.
+    cartons, programs = base.get_cartons_and_programs(data_products[0].sources[0])
+    in_wd_carton = ("mwm_wd_core" in cartons)
+
     use_in_stack = (
         (np.isfinite(snr_visit) & (snr_visit > 3))
-        & (np.array(meta["v_meta"]["RXC_XCSAO"]) > 6)
+        & 
+        (
+            (np.array(meta["v_meta"]["RXC_XCSAO"]) > 6) | in_wd_carton
+        ) 
         & (zwarnings <= 0)
     )
 

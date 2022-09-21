@@ -18,9 +18,105 @@ from tqdm import tqdm
 from typing import Optional
 
 
-#class MWMVisitOperator(BaseOperator):
-#    ui_color = "#BDD9B0"
 
+class MWMVisitOperator(BaseOperator):
+    ui_color = "#BDD9B0"
+
+    def __init__(
+        self,
+        *,
+        require_apogee=False,
+        require_boss=False,
+        cartons=None,
+        **kwargs
+    ) -> None:
+        super().__init__(**kwargs)
+        self.require_apogee = require_apogee
+        self.require_boss = require_boss
+        self.cartons = cartons
+        return None
+
+
+    def execute(self, context):
+        prev_ds, ds = (context["prev_ds"], context["ds"])
+        if prev_ds is None:
+            # Happens when we are running the DAG @once.
+            prev_ds, ds = (ds, "2100-01-01")
+
+        log.info(f"Running {self} between {prev_ds} and {ds} (boss={self.require_boss}; apogee={self.require_apogee})")
+
+        q = (
+            MWMSourceStatus
+            .select(MWMSourceStatus.source_id)
+        )
+        if self.require_boss:
+            q = q.where(
+                (
+                    (MWMSourceStatus.obs_end_boss_lco.between(prev_ds, ds))
+                &   (MWMSourceStatus.num_boss_lco_visits > 0)
+                )
+            |  
+                (
+                    (MWMSourceStatus.obs_end_boss_apo.between(prev_ds, ds))
+                &   (MWMSourceStatus.num_boss_apo_visits > 0)
+                )
+            )
+        if self.require_apogee:
+            q = q.where(
+                (
+                    (MWMSourceStatus.obs_end_apogee_lco.between(prev_ds, ds))
+                &   (MWMSourceStatus.num_apogee_lco_visits > 0)
+                )
+            |
+                (
+                    (MWMSourceStatus.obs_end_apogee_apo.between(prev_ds, ds))
+                &   (MWMSourceStatus.num_apogee_apo_visits > 0)
+                )
+            )
+
+        catalogids = flatten(list(q.tuples()))
+        log.info(f"There are {len(catalogids)} sources matched to require")
+        
+        if len(catalogids) == 0:
+            raise AirflowSkipException("No sources matched to require")
+        
+        if self.cartons is not None:
+            # Now restrict to those that are in the requested cartons
+            log.info(f"Restricting to cartons: {self.cartons}")
+
+            from astra.database.targetdb import Target, CartonToTarget, Carton
+
+            q = (
+                Target.select(Target.catalogid)
+                .distinct()
+                .join(CartonToTarget)
+                .join(Carton)
+                .where(Target.catalogid.in_(catalogids) & Carton.carton.in_(self.cartons))
+            )
+
+            catalogids = flatten(list(q.tuples()))
+            log.info(f"There are {len(catalogids)} sources matched to those cartons")
+    
+        # We need to return mwmVisit data product identifiers.
+        q = (
+            SourceDataProduct
+            .select(SourceDataProduct.data_product_id)
+            .join(DataProduct)
+            .where(
+                (DataProduct.filetype == "mwmVisit")
+            &   (SourceDataProduct.source_id.in_(catalogids))
+            )
+        )
+
+        data_product_ids = flatten(list(q.tuples()))
+        log.info(f"Matched against {len(data_product_ids)} data product identifiers")
+        if len(data_product_ids) == 0:
+            raise AirflowSkipException("No data products")
+            
+        return data_product_ids
+        
+
+        
 
 class MWMStarOperator(BaseOperator):
     
@@ -43,6 +139,9 @@ class MWMStarOperator(BaseOperator):
 
     def execute(self, context):
         prev_ds, ds = (context["prev_ds"], context["ds"])
+        if prev_ds is None:
+            # Happens when we are running the DAG @once.
+            prev_ds, ds = (ds, "2100-01-01")
 
         log.info(f"Running {self} between {prev_ds} and {ds} (boss={self.require_boss}; apogee={self.require_apogee})")
 
@@ -54,24 +153,24 @@ class MWMStarOperator(BaseOperator):
             q = q.where(
                 (
                     (MWMSourceStatus.obs_end_boss_lco.between(prev_ds, ds))
-                &   (MWMSourceStatus.num_boss_lco_visits_in_stack > 1)
+                &   (MWMSourceStatus.num_boss_lco_visits_in_stack > 0)
                 )
             |  
                 (
                     (MWMSourceStatus.obs_end_boss_apo.between(prev_ds, ds))
-                &   (MWMSourceStatus.num_boss_apo_visits_in_stack > 1)
+                &   (MWMSourceStatus.num_boss_apo_visits_in_stack > 0)
                 )
             )
         if self.require_apogee:
             q = q.where(
                 (
                     (MWMSourceStatus.obs_end_apogee_lco.between(prev_ds, ds))
-                &   (MWMSourceStatus.num_apogee_lco_visits_in_stack > 1)
+                &   (MWMSourceStatus.num_apogee_lco_visits_in_stack > 0)
                 )
             |
                 (
                     (MWMSourceStatus.obs_end_apogee_apo.between(prev_ds, ds))
-                &   (MWMSourceStatus.num_apogee_apo_visits_in_stack > 1)
+                &   (MWMSourceStatus.num_apogee_apo_visits_in_stack > 0)
                 )
             )
 
