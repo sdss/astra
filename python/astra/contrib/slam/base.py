@@ -1,4 +1,3 @@
-from re import A
 import numpy as np
 from astropy.nddata import InverseVariance
 from astra import log
@@ -76,6 +75,7 @@ class Slam(TaskInstance):
             data_product, = data_products
 
             all_results = {}
+            header_groups = {}
             database_results = []
             for spectrum in SpectrumList.read(data_product.path):
                 if not spectrum_overlaps(spectrum, model.wave): 
@@ -211,18 +211,24 @@ class Slam(TaskInstance):
                 )
 
                 # Which extname should this go to?
-                all_results[get_extname(spectrum, data_product)] = results
+                extname = get_extname(spectrum, data_product)
+                all_results[extname] = results
+                header_groups[extname] = [
+                    ("TEFF", "STELLAR LABELS"),
+                    ("INITIAL_TEFF", "INITIAL STELLAR LABELS"),
+                    ("RHO_TEFF_LOGG", "CORRELATION COEFFICIENTS"),
+                    ("STATUS", "OPTIMISATION INDICATORS"),
+                    ("SNR", "SUMMARY STATISTICS"),
+                    ("MODEL_FLUX", "MODEL SPECTRA")
+                ]
 
             with database.atomic():
                 task.create_or_update_outputs(SlamOutput, database_results)
 
                 # Create astraStar/astraVisit data product and link it to this task.
-                create_pipeline_product(task, data_product, all_results)
-
-
-def resample(wave, flux, err, wave_resamp, bounds_error=None):
-    f1 = interp1d(wave, flux, kind="cubic", bounds_error=bounds_error)
-    f2 = interp1d(wave, err, kind="cubic", bounds_error=bounds_error)
-    re_flux = f1(wave_resamp)
-    re_err = f2(wave_resamp)
-    return np.array(re_flux), np.array(re_err)
+                create_pipeline_product(
+                    task, 
+                    data_product, 
+                    all_results,
+                    header_groups=header_groups
+                )

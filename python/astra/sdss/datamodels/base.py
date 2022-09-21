@@ -108,6 +108,26 @@ GLOSSARY = {
     "NPAIRS": "Number of dither pairs combined",
     "DITHERED": "Fraction of visits that were dithered",
     "NVISITS": "Number of visits included in the stack",
+    # columns common to many analysis pipelines
+    "INITIAL_TEFF": "Initial stellar effective temperature [K]",
+    "INITIAL_LOGG": "Initial stellar surface gravity [dex]",
+    "INITIAL_FE_H": "Initial stellar metallicity [dex]",
+
+    "TEFF": "Stellar effective temperature [K]",
+    "LOGG": "Surface gravity [log10(cm/s^2)]",
+    "FE_H": "Metallicity [dex]",
+    "E_TEFF": "Error in stellar effective temperature [K]",
+    "E_LOGG": "Error in surface gravity [log10(cm/s^2)]",
+    "E_FE_H": "Error in metallicity [dex]",
+    "SUCCESS": "Flag returned by optimization routine",
+    "OPTIMALITY": "Metric for goodness of fit",
+    "STATUS": "Status flag returned by optimization routine",
+
+    "PIPELINE": "Pipeline name that produced these results",
+    "WD_TYPE": "White dwarf type",
+    "CONDITIONED_ON_PARALLAX": "Parallax used to constrain solution [mas]",
+    "CONDITIONED_ON_PHOT_G_MEAN_MAG": "G mag used to constrain solution",
+
     # XCSAO
     "V_HELIO_XCSAO": "Heliocentric velocity from XCSAO [km/s]",
     "E_V_HELIO_XCSAO": "Error in heliocentric velocity from XCSAO [km/s]",
@@ -144,6 +164,11 @@ GLOSSARY = {
     "PLATE": "Plate number",
     "FIELD": "Field number",
     "APRED": "APOGEE reduction tag",
+    # MWM data model keywords not specified elsewhere
+    "ASTRA_VERSION": "Astra version",
+    "CATALOGID": "SDSS-V catalog identifier",
+    "COMPONENT": "Disentangled stellar component",
+
     # Radial velocity keys (common to any code)
     "V_RAD": "Radial velocity in Solar barycentric rest frame [km/s]",
     "E_V_RAD": "Error in radial velocity [km/s]",
@@ -170,9 +195,12 @@ GLOSSARY = {
     "E_V_RAD_XCORR": "Error in relative velocity from XCORR [km/s]",
     "V_RAD_XCORR": "Radial velocity in Solar barycentric rest frame [km/s]",
     # Model fitting keys
+    "IDP_ID": "Astra input data product identifier",
     "TASK_ID": "Astra unique task identifier",
     "CHI_SQ": "\chi-squared of model fit",
+    # TODO: Remove one of these
     "R_CHI_SQ": "Reduced \chi-squared of model fit",
+    "REDUCED_CHI_SQ": "Reduced \chi-squared of model fit",
     "MODEL_FLUX": "Best-fitting model of source flux",
     "CONTINUUM": "Continuum flux used in model fit",
 }
@@ -196,7 +224,8 @@ def get_catalog_identifier(source: Union[Source, int]):
 
 def get_cartons_and_programs(source: Union[Source, int]):
     """
-    Return the name of cartons and programs that this source is matched to.
+    Return the name of cartons and programs that this source is matched to, ordered by their
+    priority for this source (highest priority, or "first carton", is first).
 
     :param source:
         The astronomical source, or the SDSS-V catalog identifier.
@@ -209,11 +238,12 @@ def get_cartons_and_programs(source: Union[Source, int]):
     catalogid = get_catalog_identifier(source)
 
     sq = (
-        Carton.select(Target.catalogid, Carton.carton, Carton.program)
+        Carton.select(Target.catalogid, CartonToTarget.priority, Carton.carton, Carton.program)
         .distinct()
         .join(CartonToTarget)
         .join(Target)
         .where(Target.catalogid == catalogid)
+        .order_by(CartonToTarget.priority.asc())
         .alias("distinct_cartons")
     )
 
@@ -225,6 +255,7 @@ def get_cartons_and_programs(source: Union[Source, int]):
         )
         .join(sq, on=(sq.c.catalogid == Target.catalogid))
         .group_by(Target.catalogid)
+        #.order_by(sq.c.priority.asc())
         .tuples()
     )
     _, cartons, programs = q_cartons.first()
@@ -403,9 +434,7 @@ def get_auxiliary_source_data(source: Union[Source, int]):
             )
 
     # Add carton and target information
-    cartons, programs = get_cartons_and_programs(source)
-
-    first_carton = get_first_carton(source)
+    cartons, programs = get_cartons_and_programs(source) # ordered by priority
 
     data.extend(
         [
@@ -413,7 +442,7 @@ def get_auxiliary_source_data(source: Union[Source, int]):
             (" ", "TARGETING", None),
             (
                 "CARTON_0",
-                first_carton.carton,
+                cartons[0],
                 f"First carton for source (see documentation)",
             ),
             ("CARTONS", ",".join(cartons), f"SDSS-V cartons"),
@@ -499,13 +528,17 @@ def spectrum_sampling_cards(
 
 
 def wavelength_cards(
-    crval: Union[int, float], cdelt: Union[int, float], num_pixels: int, **kwargs
+    crval: Union[int, float], 
+    cdelt: Union[int, float], 
+    num_pixels: int, 
+    decimals: int = 6, 
+    **kwargs
 ) -> List:
     return [
         BLANK_CARD,
         (" ", "WAVELENGTH INFORMATION (VACUUM)", None),
-        ("CRVAL", crval, None),
-        ("CDELT", cdelt, None),
+        ("CRVAL", np.round(crval, decimals), None),
+        ("CDELT", np.round(cdelt, decimals), None),
         ("CTYPE", "LOG-LINEAR", None),
         ("CUNIT", "Angstrom (Vacuum)", None),
         ("CRPIX", 1, None),
@@ -588,11 +621,27 @@ def add_table_category_headers(hdu, category_headers):
     return None
 
 
+def get_most_likely_label_names(input_string, names):
+    parts = input_string.split("_")
+    for i in range(len(parts) - 1):
+        label_a = "_".join(parts[:i+1])
+        label_b = "_".join(parts[i+1:])
+        if label_a in names and label_b in names:
+            return (label_a, label_b)
+    raise ValueError(f"Unable to work out label names from {input_string} and {names}")
+
 def add_glossary_comments(hdu):
-    for key in hdu.header.keys():
-        hdu.header.comments[key] = GLOSSARY.get(key, None)
-    for i, key in enumerate(hdu.data.dtype.names, start=1):
-        hdu.header.comments[f"TTYPE{i}"] = GLOSSARY.get(key, None)
+    for key in hdu.header.keys(): 
+        if hdu.header.comments[key] is None or hdu.header.comments[key] == "":
+            hdu.header.comments[key] = GLOSSARY.get(key, None)
+    if hdu.data is not None:        
+        for i, key in enumerate(hdu.data.dtype.names, start=1):
+            # Special case for RHO_ because there are too many
+            if key.startswith("RHO_"):
+                label_a, label_b = get_most_likely_label_names(key[4:], hdu.data.dtype.names)
+                hdu.header.comments[f"TTYPE{i}"] = f"Correlation between {label_a} and {label_b}"
+            else:
+                hdu.header.comments[f"TTYPE{i}"] = GLOSSARY.get(key, None)
     remove_filler_card(hdu)
     return None
 

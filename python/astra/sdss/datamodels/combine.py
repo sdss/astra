@@ -48,6 +48,14 @@ def pixel_weighted_spectrum(
     :param gaussian_filter_size: [optional]
         The filter size (in pixels) to use for any gaussian filter applied.
     """
+    meta = dict(
+        scale_by_pseudo_continuum=scale_by_pseudo_continuum,
+        median_filter_mode=median_filter_mode,
+        gaussian_filter_size=gaussian_filter_size,
+    )
+
+    if flux.size == 0:
+        return (None, None, None, None, meta)
 
     V, P = flux.shape
     continuum = np.ones((V, P), dtype=float)
@@ -73,11 +81,6 @@ def pixel_weighted_spectrum(
     stacked_flux_error = np.sqrt(1.0 / stacked_ivar) * cont
 
     stacked_bitmask = np.bitwise_or.reduce(bitmask, 0)
-    meta = dict(
-        scale_by_pseudo_continuum=scale_by_pseudo_continuum,
-        median_filter_mode=median_filter_mode,
-        gaussian_filter_size=gaussian_filter_size,
-    )
     return (stacked_flux, stacked_flux_error, stacked_bitmask, continuum, meta)
 
 

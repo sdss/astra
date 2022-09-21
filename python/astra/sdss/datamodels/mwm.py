@@ -1,5 +1,6 @@
 import datetime
 import os
+import numpy as np
 from astropy.io import fits
 from astropy.time import Time
 from sdss_access import SDSSPath
@@ -129,7 +130,7 @@ def create_mwm_data_products(
     is_empty_hdu = lambda hdu: hdu.data is None or hdu.data.size == 0
     get_num_visits = lambda hdu: 0 if is_empty_hdu(hdu) else len(hdu.data)
     get_num_visits_in_stack = (
-        lambda hdu: 0 if is_empty_hdu(hdu) else sum(hdu.data["IN_STACK"])
+        lambda hdu: 0 if is_empty_hdu(hdu) else np.sum(hdu.data["IN_STACK"])
     )
     get_obs_start = (
         lambda hdu: None
@@ -142,7 +143,7 @@ def create_mwm_data_products(
         else _safe_datetime_from_mjd_in_stack(hdu, max)
     )
 
-    source_id = source.id if isinstance(source, Source) else source
+    source_id = source.catalogid if isinstance(source, Source) else source
 
     meta = {
         "source_id": source_id,
@@ -212,7 +213,9 @@ class CreateMWMVisitStarProducts(TaskInstance):
                 catalogid, input_data_products=data_products
             )
             print(f"Created HDUs for {catalogid}")
-
+            # Is there any data in the stacked spectra?
+            any_stacked_spectra = sum([hdu.data["IN_STACK"] for hdu in hdu_star_list if hdu.size > 0])
+            
             kwds = dict(
                 catalogid=catalogid,
                 astra_version=astra_version,
@@ -222,14 +225,20 @@ class CreateMWMVisitStarProducts(TaskInstance):
             # Write to disk.
             mwmVisit_path = sdss_path.full("mwmVisit", **kwds)
             mwmStar_path = sdss_path.full("mwmStar", **kwds)
-            # Create necessary folders
-            for path in (mwmVisit_path, mwmStar_path):
-                os.makedirs(os.path.dirname(path), exist_ok=True)
 
+            # Create necessary folders
+            os.makedirs(os.path.dirname(mwmVisit_path), exist_ok=True)
+            if any_stacked_spectra:
+                os.makedirs(os.path.dirname(mwmStar_path), exist_ok=True)
+            else:
+                if os.path.exists(mwmStar_path):
+                    os.unlink(mwmStar_path)
+            
             # Ensure mwmVisit and mwmStar files are always synchronised.
             try:
                 hdu_visit_list.writeto(mwmVisit_path, overwrite=True)
-                hdu_star_list.writeto(mwmStar_path, overwrite=True)
+                if any_stacked_spectra:
+                    hdu_star_list.writeto(mwmStar_path, overwrite=True)
             except:
                 log.exception(
                     f"Exception when trying to write to either:\n{mwmVisit_path}\n{mwmStar_path}"
@@ -239,9 +248,8 @@ class CreateMWMVisitStarProducts(TaskInstance):
                     if os.path.exists(path):
                         os.unlink(path)
             else:
-                log.info(f"Wrote mwmVisits product to {mwmVisit_path}")
-                log.info(f"Wrote mwmStar product to {mwmStar_path}")
-
+                log.info(f"Wrote mwmVisit product to {mwmVisit_path}")
+            
                 # Create output data product records that link to this task.
                 dp_visit, visit_created = DataProduct.get_or_create(
                     release=self.release, filetype="mwmVisit", kwargs=kwds
@@ -250,21 +258,24 @@ class CreateMWMVisitStarProducts(TaskInstance):
                 SourceDataProduct.get_or_create(
                     data_product=dp_visit, source_id=catalogid
                 )
+                log.info(f"Created data product {dp_visit} for catalogid {catalogid}")
 
-                dp_star, star_created = DataProduct.get_or_create(
-                    release=self.release, filetype="mwmStar", kwargs=kwds
-                )
-                TaskOutputDataProducts.get_or_create(task=task, data_product=dp_star)
-                SourceDataProduct.get_or_create(
-                    data_product=dp_star, source_id=catalogid
-                )
+                if any_stacked_spectra:
+                    log.info(f"Wrote mwmStar product to {mwmStar_path}")
+                    dp_star, star_created = DataProduct.get_or_create(
+                        release=self.release, filetype="mwmStar", kwargs=kwds
+                    )
+                    TaskOutputDataProducts.get_or_create(task=task, data_product=dp_star)
+                    SourceDataProduct.get_or_create(
+                        data_product=dp_star, source_id=catalogid
+                    )
+                    log.info(f"Created data product {dp_star} for catalogid {catalogid}")
+                
+                else:
+                    log.info(f"No stacked spectra to store for {catalogid}")
 
                 # Get or create an output record.
                 task.create_or_update_outputs(MWMSourceStatus, [meta])
-
-                log.info(
-                    f"Created data products {dp_visit} and {dp_star} for catalogid {catalogid}"
-                )
 
         return None
 

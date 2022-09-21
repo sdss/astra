@@ -113,25 +113,16 @@ def create_apogee_hdus(
         continuum,
         meta_combine,
     ) = combine.pixel_weighted_spectrum(
-        flux[use_in_stack], flux_error[use_in_stack], bitmask[use_in_stack], **kwargs
+        flux[use_in_stack], 
+        flux_error[use_in_stack], 
+        bitmask[use_in_stack], 
+        **kwargs
     )
     meta.update(meta_combine)
 
-    snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
     wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)
 
-    # Calculate the visits that were dithered that went into the stack
-
     DATA_HEADER_CARD = ("SPECTRAL DATA", None)
-    star_data_shape = (1, -1)
-    star_mappings = [
-        DATA_HEADER_CARD,
-        ("SNR", np.array([snr_star]).reshape(star_data_shape)),
-        ("LAMBDA", wavelength.reshape(star_data_shape)),
-        ("FLUX", combined_flux.reshape(star_data_shape)),
-        ("E_FLUX", combined_flux_error.reshape(star_data_shape)),
-        ("BITMASK", combined_bitmask.reshape(star_data_shape)),
-    ]
 
     visit_mappings = [
         DATA_HEADER_CARD,
@@ -244,8 +235,22 @@ def create_apogee_hdus(
         ]
     )
 
-    hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, star_header)
     hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, visit_header)
+
+    if any(use_in_stack):
+        snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
+        star_data_shape = (1, -1)
+        star_mappings = [
+            DATA_HEADER_CARD,
+            ("SNR", np.array([snr_star]).reshape(star_data_shape)),
+            ("LAMBDA", wavelength.reshape(star_data_shape)),
+            ("FLUX", combined_flux.reshape(star_data_shape)),
+            ("E_FLUX", combined_flux_error.reshape(star_data_shape)),
+            ("BITMASK", combined_bitmask.reshape(star_data_shape)),
+        ]
+        hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, star_header)
+    else:
+        hdu_star = base.create_empty_hdu(observatory, instrument)
 
     # Add S/N for the stacked spectrum.
     # hdu_star.header.insert("TTYPE1", "SNR")

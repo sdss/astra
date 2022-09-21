@@ -143,27 +143,22 @@ def create_boss_hdus(
         combined_bitmask,
         continuum,
         meta_combine,
-    ) = combine.pixel_weighted_spectrum(flux, flux_error, bitmask, **kwargs)
+    ) = combine.pixel_weighted_spectrum(
+        flux[use_in_stack], 
+        flux_error[use_in_stack], 
+        bitmask[use_in_stack], 
+        **kwargs
+    )
     meta.update(meta_combine)
 
-    snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
     wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)
 
     DATA_HEADER_CARD = ("SPECTRAL DATA", None)
 
     nanify = lambda x: np.nan if x == "NaN" else x
-    star_data_shape = ((1, -1))
-    star_mappings = [
-        DATA_HEADER_CARD,
-        ("SNR", np.array([snr_star]).reshape(star_data_shape)),
-        ("LAMBDA", wavelength.reshape(star_data_shape)),
-        ("FLUX", combined_flux.reshape(star_data_shape)),
-        ("E_FLUX", combined_flux_error.reshape(star_data_shape)),
-        ("BITMASK", combined_bitmask.reshape(star_data_shape)),
-    ]
     log.info(
         f"Using default 'sdss5' for data product release if not specified. TODO: Andy, you can remove this in next database burn."
-    )
+    )        
     visit_mappings = [
         DATA_HEADER_CARD,
         ("SNR", snr_visit),
@@ -273,9 +268,21 @@ def create_boss_hdus(
         ]
     )
 
-    hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, header)
     hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, header)
-
+    if any(use_in_stack):
+        snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
+        star_data_shape = ((1, -1))
+        star_mappings = [
+            DATA_HEADER_CARD,
+            ("SNR", np.array([snr_star]).reshape(star_data_shape)),
+            ("LAMBDA", wavelength.reshape(star_data_shape)),
+            ("FLUX", combined_flux.reshape(star_data_shape)),
+            ("E_FLUX", combined_flux_error.reshape(star_data_shape)),
+            ("BITMASK", combined_bitmask.reshape(star_data_shape)),
+        ]
+        hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, header)
+    else:
+        hdu_star = base.create_empty_hdu(observatory, instrument)
     return (hdu_visit, hdu_star)
 
 

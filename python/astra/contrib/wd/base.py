@@ -305,7 +305,6 @@ class WhiteDwarfStellarParameters(TaskInstance):
             reduced_chi_sq = (chi_sq / (np.sum(np.isfinite(pixel_chi_sq[chisq_mask])) - 3))
 
             result = dict(
-                snr=spectrum.meta["SNR"][0], # TODO: Not yet handle mwmVisit
                 wd_type=wd_type,
                 teff=final_T,
                 e_teff=final_T_err,
@@ -314,6 +313,7 @@ class WhiteDwarfStellarParameters(TaskInstance):
                 v_rel=rv,
                 conditioned_on_parallax=parallax,
                 conditioned_on_phot_g_mean_mag=phot_g_mean_mag,
+                snr=spectrum.meta["SNR"][0], # TODO: Not yet handle mwmVisit
                 chi_sq=chi_sq,
                 reduced_chi_sq=reduced_chi_sq
             )
@@ -333,11 +333,19 @@ class WhiteDwarfStellarParameters(TaskInstance):
                 reduced_chi_sq=reduced_chi_sq,
                 continuum=adjust,
             )
+            extname = get_extname(spectrum, data_product)
             create_pipeline_product(
                 task, 
                 data_product, 
                 {
-                    get_extname(spectrum, data_product): result
+                    extname: result
+                },
+                header_groups={
+                    extname: [
+                        ("WD_TYPE", "STELLAR LABELS"),
+                        ("SNR", "SUMMARY STATISTICS"),
+                        ("MODEL_FLUX", "MODEL SPECTRA"),
+                    ]
                 }
             )
 
