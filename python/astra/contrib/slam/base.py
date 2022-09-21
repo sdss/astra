@@ -1,3 +1,4 @@
+from re import A
 import numpy as np
 from astropy.nddata import InverseVariance
 from astra import log
@@ -81,24 +82,31 @@ class Slam(TaskInstance):
                     continue
 
                 wave = spectrum.spectral_axis.value
-                fluxes = np.atleast_2d(spectrum.flux.value)
-                invars = np.atleast_2d(spectrum.uncertainty.represent_as(InverseVariance).array)
+                fluxs = np.atleast_2d(spectrum.flux.value)
+                ivars = np.atleast_2d(spectrum.uncertainty.represent_as(InverseVariance).array)
 
-                N, P = fluxes.shape
+                N, P = fluxs.shape
+                R = model.wave.size
 
-                fluxes_resamp, invars_resamp = [], []
+                flux_resamp = np.empty((N, R))
+                ivar_resamp = np.empty((N, R))
                 for i in range(N):
-                    fluxes_temp, invars_temp = resample(
-                        wave, fluxes[i], invars[i], wave_interp
-                    )
-                    fluxes_resamp += [fluxes_temp]
-                    invars_resamp += [invars_temp]
-                fluxes_resamp = np.array(fluxes_resamp)
-                invars_resamp = np.array(invars_resamp)
+                    # Note: One non-finite value given to scipy.interpolate.interp1d will cause the
+                    #       entire interpolated output to be NaN. This is a known issue.
+                    non_finite = ~np.isfinite(fluxs[i]) + ~np.isfinite(ivars[i])
+                    _flux = np.copy(fluxs[i])
+                    _flux[non_finite] = 0.0
+                    _ivar = np.copy(ivars[i])
+                    _ivar[non_finite] = 0.0
 
-                fluxes_norm, fluxes_cont = normalize_spectra_block(
+                    f = interp1d(wave, _flux, kind="cubic", bounds_error=None, fill_value=np.nan)
+                    g = interp1d(wave, _ivar, kind="cubic", bounds_error=None, fill_value=0)
+                    flux_resamp[i] = f(wave_interp)
+                    ivar_resamp[i] = g(wave_interp)
+
+                flux_norm, flux_cont = normalize_spectra_block(
                     wave_interp,
-                    fluxes_resamp,
+                    flux_resamp,
                     (6147.0, 8910.0),
                     dwave=parameters["dwave"],
                     p=parameters["p"],
@@ -110,69 +118,91 @@ class Slam(TaskInstance):
                     verbose=parameters["verbose"],
                 )
 
-                invars_norm = fluxes_cont**2 * invars_resamp
+                ivar_norm = flux_cont**2 * ivar_resamp
 
                 ### Initial estimation: get initial estimate of parameters by chi2 best match
                 label_init = model.predict_labels_quick(
-                    fluxes_norm, invars_norm, n_jobs=1
+                    flux_norm, ivar_norm, n_jobs=1
                 )
 
                 ### SLAM prediction: optimize parameters
                 results_pred = model.predict_labels_multi(
-                    label_init, fluxes_norm, invars_norm
+                    label_init, flux_norm, ivar_norm
                 )
-                label_pred = np.array([label["x"] for label in results_pred])
-                std_pred = np.array([label["pstd"] for label in results_pred])
-                N_, L = label_pred.shape
+                label_names = ("teff", "logg", "fe_h")
+                labels = np.array([label["x"] for label in results_pred])
+                results = dict(zip(label_names, labels.T))
+                results.update(
+                    dict(zip(
+                        [f"e_{ln}" for ln in label_names],
+                        np.array([label["pstd"] for label in results_pred]).T
+                    ))
+                )
 
-                # Create results array.
-                teff = label_pred[:, 0]
-                e_teff = std_pred[:, 0]
-                log_g = label_pred[:, 1]
-                e_log_g = std_pred[:, 1]
-                fe_h = label_pred[:, 2]
-                e_fe_h = std_pred[:, 2]
-                # alpha_m = label_pred[:,3]
-                # u_alpha_m = std_pred[:,3]
+                # Add initial values.
+                results.update(
+                    dict(
+                        zip(
+                            [f"initial_{ln}" for ln in label_names],
+                            label_init.T
+                        )
+                    )
+                )
 
+                # Add correlation coefficients.
+                L = len(label_names)
+                j, k = np.triu_indices(L, 1)
+                rho = np.array([np.corrcoef(label["pcov"]) for label in results_pred])
+                results.update(
+                    dict(
+                        zip(
+                            [f"rho_{label_names[j]}_{label_names[k]}" for j, k in zip(j, k)],
+                            rho[:, j, k].T
+                        )
+                    )
+                )
+
+                # Add optimisation keywords
+                opt_keys = ("status", "success", "optimality")
+                for result in results_pred:
+                    for key in opt_keys:
+                        results.setdefault(key, [])
+                        results[key].append(result[key])
+    
+                # Add statistics.
                 try:
                     snr = spectrum.meta["SNR"]
                 except:
-                    snr = fluxes * np.sqrt(invars)
+                    snr = fluxs * np.sqrt(ivars)
                     snr[snr <= 0] = np.nan
                     snr = np.nanmean(snr, axis=1)
 
-                # TODO: use 'pcov' covariance matrix and store correlation coefficients?
-                #       Store cost? or any other things about fitting?
-
-                prediction = model.predict_spectra(label_pred)
-                chi_sq = (prediction - fluxes_norm) ** 2 * invars_norm
-                reduced_chi_sq = np.sum(chi_sq, axis=1) / (P - L - 1)
+                axis = 1
+                prediction = model.predict_spectra(labels)
+                chi_sq = np.sum((prediction - flux_norm) ** 2 * ivar_norm, axis=axis)
+                R_finite = np.sum(ivar_norm > 0, axis=axis)
+                reduced_chi_sq = chi_sq / (R_finite - L - 1)
+                results.update(
+                    snr=snr,
+                    chi_sq=chi_sq,
+                    reduced_chi_sq=reduced_chi_sq,
+                )
 
                 # Create AstraStar product.
-                model_continuum = fluxes_temp / fluxes_norm
+                model_continuum = flux_resamp / flux_norm
 
                 resampled_continuum = np.empty((N, P))
                 resampled_model_flux = np.empty((N, P))
                 for i in range(N):
-                    f = interp1d(wave_interp, prediction[i], kind="cubic", bounds_error=False)
-                    c = interp1d(wave_interp, model_continuum[i], kind="cubic", bounds_error=False)
+                    assert np.all(np.isfinite(prediction)), "Prediction values not all finite?"
+                    assert np.all(np.isfinite(model_continuum[i])), "Model continuum values not all finite?"
+                    f = interp1d(wave_interp, prediction[i], kind="cubic", bounds_error=False, fill_value=np.nan)
+                    c = interp1d(wave_interp, model_continuum[i], kind="cubic", bounds_error=False, fill_value=np.nan)
 
                     # Re-sample the predicted spectra back to the observed frame.
                     resampled_model_flux[i] = f(wave)
                     resampled_continuum[i] = c(wave)
 
-                results = dict(
-                    snr=snr,
-                    teff=teff,
-                    e_teff=e_teff,
-                    logg=log_g,
-                    e_logg=e_log_g,
-                    fe_h=fe_h,
-                    e_fe_h=e_fe_h,
-                    chi_sq=chi_sq,
-                    reduced_chi_sq=reduced_chi_sq,
-                )
                 database_results.extend(dict_to_list(results))
                 results.update(
                     spectral_axis=spectrum.spectral_axis,  

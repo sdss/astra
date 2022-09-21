@@ -1334,15 +1334,32 @@ class WhiteDwarfLineRatiosOutput(AstraOutputBaseModel):
 class SlamOutput(AstraOutputBaseModel):
 
     snr = FloatField()
+
+    # Initial values.
+    initial_teff = FloatField()
+    initial_logg = FloatField()
+    initial_fe_h = FloatField()
+
+    # Labels.
     teff = FloatField()
     e_teff = FloatField()
     logg = FloatField()
     e_logg = FloatField()
     fe_h = FloatField()
     e_fe_h = FloatField()
-    alpha_fe = FloatField(null=True)
-    e_alpha_fe = FloatField(null=True)
+    
+    # Correlation coefficients.
+    rho_teff_logg = FloatField()
+    rho_teff_fe_h = FloatField()
+    rho_logg_fe_h = FloatField()
 
+    # Optimisation outputs.
+    success = BooleanField()
+    status = IntegerField()
+    optimality = BooleanField()
+
+    # Statistics.
+    chi_sq = FloatField()
     reduced_chi_sq = FloatField()
 
 
