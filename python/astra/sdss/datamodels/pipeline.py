@@ -102,6 +102,17 @@ def create_pipeline_product(
     ]
     for k in data_product.kwargs.keys():
         data_model_cards.append((k.upper(), data_product.kwargs[k], None))
+
+    # Add a comment with the URL
+    url = SDSSPath(data_product.release).url(data_product.filetype, **data_product.kwargs)
+    # it's a long URL, split it by the version
+
+    data_model_cards.extend([
+        BLANK_CARD,
+        (" ", "INPUT DATA PRODUCT", None),
+        ("IDP_URL", url, None)
+    ])
+    #"https://data.sdss5.org/sas/sdsswork/mwm/spectro/astra/0.2.4dev/v6_0_9-daily/spectra/star/1959/59/mwmStar-0.2.4dev-4346151959.fits"
     
     get_index = lambda k: [i for i, (key, value, comment) in enumerate(primary_hdu_cards) if key == k][0]
 

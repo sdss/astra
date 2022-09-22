@@ -214,7 +214,7 @@ class CreateMWMVisitStarProducts(TaskInstance):
             )
             print(f"Created HDUs for {catalogid}")
             # Is there any data in the stacked spectra?
-            any_stacked_spectra = sum([hdu.data["IN_STACK"] for hdu in hdu_star_list if hdu.size > 0])
+            any_stacked_spectra = sum([sum(hdu.data["IN_STACK"]) for hdu in hdu_visit_list if hdu.size > 0]) > 0
             
             kwds = dict(
                 catalogid=catalogid,

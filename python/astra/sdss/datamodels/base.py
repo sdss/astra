@@ -337,9 +337,9 @@ def get_auxiliary_source_data(source: Union[Source, int]):
             Gaia.pmdec_error,
             f"Gaia {gaia_dr} proper motion in DEC error [mas/yr]",
         ),
-        ("VRAD", Gaia.radial_velocity, f"Gaia {gaia_dr} radial velocity [km/s]"),
+        ("V_RAD", Gaia.radial_velocity, f"Gaia {gaia_dr} radial velocity [km/s]"),
         (
-            "E_VRAD",
+            "E_V_RAD",
             Gaia.radial_velocity_error,
             f"Gaia {gaia_dr} radial velocity error [km/s]",
         ),
@@ -419,7 +419,8 @@ def get_auxiliary_source_data(source: Union[Source, int]):
             .first()
         )
 
-    # Return as a list of entries suitable for a FITS header card.
+    #  Damn. Floating point nan values are not allowed in FITS headers.
+    default_values = {}
     data = []
     for key, field, comment in field_descriptors:
         if ignore(field):
@@ -428,7 +429,7 @@ def get_auxiliary_source_data(source: Union[Source, int]):
             data.append(
                 (
                     key,
-                    row[field._alias if isinstance(field, Alias) else field.name],
+                    row[field._alias if isinstance(field, Alias) else field.name] or default_values.get(key, None),
                     comment,
                 )
             )
@@ -723,7 +724,7 @@ def create_primary_hdu_cards(
     cards = [
         BLANK_CARD,
         (" ", "METADATA", None),
-        ("ASTRA", astra_version, f"Astra version"),
+        ("V_ASTRA", astra_version, f"Astra version"),
         ("CREATED", created, f"File creation time (UTC {datetime_fmt})"),
         ("HEALPIX", healpix, f"Healpix location ({nside} sides)"),
     ]
@@ -795,7 +796,7 @@ def fits_column_kwargs(values):
         V, P = np.atleast_2d(values).shape
         if values.ndim == 2:
             kwds["format"] = f"{P:.0f}{format_code}"
-            kwds["dim"] = f"({P}, )"
+            kwds["dim"] = f"({P})"
         else:
             kwds["format"] = f"{format_code}"
 
