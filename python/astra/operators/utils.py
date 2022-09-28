@@ -87,7 +87,7 @@ def create_tasks(executable_task_name, input_data_products, parameters):
     return task_ids
 
 
-def get_or_create_bundle(executable_task_name, parameters, status="created"):
+def get_or_create_bundle(executable_task_name, parameters, parsed=False, status="created"):
     """
     Get an existing bundle that only contains tasks of the given name and bundle parameters
     and has the same status, or create one.
@@ -104,9 +104,10 @@ def get_or_create_bundle(executable_task_name, parameters, status="created"):
         status = Status.get(description=status)
 
     # May need to fill in parameters with default values.
-    executable_class = to_callable(executable_task_name)
-    bundle_size, parsed_parameters = executable_class.parse_parameters(**parameters)
-    parameters = {k: v for k, (p, v, *_) in parsed_parameters.items()}
+    if not parsed:
+        executable_class = to_callable(executable_task_name)
+        bundle_size, parsed_parameters = executable_class.parse_parameters(**parameters)
+        parameters = {k: v for k, (p, v, *_) in parsed_parameters.items()}
 
     q = (
         Bundle.select()
@@ -129,10 +130,17 @@ def add_to_bundle(bundle_id, task_ids):
     if isinstance(task_ids, str):
         task_ids = json.loads(task_ids)
 
-    for task_id in task_ids:
-        TaskBundle.create(bundle_id=int(bundle_id), task_id=int(task_id))
-        log.debug(f"Assigned task {task_id} to bundle {bundle_id}")
-
+    bundle_id = int(bundle_id)
+    with database.atomic():
+        (
+            TaskBundle.insert_many(
+                [
+                    { "task_id": task_id, "bundle_id": bundle_id } for task_id in map(int, task_ids)
+                ]
+            ).execute()
+        )
+    log.info(f"Added {len(task_ids)} tasks to bundle {bundle_id}")
+    
     return None
 
 

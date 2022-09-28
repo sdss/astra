@@ -1329,6 +1329,10 @@ class WhiteDwarfLineRatiosOutput(AstraOutputBaseModel):
     wavelength_start = FloatField()
     wavelength_end = FloatField()
     line_ratio = FloatField()
+
+class WhiteDwarfClassifierOutput(AstraOutputBaseModel):
+
+    wd_type = TextField()
     
 
 class SlamOutput(AstraOutputBaseModel):

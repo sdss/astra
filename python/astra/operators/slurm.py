@@ -87,6 +87,7 @@ class SlurmOperator(BaseOperator):
         min_bundles_per_slurm_job=1,
         max_parallel_tasks_per_slurm_job=32,
         implicit_node_sharing=False,
+        per_bundle_parallelism=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -96,6 +97,7 @@ class SlurmOperator(BaseOperator):
         self.min_bundles_per_slurm_job = min_bundles_per_slurm_job
         self.max_parallel_tasks_per_slurm_job = max_parallel_tasks_per_slurm_job
         self.implicit_node_sharing = implicit_node_sharing
+        self.per_bundle_parallelism = per_bundle_parallelism
 
     def execute(self, context):
 
@@ -202,9 +204,15 @@ class SlurmOperator(BaseOperator):
             group_bundle_ids = [[bundle.id] for bundle in bundles]
 
         # Add executables for each bundle.
+        if self.per_bundle_parallelism is not None:
+            options = f"-p {self.per_bundle_parallelism} "
+        else:
+            options = ""
+
         for group_bundle in group_bundle_ids:
             group_bundle_str = " ".join([f"{id:.0f}" for id in group_bundle])
-            executable = f"astra execute bundles {group_bundle_str}"
+            suffix = "s" if len(group_bundle) > 1 else ""
+            executable = f"astra execute bundle{suffix} {options}{group_bundle_str}"
             q.append(executable)
             log.info(f"Added '{executable}' to queue {q}")
 
