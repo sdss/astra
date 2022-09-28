@@ -1,1 +1,1 @@
-from astra.contrib.wd.base import WhiteDwarfStellarParameters, LineRatios
+from astra.contrib.wd.base import WhiteDwarfStellarParameters, Classify

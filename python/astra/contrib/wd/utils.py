@@ -78,7 +78,7 @@ def line_features(
         p = np.poly1d(func_poly)
 
         for j, (start, end) in enumerate(wavelength_regions):
-            line_mask = (end > wavelength) * (wavelength > start)
+            line_mask = (end > wavelength) * (wavelength > start) * np.isfinite(flux)
             features[i, j] = np.mean(flux[line_mask]) / np.mean(p(wavelength[line_mask]))
     return features
 

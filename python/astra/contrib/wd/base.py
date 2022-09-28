@@ -1,18 +1,18 @@
 import numpy as np
 import os
 import scipy.optimize as op
+import pickle
 
 from astra import log, __version__
 from astropy.nddata import StdDevUncertainty, InverseVariance
 from astra.utils import expand_path
 from astra.base import TaskInstance, TupleParameter, Parameter
-from astra.database.astradb import WhiteDwarfOutput, WhiteDwarfLineRatiosOutput
+from astra.database.astradb import WhiteDwarfOutput, WhiteDwarfLineRatiosOutput, WhiteDwarfClassifierOutput
 from astra.tools.spectrum import Spectrum1D
 from astra.contrib.wd.utils import line_features
 
 from astra.sdss.datamodels.base import get_extname
 from astra.sdss.datamodels.pipeline import create_pipeline_product
-
 
 from astra.contrib.wd.fitting import (
     norm_spectra,
@@ -24,7 +24,9 @@ from astra.contrib.wd.fitting import (
 
 data_dir = expand_path("$MWM_ASTRA/component_data/wd/")
 
-class LineRatios(TaskInstance):
+class Classify(TaskInstance):
+
+    model_path = Parameter(default="$MWM_ASTRA/component_data/wd/training_file", bundled=True)
 
     # Don't want to store large tuples in the database for every single task.
     # Instead we will default to None and specify defaults.
@@ -67,12 +69,16 @@ class LineRatios(TaskInstance):
             [7100, 9000],
         )
 
+        with open(expand_path(self.model_path), "rb") as fp:
+            classifier = pickle.load(fp)
+
         for task, data_products, parameters in self.iterable():
-            wavelength_regions = parameters["wavelength_regions"] or default_wavelength_regions
-            polyfit_regions = parameters["polyfit_regions"] or default_polyfit_regions
-            polyfit_order = parameters["polyfit_order"]
+            wavelength_regions = parameters.get("wavelength_regions", None) or default_wavelength_regions
+            polyfit_regions = parameters.get("polyfit_regions", None) or default_polyfit_regions
+            polyfit_order = parameters.get("polyfit_order", 5)
 
             all_features = []
+            all_classifications = []
             for data_product in data_products:
                 # Only use BOSS APO spectra.
                 # TODO: Revise when we have BOSS LCO spectra.
@@ -84,6 +90,10 @@ class LineRatios(TaskInstance):
                     polyfit_regions=polyfit_regions,
                     polyfit_order=polyfit_order,
                 )
+
+                for wd_type in classifier.predict(all_line_ratios):
+                    all_classifications.append({"wd_type": wd_type})
+                
                 for line_ratios in all_line_ratios:
                     for (wl_start, wl_end), line_ratio in zip(wavelength_regions, line_ratios):
                         all_features.append(
@@ -96,6 +106,9 @@ class LineRatios(TaskInstance):
 
             # Create outputs: one for every line feature.
             task.create_or_update_outputs(WhiteDwarfLineRatiosOutput, all_features)
+            task.create_or_update_outputs(WhiteDwarfClassifierOutput, all_classifications)
+
+            log.info(f"Task {task} with data products {data_products} classified as {all_classifications}")
             
         return None
 
