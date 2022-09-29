@@ -10,4 +10,5 @@ sdss-access
 sdssdb
 sdsstools
 specutils
+python-forge
 apache-airflow
