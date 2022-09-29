@@ -3,33 +3,9 @@ import numpy as np
 from typing import Union, List, Callable, Optional, Dict
 from astropy.io import fits
 from astra import log, __version__ as astra_version
+from peewee import Alias, JOIN, fn
 from astra.database.astradb import Source
 
-
-from peewee import Alias, JOIN, fn
-from sdssdb.peewee.sdss5db import database as sdss5_database
-
-sdss5_database.set_profile("operations")
-
-from sdssdb.peewee.sdss5db.catalogdb import (
-    Catalog,
-    CatalogToTIC_v8,
-    TIC_v8 as TIC,
-    TwoMassPSC,
-)
-from sdssdb.peewee.sdss5db.targetdb import Target, CartonToTarget, Carton
-
-from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR2 as Gaia
-
-"""
-try:
-    from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR3 as Gaia
-except ImportError:
-    from sdssdb.peewee.sdss5db.catalogdb import Gaia_DR2 as Gaia
-    log.warning(
-        f"Gaia DR3 not yet available in sdssdb.peewee.sdss5db.catalogdb. Using Gaia DR2."
-    )
-"""
 
 from healpy import ang2pix
 
@@ -240,6 +216,8 @@ def get_cartons_and_programs(source: Union[Source, int]):
         and a list of program names (e.g., `mwm_snc`).
     """
 
+    from astra.database.targetdb import Target, CartonToTarget, Carton
+
     catalogid = get_catalog_identifier(source)
 
     sq = (
@@ -268,7 +246,7 @@ def get_cartons_and_programs(source: Union[Source, int]):
     return (cartons, programs)
 
 
-def get_first_carton(source: Union[Source, int]) -> Carton:
+def get_first_carton(source: Union[Source, int]):
     """
     Return the first carton this source was assigned to.
 
@@ -287,6 +265,8 @@ def get_first_carton(source: Union[Source, int]) -> Carton:
     In summary, the first carton will be correct for the FPS-era data, but may be
     incorrect for the plate-era data.
     """
+
+    from astra.database.targetdb import Target, CartonToTarget, Carton
 
     catalogid = get_catalog_identifier(source)
 
@@ -308,6 +288,14 @@ def get_auxiliary_source_data(source: Union[Source, int]):
     :param source:
         The astronomical source, or the SDSS-V catalog identifier.
     """
+
+    from astra.database.catalogdb import (
+        Catalog,
+        CatalogToTIC_v8,
+        TIC_v8 as TIC,
+        TwoMassPSC,
+        Gaia_DR2 as Gaia
+    )
 
     catalogid = get_catalog_identifier(source)
     tic_dr = TIC.__name__.split("_")[-1]
@@ -714,6 +702,8 @@ def create_primary_hdu_cards(
         Number of sides used in Healpix (lon, lat) mapping (default: 128).
     """
     catalogid = get_catalog_identifier(source)
+
+    from astra.database.catalogdb import Catalog
 
     # Sky position.
     ra, dec = (

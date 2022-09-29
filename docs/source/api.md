@@ -7,6 +7,7 @@
     :recursive:
 
     astra.base
+    astra.contrib
     astra.database
     astra.operators
     astra.sdss

@@ -8,17 +8,10 @@ from astropy.time import Time
 from airflow.exceptions import AirflowSkipException
 from peewee import fn
 from typing import Optional, List
-from astra.database.catalogdb import (
-    Catalog,
-    # CatalogToGaia_DR3,
-    Gaia_DR3,
-    SDSS_DR17_APOGEE_Allstarmerge as Star,
-    # SDSS_DR17_APOGEE_Allvisits as Visit
-)
 
 from astra.sdss.operators.base import SDSSOperator
 
-
+'''
 try:
     from astra.database.catalogdb import SDSS_DR17_APOGEE_Allvisits
 except ImportError:
@@ -38,7 +31,7 @@ except ImportError:
 else:
     Visit = SDSS_DR17_APOGEE_Allvisits
     print(f"ANDY: remove SDSS_DR17_APOGEE_Allvisits in {__file__}")
-
+'''
 
 class ApogeeOperator(SDSSOperator):
     def __init__(
@@ -84,6 +77,15 @@ class ApStarOperator(ApogeeOperator):
         """
         ds = context.get("ds", None)
         prev_ds = context.get("prev_ds", None)
+
+        from astra.database.catalogdb import (
+            Catalog,
+            # CatalogToGaia_DR3,
+            Gaia_DR3,
+            SDSS_DR17_APOGEE_Allstarmerge as Star,
+            SDSS_DR17_APOGEE_Allvisits as Visit
+            # SDSS_DR17_APOGEE_Allvisits as Visit
+        )
 
         # I first thought I'd have to query Star, matched on Visit, but actually the Star merge table
         # munges columns like 'telescope' -> 'telescopes' (all visits) and ignores things like field.
@@ -212,6 +214,15 @@ class ApVisitOperator(ApogeeOperator):
         :param context:
             The Airflow context dictionary.
         """
+
+        from astra.database.catalogdb import (
+            Catalog,
+            # CatalogToGaia_DR3,
+            Gaia_DR3,
+            SDSS_DR17_APOGEE_Allstarmerge as Star,
+            SDSS_DR17_APOGEE_Allvisits as Visit
+            # SDSS_DR17_APOGEE_Allvisits as Visit
+        )
         ds = context.get("ds", None)
         prev_ds = context.get("prev_ds", None)
 

@@ -16,7 +16,13 @@ from astra.contrib.apogeenet.utils import get_metadata, create_bitmask
 
 class StellarParameters(TaskInstance):
 
-    """Estimate stellar parameters for APOGEE spectra given a pre-trained neural network."""
+    """
+    Estimate stellar parameters for APOGEE spectra given a pre-trained neural network.
+
+    :param model_path:
+        A model path.
+
+    """
 
     model_path = Parameter(
         default="$MWM_ASTRA/component_data/APOGEENet/model.pt", bundled=True
@@ -25,6 +31,9 @@ class StellarParameters(TaskInstance):
     large_error = Parameter(default=1e10)
 
     data_slice = Parameter(default=[0, 1])  # only affects apStar data products
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
     def execute(self):
         """Execute the task."""

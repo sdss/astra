@@ -43,6 +43,14 @@ extensions = [
     "sphinx_inline_tabs",
 ]
 autosummary_generate = True
+autosummary_mock_imports = [
+    "astra.database.catalogdb",
+    "astra.database.targetdb",
+    "astra.database.apogee_drpdb",
+    "astra.database.sdss5db",
+    "astra.contrib.thecannon",
+    "astra.contrib.thecannon_new"
+]
 
 add_module_names = False
 autodoc_default_flags = ["members"]
