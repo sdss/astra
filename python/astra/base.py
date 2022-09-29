@@ -4,6 +4,7 @@ import abc
 import os
 import inspect
 import json
+import forge
 import numpy as np
 import datetime
 from collections.abc import Iterable
@@ -232,7 +233,7 @@ class TaskInstanceMeta(type):
 
     """A metaclass for decorating ``TaskInstance`` execute functions."""
 
-    def __new__(cls, class_name, bases, attrs):
+    def __new__(cls, class_name, bases, namespace):
         # Decorate stages for timing / exception tracking.
         stages = {
             "pre_execute": decorate_pre_post_execute,
@@ -240,9 +241,49 @@ class TaskInstanceMeta(type):
             "post_execute": decorate_pre_post_execute,
         }
         for stage, decorator in stages.items():
-            if stage in attrs:
-                attrs[stage] = decorator(attrs[stage])
-        return type.__new__(cls, class_name, bases, attrs)
+            if stage in namespace:
+                namespace[stage] = decorator(namespace[stage])
+
+        if bases != (object, ):
+            # assume it doesnt have an __init__
+            try:
+                __init__ = namespace["__init__"]
+            except KeyError:
+                for base in bases:
+                    for mro in base.__mro__:
+                        try:
+                            __init__ = mro.__init__
+                        except AttributeError:
+                            continue
+                        else:
+                            break
+                    else:
+                        continue
+                    break
+                
+            forge_args = [forge.arg("self")]
+            forge_kwargs = [
+                forge.arg("input_data_products", default=None),
+            ]
+
+            # Need to order the positional things first.
+            for k, v in namespace.items():
+                if isinstance(v, Parameter):
+                    try:
+                        default = v.default
+                    except:
+                        forge_args.append(forge.arg(k))
+                    else:
+                        forge_kwargs.append(forge.kwarg(k, default=default))
+
+            #forge_kwargs.append(forge.kwarg("context", default=None))
+
+            namespace["__init__"] = forge.sign(
+                *(forge_args + forge_kwargs), 
+                **forge.kwargs
+            )(__init__)
+
+        return type.__new__(cls, class_name, bases, namespace)        
 
 
 class TaskInstance(object, metaclass=TaskInstanceMeta):
