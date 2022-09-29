@@ -503,7 +503,11 @@ def get_extname(spectrum, data_product):
     elif data_product.filetype in ("mwmVisit", "mwmStar"):
         observatory, instrument = (spectrum.meta["OBSRVTRY"], spectrum.meta["INSTRMNT"])
     else:
-        raise ValueError(f"Cannot get extension name for file {data_product}")
+        # Could be a `full` filetype. Let's just try:
+        try:
+            observatory, instrument = (spectrum.meta["OBSRVTRY"], spectrum.meta["INSTRMNT"])
+        except:
+            raise ValueError(f"Cannot get extension name for file {data_product}")
     return _get_extname(instrument, observatory)
 
 

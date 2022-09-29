@@ -104,7 +104,10 @@ def create_pipeline_product(
         data_model_cards.append((k.upper(), data_product.kwargs[k], None))
 
     # Add a comment with the URL
-    url = SDSSPath(data_product.release).url(data_product.filetype, **data_product.kwargs)
+    try:
+        url = SDSSPath(data_product.release).url(data_product.filetype, **data_product.kwargs)
+    except:
+        url = "NO URL COULD BE GENERATED"
     # it's a long URL, split it by the version
 
     data_model_cards.extend([

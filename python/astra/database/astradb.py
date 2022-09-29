@@ -47,6 +47,7 @@ else:
     # BinaryJSONField, but that class is incompatible with PeeweeDatabaseConnection, and it
     # doesn't look like we need anything different from the existing PostgresqlDatabase class.
     from playhouse.postgres_ext import BinaryJSONField as JSONField
+    from playhouse.postgres_ext import ArrayField
 
     _database_config = config.get("astra_database", {})
 
@@ -944,6 +945,33 @@ class TheCannonOutput(AstraOutputBaseModel):
     rho_cr_h_ni_h = FloatField(default=0)
     rho_mn_h_ni_h = FloatField(default=0)
     rho_co_h_ni_h = FloatField(default=0)
+
+
+class ZetaPayneOutput(AstraOutputBaseModel):
+    snr = FloatField()
+
+    teff = FloatField(null=True)
+    e_teff = FloatField(null=True)
+    logg = FloatField(null=True)
+    e_logg = FloatField(null=True)
+    m_h = FloatField(null=True)
+    e_m_h = FloatField(null=True)
+    vsini = FloatField(null=True)
+    e_vsini = FloatField(null=True)
+    v_micro = FloatField(null=True)
+    e_v_micro = FloatField(null=True)
+    v_rel = FloatField(null=True)
+    e_v_rel = FloatField(null=True)
+
+    # continuum coefficients
+    try:
+        theta = ArrayField(FloatField)
+    except:
+        log.exception(f"Could not create ArrayField, ignoring..")
+
+    chi_sq = FloatField()
+    reduced_chi_sq = FloatField()
+
 
 
 class ThePayneOutput(AstraOutputBaseModel):
