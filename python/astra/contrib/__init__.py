@@ -1,1 +1,1 @@
-"""Contributed analysis codes."""
+"""Contributed pipelines."""
