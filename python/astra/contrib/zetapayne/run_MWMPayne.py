@@ -146,15 +146,15 @@ def fit_spectrum(spectrum, NN, opt, logger, constraints={}):
     except:
         print(f"Plots failed, .. continuing ")
         
-    result = dict(
-        snr=snr,
+
+    keys = ('teff', 'e_teff', 'logg', 'e_logg', 'vsini', 'e_vsini', 'v_micro', 'e_v_micro', 'fe_h', 'e_fe_h', 'v_rel', 'e_v_rel')
+    result = dict(zip(keys, db_values))
+    result.update(
         theta=db_cheb,
+        snr=snr,
         chi_sq=CHI2,
         reduced_chi_sq=CHI2/(flux.size - len(db_values) - 1)
     )
-    keys = ('teff', 'e_teff', 'logg', 'e_logg', 'vsini', 'e_vsini', 'v_micro', 'e_v_micro', 'm_h', 'e_m_h', 'v_rel', 'e_v_rel')
-    result.update(dict(zip(keys, db_values)))
-
     # Create a model spectrum
     # Resample model flux back to observed spectrum
     model_flux = np.interp(
