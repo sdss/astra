@@ -109,7 +109,7 @@ class ZetaPayne(TaskInstance):
         
         log.info(f"Running..")
         for task, (data_product, ), parameters in self.iterable():
-            results, database_results = ({}, [])
+            results, database_results, header_groups = ({}, [], {})
             for spectrum in SpectrumList.read(data_product.path):
 
                 if spectrum is None:
@@ -134,12 +134,23 @@ class ZetaPayne(TaskInstance):
 
                 extname = get_extname(spectrum, data_product)
                 results[extname] = hdu_results
+                header_groups[extname] = [
+                    ("TEFF", "STELLAR LABELS"),
+                    ("THETA", "CHEBYSHEV POLYNOMIAL COEFFICIENTS"),
+                    ("SNR", "SUMMARY STATISTICS"),
+                    ("MODEL_FLUX", "MODEL SPECTRA")
+                ]                
 
             with database.atomic():
                 task.create_or_update_outputs(ZetaPayneOutput, database_results)
 
             # Create astraStar/astraVisit data product and link it to this task.
-            create_pipeline_product(task, data_product, results)
+            create_pipeline_product(
+                task, 
+                data_product, 
+                results,
+                header_groups=header_groups
+            )
 
 
 
