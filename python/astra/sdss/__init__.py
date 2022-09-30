@@ -1,1 +1,1 @@
-SDSS data models, operators, and utilities.
+"""SDSS data models, operators, and utilities."""
