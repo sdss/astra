@@ -276,8 +276,6 @@ def resample_visit_spectra(
                 np.uint64
             )
 
-
-
     return (
         resampled_flux,
         resampled_flux_error,
