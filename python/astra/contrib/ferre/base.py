@@ -1,4 +1,4 @@
-from mimetypes import knownfiles
+"""Task for executing FERRE."""
 import os
 import numpy as np
 import subprocess
@@ -7,9 +7,9 @@ import pickle
 from tempfile import mkdtemp
 
 from astra import log, __version__
-from astra.base import ExecutableTask, Parameter, TupleParameter, DictParameter
+from astra.base import TaskInstance, Parameter, TupleParameter, DictParameter
 from astra.tools.spectrum import Spectrum1D
-from astra.contrib.ferre import bitmask, utils
+#from astra.contrib.ferre import bitmask, utils
 from astra.utils import flatten, executable, expand_path, nested_list
 from astra.database.astradb import (
     database,
@@ -19,10 +19,10 @@ from astra.database.astradb import (
     TaskOutput,
     FerreOutput,
 )
-from astra.operators.sdss import get_apvisit_metadata
+#from astra.operators.sdss import get_apvisit_metadata
 
 
-class Ferre(ExecutableTask):
+class Ferre(TaskInstance):
 
     header_path = Parameter("header_path", bundled=True)
     initial_parameters = DictParameter("initial_parameters", default=None)

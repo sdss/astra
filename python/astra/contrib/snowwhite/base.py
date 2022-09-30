@@ -9,12 +9,12 @@ from astra.utils import expand_path
 from astra.base import TaskInstance, TupleParameter, Parameter
 from astra.database.astradb import WhiteDwarfOutput, WhiteDwarfLineRatiosOutput, WhiteDwarfClassifierOutput
 from astra.tools.spectrum import Spectrum1D
-from astra.contrib.wd.utils import line_features
+from astra.contrib.snowwhite.utils import line_features
 
 from astra.sdss.datamodels.base import get_extname
 from astra.sdss.datamodels.pipeline import create_pipeline_product
 
-from astra.contrib.wd.fitting import (
+from astra.contrib.snowwhite.fitting import (
     norm_spectra,
     fit_line,
     fit_func,

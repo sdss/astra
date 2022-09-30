@@ -1,14 +1,20 @@
 import sys, os
-from SDSS import rdspec, Spec1D
-from Network import Network
-from Fit import Fit
-from UncertFit import UncertFit
+#from SDSS import rdspec, Spec1D
+#from Network import Network
+#from Fit import Fit
+#from UncertFit import UncertFit
 import numpy as np
 import matplotlib.pyplot as plt
-from common import param_names, param_units
-from fit_common import save_figure
+#from common import param_names, param_units
+#from fit_common import save_figure
 from multiprocessing import Pool, Lock
 
+from astra.contrib.zetapayne.SDSS import rdspec, Spec1D
+from astra.contrib.zetapayne.Network import Network
+from astra.contrib.zetapayne.Fit import Fit
+from astra.contrib.zetapayne.UncertFit import UncertFit
+from astra.contrib.zetapayne.common import param_names, param_units
+from astra.contrib.zetapayne.fit_common import safe_figure
 
 lock = Lock()
 

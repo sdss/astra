@@ -7,3 +7,13 @@ furo
 sphinx_copybutton
 sphinx_design
 sphinx_inline_tabs
+scikit-learn
+matplotlib
+torch
+torchvision
+# For sm_86 support, which some notchpeak GPUs require.
+# See https://github.com/pytorch/pytorch/issues/45028
+#- cudatoolkit=11
+ipyparallel # for slam
+passlib
+joblib 

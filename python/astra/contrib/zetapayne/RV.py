@@ -1,6 +1,8 @@
 import math
 import numpy as np
-from Rydberg import Rydberg
+#from Rydberg import Rydberg
+
+from astra.contrib.zetapayne.Rydberg import Rydberg
 
 
 class RV_corrector:

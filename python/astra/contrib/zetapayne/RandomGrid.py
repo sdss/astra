@@ -2,7 +2,9 @@ import sys
 import numpy as np
 from scipy.interpolate import interpn
 from multiprocessing import Pool
-from Grid import *
+#from Grid import *
+
+from astra.contrib.zetapayne.Grid import *
 
 class RandomGrid:
 

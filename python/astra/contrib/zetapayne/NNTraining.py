@@ -25,8 +25,10 @@ import os
 import torch
 import time
 from torch.autograd import Variable
-from RAdam import RAdam
-from bisect import bisect
+#from RAdam import RAdam
+#from bisect import bisect
+from astra.contrib.zetapayne.RAdam import RAdam
+from astra.contrib.zetapayne.bisect import bisect
 
 #===================================================================================================
 # simple multi-layer perceptron model

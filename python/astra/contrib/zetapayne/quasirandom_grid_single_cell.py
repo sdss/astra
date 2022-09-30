@@ -2,10 +2,13 @@ import sys, shutil
 import os, time
 import numpy as np
 from random_grid_common import *
-import sobol_seq
+#import sobol_seq
 from scipy.interpolate import interp1d
 from shutil import copyfile
-from CustomPool import CustomPool
+#from CustomPool import CustomPool
+
+from astra.contrib.zetapayne import sobol_seq
+from astra.contrib.zetapayne.CustomPool import CustomPool
 
 opt_fn = sys.argv[1]
 opt = parse_inp(opt_fn)

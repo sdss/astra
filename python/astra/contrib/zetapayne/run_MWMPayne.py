@@ -1,22 +1,22 @@
 import os, sys
 import numpy as np
-from bisect import bisect
-from Network import Network
-from common import param_names, param_units, parse_inp
-from Fit import Fit
-from fit_common import save_figure
-from UncertFit import UncertFit
-from random_grid_common import parse_inp
+from astra.contrib.zetapayne.bisect import bisect
+from astra.contrib.zetapayne.Network import Network
+from astra.contrib.zetapayne.common import param_names, param_units, parse_inp
+from astra.contrib.zetapayne.Fit import Fit
+from astra.contrib.zetapayne.fit_common import save_figure
+from astra.contrib.zetapayne.UncertFit import UncertFit
+from astra.contrib.zetapayne.random_grid_common import parse_inp
 from multiprocessing import Pool, Lock, cpu_count
-from FitLogger import FitLoggerDB
+from astra.contrib.zetapayne.FitLogger import FitLoggerDB
 import matplotlib.pyplot as plt
-from SpectrumLoader import SpectrumLoader
-from LSF import *
-from DER_SNR import DER_SNR
+from astra.contrib.zetapayne.SpectrumLoader import SpectrumLoader
+from astra.contrib.zetapayne.LSF import *
+from astra.contrib.zetapayne.DER_SNR import DER_SNR
 import traceback
 import datetime
 
-from astropy.nddata import StdDevUncertainty
+from astra.contrib.zetapayne.astropy.nddata import StdDevUncertainty
 
 
 lock = Lock()

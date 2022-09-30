@@ -2,7 +2,9 @@ import sys, gc
 import os
 from math import isnan
 import numpy as np
-from random_grid_common import *
+#from random_grid_common import *
+
+from astra.contrib.zetapayne.random_grid_common import *
 
 
 if len(sys.argv) < 2:

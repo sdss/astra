@@ -1,12 +1,20 @@
 import os, time
 import numpy as np
-from Partition import *
-from run_GSSP import *
-from Grid import *
-from RandomGrid import *
-from Subgrid import *
-from random_grid_common import *
-    
+#from Partition import *
+#from run_GSSP import *
+#from Grid import *
+#from RandomGrid import *
+#from Subgrid import *
+#from random_grid_common import *
+
+from astra.contrib.zetapayne.Partition import *
+from astra.contrib.zetapayne.run_GSSP import *
+from astra.contrib.zetapayne.Grid import *
+from astra.contrib.zetapayne.RandomGrid import *
+from astra.contrib.zetapayne.Subgrid import *
+from astra.contrib.zetapayne.random_grid_common import *
+ 
+
 opt = parse_inp()
 
 if DEBUG:

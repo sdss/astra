@@ -1,11 +1,15 @@
-from common import *
+#from common import *
 import os
 import numpy as np
-from run_GSSP import *
-from Grid import *
-from RandomGrid import *
+#from run_GSSP import *
+#from Grid import *
+#from RandomGrid import *
 from shutil import copyfile
 
+from astra.contrib.zetapayne.common import *
+from astra.contrib.zetapayne.run_GSSP import *
+from astra.contrib.zetapayne.Grid import *
+from astra.contrib.zetapayne.RandomGrid import *
 
 DEBUG = True
 

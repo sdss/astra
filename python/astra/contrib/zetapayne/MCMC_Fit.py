@@ -1,11 +1,11 @@
 import sys,os
 import numpy as np
 import matplotlib.pyplot as plt
-import emcee
-import corner
+#import emcee # TODO
+#import corner # TODO
 from multiprocessing import Pool
-from Fit import Fit
-
+#from Fit import Fit
+from astra.contrib.zetapayne.Fit import Fit
 
 def lnlike(x, data):
     chi2 = data[0]

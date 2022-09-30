@@ -1,10 +1,12 @@
 import sys,os
 import numpy as np
 from astropy.io import fits
-from SDSS import rdspec, Spec1D
-from DER_SNR import DER_SNR
+#from SDSS import rdspec, Spec1D
+#from DER_SNR import DER_SNR
 import re
 
+from astra.contrib.zetapayne.SDSS import rdspec, Spec1D
+from astra.contrib.zetapayne.DER_SNR import DER_SNR
 
 class SpectrumData:
     def __init__(self, wave, flux, err):

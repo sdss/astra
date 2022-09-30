@@ -1,6 +1,8 @@
-from astra.utils.bitmask import BitFlagNameMap
+#from astra.utils.bitmask import BitFlagNameMap
 from collections import OrderedDict
 
+class BitFlagNameMap:
+    pass
 
 class ParamBitMask(BitFlagNameMap):
 

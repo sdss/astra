@@ -1,5 +1,5 @@
 import sys, os
-from NNTraining import NNTraining
+from astra.contrib.zetapayne.NNTraining import NNTraining
 
 if len(sys.argv)<3:
     print('Usage:', sys.argv[0], '<batch_size> <num_neurons> <path_to_NPZ_file>')

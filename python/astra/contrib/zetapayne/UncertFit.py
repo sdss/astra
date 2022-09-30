@@ -1,8 +1,11 @@
 import math
 import numpy as np
-from common import *
+#from common import *
 from multiprocessing import Pool
-from RV import get_RV_CCF_H_lines
+#from RV import get_RV_CCF_H_lines
+
+from astra.contrib.zetapayne.common import *
+from astra.contrib.zetapayne.RV import get_RV_CCF_H_lines
 
 chi2_func = None
 

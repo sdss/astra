@@ -4,16 +4,24 @@ import numpy as np
 from astropy.io import fits
 import matplotlib.pyplot as plt
 from scipy import interpolate
-from bisect import bisect
-from DER_SNR import DER_SNR
-from common import param_names, param_units
-from Network import Network
-from Fit import Fit
+#from bisect import bisect
+#from DER_SNR import DER_SNR
+#from common import param_names, param_units
+#from Network import Network
+#from Fit import Fit
 from numpy.polynomial.chebyshev import chebval
-from fit_common import save_figure
-from UncertFit import UncertFit
+#from fit_common import save_figure
+#from UncertFit import UncertFit
 from multiprocessing import Pool, Lock
 
+from astra.contrib.zetapayne.bisect import bisect
+from astra.contrib.zetapayne.DER_SNR import DER_SNR
+from astra.contrib.zetapayne.common import param_names, param_units
+from astra.contrib.zetapayne.Network import Network
+from astra.contrib.zetapayne.Fit import Fit
+from astra.contrib.zetapayne.fit_common import save_figure
+
+from astra.contrib.zetapayne.UncertFit import UncertFit
 
 lock = Lock()
 

@@ -1,3 +1,5 @@
+"""General FERRE utilities."""
+
 import os
 from tkinter import N
 import numpy as np
