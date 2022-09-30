@@ -20,7 +20,7 @@ from astra.database.astradb import (
     Output,
     ClassifierOutput,
 )
-from astra.base import ExecutableTask, Parameter
+from astra.base import TaskInstance, Parameter
 from astra.tools.spectrum import Spectrum1D, calculate_snr
 from tqdm import tqdm
 
@@ -30,7 +30,7 @@ CUDA_AVAILABLE = torch.cuda.is_available()
 device = torch.device("cuda:0") if CUDA_AVAILABLE else torch.device("cpu")
 
 
-class ClassifySource(ExecutableTask):
+class ClassifySource(TaskInstance):
 
     # model_path = Parameter("model_path", bundled=True)
 
@@ -64,7 +64,7 @@ class ClassifySource(ExecutableTask):
         return results
 
 
-class ClassifyApVisit(ExecutableTask):
+class ClassifyApVisit(TaskInstance):
 
     model_path = Parameter("model_path", bundled=True)
 
@@ -122,7 +122,7 @@ class ClassifyApVisit(ExecutableTask):
         return results
 
 
-class ClassifySpecLite(ExecutableTask):
+class ClassifySpecLite(TaskInstance):
 
     model_path = Parameter("model_path", bundled=True)
 
