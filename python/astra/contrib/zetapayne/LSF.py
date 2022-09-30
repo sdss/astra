@@ -1,9 +1,8 @@
 import math
 import numpy as np
-#from bisect import bisect
+from bisect import bisect
 from scipy.ndimage import gaussian_filter1d
 
-from astra.contrib.zetapayne.bisect import bisect
 
 def gaussian(xx, mu, sigma):
     return np.exp(-0.5*((xx-mu)/sigma)**2)/(sigma * math.sqrt(2*math.pi))

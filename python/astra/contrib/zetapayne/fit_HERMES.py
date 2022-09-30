@@ -4,7 +4,7 @@ import numpy as np
 from astropy.io import fits
 import matplotlib.pyplot as plt
 from scipy import interpolate
-#from bisect import bisect
+from bisect import bisect
 #from DER_SNR import DER_SNR
 #from common import param_names, param_units
 #from Network import Network
@@ -14,7 +14,6 @@ from numpy.polynomial.chebyshev import chebval
 #from UncertFit import UncertFit
 from multiprocessing import Pool, Lock
 
-from astra.contrib.zetapayne.bisect import bisect
 from astra.contrib.zetapayne.DER_SNR import DER_SNR
 from astra.contrib.zetapayne.common import param_names, param_units
 from astra.contrib.zetapayne.Network import Network

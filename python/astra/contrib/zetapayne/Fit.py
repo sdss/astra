@@ -3,14 +3,13 @@ from __future__ import absolute_import, division, print_function # python2 compa
 import math
 import numpy as np
 from scipy.optimize import curve_fit
-#from bisect import bisect
+from bisect import bisect
 from numpy.polynomial.chebyshev import chebval
 #from Network import Network
 from scipy.ndimage import gaussian_filter1d
 #import sobol_seq
 from astra.contrib.zetapayne.Network import Network
 from astra.contrib.zetapayne import sobol_seq
-from astra.contrib.zetapayne.bisect import bisect
 
 def doppler_shift(wavelength, flux, dv):
     '''

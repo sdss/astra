@@ -1,6 +1,6 @@
 import os, sys
 import numpy as np
-from astra.contrib.zetapayne.bisect import bisect
+from bisect import bisect
 from astra.contrib.zetapayne.Network import Network
 from astra.contrib.zetapayne.common import param_names, param_units, parse_inp
 from astra.contrib.zetapayne.Fit import Fit

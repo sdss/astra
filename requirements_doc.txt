@@ -17,3 +17,4 @@ torchvision
 ipyparallel # for slam
 passlib
 joblib 
+pandas

@@ -89,9 +89,9 @@ class ApStarOperator(BaseOperator):
     def execute(
         self,
         context,
-        where=(Star.ngoodvisits > 0) & (Star.catalogid > 0),
         latest_only=True,
     ):
+        where = (Star.ngoodvisits > 0) & (Star.catalogid > 0)
         prev_ds, ds = (context["prev_ds"], context["ds"])
 
         log.info(
