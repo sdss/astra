@@ -152,7 +152,6 @@ def create_boss_hdus(
         **kwargs
     )
     meta.update(meta_combine)
-
     wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)
 
     DATA_HEADER_CARD = ("SPECTRAL DATA", None)
@@ -168,6 +167,7 @@ def create_boss_hdus(
         ("FLUX", flux),
         ("E_FLUX", flux_error),
         ("BITMASK", bitmask),
+        ("WRESL", meta["resampled_wresl"]),
         ("INPUT DATA MODEL KEYWORDS", None),
         ("RELEASE", lambda dp, image: dp.release or "sdss5"),
         ("FILETYPE", lambda dp, image: dp.filetype),
@@ -281,6 +281,7 @@ def create_boss_hdus(
             ("FLUX", combined_flux.reshape(star_data_shape)),
             ("E_FLUX", combined_flux_error.reshape(star_data_shape)),
             ("BITMASK", combined_bitmask.reshape(star_data_shape)),
+            ("WRESL", np.mean(meta["resampled_wresl"][use_in_stack], axis=0)),
         ]
         hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, header)
     else:
@@ -451,7 +452,8 @@ def resample_boss_visit_spectra(
         radial_velocities = get_boss_relative_velocity
 
     additional_meta = []
-    wavelength, v_shift, flux, flux_error, sky_flux, bitmask = ([], [], [], [], [], [])
+
+    wavelength, v_shift, flux, flux_error, sky_flux, bitmask, bad_pixel_mask, wresl = ([], [], [], [], [], [], [], [])
     for i, visit in enumerate(visits):
         path = visit.path if isinstance(visit, DataProduct) else visit
 
@@ -472,6 +474,8 @@ def resample_boss_visit_spectra(
             flux_error.append(image[1].data["IVAR"] ** -0.5)
             sky_flux.append(image[1].data["SKY"])
             bitmask.append(image[1].data["OR_MASK"])
+            bad_pixel_mask.append((image[1].data["IVAR"] == 0))
+            wresl.append(image[1].data["WRESL"])
 
     resampled_wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)
     args = (
@@ -484,6 +488,8 @@ def resample_boss_visit_spectra(
         median_filter_size=median_filter_size,
         median_filter_mode=median_filter_mode,
         gaussian_filter_size=gaussian_filter_size,
+        bad_pixel_mask=bad_pixel_mask,
+        use_smooth_filtered_spectrum_for_bad_pixels=True
     )
     kwds.update(kwargs)
 
@@ -493,6 +499,20 @@ def resample_boss_visit_spectra(
         resampled_bitmask,
     ) = combine.resample_visit_spectra(*args, flux, flux_error, **kwds)
 
+    # Do something dumb(er) for WRESL.
+    # TODO: This is not a good thing to do, but the WRESL looks well behaved but for weird
+    # spikes, and it is well behaved in real life. And i'm time-limited, and only one 
+    # pipeline claims to use wresl
+    resampled_wresl = np.vstack(wresl)
+    V, P = resampled_wresl.shape
+    for i in range(V):
+        bad_wresl = (resampled_wresl[i] == 0) + ~np.isfinite(resampled_wresl[i])
+        resampled_wresl[i, bad_wresl] = np.interp(
+            np.arange(P)[bad_wresl],
+            np.arange(P)[~bad_wresl], 
+            resampled_wresl[i][~bad_wresl]
+        )
+        
     # TODO: have resample_visit_spectra return this so we dont repeat ourselves
     meta = dict(
         crval=crval,
@@ -504,6 +524,7 @@ def resample_boss_visit_spectra(
         median_filter_size=median_filter_size,
         median_filter_mode=median_filter_mode,
         gaussian_filter_size=gaussian_filter_size,
+        resampled_wresl=resampled_wresl,
     )
     if additional_meta:
         meta["v_meta"] = list_to_dict(additional_meta)

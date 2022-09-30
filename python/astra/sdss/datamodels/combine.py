@@ -223,8 +223,9 @@ def resample_visit_spectra(
             (finite,) = np.where(np.isfinite(pixel))
 
             # NOTE: sincint() takes in variance, but returns error
+            chip_var = chip_flux_error**2 if chip_flux_error is not None else None
             ((resampled_chip_flux, resampled_chip_flux_error),) = sincint(
-                pixel[finite], n_res, [[chip_flux, chip_flux_error**2]]
+                pixel[finite], n_res, [[chip_flux, chip_var]]
             )
 
             resampled_flux[i, finite] = resampled_chip_flux
@@ -266,6 +267,7 @@ def resample_visit_spectra(
                         np.abs(resampled_bitmask_flag) > min_bitmask_value
                     ).astype(int)
 
+
     resampled_bitmask = np.zeros(resampled_flux.shape, dtype=np.uint64)
     if bitmask is not None:
         # Sum them together.
@@ -273,6 +275,8 @@ def resample_visit_spectra(
             resampled_bitmask += (resampled_bitmasks[:, :, k] * (2**flag)).astype(
                 np.uint64
             )
+
+
 
     return (
         resampled_flux,
