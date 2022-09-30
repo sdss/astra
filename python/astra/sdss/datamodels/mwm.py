@@ -1,3 +1,5 @@
+"""Create Milky Way Mapper data products (mwmVisit/mwmStar)."""
+
 import datetime
 import os
 import numpy as np

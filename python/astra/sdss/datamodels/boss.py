@@ -1,3 +1,5 @@
+"""Create HDUs in mwmVisit/mwmStar products with BOSS spectra."""
+
 import numpy as np
 from astropy.io import fits
 from astropy.time import Time

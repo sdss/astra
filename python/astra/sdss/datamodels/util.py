@@ -1,9 +1,9 @@
-import numpy as np
+"""General utilities for creating data products."""
 
+import numpy as np
 
 def log_lambda_dispersion(crval, cdelt, num_pixels):
     return 10 ** (crval + cdelt * np.arange(num_pixels))
-
 
 def calculate_snr(flux, flux_error, axis=None):
     snr_pixel = flux / flux_error

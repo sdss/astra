@@ -1,3 +1,5 @@
+"""Redshift, resample, and combine spectra."""
+
 import numpy as np
 import numpy as np
 from collections import OrderedDict

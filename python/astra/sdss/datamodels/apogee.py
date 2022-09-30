@@ -1,3 +1,5 @@
+"""Create HDUs in mwmVisit/mwmStar products with APOGEE spectra."""
+
 import numpy as np
 from astropy.io import fits
 from functools import partial

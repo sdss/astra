@@ -1,3 +1,5 @@
+"""Create pipeline products (e.g., ``astraVisit-*``/``astraStar-*``)."""
+
 from ast import Name
 import os
 import numpy as np
