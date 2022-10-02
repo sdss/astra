@@ -8,7 +8,7 @@ from astropy.time import Time
 from sdss_access import SDSSPath
 from typing import Union, List, Callable, Optional, Dict, Tuple
 
-from astra import log, __version__ as astra_version
+from astra import log, __version__ as v_astra
 
 from astra.base import TaskInstance, Parameter
 from astra.database.astradb import (
@@ -18,6 +18,7 @@ from astra.database.astradb import (
     SourceDataProduct,
     TaskOutputDataProducts,
 )
+from astra.utils import expand_path
 from astra.sdss.datamodels import base, apogee, boss
 
 
@@ -210,23 +211,27 @@ class CreateMWMVisitStarProducts(TaskInstance):
 
             catalogid = parameters["catalogid"]
 
-            print(f"Creating products for {catalogid}")
+            log.info(f"Creating products for {catalogid}")
             hdu_visit_list, hdu_star_list, meta = create_mwm_data_products(
                 catalogid, input_data_products=data_products
             )
-            print(f"Created HDUs for {catalogid}")
+            log.info(f"Created HDUs for {catalogid}")
             # Is there any data in the stacked spectra?
             any_stacked_spectra = sum([sum(hdu.data["IN_STACK"]) for hdu in hdu_visit_list if hdu.size > 0]) > 0
             
             kwds = dict(
-                catalogid=catalogid,
-                astra_version=astra_version,
+                cat_id=catalogid,
+                v_astra=v_astra,
                 run2d=self.run2d,
                 apred=self.apred,
             )
             # Write to disk.
-            mwmVisit_path = sdss_path.full("mwmVisit", **kwds)
-            mwmStar_path = sdss_path.full("mwmStar", **kwds)
+            log.warn("Setting mwmVisit/mwmStar paths by hand because we are waiting on a new release of sdss_access") # TODO
+            catalogid_groups = f"{catalogid % 1_000:.0f}/{catalogid & 1_000:.0f}"
+            mwmStar_path = expand_path("$MWM_ASTRA/{v_astra}/{run2d}-{apred}/spectra/star/{catalogid_groups}/mwmStar-{v_astra}-{cat_id}.fits".format(catalogid_groups=catalogid_groups, **kwds))
+            mwmVisit_path = expand_path("$MWM_ASTRA/{v_astra}/{run2d}-{apred}/spectra/visit/{catalogid_groups}/mwmVisit-{v_astra}-{cat_id}.fits".format(catalogid_groups=catalogid_groups, **kwds))
+            #mwmVisit_path = sdss_path.full("mwmVisit", **kwds)
+            #mwmStar_path = sdss_path.full("mwmStar", **kwds)
 
             # Create necessary folders
             os.makedirs(os.path.dirname(mwmVisit_path), exist_ok=True)

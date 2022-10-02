@@ -280,7 +280,7 @@ def create_boss_hdus(
     hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, header)
     if any(use_in_stack):
         snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
-        star_data_shape = ((1, -1))
+        star_data_shape = (1, -1)
         star_mappings = [
             DATA_HEADER_CARD,
             ("SNR", np.array([snr_star]).reshape(star_data_shape)),
@@ -288,7 +288,7 @@ def create_boss_hdus(
             ("FLUX", combined_flux.reshape(star_data_shape)),
             ("E_FLUX", combined_flux_error.reshape(star_data_shape)),
             ("BITMASK", combined_bitmask.reshape(star_data_shape)),
-            ("WRESL", np.mean(meta["resampled_wresl"][use_in_stack], axis=0)),
+            ("WRESL", np.nanmedian(meta["resampled_wresl"][use_in_stack], axis=0).reshape(star_data_shape)),
         ]
         hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, header)
     else:
@@ -514,11 +514,17 @@ def resample_boss_visit_spectra(
     V, P = resampled_wresl.shape
     for i in range(V):
         bad_wresl = (resampled_wresl[i] == 0) + ~np.isfinite(resampled_wresl[i])
-        resampled_wresl[i, bad_wresl] = np.interp(
-            np.arange(P)[bad_wresl],
-            np.arange(P)[~bad_wresl], 
-            resampled_wresl[i][~bad_wresl]
-        )
+        if np.all(bad_wresl):
+            # Some images have no WRESL values (e.g., zeros everywhere).
+            resampled_wresl[i] = np.nan
+        else:                
+            resampled_wresl[i, bad_wresl] = np.interp(
+                np.arange(P)[bad_wresl],
+                np.arange(P)[~bad_wresl], 
+                resampled_wresl[i][~bad_wresl],
+                left=np.nan,
+                right=np.nan
+            )
         
     # TODO: have resample_visit_spectra return this so we dont repeat ourselves
     meta = dict(
