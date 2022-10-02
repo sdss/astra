@@ -243,7 +243,9 @@ class TaskInstanceMeta(type):
         for stage, decorator in stages.items():
             if stage in namespace:
                 namespace[stage] = decorator(namespace[stage])
-
+        '''
+        # TODO: temporarily disabld until I fix the task.instance().execute() issue with multiple contexts
+        #       ..and to write tests for it
         if bases != (object, ):
             # assume it doesnt have an __init__
             try:
@@ -282,7 +284,7 @@ class TaskInstanceMeta(type):
                 *(forge_args + forge_kwargs), 
                 **forge.kwargs
             )(__init__)
-
+            '''
         return type.__new__(cls, class_name, bases, namespace)        
 
 
@@ -326,16 +328,24 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         return instance
 
     @classmethod
-    def from_bundle(cls, bundle, strict=True):
+    def from_bundle(cls, bundle, only_incomplete=False, strict=True):
         """
         Create a TaskInstance from a database bundle.
         """
         klass = _get_task_instance_class(bundle, Bundle, strict)
 
         # Create context.
-        # TODO: rewrite this query so it is faster when you hvae ~500,000 tasks in one bundle
+        q = (
+            Task
+            .select()
+            .join(TaskBundle)
+            .where(TaskBundle.bundle_id == bundle.id)
+        )
+        if only_incomplete:
+            log.warn(f"Restricting to tasks in bundle {bundle} that are incomplete")
+            q = q.where(Task.status != Status.get(description="completed"))
 
-        tasks = list(bundle.tasks)
+        tasks = list(tasks)
         bundle_size = len(tasks)
         context = {
             "input_data_products": [task.input_data_products for task in tasks],
@@ -498,7 +508,9 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
 
         t_init = time()
         for i, item in enumerate(self.context["iterable"]):
+
             yield item
+            
             if stage is not None:
                 t_iterable = time() - t_init
                 try:
@@ -507,6 +519,18 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
                     self.context["timing"][key].append(t_iterable)
                 finally:
                     t_init = time()
+
+                # Update status for this task.
+                print(f"update timing??")
+                '''
+                try:
+                    task, idp, parameters = item
+                    task.status_id = 5
+                    task.save()
+                except ValueError:
+                    log.warning(f"Couldn't update task in status {task} {stage}")
+                '''
+
         # fin
 
     def create_output(self, data_model, result):

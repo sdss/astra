@@ -242,69 +242,71 @@ def execute():
     pass
 
 
-def do_work(ids, is_bundle, parallelism=1):
-    from astra import log
-    from astra.utils import deserialize
-    from astra.database.astradb import Task, Bundle
-
-    model = Bundle if is_bundle else Task
-    items = deserialize(ids, model)
-    N = len(items)
-    log.debug(f"Loading {type(ids)} {N} of {ids}")
-
-    if parallelism > 1:
-        from astra import log
-        from joblib import Parallel, delayed
-
-        def f(task):
-            try:
-                task.instance().execute()
-            except:
-                log.exception(f"Exception in executing task {task}:")
-
-        Parallel(parallelism, prefer="processes")(delayed(f)(item) for item in items)    
-    else:
-            
-        for i, item in enumerate(items, start=1):
-            log.info(f"Executing item {i}/{N}: {item}")
-            try:
-                result = item.instance().execute()
-            except:
-                log.exception(f"Exception when executing item {item}")
-            else:
-                log.info(f"Completed item {i}/{N}: {item}")
-    return None
-
-
 @execute.command(hidden=True)
 @click.argument("task_ids", type=int, nargs=-1, required=True)
 def tasks(task_ids):
     """Execute multiple tasks"""
-    return do_work(task_ids, False)
+    from astra import log
+    from astra.utils import deserialize
+    from astra.database.astradb import Task
+
+    for task in deserialize(task_ids, Task):
+        log.info(f"Executing task {task}")
+        try:
+            task.instance().execute()
+        except:
+            log.exception(f"Exception in executing task {task}:")
+        else:
+            log.info(f"Completed task {task}")
+    return None
 
 
 @execute.command()
 @click.argument("task_id", type=int, nargs=1, required=True)
 def task(task_id):
     """Execute a single task"""
-    return do_work([task_id], False)
-
+    return tasks([task_id])
+    
 
 @execute.command(hidden=True)
 @click.option(
-    "--parallelism",
-    "-p",
-    type=int,
-    nargs=1,
-    default=1,
-    help="Number of parallel processes to use",
+    "--only-incomplete",
+    "only_incomplete",
+    is_flag=True,
+    help="Only execute the incomplete tasks in the bundle"
 )
 @click.argument("bundle_ids", type=int, nargs=-1, required=True)
-def bundles(bundle_ids, parallelism):
-    """Execute multiple task bundles"""
-    return do_work(bundle_ids, True, parallelism)
+def bundles(bundle_ids, only_incomplete):
+    """Execute bundles"""
+    from astra import log
+    from astra.utils import deserialize
+    from astra.database.astradb import Bundle
+
+    for bundle in deserialize(bundle_ids, Bundle):
+        log.info(f"Executing {'incomplete' if only_incomplete else 'all'} tasks in bundle {bundle}")
+        try:
+            bundle.instance(only_incomplete=only_incomplete).execute()
+        except:
+            log.exception(f"Exception in executing bundle {bundle}:")
+        else:
+            log.info(f"Completed bundle {bundle}")
+    return None
 
 
+@execute.command()
+@click.option(
+    "--only-incomplete",
+    "only_incomplete",
+    is_flag=True,
+    help="Only execute the incomplete tasks in the bundle"
+)
+@click.argument("bundle_id", type=int, nargs=-1, required=True)
+def bundle(bundle_id, only_incomplete):
+    return bundles([bundle_id], only_incomplete)
+
+
+
+'''
 @execute.command()
 @click.option(
     "--parallelism",
@@ -346,11 +348,11 @@ def bundle(bundle_id, parallelism, all_tasks):
                 log.info(f"Completed task {task}")
                 print(f"Completed task {task} (print)")
 
-        Parallel(parallelism, prefer="processes")(delayed(f)(task) for task in tasks)
+        Parallel(parallelism, prefer="threads")(delayed(f)(task) for task in tasks)
 
     else:
         return do_work([bundle_id], True)
-
+'''
 
 if __name__ == "__main__":
     cli(obj=dict())
