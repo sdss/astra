@@ -127,13 +127,12 @@ def estimate_labels(
             labels = (p_opt + 0.5) * (x_max - x_min) + x_min
             e_labels = np.sqrt(np.diag(p_cov)) * (x_max - x_min)
 
-            result = OrderedDict([("snr", spectrum.meta["SNR"][i])])
-            result.update(OrderedDict(zip(label_names, labels)))
+            result = OrderedDict(zip(label_names, labels))
             result.update(OrderedDict(zip([f"e_{ln}" for ln in label_names], e_labels)))
 
             rho = np.corrcoef(p_cov)
             for j, k in zip(*np.triu_indices(L, 1)):
-                result[f"{label_names[j]}_{label_names[k]}_corr"] = rho[j, k]
+                result[f"rho_{label_names[j]}_{label_names[k]}"] = rho[j, k]
 
             # Interpolate model_flux back onto the observed wavelengths.
             model_flux = objective_function(model_wavelength, *p_opt)
@@ -142,13 +141,15 @@ def estimate_labels(
             )
             chi_sq = np.sum(((model_flux - flux) / e_flux) ** 2)
             reduced_chi_sq = chi_sq / (model_flux.size - L - 1)
-            result.update(chi_sq=chi_sq, reduced_chi_sq=reduced_chi_sq)
-            meta = dict(continuum=None)
+            result.update(
+                snr=spectrum.meta["SNR"][i],
+                chi_sq=chi_sq, 
+                reduced_chi_sq=reduced_chi_sq
+            )
+            meta = OrderedDict([("model_flux", resampled_model_flux)])
             if continuum is not None:
                 resampled_model_flux *= continuum[i]
                 meta["continuum"] = continuum[i]
-
-            meta["model_flux"] = resampled_model_flux
             
             results.append(result)
             meta_results.append(meta)

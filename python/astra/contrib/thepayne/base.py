@@ -66,7 +66,7 @@ class ThePayne(TaskInstance):
 
         for task, data_products, parameters in self.iterable():
             data_product, = data_products
-            results, database_results = ({}, [])
+            results, database_results, header_groups = ({}, [], {})
             for spectrum in SpectrumList.read(
                 data_product.path, data_slice=parameters.get("data_slice", None)
             ):
@@ -95,9 +95,15 @@ class ThePayne(TaskInstance):
                 hdu_results = list_to_dict(labels)
                 hdu_results.update(list_to_dict(meta))
                 results[extname] = hdu_results
+                header_groups[extname] = [
+                    ("TEFF", "STELLAR LABELS"),
+                    ("RHO_TEFF_LOGG", "CORRELATION COEFFICIENTS"),
+                    ("SNR", "SUMMARY STATISTICS"),
+                    ("MODEL_FLUX", "MODEL SPECTRA")
+                ]
 
             with database.atomic():
                 task.create_or_update_outputs(ThePayneOutput, database_results)
 
             # Create astraStar/astraVisit data product and link it to this task.
-            create_pipeline_product(task, data_product, results)
+            create_pipeline_product(task, data_product, results, header_groups=header_groups)
