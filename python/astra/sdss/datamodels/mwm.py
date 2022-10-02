@@ -212,6 +212,7 @@ class CreateMWMVisitStarProducts(TaskInstance):
             catalogid = parameters["catalogid"]
 
             log.info(f"Creating products for {catalogid}")
+            
             hdu_visit_list, hdu_star_list, meta = create_mwm_data_products(
                 catalogid, input_data_products=data_products
             )
@@ -226,7 +227,7 @@ class CreateMWMVisitStarProducts(TaskInstance):
                 apred=self.apred,
             )
             # Write to disk.
-            log.warn("Setting mwmVisit/mwmStar paths by hand because we are waiting on a new release of sdss_access") # TODO
+            log.warn("Setting mwmVisit/mwmStar paths by hand because we are waiting on a new release of sdss_access and the tree product") # TODO
             catalogid_groups = f"{catalogid % 1_000:.0f}/{catalogid & 1_000:.0f}"
             mwmStar_path = expand_path("$MWM_ASTRA/{v_astra}/{run2d}-{apred}/spectra/star/{catalogid_groups}/mwmStar-{v_astra}-{cat_id}.fits".format(catalogid_groups=catalogid_groups, **kwds))
             mwmVisit_path = expand_path("$MWM_ASTRA/{v_astra}/{run2d}-{apred}/spectra/visit/{catalogid_groups}/mwmVisit-{v_astra}-{cat_id}.fits".format(catalogid_groups=catalogid_groups, **kwds))

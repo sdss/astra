@@ -1,3 +1,4 @@
+import numpy as np
 from airflow.models.baseoperator import BaseOperator
 from astra.database.astradb import (
     database,
@@ -250,6 +251,7 @@ class MWMVisitStarFactory(BaseOperator):
         apred: Optional[str] = None,
         run2d_release: Optional[str] = None,
         run2d: Optional[str] = None,
+        num_bundles: Optional[int] = 1,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -258,6 +260,10 @@ class MWMVisitStarFactory(BaseOperator):
         self.apred_release = apred_release
         self.run2d = run2d
         self.run2d_release = run2d_release
+        self.num_bundles = num_bundles
+
+        if num_bundles < 1:
+            raise ValueError("num_bundles must be >= 1")
         return None
 
     def execute(self, context):
@@ -332,21 +338,23 @@ class MWMVisitStarFactory(BaseOperator):
                 )
         log.info(f"Done.")
         
-        bundle = Bundle.create()
-        log.info(f"Created task bundle {bundle}")
+        bundles = [Bundle() for i in range(self.num_bundles)]
+        with database.atomic():
+            Bundle.bulk_create(bundles)
 
-        log.info(f"Adding {N_tasks} tasks to bundle {bundle}")
+        log.info(f"Created task bundles {bundles}")
+        N_tasks_per_bundle = int(np.ceil(N_tasks / self.num_bundles))
         with database.atomic():
             (
                 TaskBundle.insert_many(
                     [
-                        { "task_id": task.id, "bundle_id": bundle.id } for task in tasks
+                        { "task_id": task.id, "bundle_id": bundles[i // N_tasks_per_bundle].id } for i, task in enumerate(tasks)
                     ]
                 ).execute()
             )
         log.info(f"Done.")
 
-        return bundle.id
+        return [b.id for b in bundles]
 
 
 STELLAR_CARTONS = (

@@ -155,11 +155,6 @@ def create_boss_hdus(
     wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)
 
     # Disallow zero fluxes.
-    bad_flux, bad_combined_flux = ((flux_error == 0), (combined_flux_error == 0))
-    flux[bad_flux] = np.nan
-    flux_error[bad_flux] = np.inf
-    combined_flux[bad_combined_flux] = np.nan
-    combined_flux_error[bad_combined_flux] = np.inf
 
     DATA_HEADER_CARD = ("SPECTRAL DATA", None)
 
@@ -279,6 +274,12 @@ def create_boss_hdus(
 
     hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, header)
     if any(use_in_stack):
+        bad_flux, bad_combined_flux = ((flux_error == 0), (combined_flux_error == 0))
+        flux[bad_flux] = np.nan
+        flux_error[bad_flux] = np.inf
+        combined_flux[bad_combined_flux] = np.nan
+        combined_flux_error[bad_combined_flux] = np.inf
+
         snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
         star_data_shape = (1, -1)
         star_mappings = [

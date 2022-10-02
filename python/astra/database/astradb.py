@@ -156,6 +156,11 @@ class DataProduct(AstraBaseModel):
         kwargs.setdefault("kwargs_hash", hashed)
         super(DataProduct, self).__init__(*args, **kwargs)
 
+
+    def __repr__(self):
+        return f"<{self.__class__.__name__} ({self.filetype}): id={self.id}>"
+
+
     @classmethod
     def adapt_and_hash_kwargs(cls, kwargs):
         adapted = _template_dpkwf.adapt(kwargs)
@@ -358,8 +363,9 @@ class Task(AstraBaseModel):
                 fields = []
                 for output, result in zip(existing_outputs, results):
                     for key, value in result.items():
-                        setattr(output, key, value)
-                        fields.append(key)
+                        if key in model._meta.fields and value is not None: # this skips over things like source_id, output_id, which wouldn't change
+                            setattr(output, key, value)
+                            fields.append(key)
                 fields = list(set(fields))
                 model.bulk_update(existing_outputs[:N_results], fields)
 
@@ -411,6 +417,38 @@ class Bundle(AstraBaseModel):
     @property
     def tasks(self):
         return Task.select().join(TaskBundle).join(Bundle).where(Bundle.id == self.id)
+
+
+    def watch_status(self, interval=1):
+        total = self.count_tasks()
+        q = dict(
+            Task
+            .select(Task.status_id, fn.COUNT(Task.id))
+            .join(TaskBundle)
+            .where(TaskBundle.bundle_id == self.id)
+            .group_by(Task.status_id)
+            .tuples()
+        )
+        initial = q.get(5, 0)
+        with tqdm(total=total, initial=initial) as pb:
+            while True:
+                sleep(interval)
+                q = dict(
+                    Task
+                    .select(Task.status_id, fn.COUNT(Task.id))
+                    .join(TaskBundle)
+                    .where(TaskBundle.bundle_id == self.id)
+                    .group_by(Task.status_id)
+                    .tuples()
+                )
+                complete = q.get(5, 0)
+                if complete > pb.n:
+                    pb.update(complete - pb.n)
+                if complete >= total:
+                    break
+        
+        return None
+
 
     def _watch(self, interval=1):
         """
@@ -465,10 +503,9 @@ class Bundle(AstraBaseModel):
         )
         return count
 
-    def instance(self, strict=True):
+    def instance(self, only_incomplete=False, strict=True):
         from astra.base import TaskInstance
-
-        return TaskInstance.from_bundle(self, strict=strict)
+        return TaskInstance.from_bundle(self, only_incomplete=only_incomplete, strict=strict)
 
     def split(self, N):
         N = int(N)
@@ -490,6 +527,7 @@ class Bundle(AstraBaseModel):
                 TaskBundle.create(task=task, bundle=bundle)
             new_bundles.append(bundle)
         return new_bundles
+
 
 
 class TaskBundle(AstraBaseModel):

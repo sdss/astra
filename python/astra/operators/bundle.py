@@ -1,4 +1,5 @@
 import json
+import numpy as np
 from zoneinfo import available_timezones
 from peewee import fn
 from airflow.sensors.base import BaseSensorOperator
@@ -69,6 +70,7 @@ class BundleCreator(BaseOperator):
         input_data_products,
         parameters,
         use_existing_bundle=False,
+        num_bundles=1, 
         **kwargs
     ) -> None:
         super(BundleCreator, self).__init__(**kwargs)
@@ -76,6 +78,13 @@ class BundleCreator(BaseOperator):
         self.input_data_products = input_data_products
         self.parameters = parameters
         self.use_existing_bundle = use_existing_bundle
+        self.num_bundles = num_bundles
+
+        if not self.use_existing_bundle and self.num_bundles < 1:
+            raise ValueError(f"If not using existing bundle, num_bundles must be >= 1, not {self.num_bundles}")
+        
+        if self.use_existing_bundle and self.num_bundles > 1:
+            log.warn("Using existing bundle, so ignoring num_bundles keyword")
         return None
 
     def execute(self, context):
@@ -110,14 +119,29 @@ class BundleCreator(BaseOperator):
                 parameters,
                 parsed=True
             )
-        else:
-            bundle_id = Bundle.create().id
-        
-        log.info(f"Using bundle {bundle_id}. Adding tasks to bundle.")
+            log.info(f"Using existing bundle {bundle_id}. Adding tasks to bundle.")
+            add_to_bundle(bundle_id, [task.id for task in tasks])
+            return bundle_id
 
-        add_to_bundle(bundle_id, [task.id for task in tasks])
-        log.info(f"Done")
-        return bundle_id
+        else:
+            bundles = [Bundle() for _ in range(self.num_bundles)]
+            with database.atomic():
+                Bundle.bulk_create(bundles)
+
+            log.info(f"Created task bundles {bundles}")
+            N_tasks = len(tasks)
+            N_tasks_per_bundle = int(np.ceil(N_tasks / self.num_bundles))
+            with database.atomic():
+                (
+                    TaskBundle.insert_many(
+                        [
+                            { "task_id": task.id, "bundle_id": bundles[i // N_tasks_per_bundle].id } for i, task in enumerate(tasks)
+                        ]
+                    ).execute()
+                )
+            log.info(f"Done.")
+
+            return [b.id for b in bundles]
 
 
 class BundleSensor(BaseSensorOperator):
