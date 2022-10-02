@@ -160,7 +160,7 @@ class ApStarOperator(ApogeeOperator):
                     )
                 except:
                     log.warning(
-                        f"No Catalog entry found at ra={starmap.ra}, dec={star.dec}. Skipping {path} from {star}"
+                        f"No Catalog entry found at ra={star.ra}, dec={star.dec}. Skipping {path} from {star}"
                     )
                     errors.append(
                         {
