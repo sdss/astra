@@ -11,27 +11,6 @@ from typing import Optional, List
 
 from astra.sdss.operators.base import SDSSOperator
 
-'''
-try:
-    from astra.database.catalogdb import SDSS_DR17_APOGEE_Allvisits
-except ImportError:
-    from astra.database.catalogdb import CatalogdbModel, TextField
-
-    # TODO: this table not yet in sdssdb, will be in next version
-    #       remove this after sdssdb 0.5.4
-    class SDSS_DR17_APOGEE_Allvisits(CatalogdbModel):
-
-        visit_id = TextField(primary_key=True)
-
-        class Meta:
-            table_name = "sdss_dr17_apogee_allvisits"
-
-    Visit = SDSS_DR17_APOGEE_Allvisits
-
-else:
-    Visit = SDSS_DR17_APOGEE_Allvisits
-    print(f"ANDY: remove SDSS_DR17_APOGEE_Allvisits in {__file__}")
-'''
 
 class ApogeeOperator(SDSSOperator):
     def __init__(
@@ -83,9 +62,28 @@ class ApStarOperator(ApogeeOperator):
             # CatalogToGaia_DR3,
             Gaia_DR3,
             SDSS_DR17_APOGEE_Allstarmerge as Star,
-            SDSS_DR17_APOGEE_Allvisits as Visit
+            #SDSS_DR17_APOGEE_Allvisits as Visit
             # SDSS_DR17_APOGEE_Allvisits as Visit
         )
+        try:
+            from astra.database.catalogdb import SDSS_DR17_APOGEE_Allvisits
+        except ImportError:
+            from astra.database.catalogdb import CatalogdbModel, TextField
+
+            # TODO: this table not yet in sdssdb, will be in next version
+            #       remove this after sdssdb 0.5.4
+            class SDSS_DR17_APOGEE_Allvisits(CatalogdbModel):
+
+                visit_id = TextField(primary_key=True)
+
+                class Meta:
+                    table_name = "sdss_dr17_apogee_allvisits"
+
+            Visit = SDSS_DR17_APOGEE_Allvisits
+
+        else:
+            Visit = SDSS_DR17_APOGEE_Allvisits
+            print(f"ANDY: remove SDSS_DR17_APOGEE_Allvisits in {__file__}")        
 
         # I first thought I'd have to query Star, matched on Visit, but actually the Star merge table
         # munges columns like 'telescope' -> 'telescopes' (all visits) and ignores things like field.

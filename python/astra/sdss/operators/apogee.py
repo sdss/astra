@@ -5,26 +5,31 @@ from airflow.models.baseoperator import BaseOperator
 from airflow.exceptions import AirflowFailException, AirflowSkipException
 from sdss_access import SDSSPath
 from astra.database.apogee_drpdb import Star, Visit
-from astra.database.astradb import DataProduct, Source, SourceDataProduct
+from astra.database.astradb import database, DataProduct, Source, SourceDataProduct
 from astra import log
+from astra.utils import flatten
 
 from functools import lru_cache
 
 from peewee import fn
-
+from tqdm import tqdm
 
 class ApVisitOperator(BaseOperator):
     def __init__(
         self,
         apred: Optional[str] = "daily",
+        check_path: Optional[bool] = True,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.apred = apred
+        self.check_path = check_path
         return None
+
 
     def execute(self, context):
 
+        release, filetype = ("sdss5", "apVisit")
         prev_ds, ds = (context["prev_ds"], context["ds"])
 
         if prev_ds is None:
@@ -38,14 +43,24 @@ class ApVisitOperator(BaseOperator):
 
         # Through inspection I found that all the visit (Database) records with missing paths
         # tended to be those without any sdssv_apogee_target0 value.
+        #'telescope', 'plate', 'field', 'mjd', 'fiber', 'apred'
+        log.info(f"{self} is looking for products created between {prev_ds} and {ds} (check_path={self.check_path})")
 
-        log.info(f"{self} is looking for products created between {prev_ds} and {ds}")
         q = (
-            Visit.select()
+            Visit.select(
+                Visit.catalogid,
+                Visit.telescope,
+                Visit.plate,
+                Visit.field,
+                Visit.mjd,
+                Visit.fiber,
+                Visit.apred,
+            )
             .where(
                 expression & (Visit.apred_vers == self.apred) & (Visit.catalogid > 0)
             )
             .order_by(Visit.pk.asc())
+            .tuples()
         )
 
         N = q.count()
@@ -56,26 +71,69 @@ class ApVisitOperator(BaseOperator):
 
         log.info(f"Found {N} rows.")
 
-        ids = []
-        errors = []
-        for origin in q:
-            success, result = get_or_create_data_product_from_apogee_drpdb(origin)
-            if success:
-                log.debug(
-                    "Data product {data_product_id} matched to {source_id}".format(
-                        **result
-                    )
-                )
-                ids.append(result["data_product_id"])
-            else:
-                log.warning("{reason} ({detail}) from {origin}".format(**result))
-                errors.append(result)
+        p = SDSSPath(release)
+        keys = ("telescope", "plate", "field", "mjd", "fiber", "apred")    
+        catalogids, data_product_kwds, errors = ([], [], [])
+        for N, (catalogid, *values) in enumerate(tqdm(q, total=N), start=1):
+            kwargs = dict(zip(keys, values))
+            kwargs["field"] = kwargs["field"].strip()
+            if not isinstance(catalogid, int):
+                error = {"detail": None, "origin": (catalogid, *values), "reason": f"Catalogid is not an integer ({type(catalogid)}: {catalogid})" }
+                errors.append(error)
+                continue
+        
+            if self.check_path:
+                path = p.full(filetype, **kwargs)
+                if not os.path.exists(path):
+                    error = {"detail": path, "origin": (catalogid, *values), "reason": "File does not exist"}
+                    errors.append(error)
+                    continue
 
-        log.info(f"Created {len(ids)} data products.")
-        log.info(f"Encountered {len(errors)} errors.")
+            kwargs, kwargs_hash = DataProduct.adapt_and_hash_kwargs(kwargs)
+            catalogids.append(catalogid)
+            data_product_kwds.append(
+                dict(
+                    release=release,
+                    filetype=filetype,
+                    kwargs=kwargs,
+                    kwargs_hash=kwargs_hash
+                )
+            )
+        
+        N -= len(errors)
+
+        log.info(f"Doing bulk upserts..")
+        with database.atomic():
+            log.info(f"Creating {N} sources..")
+            Source.insert_many([dict(catalogid=catalogid) for catalogid in catalogids]).on_conflict_ignore().execute()
+
+            log.info(f"Creating {N} data products..")
+            data_product_ids = flatten(
+                DataProduct
+                .insert_many(data_product_kwds)
+                .returning(DataProduct.id)
+                .on_conflict_ignore()
+                .tuples()
+                .execute()
+            )
+            log.info(f"Linking data products to sources..")
+            SourceDataProduct.insert_many([
+                {"source_id": cid, "data_product_id": dpid } for cid, dpid in zip(catalogids, data_product_ids)
+            ]).on_conflict_ignore().execute()
+
+        log.info(f"Done!")
+        
+        log.info(f"Created {len(data_product_ids)} data products.")
+        if self.check_path:
+            log.warning(f"Encountered {len(errors)} errors.")
+            for error in errors:
+                log.warning("{reason}: {detail} from {origin}".format(**error))
+        else:
+            log.warning(f"Did not check paths. Some data products may not exist on disk.")
+        
         if len(errors) == N:
             raise AirflowSkipException(f"{N}/{N} data products had errors")
-        return ids
+        return data_product_ids
 
 
 class ApStarOperator(BaseOperator):

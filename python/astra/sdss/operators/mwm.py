@@ -28,12 +28,16 @@ class MWMVisitOperator(BaseOperator):
         require_apogee=False,
         require_boss=False,
         cartons=None,
+        run2d=None,
+        apred=None,
         **kwargs
     ) -> None:
         super().__init__(**kwargs)
         self.require_apogee = require_apogee
         self.require_boss = require_boss
         self.cartons = cartons
+        self.apred = apred
+        self.run2d = run2d
         return None
 
 
@@ -107,6 +111,10 @@ class MWMVisitOperator(BaseOperator):
             &   (SourceDataProduct.source_id.in_(catalogids))
             )
         )
+        if self.apred is not None:
+            q = q.where(DataProduct.kwargs["apred"] == self.apred)
+        if self.run2d is not None:
+            q = q.where(DataProduct.kwargs["run2d"] == self.run2d)
 
         data_product_ids = flatten(list(q.tuples()))
         log.info(f"Matched against {len(data_product_ids)} data product identifiers")
@@ -127,6 +135,8 @@ class MWMStarOperator(BaseOperator):
         *,
         require_apogee=False,
         require_boss=False,
+        apred=None,
+        run2d=None,
         cartons=None,
         **kwargs
     ) -> None:
@@ -134,6 +144,8 @@ class MWMStarOperator(BaseOperator):
         self.require_apogee = require_apogee
         self.require_boss = require_boss
         self.cartons = cartons
+        self.apred = apred
+        self.run2d = run2d
         return None
 
 
@@ -143,7 +155,10 @@ class MWMStarOperator(BaseOperator):
             # Happens when we are running the DAG @once.
             prev_ds, ds = (ds, "2100-01-01")
 
-        log.info(f"Running {self} between {prev_ds} and {ds} (boss={self.require_boss}; apogee={self.require_apogee})")
+        log.info(
+            f"Running {self} between {prev_ds} and {ds} (boss={self.require_boss}; apogee={self.require_apogee} "
+            f"run2d={self.run2d}, apred={self.apred})"
+        )
 
         q = (
             MWMSourceStatus
@@ -207,6 +222,10 @@ class MWMStarOperator(BaseOperator):
             &   (SourceDataProduct.source_id.in_(catalogids))
             )
         )
+        if self.apred is not None:
+            q = q.where(DataProduct.kwargs["apred"] == self.apred)
+        if self.run2d is not None:
+            q = q.where(DataProduct.kwargs["run2d"] == self.run2d)
 
         data_product_ids = flatten(list(q.tuples()))
         log.info(f"Matched against {len(data_product_ids)} data product identifiers")
@@ -279,6 +298,7 @@ class MWMVisitStarFactory(BaseOperator):
             expression |= sub
 
         # Create the tasks first in bulk.
+        # TODO: use insert_many instead
         tasks = []
         for catalogid in tqdm(catalogids, desc="Creating tasks"):
             tasks.append(
