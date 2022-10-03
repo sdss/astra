@@ -11,6 +11,7 @@ from astropy import units as u
 from typing import Union, List, Callable, Optional, Dict
 
 from astra.utils import flatten
+from astra import log
 
 C_KM_S = c.to(u.km / u.s).value
 
@@ -217,9 +218,14 @@ def resample_visit_spectra(
                             chip_flux_error
                         )[chip_bad_pixel_mask]
 
-            pixel = wave_to_pixel(
-                resampled_wavelength * (1 + v_rad / C_KM_S), chip_wavelength
-            )
+            try:
+                pixel = wave_to_pixel(
+                    resampled_wavelength * (1 + v_rad / C_KM_S), chip_wavelength
+                )
+            except np.linalg.LinAlgError:
+                log.exception(f"Exception when trying to convert wavelength to pixel.")
+                continue
+
             (finite,) = np.where(np.isfinite(pixel))
 
             # NOTE: sincint() takes in variance, but returns error
