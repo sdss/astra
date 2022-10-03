@@ -209,6 +209,9 @@ class CreateMWMVisitStarProducts(TaskInstance):
 
         for task, data_products, parameters in self.iterable():
 
+            if len(data_products) == 0:
+                raise ValueError(f"No data products given for task {task}")
+
             catalogid = parameters["catalogid"]
 
             log.info(f"Creating products for {catalogid}")
@@ -228,6 +231,9 @@ class CreateMWMVisitStarProducts(TaskInstance):
             )
             # Write to disk.
             log.warn("Setting mwmVisit/mwmStar paths by hand because we are waiting on a new release of sdss_access and the tree product") # TODO
+            k = 100
+            catalogid_groups = f"{(catalogid // k) % k:.0f}/{catalogid % k:.0f}"
+            log.warn("catalogid groups still wrong")
             catalogid_groups = f"{catalogid % 1_000:.0f}/{catalogid & 1_000:.0f}"
             mwmStar_path = expand_path("$MWM_ASTRA/{v_astra}/{run2d}-{apred}/spectra/star/{catalogid_groups}/mwmStar-{v_astra}-{cat_id}.fits".format(catalogid_groups=catalogid_groups, **kwds))
             mwmVisit_path = expand_path("$MWM_ASTRA/{v_astra}/{run2d}-{apred}/spectra/visit/{catalogid_groups}/mwmVisit-{v_astra}-{cat_id}.fits".format(catalogid_groups=catalogid_groups, **kwds))

@@ -194,21 +194,22 @@ def create_apogee_hdus(
     spectrum_sampling_cards = base.spectrum_sampling_cards(**meta)
     wavelength_cards = base.wavelength_cards(**meta)
 
+    finite_or_empty = lambda _: _ if np.isfinite(_) else ""
     doppler_cards = [
         # Since DOPPLER uses the same Cannon model for the final fit of all individual visits,
         # we include it here instead of repeating the information many times in the data table.
         base.BLANK_CARD,
         (" ", "DOPPLER STELLAR PARAMETERS", None),
         *[
-            (f"{k}_D", np.round(velocity_meta[f"{k}_DOPPLER"][0], 1))
+            (f"{k}_D", finite_or_empty(np.round(velocity_meta[f"{k}_DOPPLER"][0], 1)))
             for k in ("TEFF", "E_TEFF")
         ],
         *[
-            (f"{k}_D", np.round(velocity_meta[f"{k}_DOPPLER"][0], 3))
+            (f"{k}_D", finite_or_empty(np.round(velocity_meta[f"{k}_DOPPLER"][0], 3)))
             for k in ("LOGG", "E_LOGG")
         ],
         *[
-            (f"{k}_D", np.round(velocity_meta[f"{k}_DOPPLER"][0], 3))
+            (f"{k}_D", finite_or_empty(np.round(velocity_meta[f"{k}_DOPPLER"][0], 3)))
             for k in ("FEH", "E_FEH")
         ],
     ]
@@ -224,23 +225,23 @@ def create_apogee_hdus(
             base.FILLER_CARD,
         ]
     )
-    star_header = fits.Header(
-        [
-            *base.metadata_cards(observatory, instrument),
-            *drp_cards,
-            *spectrum_sampling_cards,
-            # Add the fraction that are dithered.
-            ("DITHERED", np.sum(dithered[use_in_stack]) / np.sum(use_in_stack)),
-            ("NVISITS", np.sum(use_in_stack)),
-            *doppler_cards,
-            *wavelength_cards,
-            base.FILLER_CARD,
-        ]
-    )
 
     hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, visit_header)
 
     if any(use_in_stack):
+        star_header = fits.Header(
+            [
+                *base.metadata_cards(observatory, instrument),
+                *drp_cards,
+                *spectrum_sampling_cards,
+                # Add the fraction that are dithered.
+                ("DITHERED", np.sum(dithered[use_in_stack]) / np.sum(use_in_stack)),
+                ("NVISITS", np.sum(use_in_stack)),
+                *doppler_cards,
+                *wavelength_cards,
+                base.FILLER_CARD,
+            ]
+        )        
         bad_flux, bad_combined_flux = ((flux_error == 0), (combined_flux_error == 0))
         flux[bad_flux] = np.nan
         flux_error[bad_flux] = np.inf
@@ -344,7 +345,7 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct) -> dict:
     return {
         "V_BC": result.bc,
         "V_REL": result.vrel,
-        "V_RAD": result.vheliobary,
+        "V_RAD": result.vrad, # formerly vheliobary
         "E_V_REL": result.vrelerr,
         "E_V_RAD": result.vrelerr,
         "V_TYPE": result.vtype,  # 1=chisq, 2=xcorr
@@ -362,7 +363,7 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct) -> dict:
         "N_RV_COMPONENTS": result.n_components,
         "V_REL_XCORR": result.xcorr_vrel,
         "E_V_RAD_XCORR": result.xcorr_vrelerr,
-        "V_RAD_XCORR": result.xcorr_vheliobary,
+        "V_RAD_XCORR": result.xcorr_vrad, # formerly vheliobary
         "RV_COMPONENTS": result.rv_components,
     }
 

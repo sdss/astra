@@ -286,7 +286,11 @@ def get_cartons_and_programs(source: Union[Source, int]):
         #.order_by(sq.c.priority.asc())
         .tuples()
     )
-    _, cartons, programs = q_cartons.first()
+    try:
+        _, cartons, programs = q_cartons.first()
+    except TypeError:
+        log.warning(f"No cartons or programs found for source {catalogid}")
+        return ([""], [""])
     cartons, programs = (cartons.split(","), programs.split(","))
     return (cartons, programs)
 
@@ -446,28 +450,34 @@ def get_auxiliary_source_data(source: Union[Source, int]):
             .select(*only_fields_of(Gaia))
             .where(Gaia.cone_search(row["ra"], row["dec"], 1.0 / 3600.0))
             .dicts()
-            .first()
+            .first() or dict()
         )
+
         # TODO: Don't do this!
         row.update(
             TwoMassPSC
             .select(*only_fields_of(TwoMassPSC))
             .where(TwoMassPSC.cone_search(row["ra"], row["dec"], 1.0 / 3600.0, dec_col="decl"))
             .dicts()
-            .first()
+            .first() or dict()
         )
 
     #  Damn. Floating point nan values are not allowed in FITS headers.
     default_values = {}
     data = []
-    for key, field, comment in field_descriptors:
+    for header_key, field, comment in field_descriptors:
         if ignore(field):
-            data.append((key, field, comment))
+            data.append((header_key, field, comment))
         else:
+            field_name = field._alias if isinstance(field, Alias) else field.name
+            if field_name in row:
+                value = row[field_name]
+            else:
+                value = default_values.get(header_key, None)
             data.append(
                 (
-                    key,
-                    row[field._alias if isinstance(field, Alias) else field.name] or default_values.get(key, None),
+                    header_key,
+                    value,
                     comment,
                 )
             )
@@ -823,7 +833,7 @@ def fits_column_kwargs(values):
         ),  # 64-bit integers
         (
             "J",
-            lambda v: isinstance(v[0], (int, np.integer)) and (int(max(v) >> 32) == 0),
+            lambda v: isinstance(v[0], (int, np.integer)) and ((int(max(v) >> 32) == 0) or ((len(set(v)) == 1) & (v[0] < 0))),
         ),  # 32-bit integers
         ("L", lambda v: isinstance(v[0], (bool, np.bool_))),  # bools
     ]
