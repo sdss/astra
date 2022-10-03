@@ -67,7 +67,7 @@ class Sinusoids(Continuum):
         return self
 
     def __call__(
-        self, spectrum: Spectrum1D, theta: Optional[Union[List, np.array, Tuple]] = None
+        self, spectrum: Spectrum1D, theta: Optional[Union[List, np.array, Tuple]] = None, **kwargs
     ) -> np.ndarray:
         if theta is None:
             theta = self.theta

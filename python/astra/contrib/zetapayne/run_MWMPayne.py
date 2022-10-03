@@ -16,7 +16,7 @@ from astra.contrib.zetapayne.DER_SNR import DER_SNR
 import traceback
 import datetime
 
-from astra.contrib.zetapayne.astropy.nddata import StdDevUncertainty
+from astropy.nddata import StdDevUncertainty
 
 
 lock = Lock()

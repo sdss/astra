@@ -13,8 +13,10 @@ class Scalar(Continuum):
     """Represent the stellar continuum with a scalar."""
 
     available_methods = {
-        "mean": lambda a: np.nanmean(a, axis=1),
-        "median": lambda a: np.nanmedian(a, axis=1)
+        "mean": np.nanmean,
+        "median": np.nanmedian,
+        "max": np.nanmax,
+        "min": np.nanmin,
     }
 
     def __init__(
@@ -26,14 +28,11 @@ class Scalar(Continuum):
         fill_value: Optional[Union[int, float]] = np.nan,
         **kwargs,
     ) -> None:
-        (
-            """
+        f"""
         :param methods: [optional]
-            The method used to estimate the continuum. Must be one of `Scalar.available_methods`.
+            The method used to estimate the continuum. Must be one of: {', '.join(Scalar.available_methods)}.
 
-        """
-            + Continuum.__init__.__doc__
-        )
+        """    + Continuum.__init__.__doc__
         super(Scalar, self).__init__(
             spectral_axis=spectral_axis,
             regions=regions,
@@ -63,7 +62,7 @@ class Scalar(Continuum):
         return self
 
     def __call__(
-        self, spectrum: Spectrum1D, theta: Optional[Union[List, np.array, Tuple]] = None
+        self, spectrum: Spectrum1D, theta: Optional[Union[List, np.array, Tuple]] = None, **kwargs
     ) -> np.ndarray:
         if theta is None:
             theta = self.theta
