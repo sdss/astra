@@ -241,11 +241,7 @@ def execute():
     """Execute a task or bundle."""
     pass
 
-
-@execute.command(hidden=True)
-@click.argument("task_ids", type=int, nargs=-1, required=True)
-def tasks(task_ids):
-    """Execute multiple tasks"""
+def _execute_tasks(task_ids):
     from astra import log
     from astra.utils import deserialize
     from astra.database.astradb import Task
@@ -261,23 +257,20 @@ def tasks(task_ids):
     return None
 
 
+@execute.command(hidden=True)
+@click.argument("task_ids", type=int, nargs=-1, required=True)
+def tasks(task_ids):
+    """Execute multiple tasks"""
+    return _execute_tasks(task_ids)
+
 @execute.command()
 @click.argument("task_id", type=int, nargs=1, required=True)
 def task(task_id):
     """Execute a single task"""
-    return tasks([task_id])
+    return _execute_tasks([task_id])
     
 
-@execute.command(hidden=True)
-@click.option(
-    "--only-incomplete",
-    "only_incomplete",
-    is_flag=True,
-    help="Only execute the incomplete tasks in the bundle"
-)
-@click.argument("bundle_ids", type=int, nargs=-1, required=True)
-def bundles(bundle_ids, only_incomplete):
-    """Execute bundles"""
+def _execute_bundles(bundle_ids, only_incomplete):
     from astra import log
     from astra.utils import deserialize
     from astra.database.astradb import Bundle
@@ -293,16 +286,27 @@ def bundles(bundle_ids, only_incomplete):
     return None
 
 
+@execute.command(hidden=True)
+@click.option(
+    "--only-incomplete",
+    is_flag=True,
+    help="Only execute the incomplete tasks in the bundle"
+)
+@click.argument("bundle_ids", type=int, nargs=-1, required=True)
+def bundles(bundle_ids, only_incomplete):
+    """Execute bundles"""
+    _execute_bundles(bundle_ids, only_incomplete)
+
+
 @execute.command()
 @click.option(
     "--only-incomplete",
-    "only_incomplete",
     is_flag=True,
     help="Only execute the incomplete tasks in the bundle"
 )
 @click.argument("bundle_id", type=int, nargs=-1, required=True)
 def bundle(bundle_id, only_incomplete):
-    return bundles([bundle_id], only_incomplete)
+    return _execute_bundles([bundle_id], only_incomplete)
 
 
 

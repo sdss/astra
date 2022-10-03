@@ -11,6 +11,7 @@ from astra.database.astradb import (
     SourceDataProduct,
     MWMSourceStatus
 )
+from peewee import fn
 from airflow.exceptions import AirflowSkipException
 from astra.utils import flatten
 from astra import log, __version__ as astra_version
@@ -246,20 +247,18 @@ class MWMVisitStarFactory(BaseOperator):
     def __init__(
         self,
         *,
-        product_release: Optional[str] = None,
-        apred_release: Optional[str] = None,
+        release: Optional[str] = None,
+        #apred_release: Optional[str] = None,
         apred: Optional[str] = None,
-        run2d_release: Optional[str] = None,
+        #run2d_release: Optional[str] = None,
         run2d: Optional[str] = None,
         num_bundles: Optional[int] = 1,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self.product_release = product_release
+        self.release = release
         self.apred = apred
-        self.apred_release = apred_release
         self.run2d = run2d
-        self.run2d_release = run2d_release
         self.num_bundles = num_bundles
 
         if num_bundles < 1:
@@ -270,21 +269,57 @@ class MWMVisitStarFactory(BaseOperator):
 
         ti, task = (context["ti"], context["task"])
 
-        #if catalogids is None:
-        #    catalogids = map(
-        #        int, tuple(set(flatten(ti.xcom_pull(task_ids=task.upstream_task_ids))))
-        #    )
-        #else:
-        catalogids = flatten(Source.select(Source.catalogid).tuples())
+        # Get the data products identifiers from upstream operators
+        data_product_ids = map(int, tuple(set(flatten(ti.xcom_pull(task_ids=task.upstream_task_ids)))))
+        log.info(f"Found {len(data_product_ids)} data product identifiers")
         
+        # TODO: we could get run2d/apred from upstream, but should we?
+        '''
+        if self.run2d is None:
+            # Get run2d from the input data products
+            q = flatten(
+                DataProduct
+                .select(fn.DISTINCT(DataProduct.kwargs["run2d"]))
+                .where(
+                    (DataProduct.filetype == "specFull")
+                &   (DataProduct.id.in_(data_product_ids))
+                )
+                .tuples()
+            )
+            if len(q) > 1:
+                raise ValueError(f"No run2d given, and multiple run2d values found in input data products: {q}")
+            
+            self.run2d, = q
+            log.info(f"Setting run2d={self.run2d}")
+        
+        if self.apred is None:
+            # Get apred from the input data products.
+            q = flatten(
+                DataProduct
+                .select(fn.DISTINCT(DataProduct.kwargs["apred"]))
+                .where(
+                    (DataProduct.filetype == "apVisit")
+                &   (DataProduct.id.in_(data_product_ids))
+                )
+                .tuples()
+            )
+            if len(q) > 1:
+                raise ValueError(f"No apred given, and multiple apred values found in input data products: {q}")
+            self.apred, = q
+            log.info(f"Setting apred={self.apred}")
+        '''
         parameters = dict(
-            release=self.product_release,
+            release=self.release,
             run2d=self.run2d,
             apred=self.apred,
         )
 
-        expression = DataProduct.filetype.in_(("apVisit", "specFull"))
+        expression = DataProduct.id.in_(data_product_ids)
+        #    DataProduct.filetype.in_(("apVisit", "specFull"))
+        #&   
+        #)
 
+        '''
         if self.apred_release is not None and self.apred is not None:
             sub = DataProduct.filetype == "apVisit"
             if self.apred_release is not None:
@@ -302,6 +337,14 @@ class MWMVisitStarFactory(BaseOperator):
                 sub &= DataProduct.kwargs["run2d"] == self.run2d
 
             expression |= sub
+        '''
+        catalogids = flatten(
+            SourceDataProduct
+            .select(SourceDataProduct.source_id)
+            .distinct()
+            .where(SourceDataProduct.data_product_id.in_(data_product_ids))
+            .tuples()
+        )
 
         # Create the tasks first in bulk.
         # TODO: use insert_many instead

@@ -13,8 +13,8 @@ class Scalar(Continuum):
     """Represent the stellar continuum with a scalar."""
 
     available_methods = {
-        "mean": np.mean,
-        "median": np.median,
+        "mean": lambda a: np.nanmean(a, axis=1),
+        "median": lambda a: np.nanmedian(a, axis=1)
     }
 
     def __init__(

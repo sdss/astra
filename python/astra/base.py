@@ -345,8 +345,11 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
             log.warn(f"Restricting to tasks in bundle {bundle} that are incomplete")
             q = q.where(Task.status != Status.get(description="completed"))
 
-        tasks = list(tasks)
+        tasks = list(q)
         bundle_size = len(tasks)
+        if bundle_size == 0:
+            raise EmptyBundleException(f"No tasks found for bundle {bundle} with only_incomplete={only_incomplete}")
+        
         context = {
             "input_data_products": [task.input_data_products for task in tasks],
             "tasks": tasks,
@@ -480,7 +483,7 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
             parsed[name] = (parameter, value, default, length, indexed)
         return (bundle_size, parsed)
 
-    def iterable(self, stage=None):
+    def iterable(self, stage=None, debug=True):
         """
         Iterate over the tasks in the bundle.
 
@@ -509,27 +512,36 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         t_init = time()
         for i, item in enumerate(self.context["iterable"]):
 
-            yield item
-            
-            if stage is not None:
-                t_iterable = time() - t_init
-                try:
-                    self.context["timing"][key][i] += t_iterable
-                except IndexError:  # array is not long enough, we're in append mode
-                    self.context["timing"][key].append(t_iterable)
-                finally:
-                    t_init = time()
-
-                # Update status for this task.
-                print(f"update timing??")
-                '''
-                try:
-                    task, idp, parameters = item
-                    task.status_id = 5
+            try:
+                yield item
+            except:
+                task, idp, parameters = item
+                log.exception(f"Exception in executing {i}th task in bundle ({task}):")
+                if stage is not None:
+                    status = Status.get(description=f"failed-{stage.replace('_', '-')}")
+                    task.status_id = status.id
                     task.save()
-                except ValueError:
-                    log.warning(f"Couldn't update task in status {task} {stage}")
-                '''
+                raise 
+                continue
+            else:
+                if stage is not None:
+                    t_iterable = time() - t_init
+                    try:
+                        self.context["timing"][key][i] += t_iterable
+                    except IndexError:  # array is not long enough, we're in append mode
+                        self.context["timing"][key].append(t_iterable)
+                    finally:
+                        t_init = time()
+
+                    # Update status for this task. if we set
+                    # TODO: Get the correct status ID
+                    try:
+                        task, idp, parameters = item
+                        task.status_id = 5 # TODO 
+                        task.completed = datetime.datetime.now()
+                        task.save()
+                    except ValueError:
+                        log.warning(f"Couldn't update task in status {task} {stage}")
 
         # fin
 
@@ -750,3 +762,7 @@ def get_or_create_data_products(iterable):
             else:
                 dps.append(dp)
     return dps
+
+
+class EmptyBundleException(Exception):
+    pass
