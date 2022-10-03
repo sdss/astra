@@ -127,14 +127,19 @@ class ApStarOperator(ApogeeOperator):
                 "field": star.field.strip(),
                 "telescope": star.telescope,
                 "obj": star.apogee_id,
-                # The 'reduction' keyword is used by apStar-1m, but not apStar. No idea why it's not ``obj``..
-                "reduction": star.apogee_id,
             }
+            if self.filetype(star.telescope) == "apStar-1m":
+                # The 'reduction' keyword is used by apStar-1m, but not apStar. No idea why it's not ``obj``..
+                kwds.update(reduction=star.apogee_id)
+
             path = self.path_instance.full(self.filetype(star.telescope), **kwds)
             if not os.path.exists(path):
-                errors.append(
-                    {"detail": path, "origin": star, "reason": "File does not exist"}
-                )
+                errors.append({
+                    "detail": path, 
+                    "origin": star, 
+                    "reason": "File does not exist",
+                    "kwds": kwds
+                })
                 log.warning(
                     f"Error ingesting path {path} from {star}:\n\t{errors[-1]['reason']}\nwith keywords {kwds}"
                 )
@@ -189,7 +194,7 @@ class ApStarOperator(ApogeeOperator):
         if len(errors) > 0:
             for error in errors:
                 log.warning(
-                    f"Error ingesting path {error['path']} from {error['origin']}:\n\t{error['reason']}\nwith keywords {error['kwds']}"
+                    f"Error ingesting path {error['detail']} from {error['origin']}:\n\t{error['reason']}\nwith keywords {error['kwds']}"
                 )
         if len(ids) == 0:
             raise AirflowSkipException(f"No data products ingested.")
