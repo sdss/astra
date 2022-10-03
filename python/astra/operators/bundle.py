@@ -18,7 +18,17 @@ def f(task_id):
         log.exception(f"Exception in executing task id {task_id}:")
 
 class BundleExecutor(BaseOperator):
+    
     template_fields = ("bundle", )
+
+    """
+    Execute a bundle on the head node. 
+    
+    This is useful if the bundle has low overheads (e.g., low time to load a model, but many tasks to run).
+    This will create an instance of every task in the bundle and execute the task instances in parallel,
+    instead of the alternative of creating a single instance of the bundle and executing the bundle instance.
+    If you need to execute many bundles, or a bundle with significant overheads, then you should use a SlurmOperator.
+    """ 
 
     def __init__(
         self,
@@ -38,24 +48,33 @@ class BundleExecutor(BaseOperator):
 
 
     def execute(self, context):
-        self.bundle = int(self.bundle)
+        if isinstance(self.bundle, str):
+            bundle_ids = json.loads(self.bundle)
+            if isinstance(bundle_ids, (tuple, list)):
+                bundle_ids = list(map(int, bundle_ids))
+            else:
+                bundle_ids = [int(bundle_ids)]
+        else:
+            bundle_ids = [int(self.bundle)]
+        
         self.n_jobs = int(self.n_jobs)
 
-        log.info(f"Executing bundle {self.bundle} with n_jobs {self.n_jobs} and backend {self.backend}")
+        log.info(f"Executing bundle(s) {bundle_ids} with n_jobs {self.n_jobs} and backend {self.backend}")
 
         # If they are embarrasingly parallel with low overhead, then this might be helpful
         if self.n_jobs > 1:
-            # Should we split this into n_jobs bundles and execute them in parallel?
-            print(f"#TODO Andy you should split this bundle into X n_jobs and execute them in parallel")
             task_ids = (
                 TaskBundle
                 .select(TaskBundle.task_id)
-                .where(TaskBundle.bundle_id == self.bundle)
+                .where(TaskBundle.bundle_id.in_(bundle_ids))
+                .tuples()
             )            
             with parallel_backend(self.backend, n_jobs=self.n_jobs):
-                Parallel()(delayed(f)(task_id) for task_id in task_ids)
+                Parallel()(delayed(f)(task_id) for task_id, in task_ids)
         else:
-            Bundle.get(self.bundle).instance().execute()
+            if len(bundle_ids) > 1:
+                raise ValueError(f"Cannot execute multiple bundles with n_jobs=1")
+            Bundle.get(bundle_ids[0]).instance().execute()
         
         return None
 
