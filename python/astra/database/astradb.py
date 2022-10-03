@@ -209,6 +209,20 @@ class DataProduct(AstraBaseModel):
 
     @cached_property
     def path(self):
+        if self.filetype in ("mwmStar", "mwmVisit"):
+            catalogid = self.kwargs['cat_id']
+            k = 100
+            #catalogid_groups = f"{(catalogid // k) % k:.0f}/{catalogid % k:.0f}"
+            catalogid_groups = f"{(catalogid // k) % k:0>2.0f}/{catalogid % k:0>2.0f}"
+
+            log.warn("hard-coding in path")
+            from astra.utils import expand_path
+            
+            if self.filetype == "mwmStar":
+                return expand_path("$MWM_ASTRA/{v_astra}/{run2d}-{apred}/spectra/star/{catalogid_groups}/mwmStar-{v_astra}-{cat_id}.fits".format(catalogid_groups=catalogid_groups, **self.kwargs))
+            else:
+                return expand_path("$MWM_ASTRA/{v_astra}/{run2d}-{apred}/spectra/visit/{catalogid_groups}/mwmVisit-{v_astra}-{cat_id}.fits".format(catalogid_groups=catalogid_groups, **self.kwargs))
+                
         try:
             p = _sdss_path_instances[self.release]
         except KeyError:
