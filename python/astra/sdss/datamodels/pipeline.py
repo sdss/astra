@@ -37,7 +37,9 @@ def create_pipeline_product(
     results: dict,
     release: str = "sdss5",
     source: Optional[Source] = None,
-    header_groups: Optional[dict] = None
+    header_groups: Optional[dict] = None,
+    product_name: Optional[str] = None,
+    **kwargs
 ):
     """
     Create a data product containing the best-fitting model parameters and model spectra from an
@@ -67,6 +69,11 @@ def create_pipeline_product(
         the HDU extension (e.g., 'APOGEE/APO') and the values should be a list of two-length
         tuples where each tuple contains: the header key where the group starts, and the name of
         the group.
+
+    :product_name: [optional]
+        The name of the product. For example, the Snow White pipeline produces `astraStarWD`
+        and `astraVisitWD` products. The product name in this case is `WD`. If not provided, this
+        will be inferred from the given task. 
     """
 
     if data_product.filetype in ("mwmVisit", "mwmStar"):
@@ -158,6 +165,21 @@ def create_pipeline_product(
     
     # Parse pipeline name from the task name
     pipeline = task.name.split(".")[2]
+    # Get the pipeline product:
+    if product_name is None:
+        product_name = {
+            "snowwhite": "WD",
+            "aspcap": "ASPCAP",
+            "cannon": "CANNON",
+            "korg": "Korg",
+            "thepayne": "ThePayne",
+            "zetapayne": "ZetaPayne",
+            "slam": "SLAM",        
+        }.get(pipeline, pipeline)
+
+    star_or_visit = "Visit" if data_product.filetype == "mwmVisit" else "Star"
+    filetype = f"astra{star_or_visit}{product_name}"
+    cat_id = data_product.kwargs.get("cat_id", image[0].header["SDSS_ID"])
     task_id = task.id
 
     # Add check sums to everything except the primary, since we already did it and doing it again screws it up.
@@ -165,29 +187,30 @@ def create_pipeline_product(
 
     image = fits.HDUList(hdus)
     kwds = dict(
-        pipeline=pipeline,
         astra_version=astra_version,
         apred=data_product.kwargs.get("apred", ""),
         run2d=data_product.kwargs.get("run2d", ""),
         # Get catalog identifier from primary HDU. Don't rely on it being in the data product kwargs.
-        catalogid=data_product.kwargs.get("catalogid", image[0].header["SDSS_ID"]),
+        cat_id=cat_id,
+        task_id=task_id
     )
-
-    filetype = "astraVisit" if data_product.filetype == "mwmVisit" else "astraStar"
 
     try:
         path = SDSSPath(release).full(filetype, **kwds)
     except:
         log.exception(f"Could not create path for {filetype} {kwds}")
 
-        apred, run2d, catalogid = (kwds["apred"], kwds["run2d"], kwds["catalogid"])
-        if filetype == "astraVisit":
+        k = 100
+        catalogid_groups = f"{(cat_id // k) % k:0>2.0f}/{cat_id % k:0>2.0f}"
+
+        apred, run2d, cat_id = (kwds["apred"], kwds["run2d"], kwds["cat_id"])
+        if filetype.startswith("astraVisit"):
             path = expand_path(
-                f"$MWM_ASTRA/{astra_version}/{run2d}-{apred}/results/visit/{catalogid % 10000:.0f}/{catalogid % 100:.0f}/astraVisit-{astra_version}-{pipeline}-{catalogid}-{task_id}.fits"
+                f"$MWM_ASTRA/{astra_version}/{run2d}-{apred}/results/visit/{catalogid_groups}/astraVisit-{product_name}-{astra_version}-{cat_id}-{task_id}.fits"
             )
-        elif filetype == "astraStar":
+        elif filetype.startswith("astraStar"):
             path = expand_path(
-                f"$MWM_ASTRA/{astra_version}/{run2d}-{apred}/results/star/{catalogid % 10000:.0f}/{catalogid % 100:.0f}/astraStar-{astra_version}-{pipeline}-{catalogid}-{task_id}.fits"
+                f"$MWM_ASTRA/{astra_version}/{run2d}-{apred}/results/star/{catalogid_groups}/astraStar-{product_name}-{astra_version}-{cat_id}-{task_id}.fits"
             )
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
