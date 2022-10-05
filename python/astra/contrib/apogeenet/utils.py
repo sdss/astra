@@ -144,7 +144,7 @@ def get_metadata(spectrum: Spectrum1D):
         "K_MAG": ["KMAG"],
     }
 
-    de_nanify = lambda x: x if (x != "NaN" and x != -999999) else np.nan
+    de_nanify = lambda x: x if (x != "NaN" and x != -999999 and x is not None) else np.nan
     meta = OrderedDict()
     for preferred_key, alternate_keys in keys.items():
         for key in [preferred_key] + alternate_keys:
