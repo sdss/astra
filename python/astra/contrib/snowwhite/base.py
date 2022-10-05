@@ -198,17 +198,24 @@ class WhiteDwarfStellarParameters(TaskInstance):
                 ]
 
             # fit the spectrum
+            teff_bounds, logg_bounds = [(6000, 89000), (650, 899)]
+            # ARC notes:
+            # if the first_T and first_g are on the edge of the grid, then the optimization fails.
+            # clip it to be within some amount
+            first_T = np.clip(first_T, teff_bounds[0] + 100, teff_bounds[1] - 100)
+            first_g = np.clip(first_g, logg_bounds[0] + 10, logg_bounds[1] - 10)
+            
             new_best = op.minimize(
                 fit_func,
                 (first_T, first_g, 10.0),
-                bounds=((6000, 89000), (650, 899), (None, None)),
+                bounds=[teff_bounds, logg_bounds, (None, None)],
                 args=(spec_n, l_crop, self.model_grid, 0),
                 method="L-BFGS-B",
             )
             other_T = op.minimize(
                 err_func,
                 (first_T, first_g),
-                bounds=((6000, 89000), (650, 899)),
+                bounds=(teff_bounds, logg_bounds),
                 args=(new_best.x[2], new_best.fun, spec_n, l_crop, self.model_grid),
                 method="L-BFGS-B",
             )
