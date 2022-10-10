@@ -52,11 +52,15 @@ class Chebyshev(Continuum):
         for i in range(N):
             for j, ((lower, upper), indices) in enumerate(zip(*_initialized_args)):
                 x = np.linspace(-1, 1, upper - lower)
+                # Restrict to finite values.
+                y = flux[i, indices]
+                w = 1.0 / e_flux[i, indices]
+                finite = np.isfinite(y * w)
                 f = np.polynomial.Chebyshev.fit(
-                    x[indices - lower],
-                    flux[i, indices],
+                    x[indices - lower][finite],
+                    y[finite],
                     self.deg,
-                    w=1.0 / e_flux[i, indices],
+                    w=w[finite],
                 )
                 self.theta[i, j] = f.convert().coef
         return self

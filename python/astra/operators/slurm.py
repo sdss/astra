@@ -176,9 +176,16 @@ class SlurmOperator(BaseOperator):
                     .tuples()
             )
             """
+            def estimate_relative_cost(bundle_id):
+                return (
+                    TaskBundle.select()
+                    .join(Task)
+                    .where(TaskBundle.bundle == bundle_id)
+                    .count()
+                )
             bundle_costs = np.array(
                 [
-                    [bundle_id, estimate_relative_cost(Bundle.get(bundle_id))]
+                    [bundle_id, estimate_relative_cost(bundle_id)]
                     for bundle_id in primary_keys
                 ]
             )
@@ -198,6 +205,7 @@ class SlurmOperator(BaseOperator):
                 f"Total bundle cost: {np.sum(bundle_costs.T[1])} split across {Q_free} groups, with costs {group_costs} (max diff: {np.ptp(group_costs)})"
             )
             log.debug(f"Number per item: {list(map(len, group_bundle_ids))}")
+            
 
         else:
             # Run all bundles in parallel.

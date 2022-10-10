@@ -5,12 +5,14 @@ import subprocess
 import sys
 import pickle
 from tempfile import mkdtemp
-
+from astropy.nddata import StdDevUncertainty
+from collections import OrderedDict
 from astra import log, __version__
 from astra.base import TaskInstance, Parameter, TupleParameter, DictParameter
-from astra.tools.spectrum import Spectrum1D
-#from astra.contrib.ferre import bitmask, utils
-from astra.utils import flatten, executable, expand_path, nested_list
+from astra.tools.spectrum import Spectrum1D, SpectrumList
+from astra.tools.spectrum.utils import spectrum_overlaps
+from astra.contrib.ferre import bitmask, utils
+from astra.utils import dict_to_list, list_to_dict, flatten, executable, expand_path, nested_list
 from astra.database.astradb import (
     database,
     DataProduct,
@@ -19,58 +21,52 @@ from astra.database.astradb import (
     TaskOutput,
     FerreOutput,
 )
-#from astra.operators.sdss import get_apvisit_metadata
-
+from astra.sdss.datamodels.pipeline import create_pipeline_product
+from astra.sdss.datamodels.base import get_extname
+from astra.contrib.ferre.bitmask import (PixelBitMask, ParamBitMask)
 
 class Ferre(TaskInstance):
 
-    header_path = Parameter("header_path", bundled=True)
-    initial_parameters = DictParameter("initial_parameters", default=None)
-    frozen_parameters = DictParameter("frozen_parameters", default=None, bundled=True)
-    interpolation_order = Parameter("interpolation_order", default=3, bundled=True)
-    weight_path = Parameter("weight_path", default=None, bundled=True)
-    lsf_shape_path = Parameter("lsf_shape_path", default=None, bundled=True)
-    lsf_shape_flag = Parameter("lsf_shape_flag", default=0, bundled=True)
-    error_algorithm_flag = Parameter("error_algorithm_flag", default=1, bundled=True)
-    wavelength_interpolation_flag = Parameter(
-        "wavelength_interpolation_flag", default=0, bundled=True
-    )
-    optimization_algorithm_flag = Parameter(
-        "optimization_algorithm_flag", default=3, bundled=True
-    )
-    continuum_flag = Parameter("continuum_flag", default=1, bundled=True)
-    continuum_order = Parameter("continuum_order", default=4, bundled=True)
-    continuum_segment = Parameter("continuum_segment", default=None, bundled=True)
-    continuum_reject = Parameter("continuum_reject", default=0.3, bundled=True)
-    continuum_observations_flag = Parameter(
-        "continuum_observations_flag", default=1, bundled=True
-    )
-    full_covariance = Parameter("full_covariance", default=False, bundled=True)
-    pca_project = Parameter("pca_project", default=False, bundled=True)
-    pca_chi = Parameter("pca_chi", default=False, bundled=True)
-    f_access = Parameter("f_access", default=None, bundled=True)
-    f_format = Parameter("f_format", default=1, bundled=True)
-    ferre_kwds = DictParameter("ferre_kwds", default=None, bundled=True)
-    parent_dir = Parameter("parent_dir", default=None, bundled=True)
-    n_threads = Parameter("n_threads", default=1, bundled=True)
+    header_path = Parameter(bundled=True)
+    initial_parameters = DictParameter(default=None)
+    frozen_parameters = DictParameter(default=None, bundled=True)
+    interpolation_order = Parameter(default=3, bundled=True)
+    weight_path = Parameter(default=None, bundled=True)
+    lsf_shape_path = Parameter(default=None, bundled=True)
+    lsf_shape_flag = Parameter(default=0, bundled=True)
+    error_algorithm_flag = Parameter(default=1, bundled=True)
+    wavelength_interpolation_flag = Parameter(default=0, bundled=True)
+    optimization_algorithm_flag = Parameter(default=3, bundled=True)
+    continuum_flag = Parameter(default=1, bundled=True)
+    continuum_order = Parameter(default=4, bundled=True)
+    continuum_segment = Parameter(default=None, bundled=True)
+    continuum_reject = Parameter(default=0.3, bundled=True)
+    continuum_observations_flag = Parameter(default=1, bundled=True)
+    full_covariance = Parameter(default=False, bundled=True)
+    pca_project = Parameter(default=False, bundled=True)
+    pca_chi = Parameter(default=False, bundled=True)
+    f_access = Parameter(default=None, bundled=True)
+    f_format = Parameter(default=1, bundled=True)
+    ferre_kwds = DictParameter(default=None, bundled=True)
+    parent_dir = Parameter(default=None, bundled=True)
+    n_threads = Parameter(default=1, bundled=True)
 
-    # For normalization to be made before the FERRE run.
-    normalization_method = Parameter(
-        "normalization_method", default=None, bundled=False
-    )
-    normalization_kwds = DictParameter(
-        "normalization_kwds", default=None, bundled=False
-    )
+    # For rectification to be made before the FERRE run.
+    continuum_method = Parameter(default=None, bundled=True)
+    continuum_kwargs = DictParameter(default=None, bundled=True)
 
-    # For deciding what rows to use from each data product.
-    slice_args = TupleParameter("slice_args", default=None, bundled=False)
+    data_slice = TupleParameter(default=[0, 1]) # only relevant for ApStar data products
+
+    bad_pixel_flux_value = Parameter(default=1e-4)
+    bad_pixel_sigma_value = Parameter(default=1e10)
+    skyline_sigma_multiplier = Parameter(default=100)
+    min_sigma_value = Parameter(default=0.05)
 
     # FERRE will sometimes hang forever if there is a spike in the data (e.g., a skyline) that
     # is not represented by the uncertainty array (e.g., it looks 'real').
-
     # An example of this on Utah is under ~/ferre-death-examples/spike/
     # To self-preserve FERRE, we do a little adjustment to the uncertainty array.
-    spike_threshold_to_inflate_uncertainty = Parameter(default=5, bundled=True)
+    spike_threshold_to_inflate_uncertainty = Parameter(default=5)
 
     # Maximum timeout in seconds for FERRE
     timeout = Parameter(default=12 * 60 * 60, bundled=True)
@@ -104,24 +100,30 @@ class Ferre(TaskInstance):
 
         # If we are not slicing the data products then the scaling should go as the size of the
         # data products
-        if parameters.get("slice_args", None) is None:
+        if parameters.get("data_slice", None) is None:
             factor_data_product_size = scale
         else:
             # Estimate the number slicing each time.
-            N = np.ptp(np.array(parameters["slice_args"]).flatten())
+            N = np.ptp(np.array(parameters["data_slice"]).flatten())
             factor_data_product = N * scale
 
         return np.array([factor_task, factor_data_product, factor_data_product_size])
 
     @classmethod
-    def to_name(cls, i, j, k, data_product, snr, **kwargs):
-        obj = data_product.kwargs.get("obj", "NOOBJ")
-        return f"{i:.0f}_{j:.0f}_{k:.0f}_{snr:.1f}_{obj}"
+    def to_name(cls, i, j, k, l, data_product, snr, **kwargs):
+        keys = ("cat_id", "obj")
+        for key in keys:
+            if key in data_product.kwargs:
+                obj = data_product.kwargs[key]
+                break
+        else:
+            obj = "NOOBJ"
+        return f"{i:.0f}_{j:.0f}_{k:.0f}_{l:.0f}_{snr:.1f}_{obj}"
 
     @classmethod
     def from_name(cls, name):
-        i, j, k, snr, *obj = name.split("_")
-        return dict(i=int(i), j=int(j), k=int(k), snr=float(snr), obj="_".join(obj))
+        i, j, k, l, snr, *obj = name.split("_")
+        return dict(i=int(i), j=int(j), k=int(k), l=int(l), snr=float(snr), obj="_".join(obj))
 
     def pre_execute(self):
 
@@ -148,7 +150,7 @@ class Ferre(TaskInstance):
                 else:
                     dir = mkdtemp(dir=parent_dir)
             else:
-                dir = os.path.join(parent_dir, f"bundles/{bundle.id % 100}/{bundle.id}")
+                dir = os.path.join(parent_dir, f"bundles/{bundle.id % 100:0>2.0f}/{bundle.id}")
         else:
             dir = mkdtemp()
 
@@ -189,100 +191,130 @@ class Ferre(TaskInstance):
         with open(os.path.join(dir, "input.nml"), "w") as fp:
             fp.write(utils.format_ferre_control_keywords(control_kwds))
 
+        if self.continuum_method is not None:
+            f_continuum = executable(self.continuum_method)(**self.continuum_kwargs)
+        else:
+            f_continuum = None            
+
+        pixel_mask = PixelBitMask()
+
+        # Construct mask to match FERRE model grid.
+        model_wavelengths = tuple(map(utils.wavelength_array, segment_headers))
+
         # Read in the input data products.
-        wl, flux, sigma = ([], [], [])
-        names, initial_parameters_as_dicts = ([], [])
-        indices = []
-        spectrum_metas = []
+        indices, flux, sigma, names, initial_parameters_as_dicts = ([], [], [], [], [])
         for i, (task, data_products, parameters) in enumerate(self.iterable()):
             for j, data_product in enumerate(flatten(data_products)):
-                spectrum = Spectrum1D.read(data_product.path)
+                for k, spectrum in enumerate(SpectrumList.read(data_product.path, data_slice=parameters["data_slice"])):
+                    if not spectrum_overlaps(spectrum, np.hstack(model_wavelengths)):
+                        continue
 
-                # Get relevant spectrum metadata
-                spectrum_meta = get_apvisit_metadata(data_product)
+                    N, P = spectrum.flux.shape
+                    wl_ = spectrum.wavelength.value
+                    flux_ = spectrum.flux.value
+                    sigma_ = spectrum.uncertainty.represent_as(StdDevUncertainty).array
+                    
+                    # Perform any continuum rectification pre-processing.
+                    if f_continuum is not None:
+                        f_continuum.fit(spectrum)
+                        continuum = f_continuum(spectrum)
+                        flux_ /= continuum
+                        sigma_ /= continuum
+                    else:
+                        continuum = None
+                    
+                    # Inflate errors around skylines, etc.
+                    skyline_mask = (
+                        spectrum.meta["BITMASK"] & pixel_mask.get_value("SIG_SKYLINE")
+                    ) > 0
+                    sigma_[skyline_mask] *= parameters["skyline_sigma_multiplier"]
+                    
+                    # Set bad pixels to have no useful data.
+                    if parameters["bad_pixel_flux_value"] is not None or parameters["bad_pixel_sigma_value"] is not None:                            
+                        bad = (
+                            ~np.isfinite(flux_)
+                            | ~np.isfinite(sigma_)
+                            | (flux_ < 0)
+                            | (sigma_ < 0)
+                            | ((spectrum.meta["BITMASK"] & pixel_mask.get_level_value(1)) > 0)
+                        )
 
-                # Apply any slicing, if requested.
-                if parameters["slice_args"] is not None:
-                    # TODO: Refactor this and put somewhere common.
-                    slices = tuple([slice(*args) for args in parameters["slice_args"]])
-                    spectrum_meta = spectrum_meta[
-                        slices[0]
-                    ]  # TODO: allow for more than 1 slice?
-                    spectrum._data = spectrum._data[slices]
-                    spectrum._uncertainty.array = spectrum._uncertainty.array[slices]
-                    for key in ("bitmask", "snr"):
-                        try:
-                            spectrum.meta[key] = np.array(spectrum.meta[key])[slices]
-                        except:
-                            log.exception(
-                                f"Unable to slice '{key}' metadata with {parameters['slice_args']} on {task} {data_product}"
+                        flux_[bad] = parameters["bad_pixel_flux_value"]
+                        sigma_[bad] = parameters["bad_pixel_sigma_value"]
+
+                    # Clip the error array. This is a pretty bad idea but I am doing what was done before!
+                    if parameters["min_sigma_value"] is not None:
+                        sigma_ = np.clip(sigma_, parameters["min_sigma_value"], np.inf)
+
+                    # Retrict to the pixels within the model wavelength grid.
+                    mask = _get_ferre_mask(wl_, model_wavelengths)
+
+                    flux_ = flux_[:, mask]
+                    sigma_ = sigma_[:, mask]
+
+                    # Sometimes FERRE will run forever.
+                    # TODO: rename to spike_threshold_for_bad_pixel
+                    if parameters["spike_threshold_to_inflate_uncertainty"] > 0:
+
+                        flux_median = np.median(flux_, axis=1).reshape((-1, 1))
+                        flux_stddev = np.std(flux_, axis=1).reshape((-1, 1))
+                        sigma_median = np.median(sigma_, axis=1).reshape((-1, 1))
+
+                        delta = (flux_ - flux_median) / flux_stddev
+                        is_spike = (delta > parameters["spike_threshold_to_inflate_uncertainty"]) * (
+                            sigma_ < (parameters["spike_threshold_to_inflate_uncertainty"] * sigma_median)
+                        )
+                        if np.any(is_spike):
+                            fraction = np.sum(is_spike) / is_spike.size
+                            log.warning(
+                                f"Inflating uncertainties for {np.sum(is_spike)} pixels ({100 * fraction:.2f}%) that were identified as spikes."
                             )
+                            for pi in range(is_spike.shape[0]):
+                                n = np.sum(is_spike[pi])
+                                if n > 0:
+                                    log.debug(f"  {n} pixels on spectrum index {pi}")
+                            sigma_[is_spike] = parameters["bad_pixel_sigma_value"]
 
-                # Apply any general normalization method.
-                if parameters["normalization_method"] is not None:
-                    _class = executable(parameters["normalization_method"])
-                    rectifier = _class(
-                        spectrum, **(parameters["normalization_kwds"] or dict())
-                    )
-
-                    # Normalization methods for FERRE cannot be applied within the log-likelihood
-                    # function, because we'd have to have it executed *within* FERRE.
-                    if len(rectifier.parameter_names) > 0:
-                        raise TypeError(
-                            f"Normalization method {parameters['normalization_method']} on {self} cannot be applied within the log-likelihood function for FERRE."
-                        )
-                    spectrum = rectifier()
-
-                N, P = spectrum.flux.shape
-                initial_parameters = parameters["initial_parameters"]
-                # Allow initital parameters to be a dict (applied to all spectra) or a list of dicts (one per spectra)
-                log.debug(
-                    f"There are {N} spectra in {task} {data_product} and initial params is {len(initial_parameters)} long"
-                )
-                log.debug(f"And {set(map(type, initial_parameters))}")
-
-                if len(initial_parameters) == N and all(
-                    isinstance(_, dict) for _ in initial_parameters
-                ):
+                    # Parse initial parameters. Expected types:
+                    # - dictionary of single values -> apply single value to all N spectra
+                    # - dictionary of lists of length N -> different value per spectrum
+                    # - dictionary of lists of single value -> apply single value to all N spectra
+                    # TODO: Move this logic elsewhere so it's testable.
+                    initial_parameters = parameters["initial_parameters"]
+                    # Allow initital parameters to be a dict (applied to all spectra) or a list of dicts (one per spectra)
                     log.debug(
-                        f"Allowing different initial parameters for each {N} spectra on task {task}"
+                        f"There are {N} spectra in {task} {data_product} and initial params is {len(initial_parameters)} long"
                     )
-                    initial_parameters_as_dicts.extend(initial_parameters)
-                else:
-                    if N > 1:
+                    log.debug(f"And {set(map(type, initial_parameters))}")
+
+                    if len(initial_parameters) == N and all(
+                        isinstance(_, dict) for _ in initial_parameters
+                    ):
                         log.debug(
-                            f"Using same initial parameters {initial_parameters} for all {N} spectra on task {task}"
+                            f"Allowing different initial parameters for each {N} spectra on task {task}"
                         )
-                    initial_parameters_as_dicts.extend([initial_parameters] * N)
+                        initial_parameters_as_dicts.extend(initial_parameters)
+                    else:
+                        if N > 1:
+                            log.debug(
+                                f"Using same initial parameters {initial_parameters} for all {N} spectra on task {task}"
+                            )
+                        initial_parameters_as_dicts.extend([initial_parameters] * N)
 
-                if N != len(spectrum_meta):
-                    log.warning(
-                        f"Number of spectra does not match expected from visit metadata: {N} != {len(spectrum_meta)}"
-                    )
-
-                for k in range(N):
-                    indices.append((i, j, k))
-                    names.append(
-                        self.to_name(
-                            i=i,
-                            j=j,
-                            k=k,
-                            data_product=data_product,
-                            snr=spectrum.meta["snr"][k],
+                    for l in range(N):
+                        indices.append((i, j, k, l))
+                        names.append(
+                            self.to_name(
+                                i=i,
+                                j=j,
+                                k=k,
+                                l=l,
+                                data_product=data_product,
+                                snr=spectrum.meta["SNR"].flatten()[l],
+                            )
                         )
-                    )
-                    wl.append(spectrum.wavelength)
-                    flux.append(spectrum.flux.value[k])
-                    sigma.append(spectrum.uncertainty.array[k] ** -0.5)
-
-                spectrum_metas.extend(spectrum_meta)
-
-        indices, wl, flux, sigma = (
-            np.array(indices),
-            np.array(wl),
-            np.array(flux),
-            np.array(sigma),
-        )
+                        flux.append(flux_)
+                        sigma.append(sigma_)
 
         # Convert list of dicts of initial parameters to array.
         initial_parameters = utils.validate_initial_and_frozen_parameters(
@@ -297,53 +329,22 @@ class Ferre(TaskInstance):
             for name, point in zip(names, initial_parameters):
                 fp.write(utils.format_ferre_input_parameters(*point, name=name))
 
-        # Construct mask to match FERRE model grid.
-        model_wavelengths = tuple(map(utils.wavelength_array, segment_headers))
-        mask = np.zeros(wl.shape[1], dtype=bool)
-        for model_wavelength in model_wavelengths:
-            # TODO: Building wavelength mask off just the first wavelength array.
-            #       We are assuming all have the same wavelength array.
-            s_index, e_index = wl[0].searchsorted(model_wavelength[[0, -1]])
-            mask[s_index : e_index + 1] = True
-
-        # Sometimes FERRE will run forever
-        self.spike_threshold_to_inflate_uncertainty = 5
-        if self.spike_threshold_to_inflate_uncertainty > 0:
-            flux_median = np.median(flux[:, mask], axis=1).reshape((-1, 1))
-            flux_stddev = np.std(flux[:, mask], axis=1).reshape((-1, 1))
-            sigma_median = np.median(sigma[:, mask], axis=1).reshape((-1, 1))
-
-            delta = (flux - flux_median) / flux_stddev
-            is_spike = (delta > self.spike_threshold_to_inflate_uncertainty) * (
-                sigma < (self.spike_threshold_to_inflate_uncertainty * sigma_median)
-            )
-
-            if np.any(is_spike):
-                fraction = np.sum(is_spike[:, mask]) / is_spike[:, mask].size
-                log.warning(
-                    f"Inflating uncertainties for {np.sum(is_spike)} pixels ({100 * fraction:.2f}%) that were identified as spikes."
-                )
-                for i in range(is_spike.shape[0]):
-                    n = np.sum(is_spike[i, mask])
-                    if n > 0:
-                        log.debug(f"  {n} pixels on spectrum index {i}")
-                sigma[is_spike] = 1e10
+        indices = np.array(indices)
+        N, _ = indices.shape
+        flux = np.array(flux).reshape((N, -1))
+        sigma = np.array(sigma).reshape((N, -1))
 
         # Write data arrays.
         savetxt_kwds = dict(fmt="%.4e", footer="\n")
         np.savetxt(
-            os.path.join(dir, control_kwds["ffile"]), flux[:, mask], **savetxt_kwds
+            os.path.join(dir, control_kwds["ffile"]), flux, **savetxt_kwds
         )
         np.savetxt(
-            os.path.join(dir, control_kwds["erfile"]), sigma[:, mask], **savetxt_kwds
+            os.path.join(dir, control_kwds["erfile"]), sigma, **savetxt_kwds
         )
-
-        # Write metadata file to pick up later.
-        with open(os.path.join(dir, "spectrum_meta.pkl"), "wb") as fp:
-            pickle.dump(spectrum_metas, fp)
-
         context = dict(dir=dir)
         return context
+
 
     def execute(self):
         """Execute FERRE"""
@@ -415,6 +416,7 @@ class Ferre(TaskInstance):
         with open(os.path.join(dir, "stderr"), "w") as fp:
             fp.write(stderr)
 
+        '''
         # We actually have timings per-spectrum but we aggregate this to per-task.
         # We might want to store the per-data-product and per-spectrum timing elsewhere.
         try:
@@ -440,6 +442,23 @@ class Ferre(TaskInstance):
             log.debug(f"Timing information from FERRE stdout:")
             for key, value in timings.items():
                 log.debug(f"\t{key}: {value}")
+        '''
+
+
+    def post_execute(self):
+        """
+        Post-execute hook after FERRE is complete.
+
+        Read in the output files, create rows in the database, and produce output data products.
+        """
+        dir = self.context["pre_execute"]["dir"]
+        with open(os.path.join(dir, "stdout"), "r") as fp:
+            stdout = fp.read()
+        with open(os.path.join(dir, "stderr"), "r") as fp:
+            stderr = fp.read()
+
+        n_done, n_error, control_kwds = utils.parse_ferre_output(dir, stdout, stderr)
+        timings = utils.get_processing_times(stdout)
 
         # Parse the outputs from the FERRE run.
         path = os.path.join(dir, control_kwds["OPFILE"])
@@ -479,7 +498,7 @@ class Ferre(TaskInstance):
                 path = os.path.join(dir, control_kwds["SFFILE"])
                 normalized_flux = np.atleast_2d(np.loadtxt(path))
             except:
-                log.exception(f"Failed to load normalized flux from {path}")
+                log.exception(f"Failed to load normalized observed flux from {path}")
                 raise
             else:
                 continuum = flux / normalized_flux
@@ -491,8 +510,6 @@ class Ferre(TaskInstance):
             utils.expand_path(self.header_path)
         )
         parameter_names = utils.sanitise(headers["LABEL"])
-
-        wavelength = np.hstack(tuple(map(utils.wavelength_array, segment_headers)))
 
         # Flag things.
         param_bitmask = bitmask.ParamBitMask()
@@ -523,126 +540,114 @@ class Ferre(TaskInstance):
             )
             log.warning(f"FERRE returned all erroneous values for an entry: {idx} {v}")
 
-        with open(os.path.join(dir, "spectrum_meta.pkl"), "rb") as fp:
-            spectrum_metas = pickle.load(fp)
-
-        results_dict = {}
-        ijks = []
-        for z, (name, param, param_err, bitmask_flag, spectrum_meta) in enumerate(
-            zip(names, params, param_errs, param_bitmask_flags, spectrum_metas)
+        model_wavelengths = tuple(map(utils.wavelength_array, segment_headers))
+        label_results = {}
+        spectral_results = {}
+        for z, (name, param, param_err, bitmask_flag) in enumerate(
+            zip(names, params, param_errs, param_bitmask_flags)
         ):
             parsed = self.from_name(name)
-            result = dict(
-                log_chisq_fit=meta["log_chisq_fit"][z],
-                log_snr_sq=meta["log_snr_sq"][z],
-                frac_phot_data_points=meta["frac_phot_data_points"][z],
-                snr=parsed["snr"],
-            )
 
-            result["meta"] = spectrum_meta
-
-            try:
-                result.update(
-                    ferre_time_elapsed=timings["time_per_spectrum"][z],
-                    ferre_time_load=timings["time_load"],
-                    ferre_n_obj=timings["n_obj"],
-                    ferre_n_threads=timings["n_threads"],
-                )
-            except:
-                log.exception(
-                    f"Exception while trying to include FERRE timing information in the database for {self}"
-                )
-
-            result.update(dict(zip(parameter_names, param)))
-            result.update(dict(zip([f"u_{pn}" for pn in parameter_names], param_err)))
+            result = OrderedDict(zip(reversed(parameter_names), reversed(param)))
+            result.update(dict(zip([f"e_{pn}" for pn in reversed(parameter_names)], reversed(param_err))))
             result.update(
-                dict(zip([f"bitmask_{pn}" for pn in parameter_names], bitmask_flag))
+                dict(zip([f"bitmask_{pn}" for pn in reversed(parameter_names)], reversed(bitmask_flag)))
             )
-
-            # Add spectra.
-            result["data"] = dict(
-                wavelength=wavelength,
-                flux=flux[z],
-                flux_sigma=flux_sigma[z],
-                model_flux=model_flux[z],
-                continuum=continuum[z],
-                normalized_flux=normalized_flux[z],
+            result.update(
+                dict(
+                    log_chisq_fit=meta["log_chisq_fit"][z],
+                    log_snr_sq=meta["log_snr_sq"][z],
+                    frac_phot_data_points=meta["frac_phot_data_points"][z],
+                    snr=parsed["snr"],
+                )
             )
 
             i, j, k = (int(parsed[_]) for _ in "ijk")
-            ijks.append((i, j, k))
-            results_dict.setdefault((i, j), [])
-            results_dict[(i, j)].append(result)
 
-        # List-ify.
-        results = nested_list(ijks)
-        for (i, j), value in results_dict.items():
-            for k, result in enumerate(value):
-                results[i][j][k] = result
-        return results
+            label_results.setdefault((i, j, k), [])
+            label_results[(i, j, k)].append(result)
+            spectral_results.setdefault((i, j, k), [])
+            
+            # TODO: These need to be resampled to the observed pixels!
+            spectral_results[(i, j, k)].append(dict(
+                model_flux=model_flux[z],
+                continuum=continuum[z],
+                # FERRE_flux is what we actually gave to FERRE. Store it here just in case?
+                ferre_flux=flux[z],
+                e_ferre_flux=flux_sigma[z],
+            ))
 
-    def post_execute(self):
-        """
-        Post-execute hook after FERRE is complete.
-
-        Read in the output files, create rows in the database, and produce output data products.
-        """
-
-        results = self.context["execute"]
-
+        if self.continuum_method is not None:
+            f_continuum = executable(self.continuum_method)(**self.continuum_kwargs)
+        else:
+            f_continuum = None          
+        
         # Create outputs in the database.
-        with database.atomic() as txn:
-            for (task, data_products, _), task_results in zip(self.iterable(), results):
-                for (data_product, data_product_results) in zip(
-                    flatten(data_products), task_results
-                ):
+        for i, (task, (data_product, ), parameters) in enumerate(self.iterable()):
+            hdu_results = {}
+            task_results = []
+            header_groups = {}
+            for k, spectrum in enumerate(SpectrumList.read(data_product.path, data_slice=parameters["data_slice"])):
+                if not spectrum_overlaps(spectrum, np.hstack(model_wavelengths)):
+                    continue
+                
+                index = (i, 0, k)
 
-                    for result in data_product_results:
-                        output = Output.create()
+                extname = get_extname(spectrum, data_product)
 
-                        # Create a data product.
-                        # TODO: This is a temporary hack until we have a data model in place.
-                        path = expand_path(
-                            f"$MWM_ASTRA/{__version__}/ferre/tasks/{task.id % 100}/{task.id}/output_{output.id}.pkl"
-                        )
-                        os.makedirs(os.path.dirname(path), exist_ok=True)
+                # TODO: Put in the initial parameters?
+                hdu_result = list_to_dict(label_results[index])
+                
+                spectral_results_ = list_to_dict(spectral_results[index])
+                mask = _get_ferre_mask(spectrum.wavelength.value, model_wavelengths)
+                spectral_results_ = _de_mask_values(spectral_results_, mask)
 
-                        with open(path, "wb") as fp:
-                            pickle.dump(result, fp)
+                # TODO: Store this in a meta file instead of doing it in pre_ and post_??
+                if f_continuum is not None:
+                    f_continuum.fit(spectrum)
+                    pre_continuum = f_continuum(spectrum)
+                else:
+                    pre_continuum = 1
+                
+                spectral_results_["continuum"] *= pre_continuum
+                spectral_results_["model_flux"] *= spectral_results_["continuum"]
 
-                        output_data_product = DataProduct.create(
-                            release=data_product.release,
-                            filetype="full",
-                            kwargs=dict(full=path),
-                        )
-                        TaskOutputDataProducts.create(
-                            task=task, data_product=output_data_product
-                        )
+                hdu_result.update(spectral_results_)
+                hdu_results[extname] = hdu_result
+                header_groups[extname] = [
+                    ("TEFF", "STELLAR LABELS"),
+                    ("BITMASK_TEFF", "BITMASK FLAGS"),
+                    ("LOG_CHISQ_FIT", "SUMMARY STATISTICS"),
+                    ("MODEL_FLUX", "MODEL SPECTRA")
+                ]
+                task_results.extend(label_results[index])
 
-                        # Spectra don't belong in the database.
-                        result.pop("data")
+            create_pipeline_product(task, data_product, hdu_results, header_groups=header_groups)
 
-                        TaskOutput.create(task=task, output=output)
-                        FerreOutput.create(task=task, output=output, **result)
-
-                        log.info(
-                            f"Created output {output} for task {task} and data product {data_product}"
-                        )
-                        log.info(
-                            f"New output data product: {output_data_product} at {path}"
-                        )
+            # Add to database.
+            task.create_or_update_outputs(FerreOutput, task_results)
 
         return None
 
 
-"""
-def create_task_output(task, model, **kwargs):
-    output = Output.create()
-    task_output = TaskOutput.create(task=task, output=output)
-    result = model.create(
-        task=task,
-        output=output,
-        **kwargs
-    )
-    return (output, task_output, result)
-"""
+def _get_ferre_mask(observed_wavelength, model_wavelengths):
+    P = observed_wavelength.size
+    mask = np.zeros(P, dtype=bool)
+    for model_wavelength in model_wavelengths:
+        s_index, e_index = observed_wavelength.searchsorted(model_wavelength[[0, -1]])
+        if (e_index - s_index) != model_wavelength.size:
+            log.warn(f"Model wavelength grid does not precisely match data product ({e_index - s_index} vs {model_wavelength.size} on {model_wavelength[[0, -1]]})")
+            e_index = s_index + model_wavelength.size
+        mask[s_index:e_index] = True
+    return mask
+
+
+def _de_mask_values(spectral_dict, mask, fill_value=np.nan):
+    P = mask.size
+    updated = {}
+    for k, v in spectral_dict.items():
+        N, O = np.atleast_2d(v).shape
+        updated_v = fill_value * np.ones((N, P))
+        updated_v[:, mask] = np.array(v)
+        updated[k] = updated_v
+    return updated

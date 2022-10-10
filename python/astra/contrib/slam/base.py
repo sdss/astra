@@ -191,17 +191,40 @@ class Slam(TaskInstance):
                 # Create AstraStar product.
                 model_continuum = flux_resamp / flux_norm
 
-                resampled_continuum = np.empty((N, P))
-                resampled_model_flux = np.empty((N, P))
-                for i in range(N):
-                    assert np.all(np.isfinite(prediction)), "Prediction values not all finite?"
-                    assert np.all(np.isfinite(model_continuum[i])), "Model continuum values not all finite?"
-                    f = interp1d(wave_interp, prediction[i], kind="cubic", bounds_error=False, fill_value=np.nan)
-                    c = interp1d(wave_interp, model_continuum[i], kind="cubic", bounds_error=False, fill_value=np.nan)
+                resampled_continuum = np.nan * np.ones((N, P))
+                resampled_model_flux = np.nan * np.ones((N, P))
+                if not np.all(np.isfinite(prediction)):
+                    log.warning(f"Prediction values not all finite!")
+                if not np.all(np.isfinite(model_continuum[i])):
+                    log.warning(f"Not all model continuum values finite!")
 
-                    # Re-sample the predicted spectra back to the observed frame.
-                    resampled_model_flux[i] = f(wave)
-                    resampled_continuum[i] = c(wave)
+                try:
+                        
+                    for i in range(N):
+                        #assert np.all(np.isfinite(prediction)), "Prediction values not all finite?"
+                        #assert np.all(np.isfinite(model_continuum[i])), "Model continuum values not all finite?"
+                        finite_prediction = np.isfinite(prediction[i])
+                        finite_model_continuum = np.isfinite(model_continuum[i])
+                        f = interp1d(
+                            wave_interp[finite_prediction], 
+                            prediction[i][finite_prediction], 
+                            kind="cubic", 
+                            bounds_error=False, 
+                            fill_value=np.nan
+                        )
+                        c = interp1d(
+                            wave_interp[finite_model_continuum], 
+                            model_continuum[i][finite_model_continuum], 
+                            kind="cubic", 
+                            bounds_error=False, 
+                            fill_value=np.nan
+                        )
+
+                        # Re-sample the predicted spectra back to the observed frame.
+                        resampled_model_flux[i] = f(wave)
+                        resampled_continuum[i] = c(wave)
+                except:
+                    log.exception(f"Exception in sampling spectra. Maybe there are all negative fluxes?")
 
                 database_results.extend(dict_to_list(results))
                 results.update(

@@ -102,6 +102,17 @@ class Source(AstraBaseModel):
             .where(Source.catalogid == self.catalogid)
         )
 
+    '''
+    # Sould link source and data product/task to the OUTPUT table... then it'd be easier.
+    @property
+    def outputs(self):
+        outputs = []
+        o = TaskOutput.get(TaskOutput.task == self)
+        for expr, column in o.output.dependencies():
+            if column.model not in (TaskOutput, AstraOutputBaseModel):
+                outputs.extend(column.model.select().where(column.model.task == self))
+        return sorted(outputs, key=lambda x: x.output_id)
+    '''
 
 class DataProductKeywordsField(JSONField):
     def adapt(self, kwargs):
@@ -222,7 +233,19 @@ class DataProduct(AstraBaseModel):
                 return expand_path("$MWM_ASTRA/{v_astra}/{run2d}-{apred}/spectra/star/{catalogid_groups}/mwmStar-{v_astra}-{cat_id}.fits".format(catalogid_groups=catalogid_groups, **self.kwargs))
             else:
                 return expand_path("$MWM_ASTRA/{v_astra}/{run2d}-{apred}/spectra/visit/{catalogid_groups}/mwmVisit-{v_astra}-{cat_id}.fits".format(catalogid_groups=catalogid_groups, **self.kwargs))
-                
+
+        elif self.filetype.startswith("astraStar"):
+            pipeline = self.filetype[len("astraStar"):]
+            catalogid = self.kwargs['cat_id']
+            k = 100
+            #catalogid_groups = f"{(catalogid // k) % k:.0f}/{catalogid % k:.0f}"
+            catalogid_groups = f"{(catalogid // k) % k:0>2.0f}/{catalogid % k:0>2.0f}"
+
+            log.warn("hard-coding in path")
+            from astra.utils import expand_path
+            return expand_path("$MWM_ASTRA/{v_astra}/{run2d}-{apred}/results/star/{catalogid_groups}/astraStar-{pipeline}-{v_astra}-{cat_id}-{task_id}.fits".format(pipeline=pipeline, catalogid_groups=catalogid_groups, **self.kwargs))
+
+
         try:
             p = _sdss_path_instances[self.release]
         except KeyError:

@@ -5,7 +5,7 @@ import os
 import numpy as np
 from typing import Dict, List, Union, Optional, Tuple
 from sdss_access import SDSSPath
-from astra import log, __version__ as astra_version
+from astra import log, __version__ as v_astra
 from astra.database.astradb import Task, DataProduct, Source, TaskOutputDataProducts
 from astropy.io import fits
 from functools import partial
@@ -187,7 +187,7 @@ def create_pipeline_product(
 
     image = fits.HDUList(hdus)
     kwds = dict(
-        astra_version=astra_version,
+        v_astra=v_astra,
         apred=data_product.kwargs.get("apred", ""),
         run2d=data_product.kwargs.get("run2d", ""),
         # Get catalog identifier from primary HDU. Don't rely on it being in the data product kwargs.
@@ -206,11 +206,11 @@ def create_pipeline_product(
         apred, run2d, cat_id = (kwds["apred"], kwds["run2d"], kwds["cat_id"])
         if filetype.startswith("astraVisit"):
             path = expand_path(
-                f"$MWM_ASTRA/{astra_version}/{run2d}-{apred}/results/visit/{catalogid_groups}/astraVisit-{product_name}-{astra_version}-{cat_id}-{task_id}.fits"
+                f"$MWM_ASTRA/{v_astra}/{run2d}-{apred}/results/visit/{catalogid_groups}/astraVisit-{product_name}-{v_astra}-{cat_id}-{task_id}.fits"
             )
         elif filetype.startswith("astraStar"):
             path = expand_path(
-                f"$MWM_ASTRA/{astra_version}/{run2d}-{apred}/results/star/{catalogid_groups}/astraStar-{product_name}-{astra_version}-{cat_id}-{task_id}.fits"
+                f"$MWM_ASTRA/{v_astra}/{run2d}-{apred}/results/star/{catalogid_groups}/astraStar-{product_name}-{v_astra}-{cat_id}-{task_id}.fits"
             )
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
