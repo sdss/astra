@@ -52,8 +52,8 @@ class Ferre(TaskInstance):
     n_threads = Parameter(default=1, bundled=True)
 
     # For rectification to be made before the FERRE run.
-    continuum_method = Parameter(default=None, bundled=True)
-    continuum_kwargs = DictParameter(default=None, bundled=True)
+    continuum_method = Parameter(default=None)
+    continuum_kwargs = DictParameter(default=None)
 
     data_slice = TupleParameter(default=[0, 1]) # only relevant for ApStar data products
 
@@ -189,12 +189,7 @@ class Ferre(TaskInstance):
 
         # Write the control file.
         with open(os.path.join(dir, "input.nml"), "w") as fp:
-            fp.write(utils.format_ferre_control_keywords(control_kwds))
-
-        if self.continuum_method is not None:
-            f_continuum = executable(self.continuum_method)(**self.continuum_kwargs)
-        else:
-            f_continuum = None            
+            fp.write(utils.format_ferre_control_keywords(control_kwds))       
 
         pixel_mask = PixelBitMask()
 
@@ -215,13 +210,14 @@ class Ferre(TaskInstance):
                     sigma_ = spectrum.uncertainty.represent_as(StdDevUncertainty).array
                     
                     # Perform any continuum rectification pre-processing.
-                    if f_continuum is not None:
+                    if parameters["continuum_method"] is not None:
+                        f_continuum = executable(parameters["continuum_method"])(**parameters["continuum_kwargs"])
                         f_continuum.fit(spectrum)
                         continuum = f_continuum(spectrum)
                         flux_ /= continuum
                         sigma_ /= continuum
                     else:
-                        continuum = None
+                        f_continuum = None     
                     
                     # Inflate errors around skylines, etc.
                     skyline_mask = (
@@ -368,7 +364,7 @@ class Ferre(TaskInstance):
                         stdout=stdout,
                         stderr=stderr,
                         check=False,
-                        timeout=24 * 60 * 60,  # self.timeout
+                        timeout=7 * 24 * 60 * 60, # a week! # self.timeout
                     )
         except:
             log.exception(f"Exception when calling FERRE in {dir}:")
@@ -576,11 +572,6 @@ class Ferre(TaskInstance):
                 ferre_flux=flux[z],
                 e_ferre_flux=flux_sigma[z],
             ))
-
-        if self.continuum_method is not None:
-            f_continuum = executable(self.continuum_method)(**self.continuum_kwargs)
-        else:
-            f_continuum = None          
         
         # Create outputs in the database.
         for i, (task, (data_product, ), parameters) in enumerate(self.iterable()):
@@ -603,12 +594,13 @@ class Ferre(TaskInstance):
                 spectral_results_ = _de_mask_values(spectral_results_, mask)
 
                 # TODO: Store this in a meta file instead of doing it in pre_ and post_??
-                if f_continuum is not None:
+                if parameters["continuum_method"] is not None:
+                    f_continuum = executable(parameters["continuum_method"])(**parameters["continuum_kwargs"])
                     f_continuum.fit(spectrum)
                     pre_continuum = f_continuum(spectrum)
                 else:
-                    pre_continuum = 1
-                
+                    pre_continuum = 1                     
+
                 spectral_results_["continuum"] *= pre_continuum
                 spectral_results_["model_flux"] *= spectral_results_["continuum"]
 

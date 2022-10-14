@@ -313,7 +313,7 @@ def create_initial_stellar_parameter_task_bundles(
 def create_stellar_parameter_task_bundles(
     initial_task_bundles,
     weight_path: Optional[str] = "$MWM_ASTRA/component_data/aspcap/global_mask_v02.txt",
-    continuum_method: Optional[Union[Continuum, str]] = continuum.MedianFilter,
+    continuum_method: Optional[Union[Continuum, str]] = "astra.contrib.aspcap.continuum.MedianFilter",
     continuum_kwargs: Optional[dict] = None,
     **kwargs,
 ):
@@ -410,7 +410,7 @@ def create_stellar_parameter_task_bundles(
                 f"\t{i:.0f}: \chi^2 = {log_chisq_fit:.3f} for task {task} and output {output}"
             )
 
-    if continuum_method is not None:
+    if continuum_method is not None and not isinstance(continuum_method, str):
         continuum_method = serialize_executable(continuum_method)
 
     task_data_products = []
