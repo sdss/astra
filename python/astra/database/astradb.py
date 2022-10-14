@@ -220,6 +220,7 @@ class DataProduct(AstraBaseModel):
 
     @cached_property
     def path(self):
+        '''
         if self.filetype in ("mwmStar", "mwmVisit"):
             catalogid = self.kwargs['cat_id']
             k = 100
@@ -244,7 +245,7 @@ class DataProduct(AstraBaseModel):
             log.warn("hard-coding in path")
             from astra.utils import expand_path
             return expand_path("$MWM_ASTRA/{v_astra}/{run2d}-{apred}/results/star/{catalogid_groups}/astraStar-{pipeline}-{v_astra}-{cat_id}-{task_id}.fits".format(pipeline=pipeline, catalogid_groups=catalogid_groups, **self.kwargs))
-
+        '''
 
         try:
             p = _sdss_path_instances[self.release]
@@ -589,15 +590,7 @@ class AstraOutputBaseModel(AstraBaseModel):
 
     """A base class for output data models."""
 
-    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
-    task = ForeignKeyField(Task)
-    meta = JSONField(null=True)
-
-    # Most Outputs will be associated with a single Source
-    # This is a convenience reference to avoid us having to join between:
-    # xxxOutput -> Task -> TaskInputDataProducts -> DataProduct -> Source
-    # TODO: update existing schema to reflect this
-    # source = ForeignKeyField(Source, on_delete="CASCADE", null=True)
+    pass
 
 
 class MWMSourceStatus(AstraOutputBaseModel):
@@ -639,6 +632,8 @@ class ClassifierOutput(AstraOutputBaseModel):
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
     meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
+    parent_data_product = ForeignKeyField(DataProduct, null=True)
 
     dithered = BooleanField()
 
@@ -662,6 +657,7 @@ class ClassifySourceOutput(AstraOutputBaseModel):
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
     task = ForeignKeyField(Task)
     meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
 
     p_cv = FloatField(default=0)
     lp_cv = FloatField(default=SMALL)
@@ -678,6 +674,12 @@ class ClassifySourceOutput(AstraOutputBaseModel):
 
 
 class FerreOutput(AstraOutputBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
+    parent_data_product = ForeignKeyField(DataProduct, null=True)
 
     snr = FloatField()
     teff = FloatField()
@@ -730,6 +732,12 @@ class FerreOutput(AstraOutputBaseModel):
 
 class ApogeeNetOutput(AstraOutputBaseModel):
 
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
+    parent_data_product = ForeignKeyField(DataProduct, null=True)
+
     snr = FloatField()
     teff = FloatField()
     logg = FloatField()
@@ -744,6 +752,12 @@ class ApogeeNetOutput(AstraOutputBaseModel):
 
 
 class AspcapOutput(AstraOutputBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
+    parent_data_product = ForeignKeyField(DataProduct, null=True)
 
     # Metadata.
     snr = FloatField()
@@ -803,6 +817,12 @@ for element in elements:
 
 
 class TheCannonOutput(AstraOutputBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
+    parent_data_product = ForeignKeyField(DataProduct, null=True)
 
     # Metadata.
     snr = FloatField()
@@ -1023,6 +1043,13 @@ class TheCannonOutput(AstraOutputBaseModel):
 
 
 class ZetaPayneOutput(AstraOutputBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
+    parent_data_product = ForeignKeyField(DataProduct, null=True)
+
     snr = FloatField()
 
     teff = FloatField(null=True)
@@ -1050,6 +1077,12 @@ class ZetaPayneOutput(AstraOutputBaseModel):
 
 
 class ThePayneOutput(AstraOutputBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
+    parent_data_product = ForeignKeyField(DataProduct, null=True)
 
     snr = FloatField()
     v_rad = FloatField(null=True)
@@ -1412,6 +1445,12 @@ class ThePayneOutput(AstraOutputBaseModel):
 
 class WhiteDwarfOutput(AstraOutputBaseModel):
 
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
+    parent_data_product = ForeignKeyField(DataProduct, null=True)
+
     wd_type = TextField()
     snr = FloatField()
     teff = FloatField()
@@ -1429,16 +1468,34 @@ class WhiteDwarfOutput(AstraOutputBaseModel):
 
 class WhiteDwarfLineRatiosOutput(AstraOutputBaseModel):
 
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
+    parent_data_product = ForeignKeyField(DataProduct, null=True)
+
     wavelength_start = FloatField()
     wavelength_end = FloatField()
     line_ratio = FloatField()
 
 class WhiteDwarfClassifierOutput(AstraOutputBaseModel):
 
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
+    parent_data_product = ForeignKeyField(DataProduct, null=True)
+
     wd_type = TextField()
     
 
 class SlamOutput(AstraOutputBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
+    parent_data_product = ForeignKeyField(DataProduct, null=True)
 
     snr = FloatField()
 
