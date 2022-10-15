@@ -256,6 +256,8 @@ def create_boss_hdus(
         ("V_SHIFT", meta["v_shift"]),
         ("IN_STACK", use_in_stack),
         ("ZWARNING", zwarnings),
+        ("DATABASE PRIMARY KEYS", None),
+        ("DATA_PRODUCT_ID", lambda dp, image: dp.id)
     ]
 
     spectrum_sampling_cards = base.spectrum_sampling_cards(**meta)

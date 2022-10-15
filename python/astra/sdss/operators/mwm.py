@@ -270,86 +270,38 @@ class MWMVisitStarFactory(BaseOperator):
         ti, task = (context["ti"], context["task"])
 
         # Get the data products identifiers from upstream operators
-        data_product_ids = map(int, tuple(set(flatten(ti.xcom_pull(task_ids=task.upstream_task_ids)))))
+        log.info(f"Upstream: {ti.xcom_pull(task_ids=task.upstream_task_ids)}")
+        data_product_ids = list(map(int, tuple(set(flatten(ti.xcom_pull(task_ids=task.upstream_task_ids))))))
         log.info(f"Found {len(data_product_ids)} data product identifiers")
         
-        # TODO: we could get run2d/apred from upstream, but should we?
-        '''
-        if self.run2d is None:
-            # Get run2d from the input data products
-            q = flatten(
-                DataProduct
-                .select(fn.DISTINCT(DataProduct.kwargs["run2d"]))
-                .where(
-                    (DataProduct.filetype == "specFull")
-                &   (DataProduct.id.in_(data_product_ids))
-                )
-                .tuples()
-            )
-            if len(q) > 1:
-                raise ValueError(f"No run2d given, and multiple run2d values found in input data products: {q}")
-            
-            self.run2d, = q
-            log.info(f"Setting run2d={self.run2d}")
-        
-        if self.apred is None:
-            # Get apred from the input data products.
-            q = flatten(
-                DataProduct
-                .select(fn.DISTINCT(DataProduct.kwargs["apred"]))
-                .where(
-                    (DataProduct.filetype == "apVisit")
-                &   (DataProduct.id.in_(data_product_ids))
-                )
-                .tuples()
-            )
-            if len(q) > 1:
-                raise ValueError(f"No apred given, and multiple apred values found in input data products: {q}")
-            self.apred, = q
-            log.info(f"Setting apred={self.apred}")
-        '''
+        import pickle
+        with open("/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/mwm/spectro/astra/astra/tmp.pkl", "wb") as fp:
+            pickle.dump(data_product_ids, fp)
+
         parameters = dict(
             release=self.release,
             run2d=self.run2d,
             apred=self.apred,
         )
 
-        expression = DataProduct.id.in_(data_product_ids)
-        #    DataProduct.filetype.in_(("apVisit", "specFull"))
-        #&   
-        #)
-
-        '''
-        if self.apred_release is not None and self.apred is not None:
-            sub = DataProduct.filetype == "apVisit"
-            if self.apred_release is not None:
-                sub &= DataProduct.release == self.apred_release
-            if self.apred is not None:
-                sub &= DataProduct.kwargs["apred"] == self.apred
-
-            expression |= sub
-
-        if self.run2d_release is not None and self.run2d is not None:
-            sub = DataProduct.filetype == "specFull"
-            if self.run2d_release is not None:
-                sub &= DataProduct.release == self.run2d_release
-            if self.run2d is not None:
-                sub &= DataProduct.kwargs["run2d"] == self.run2d
-
-            expression |= sub
-        '''
-        catalogids = flatten(
+        q = (
             SourceDataProduct
-            .select(SourceDataProduct.source_id)
-            .distinct()
+            .select(
+                SourceDataProduct.source_id,
+                SourceDataProduct.data_product_id
+            )
             .where(SourceDataProduct.data_product_id.in_(data_product_ids))
             .tuples()
         )
-
-        # Create the tasks first in bulk.
-        # TODO: use insert_many instead
+        # put things in some dict of catalogid -> list of data product ids
+        identifiers = {}
+        for source_id, data_product_id in tqdm(q):
+            identifiers.setdefault(source_id, [])
+            identifiers[source_id].append(data_product_id)
+    
+        # Create everything in bulk.
         tasks = []
-        for catalogid in tqdm(catalogids, desc="Creating tasks"):
+        for catalogid in tqdm(identifiers.keys(), desc="Creating tasks"):
             tasks.append(
                 Task(
                     name="astra.sdss.datamodels.mwm.CreateMWMVisitStarProducts",
@@ -367,20 +319,19 @@ class MWMVisitStarFactory(BaseOperator):
         # Create TaskInputDataProducts.
         log.info(f"Linking data products to tasks")
         with database.atomic():
-            for catalogid, task in zip(catalogids, tqdm(tasks)):
-                (
-                    TaskInputDataProducts
-                    .insert_from(
-                        SourceDataProduct.select(SourceDataProduct.data_product_id, task.id)
-                        .join(DataProduct)
-                        .where(SourceDataProduct.source_id == catalogid)
-                        .where(expression),
-                        fields=[TaskInputDataProducts.data_product_id, TaskInputDataProducts.task_id]
+            rows = []
+            for task, catalogid in tqdm(zip(tasks, identifiers.keys()), desc="Creating rows"):
+                for data_product_id in identifiers[catalogid]:
+                    rows.append(
+                        dict(
+                            task_id=task.id,
+                            data_product_id=data_product_id,
+                        )
                     )
-                    .execute()
-                )
-        log.info(f"Done.")
-        
+            TaskInputDataProducts.insert_many(rows).execute()
+
+        log.info(f"Done")
+
         bundles = [Bundle() for i in range(self.num_bundles)]
         with database.atomic():
             Bundle.bulk_create(bundles)

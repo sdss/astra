@@ -191,9 +191,10 @@ GLOSSARY = {
     "FIELD": "Field number",
     "APRED": "APOGEE reduction tag",
     # MWM data model keywords not specified elsewhere
-    "ASTRA_VERSION": "Astra version",
-    "CATALOGID": "SDSS-V catalog identifier",
+    "V_ASTRA": "Astra version",
+    "CAT_ID": "SDSS-V catalog identifier",
     "COMPONENT": "Disentangled stellar component",
+    "DATA_PRODUCT_ID": "Astra data product identifier",
 
     # Radial velocity keys (common to any code)
     "V_RAD": "Radial velocity in Solar barycentric rest frame [km/s]",
@@ -356,7 +357,7 @@ def get_auxiliary_source_data(source: Union[Source, int]):
     field_descriptors = [
         BLANK_CARD,
         (" ", "IDENTIFIERS", None),
-        ("SDSS_ID", Catalog.catalogid, f"SDSS-V catalog identifier"),
+        ("CAT_ID", Catalog.catalogid, f"SDSS-V catalog identifier"),
         ("TIC_ID", TIC.id.alias("tic_id"), f"TESS Input Catalog ({tic_dr}) identifier"),
         ("GAIA_ID", Gaia.source_id, f"Gaia {gaia_dr} source identifier"),
         BLANK_CARD,

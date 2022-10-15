@@ -189,6 +189,7 @@ def create_apogee_hdus(
         ("DATABASE PRIMARY KEYS", None),
         ("VISIT_PK", velocity_meta["VISIT_PK"]),
         ("RV_VISIT_PK", velocity_meta["RV_VISIT_PK"]),
+        ("DATA_PRODUCT_ID", lambda dp, image: dp.id),
     ]
 
     spectrum_sampling_cards = base.spectrum_sampling_cards(**meta)
