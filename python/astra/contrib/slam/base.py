@@ -131,7 +131,14 @@ class Slam(TaskInstance):
                 )
                 label_names = ("teff", "logg", "fe_h")
                 labels = np.array([label["x"] for label in results_pred])
-                results = dict(zip(label_names, labels.T))
+                parent_data_product_id = spectrum.meta.get("DATA_PRODUCT_ID", None)
+                if not parent_data_product_id:
+                    parent_data_product_id = [data_product.id] * N
+                results = dict(
+                    source_id=[spectrum.meta.get("CAT_ID", None)] * N,
+                    parent_data_product_id=parent_data_product_id
+                )
+                results.update(dict(zip(label_names, labels.T)))
                 results.update(
                     dict(zip(
                         [f"e_{ln}" for ln in label_names],

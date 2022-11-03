@@ -328,7 +328,7 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         return instance
 
     @classmethod
-    def from_bundle(cls, bundle, only_incomplete=False, strict=True):
+    def from_bundle(cls, bundle, only_incomplete=False, strict=True, reverse=False):
         """
         Create a TaskInstance from a database bundle.
         """
@@ -344,6 +344,9 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
         if only_incomplete:
             log.warn(f"Restricting to tasks in bundle {bundle} that are incomplete")
             q = q.where(Task.status != Status.get(description="completed"))
+
+        if reverse:
+            q = q.order_by(Task.id.desc())
 
         tasks = list(q)
         bundle_size = len(tasks)
@@ -521,7 +524,6 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
                     status = Status.get(description=f"failed-{stage.replace('_', '-')}")
                     task.status_id = status.id
                     task.save()
-                raise 
                 continue
             else:
                 if stage is not None:
@@ -535,11 +537,13 @@ class TaskInstance(object, metaclass=TaskInstanceMeta):
 
                     # Update status for this task. if we set
                     # TODO: Get the correct status ID
+                    # Don't set the task status if it's already failed
                     try:
                         task, idp, parameters = item
-                        task.status_id = 5 # TODO 
-                        task.completed = datetime.datetime.now()
-                        task.save()
+                        if task.status.description not in ("failed-pre-execution", "failed-execution", "failed-post-execution"):
+                            task.status_id = 5 # TODO 
+                            task.completed = datetime.datetime.now()
+                            task.save()
                     except ValueError:
                         log.warning(f"Couldn't update task in status {task} {stage}")
 

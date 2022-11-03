@@ -43,7 +43,7 @@ def vacuum_to_air(wave_AA):
     return np.array(wave_new)
 
 
-def fit_spectrum(spectrum, NN, opt, logger, constraints={}):
+def fit_spectrum(spectrum, NN, opt, logger, constraints={}, data_product=None):
 
     wave_start = float(opt['wave_range'][0])
     wave_end = float(opt['wave_range'][1])
@@ -107,7 +107,7 @@ def fit_spectrum(spectrum, NN, opt, logger, constraints={}):
     CHI2 = fit_res.chi2_func(fit_res.popt)
 
     #SNR = DER_SNR(flux)
-    snr = spectrum.meta["SNR"][0]
+    snr = np.array(spectrum.meta["SNR"]).flatten()[0] # not doing mwmVisits
 
     #name = spectrum.obj_id
     #row = [name, '%.1f'%SNR]
@@ -124,7 +124,9 @@ def fit_spectrum(spectrum, NN, opt, logger, constraints={}):
             db_values.append(np.nan)
             db_values.append(np.nan)
 
-    db_values.append(fit_res.RV)
+    # 2022-10-24, Andy Casey: Applying sign correction identified by Eleonra Zari in 0.2.6.
+    #                         This has been corrected in all downstream files.
+    db_values.append(-fit_res.RV)
     db_values.append(fit_res.RV_uncert)
     db_cheb = fit_res.popt[k+1:]
 
@@ -148,7 +150,14 @@ def fit_spectrum(spectrum, NN, opt, logger, constraints={}):
         
 
     keys = ('teff', 'e_teff', 'logg', 'e_logg', 'vsini', 'e_vsini', 'v_micro', 'e_v_micro', 'fe_h', 'e_fe_h', 'v_rel', 'e_v_rel')
-    result = dict(zip(keys, db_values))
+    parent_data_product_id = spectrum.meta.get("DATA_PRODUCT_ID", None)
+    if not parent_data_product_id and (data_product is not None):
+        parent_data_product_id = data_product.id
+    result = dict(
+        source_id=spectrum.meta.get("CAT_ID", None),
+        parent_data_product_id=parent_data_product_id,
+    )
+    result.update(dict(zip(keys, db_values)))
     result.update(
         theta=db_cheb,
         snr=snr,

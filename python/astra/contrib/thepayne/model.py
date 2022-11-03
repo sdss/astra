@@ -25,6 +25,7 @@ def estimate_labels(
     continuum: Optional[np.array] = None,
     v_rad_tolerance: Optional[Union[float, int]] = None,
     opt_tolerance: Optional[float] = 5e-4,
+    data_product=None,
     **kwargs,
 ):
     """
@@ -82,6 +83,15 @@ def estimate_labels(
             mask.shape == model_wavelength.shape
         ), "Mask and model wavelengths do not have the same shape"
 
+    source_id = spectrum.meta.get("CAT_ID", None)        
+    if source_id is None and data_product is not None:
+        try:
+            source_id = data_product.sources[0].catalogid
+        except:
+            None
+    parent_data_product_id = spectrum.meta.get("DATA_PRODUCT_ID", None)
+    if (parent_data_product_id is None or len(parent_data_product_id) == 0) and data_product is not None:
+        parent_data_product_id = [data_product.id] * N
     results = []
     meta_results = []
     kwds = kwargs.copy()
@@ -95,7 +105,7 @@ def estimate_labels(
         e_flux[mask] = LARGE
 
         # Fix non-finite pixels and error values.
-        non_finite = ~np.isfinite(flux) + ~np.isfinite(e_flux)
+        non_finite = ~np.isfinite(flux) + ~np.isfinite(e_flux) + (e_flux <= 0)
         flux[non_finite] = 1
         e_flux[non_finite] = LARGE
 
@@ -114,21 +124,42 @@ def estimate_labels(
             method="trf",
             xtol=opt_tolerance,
             ftol=opt_tolerance,
-        )
+    )
+
+        result = OrderedDict([
+            ("source_id", source_id),
+            ("parent_data_product_id", parent_data_product_id[i])
+        ])
 
         try:
             p_opt, p_cov = curve_fit(objective_function, **kwds)
 
         except ValueError:
             log.exception(f"Error occurred fitting spectrum {i}:")
-            results.append((None, None, {}))
+            result.update(dict(zip(label_names, [np.nan] * len(label_names))))
+            result.update(dict(zip([f"e_{ln}" for ln in label_names], [np.nan] * len(label_names))))
+            for j, k in zip(*np.triu_indices(L, 1)):
+                result[f"rho_{label_names[j]}_{label_names[k]}"] = np.nan
+            result.update(
+                snr=spectrum.meta["SNR"][i],
+                chi_sq=np.nan,
+                reduced_chi_sq=np.nan
+            )
+            
+            meta = OrderedDict([("model_flux", np.nan * np.ones_like(flux))])
+            if continuum is not None:
+                resampled_model_flux *= continuum[i]
+                meta["continuum"] = continuum[i]
+            
+            results.append(result)
+            meta_results.append(meta)
 
         else:
             labels = (p_opt + 0.5) * (x_max - x_min) + x_min
             e_labels = np.sqrt(np.diag(p_cov)) * (x_max - x_min)
 
-            result = OrderedDict(zip(label_names, labels))
-            result.update(OrderedDict(zip([f"e_{ln}" for ln in label_names], e_labels)))
+            result.update(dict(zip(label_names, labels)))
+            result.update(dict(zip([f"e_{ln}" for ln in label_names], e_labels)))
 
             rho = np.corrcoef(p_cov)
             for j, k in zip(*np.triu_indices(L, 1)):

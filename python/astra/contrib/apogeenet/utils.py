@@ -3,6 +3,7 @@ import numpy as np
 from astra.tools.bitmask import BitMask
 from astra.tools.spectrum import Spectrum1D
 
+from astra.database.catalogdb import SDSS_DR17_APOGEE_Allstarmerge, Gaia_DR2
 
 class LabelBitmask(BitMask):
 
@@ -154,6 +155,7 @@ def get_metadata(spectrum: Spectrum1D):
                 try:
                     value = spectrum.meta[key.lower()]
                 except KeyError:
+                    meta[preferred_key] = np.nan
                     continue
                 else:
                     meta[preferred_key] = de_nanify(value)
@@ -161,8 +163,32 @@ def get_metadata(spectrum: Spectrum1D):
             else:
                 meta[preferred_key] = de_nanify(value)
                 break
-
+    
     metadata = np.array([de_nanify(value) for value in meta.values()])
+    # Special case for SDSS-IV apStar objects, which don't have Gaia data in the FITS files.
+    if "ddo51" in spectrum.meta and not np.any(np.isfinite(metadata[:4])):
+        try:    
+            q = (
+                Gaia_DR2
+                .select(
+                    Gaia_DR2.parallax, 
+                    Gaia_DR2.phot_g_mean_mag,
+                    Gaia_DR2.phot_bp_mean_mag,
+                    Gaia_DR2.phot_rp_mean_mag,
+                )
+                .join(SDSS_DR17_APOGEE_Allstarmerge, on=(Gaia_DR2.source_id == SDSS_DR17_APOGEE_Allstarmerge.gaia_source_id))
+                .where(
+                    (SDSS_DR17_APOGEE_Allstarmerge.apogee_id == spectrum.meta["objid"])
+                )
+                .tuples()
+            )
+        except:
+            None
+        else:                
+            result = q.first()
+            if result is not None:
+                metadata[:4] = result
+
     mdata_replacements = np.array(
         [-84.82700, 21.40844, 24.53892, 20.26276, 18.43900, 24.00000, 17.02500]
     )

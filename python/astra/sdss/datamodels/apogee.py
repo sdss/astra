@@ -13,6 +13,8 @@ from astra.sdss.datamodels import base, combine, util
 from astra.sdss.bitmasks.apogee_drp import StarBitMask, PixelBitMask
 
 
+
+
 def create_apogee_hdus(
     data_products: List[DataProduct],
     crval: float = 4.179,
@@ -61,11 +63,36 @@ def create_apogee_hdus(
         (f"{instrument} DATA REDUCTION PIPELINE", None),
         "V_APRED",
     )
+
+    # Let's get STARFLAG and DITHERED from each file first, which lets us check whether any
+    # of the files are corrupted.
+    D = len(data_products)
+    keep = np.ones(D, dtype=bool)
+    starflag = np.zeros(D, dtype=np.uint64)
+    dithered = np.zeros(D, dtype=float)
+    for i, data_product in enumerate(data_products):
+        try:    
+            with fits.open(data_product.path) as image:
+                starflag[i] = image[0].header["STARFLAG"]
+                dithered[i] = 1.0 if image[1].data.size == (3 * 4096) else 0.0
+                if len(image) < 5:
+                    log.exception(f"File {data_product} at {data_product.path} has unexpectedly few HDUs")
+                    keep[i] = False
+        except:
+            log.exception(f"OSError when loading {data_product}: {data_product.path}")
+            keep[i] = False
+            continue
+
+    # Restrict ourselves to non-corrupted data products
+    data_products = [dp for dp, keep_dp in zip(data_products, keep) if keep_dp]
+    dithered = dithered[keep]
+    starflag = starflag[keep]
+        
     if len(data_products) == 0:
         empty_visits_hdu = base.create_empty_hdu(observatory, instrument)
         empty_star_hdu = base.create_empty_hdu(observatory, instrument)
         return (empty_visits_hdu, empty_star_hdu)
-
+    
     # Data reduction pipeline keywords
     drp_cards = base.headers_as_cards(data_products[0], common_headers)
 
@@ -99,14 +126,9 @@ def create_apogee_hdus(
     )
 
     starmask = StarBitMask()
-    dithered = np.zeros(len(data_products), dtype=float)
-    for i, data_product in enumerate(data_products):
-        with fits.open(data_product.path) as image:
-            starflag = np.uint64(image[0].header["STARFLAG"])
-            use_in_stack *= ((starflag & starmask.bad_value) == 0) & (
-                (starflag & starmask.get_value("RV_REJECT")) == 0
-            )
-            dithered[i] = 1.0 if image[1].data.size == (3 * 4096) else 0.0
+    use_in_stack *= ((starflag & starmask.bad_value) == 0) & (
+        (starflag & starmask.get_value("RV_REJECT")) == 0
+    )
 
     (
         combined_flux,
@@ -270,6 +292,31 @@ def create_apogee_hdus(
 
     return (hdu_visit, hdu_star)
 
+def _no_rv_measurement():
+    return {
+        "V_BC": np.nan,
+        "V_REL": 0,
+        "V_RAD": np.nan,
+        "E_V_REL": np.nan,
+        "E_V_RAD": np.nan,
+        "V_TYPE": -1,
+        "JD": -1,
+        "DATE-OBS": "",
+        "TEFF_DOPPLER": np.nan,
+        "E_TEFF_DOPPLER": np.nan,
+        "LOGG_DOPPLER": np.nan,
+        "E_LOGG_DOPPLER": np.nan,
+        "FEH_DOPPLER": np.nan,
+        "E_FEH_DOPPLER": np.nan,
+        "VISIT_PK": -1,
+        "RV_VISIT_PK": -1,
+        "RCHISQ": np.nan,
+        "N_RV_COMPONENTS": 0,
+        "V_REL_XCORR": np.nan,
+        "E_V_RAD_XCORR": np.nan,
+        "V_RAD_XCORR": np.nan,
+        "RV_COMPONENTS": np.array([np.nan, np.nan, np.nan]),
+    }    
 
 def get_apogee_visit_radial_velocity(data_product: DataProduct) -> dict:
     """
@@ -290,16 +337,19 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct) -> dict:
     # Note: The rv_visit table contains *NEARLY* everything to uniquely identify
     #       a visit. It contains mjd, apred, fiber (fibreid), telescope, plate,
     #       but does not contain FIELD. So we must cross-match with the visit table.
+
     q = (
         RvVisit.select()
         .join(Visit, on=(RvVisit.visit_pk == Visit.pk))
         .where(
             (Visit.telescope == data_product.kwargs["telescope"])
-            & (Visit.fiberid == data_product.kwargs["fiber"])
-            & (Visit.mjd == data_product.kwargs["mjd"])
-            & (Visit.apred == data_product.kwargs["apred"])
-            & (Visit.field == data_product.kwargs["field"])
-            & (Visit.plate == data_product.kwargs["plate"])
+        &   (Visit.fiberid == data_product.kwargs["fiber"])
+        &   (Visit.mjd == data_product.kwargs["mjd"])
+        &   (Visit.field == data_product.kwargs["field"])
+        &   (Visit.plate == data_product.kwargs["plate"])
+        &   (Visit.apred == data_product.kwargs["apred"])
+        # TODO: Currently the tagged version might not have a RV, but the daily does.
+        #       Should we take daily when tagged doesn't have an RV? A bit ugly..
         )
         .order_by(RvVisit.created.desc())
     )
@@ -310,31 +360,7 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct) -> dict:
         )
 
         # No RV measurement for this visit.
-        return {
-            "V_BC": np.nan,
-            "V_REL": 0,
-            "V_RAD": np.nan,
-            "E_V_REL": np.nan,
-            "E_V_RAD": np.nan,
-            "V_TYPE": -1,
-            "JD": -1,
-            "DATE-OBS": "",
-            "TEFF_DOPPLER": np.nan,
-            "E_TEFF_DOPPLER": np.nan,
-            "LOGG_DOPPLER": np.nan,
-            "E_LOGG_DOPPLER": np.nan,
-            "FEH_DOPPLER": np.nan,
-            "E_FEH_DOPPLER": np.nan,
-            "VISIT_PK": -1,
-            "RV_VISIT_PK": -1,
-            "RCHISQ": np.nan,
-            "N_RV_COMPONENTS": 0,
-            "V_REL_XCORR": np.nan,
-            "E_V_RAD_XCORR": np.nan,
-            "V_RAD_XCORR": np.nan,
-            "RV_COMPONENTS": np.array([np.nan, np.nan, np.nan]),
-        }
-
+        return _no_rv_measurement() 
     # Sanity check
     if data_product.sources[0].catalogid != result.catalogid:
         raise ValueError(
@@ -461,7 +487,7 @@ def resample_apogee_visit_spectra(
             # We resample the bitmask, and we provide a bad pixel mask.
             bitmask.append(image[hdu_bitmask].data)
             bad_pixel_mask.append((bitmask[-1] & pixel_mask.bad_value) > 0)
-
+        
         include_visits.append(visit)
 
     resampled_wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)

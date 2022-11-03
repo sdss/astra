@@ -1,5 +1,5 @@
 from astra.contrib.classifier.base import (
     ClassifyApVisit,
-    ClassifySpecLite,
+    ClassifySpecFull,
     ClassifySource,
 )

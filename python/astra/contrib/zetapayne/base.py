@@ -126,7 +126,7 @@ class ZetaPayne(TaskInstance):
                 opt_keys = ("wave_range", "spectral_R", "N_chebyshev", "N_presearch_iter", "N_presearch")
                 opt = { k: parameters[f"{prefix}{k}"] for k in opt_keys }
 
-                result, meta, fit = fit_spectrum(spectrum, network, opt, logger)
+                result, meta, fit = fit_spectrum(spectrum, network, opt, logger, data_product=data_product)        
 
                 database_results.extend(result)
                 hdu_results = list_to_dict(result)

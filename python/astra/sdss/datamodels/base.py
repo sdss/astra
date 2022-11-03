@@ -12,6 +12,8 @@ from healpy import ang2pix
 BLANK_CARD = (" ", " ", None)
 FILLER_CARD = (FILLER_CARD_KEY, *_) = ("TTYPE0", "Water cuggle", None)
 
+datetime_fmt = "%y-%m-%d %H:%M:%S"
+
 GLOSSARY = {
     #           "*****************************************************"
     "INSTRMNT": "Instrument name",
@@ -84,6 +86,7 @@ GLOSSARY = {
     "NPAIRS": "Number of dither pairs combined",
     "DITHERED": "Fraction of visits that were dithered",
     "NVISITS": "Number of visits included in the stack",
+    "NVISITS_APSTAR": "Number of visits included in the apStar file",
     # columns common to many analysis pipelines
     "INITIAL_TEFF": "Initial stellar effective temperature [K]",
     "INITIAL_LOGG": "Initial stellar surface gravity [dex]",
@@ -91,7 +94,148 @@ GLOSSARY = {
 
     "TEFF": "Stellar effective temperature [K]",
     "LOGG": "Surface gravity [log10(cm/s^2)]",
-    "FE_H": "Metallicity [dex]",                                                          
+    "FE_H": "Metallicity [dex]",    
+    "METALS": "Metallicity [dex]", # TODO: rename as FE_H? or M_H?
+    "E_METALS": "Error in metallicity [dex]",
+    "O_MG_SI_S_CA_TI": "[alpha/Fe] abundance ratio [dex]",
+    "E_O_MG_SI_S_CA_TI": "Error in [alpha/Fe] abundance ratio [dex]",
+    "LOG10VDOP": "Log10 of the doppler broadening [km/s]",
+    "E_LOG10VDOP": "Error in the log10 doppler broadening [km/s]",
+    "LGVSINI": "Log of the projected rotational velocity [km/s]",
+    "E_LGVSINI": "Error in the log projected rotational velocity [km/s]",
+    "C_H_PHOTOSPHERE": "Photosphere carbon abundance [dex]",
+    "E_C_H_PHOTOSPHERE": "Error on photosphere carbon abundance [dex]",
+    "N_H_PHOTOSPHERE": "Photosphere nitrogen abundance [dex]",
+    "E_N_PHOTOSPHERE": "Error on photosphere nitrogen abundance [dex]",
+    "CE_H": "Cerium abundance as [Ce/H] [dex]",
+    "E_CE_H": "Error on cerium abundance as [Ce/H] [dex]",
+    "CI_H": "Carbon abundance as [C I/H] [dex]",
+    "E_CI_H": "Error on carbon abundance as [C I/H] [dex]",
+    "ND_H": "Neodymium abundance as [Nd/H] [dex]",
+    "E_ND_H": "Error on neodymium abundance as [Nd/H] [dex]",
+    "RB_H": "Rubidium abundance as [Rb/H] [dex]",
+    "E_RB_H": "Error on rubidium abundance as [Rb/H] [dex]",
+    "TIII_H": "Titanium abundance as [Ti II/H] [dex]",
+    "E_TIII_H": "Error in titanium abundance as [Ti II/H] [dex]",
+    "TI_H": "Titanium abundance as [Ti/H] [dex]",
+    "E_TI_H": "Error in titanium abundance as [Ti/H] [dex]",
+    "YB_H": "Ytterbium abundance as [Yb/H] [dex]",
+    "E_YB_H": "Error in ytterbium abundance as [Yb/H] [dex]",
+
+    'BITMASK_TEFF': 'Bitmask flag for TEFF',
+    'BITMASK_LOGG': 'Bitmask flag for LOGG',
+    'BITMASK_METALS': 'Bitmask flag for METALS',
+    'BITMASK_O_MG_SI_S_CA_TI': 'Bitmask flag for O_MG_SI_S_CA_TI',
+    'BITMASK_LOG10VDOP': 'Bitmask flag for LOG10VDOP',
+    'BITMASK_LGVSINI': 'Bitmask flag for LGVSINI',
+    'BITMASK_C_H_PHOTOSPHERE': 'Bitmask flag for C_H_PHOTOSPHERE',
+    'BITMASK_N_H_PHOTOSPHERE': 'Bitmask flag for N_H_PHOTOSPHERE',
+    'BITMASK_AL_H': 'Bitmask flag for AL_H',
+    'BITMASK_CA_H': 'Bitmask flag for CA_H',
+    'BITMASK_CE_H': 'Bitmask flag for CE_H',
+    'BITMASK_CI_H': 'Bitmask flag for CI_H',
+    'BITMASK_C_H': 'Bitmask flag for C_H',
+    'BITMASK_CO_H': 'Bitmask flag for CO_H',
+    'BITMASK_CR_H': 'Bitmask flag for CR_H',
+    'BITMASK_CU_H': 'Bitmask flag for CU_H',
+    'BITMASK_FE_H': 'Bitmask flag for FE_H',
+    'BITMASK_GE_H': 'Bitmask flag for GE_H',
+    'BITMASK_K_H': 'Bitmask flag for K_H',
+    'BITMASK_MG_H': 'Bitmask flag for MG_H',
+    'BITMASK_MN_H': 'Bitmask flag for MN_H',
+    'BITMASK_NA_H': 'Bitmask flag for NA_H',
+    'BITMASK_ND_H': 'Bitmask flag for ND_H',
+    'BITMASK_NI_H': 'Bitmask flag for NI_H',
+    'BITMASK_N_H': 'Bitmask flag for N_H',
+    'BITMASK_O_H': 'Bitmask flag for O_H',
+    'BITMASK_P_H': 'Bitmask flag for P_H',
+    'BITMASK_RB_H': 'Bitmask flag for RB_H',
+    'BITMASK_SI_H': 'Bitmask flag for SI_H',
+    'BITMASK_S_H': 'Bitmask flag for S_H',
+    'BITMASK_TIII_H': 'Bitmask flag for TIII_H',
+    'BITMASK_TI_H': 'Bitmask flag for TI_H',
+    'BITMASK_V_H': 'Bitmask flag for V_H',
+    'BITMASK_YB_H': 'Bitmask flag for YB_H',
+    'LOG_CHISQ_FIT': 'Log \chi^2 of stellar parameter fit',
+    'LOG_CHISQ_FIT': 'Log \chi^2 of CN_H fit',
+    'LOG_CHISQ_FIT_AL_H': 'Log \chi^2 of AL_H fit',
+    'LOG_CHISQ_FIT_CA_H': 'Log \chi^2 of CA_H fit',
+    'LOG_CHISQ_FIT_CE_H': 'Log \chi^2 of CE_H fit',
+    'LOG_CHISQ_FIT_CI_H': 'Log \chi^2 of CI_H fit',
+    'LOG_CHISQ_FIT_C_H': 'Log \chi^2 of C_H fit',
+    'LOG_CHISQ_FIT_CO_H': 'Log \chi^2 of CO_H fit',
+    'LOG_CHISQ_FIT_CR_H': 'Log \chi^2 of CR_H fit',
+    'LOG_CHISQ_FIT_CU_H': 'Log \chi^2 of CU_H fit',
+    'LOG_CHISQ_FIT_FE_H': 'Log \chi^2 of FE_H fit',
+    'LOG_CHISQ_FIT_GE_H': 'Log \chi^2 of GE_H fit',
+    'LOG_CHISQ_FIT_K_H': 'Log \chi^2 of K_H fit',
+    'LOG_CHISQ_FIT_MG_H': 'Log \chi^2 of MG_H fit',
+    'LOG_CHISQ_FIT_MN_H': 'Log \chi^2 of MN_H fit',
+    'LOG_CHISQ_FIT_NA_H': 'Log \chi^2 of NA_H fit',
+    'LOG_CHISQ_FIT_ND_H': 'Log \chi^2 of ND_H fit',
+    'LOG_CHISQ_FIT_NI_H': 'Log \chi^2 of NI_H fit',
+    'LOG_CHISQ_FIT_N_H': 'Log \chi^2 of N_H fit',
+    'LOG_CHISQ_FIT_O_H': 'Log \chi^2 of O_H fit',
+    'LOG_CHISQ_FIT_P_H': 'Log \chi^2 of P_H fit',
+    'LOG_CHISQ_FIT_RB_H': 'Log \chi^2 of RB_H fit',
+    'LOG_CHISQ_FIT_SI_H': 'Log \chi^2 of SI_H fit',
+    'LOG_CHISQ_FIT_S_H': 'Log \chi^2 of S_H fit',
+    'LOG_CHISQ_FIT_TIII_H': 'Log \chi^2 of TIII_H fit',
+    'LOG_CHISQ_FIT_TI_H': 'Log \chi^2 of TI_H fit',
+    'LOG_CHISQ_FIT_V_H': 'Log \chi^2 of V_H fit',
+    'LOG_CHISQ_FIT_YB_H': 'Log \chi^2 of YB_H fit',
+    'MODEL_FLUX_AL_H': 'Best-fitting model for AL_H fit',
+    'CONTINUUM_AL_H': 'Continuum flux used in AL_H fit',
+    'MODEL_FLUX_CA_H': 'Best-fitting model for CA_H fit',
+    'CONTINUUM_CA_H': 'Continuum flux used in CA_H fit',
+    'MODEL_FLUX_CE_H': 'Best-fitting model for CE_H fit',
+    'CONTINUUM_CE_H': 'Continuum flux used in CE_H fit',
+    'MODEL_FLUX_CI_H': 'Best-fitting model for CI_H fit',
+    'CONTINUUM_CI_H': 'Continuum flux used in CI_H fit',
+    'MODEL_FLUX_C_H': 'Best-fitting model for C_H fit',
+    'CONTINUUM_C_H': 'Continuum flux used in C_H fit',
+    'MODEL_FLUX_CO_H': 'Best-fitting model for CO_H fit',
+    'CONTINUUM_CO_H': 'Continuum flux used in CO_H fit',
+    'MODEL_FLUX_CR_H': 'Best-fitting model for CR_H fit',
+    'CONTINUUM_CR_H': 'Continuum flux used in CR_H fit',
+    'MODEL_FLUX_CU_H': 'Best-fitting model for CU_H fit',
+    'CONTINUUM_CU_H': 'Continuum flux used in CU_H fit',
+    'MODEL_FLUX_FE_H': 'Best-fitting model for FE_H fit',
+    'CONTINUUM_FE_H': 'Continuum flux used in FE_H fit',
+    'MODEL_FLUX_GE_H': 'Best-fitting model for GE_H fit',
+    'CONTINUUM_GE_H': 'Continuum flux used in GE_H fit',
+    'MODEL_FLUX_K_H': 'Best-fitting model for K_H fit',
+    'CONTINUUM_K_H': 'Continuum flux used in K_H fit',
+    'MODEL_FLUX_MG_H': 'Best-fitting model for MG_H fit',
+    'CONTINUUM_MG_H': 'Continuum flux used in MG_H fit',
+    'MODEL_FLUX_MN_H': 'Best-fitting model for MN_H fit',
+    'CONTINUUM_MN_H': 'Continuum flux used in MN_H fit',
+    'MODEL_FLUX_NA_H': 'Best-fitting model for NA_H fit',
+    'CONTINUUM_NA_H': 'Continuum flux used in NA_H fit',
+    'MODEL_FLUX_ND_H': 'Best-fitting model for ND_H fit',
+    'CONTINUUM_ND_H': 'Continuum flux used in ND_H fit',
+    'MODEL_FLUX_NI_H': 'Best-fitting model for NI_H fit',
+    'CONTINUUM_NI_H': 'Continuum flux used in NI_H fit',
+    'MODEL_FLUX_N_H': 'Best-fitting model for N_H fit',
+    'CONTINUUM_N_H': 'Continuum flux used in N_H fit',
+    'MODEL_FLUX_O_H': 'Best-fitting model for O_H fit',
+    'CONTINUUM_O_H': 'Continuum flux used in O_H fit',
+    'MODEL_FLUX_P_H': 'Best-fitting model for P_H fit',
+    'CONTINUUM_P_H': 'Continuum flux used in P_H fit',
+    'MODEL_FLUX_RB_H': 'Best-fitting model for RB_H fit',
+    'CONTINUUM_RB_H': 'Continuum flux used in RB_H fit',
+    'MODEL_FLUX_SI_H': 'Best-fitting model for SI_H fit',
+    'CONTINUUM_SI_H': 'Continuum flux used in SI_H fit',
+    'MODEL_FLUX_S_H': 'Best-fitting model for S_H fit',
+    'CONTINUUM_S_H': 'Continuum flux used in S_H fit',
+    'MODEL_FLUX_TIII_H': 'Best-fitting model for TIII_H fit',
+    'CONTINUUM_TIII_H': 'Continuum flux used in TIII_H fit',
+    'MODEL_FLUX_TI_H': 'Best-fitting model for TI_H fit',
+    'CONTINUUM_TI_H': 'Continuum flux used in TI_H fit',
+    'MODEL_FLUX_V_H': 'Best-fitting model for V_H fit',
+    'CONTINUUM_V_H': 'Continuum flux used in V_H fit',
+    'MODEL_FLUX_YB_H': 'Best-fitting model for YB_H fit',
+    'CONTINUUM_YB_H': 'Continuum flux used in YB_H fit',
     #V_TURB..
     "V_MACRO": "Macro-turbulent velocity [km/s]",
     "C_H": "Carbon abundance as [C/H] [dex]",
@@ -149,6 +293,8 @@ GLOSSARY = {
     "OPTIMALITY": "Metric for goodness of fit",
     "STATUS": "Status flag returned by optimization routine",
 
+    "APOGEE_ID": "2MASS-style identifier",
+    "BOSS_SPECOBJ_ID": "BOSS spectrum object identifier",
     "PIPELINE": "Pipeline name that produced these results",
     "WD_TYPE": "White dwarf type",
     "CONDITIONED_ON_PARALLAX": "Parallax used to constrain solution [mas]",
@@ -194,6 +340,7 @@ GLOSSARY = {
     "V_ASTRA": "Astra version",
     "CAT_ID": "SDSS-V catalog identifier",
     "COMPONENT": "Disentangled stellar component",
+    "OUTPUT_ID": "Astra unique output identifier",
     "DATA_PRODUCT_ID": "Astra data product identifier",
 
     # Radial velocity keys (common to any code)
@@ -206,6 +353,48 @@ GLOSSARY = {
     "JD": "Julian date at mid-point of visit",
     "STARFLAG": "APOGEE DRP quality bit mask",
     "BITMASK": "Pixel-level bitmask (see documentation)",
+    
+    "CAT_ID": "SDSS-V catalog identifier",
+    "TIC_ID": "TESS Input Catalog (v8) identifier",
+    "GAIA_ID": "Gaia DR2 source identifier",
+
+
+    "G_MAG": f"Gaia DR2 mean apparent G magnitude [mag]",
+    "RP_MAG": f"Gaia DR2 mean apparent RP magnitude [mag]",
+    "BP_MAG": f"Gaia DR2 mean apparent BP magnitude [mag]",
+    "J_MAG": "2MASS mean apparent J magnitude [mag]",
+    "H_MAG": "2MASS mean apparent H magnitude [mag]",
+    "K_MAG": "2MASS mean apparent K magnitude [mag]",
+
+    "CREATED": f"File creation time (UTC {datetime_fmt})",
+    "HEALPIX": f"Healpix location (128 sides)",
+
+    "RA": "SDSS-V catalog right ascension (J2000) [deg]",
+    "DEC": "SDSS-V catalog declination (J2000) [deg]",
+    "RA_GAIA": f"Gaia DR2 right ascension [deg]",
+    "DEC_GAIA": f"Gaia DR2 declination [deg]",
+    "PLX": f"Gaia DR2 parallax [mas]",
+    "E_PLX": f"Gaia DR2 parallax error [mas]",
+    "PMRA": f"Gaia DR2 proper motion in RA [mas/yr]",
+    "E_PMRA": f"Gaia DR2 proper motion in RA error [mas/yr]",
+    "PMDE": f"Gaia DR2 proper motion in DEC [mas/yr]",
+    "E_PMDE": f"Gaia DR2 proper motion in DEC error [mas/yr]",
+    "V_RAD_GAIA": f"Gaia DR2 radial velocity [km/s]",
+    "E_V_RAD_GAIA": f"Gaia DR2 radial velocity error [km/s]",
+    
+    # APOGEE DRP stuff
+    "V_SCATTER": "Scatter in radial velocity measurements [km/s]",
+    "E_V_MED": "Median of RV errors of individual visits [km/s]",
+    "CHISQ_RV": "\chi-squared of radial velocity fit",
+    "AUTOFWHM_D": "FWHM from Doppler",
+    "CCPFWHM_D": "FWHM from Doppler",
+    "NGOODVISITS": "Number of visits with good spectra",
+    "NGOODRVS": "Number of good radial velocity measurements",
+    "MEANFIB": "Mean S/N-weighted fiber number of all observations",
+    "SIGFIB": "Standard deviation of S/N-weighter fiber numbers",
+    "STARFLAGS": "APOGEE DRP quality bit masks",
+
+    "BITMASK_FLAG": "Results bitmask flag (see documentation)",
     # Doppler keys
     "TEFF_D": "Effective temperature from DOPPLER [K]",
     "E_TEFF_D": "Error in effective temperature from DOPPLER [K]",
@@ -213,7 +402,12 @@ GLOSSARY = {
     "E_LOGG_D": "Error in surface gravity from DOPPLER",
     "FEH_D": "Metallicity from DOPPLER",
     "E_FEH_D": "Error in metallicity from DOPPLER",
+    
+    "V_TURB": "Microturbulent velocity [km/s]",
+    "E_V_TURB": "Error in microturbulent velocity [km/s]",
+
     "RCHISQ": "Reduced \chi-squared of model fit",
+    "STAR_PK": "Primary key in `apogee_drp.star` table",
     "VISIT_PK": "Primary key in `apogee_drp.visit` table",
     "RV_VISIT_PK": "Primary key in `apogee_drp.rv_visit` table",
     "N_RV_COMPONENTS": "Number of detected RV components",
@@ -230,6 +424,27 @@ GLOSSARY = {
     "REDUCED_CHI_SQ": "Reduced \chi-squared of model fit",
     "MODEL_FLUX": "Best-fitting model of source flux",
     "CONTINUUM": "Continuum flux used in model fit",
+
+    "CARTON_0": "First carton for source (see documentation)",
+    "MAPPERS": "SDSS-V mappers",
+    "PROGRAMS": "SDSS-V programs",    
+
+    "CLASS": "Most probable classification",
+    "P_CV": "Relative probability of being a cataclysmic variable",
+    "P_FGKM": "Relative probability of being a FGKM star",
+    "P_HOTSTAR": "Relative probability of being a hot star",
+    "P_WD": "Relative probability of being a white dwarf",
+    "P_SB2": "Relative probability of being a spectroscopic binary",
+    "P_YSO": "Relative probability of being a young stellar object",
+    "LP_CV": "Log probability of being a cataclysmic variable",
+    "LP_FGKM": "Log probability of being a FGKM star",
+    "LP_HOTSTAR": "Log probability of being a hot star",
+    "LP_WD": "Log probability of being a white dwarf",
+    "LP_SB2": "Log probability of being a spectroscopic binary",
+    "LP_YSO": "Log probability of being a young stellar object",
+
+
+
 }
 for key, comment in GLOSSARY.items():
     if len(comment) > 80:
@@ -507,6 +722,9 @@ def get_auxiliary_source_data(source: Union[Source, int]):
     return data
 
 
+
+
+
 def create_empty_hdu(observatory: str, instrument: str) -> fits.BinTableHDU:
     """
     Create an empty HDU to use as a filler.
@@ -773,7 +991,6 @@ def create_primary_hdu_cards(
 
     # I would like to use .isoformat(), but it is too long and makes headers look disorganised.
     # Even %Y-%m-%d %H:%M:%S is one character too long! ARGH!
-    datetime_fmt = "%y-%m-%d %H:%M:%S"
     created = datetime.datetime.utcnow().strftime(datetime_fmt)
 
     cards = [
@@ -802,7 +1019,7 @@ def create_primary_hdu_cards(
 
 
 def fits_column_kwargs(values):
-    if all(isinstance(v, str) for v in values):
+    if all(isinstance(v, (str, bytes)) for v in values):
         max_len = max(1, max(map(len, values)))
         return dict(format=f"{max_len}A")
 

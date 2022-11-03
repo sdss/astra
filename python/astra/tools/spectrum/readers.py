@@ -123,8 +123,6 @@ def load_sdss_mwmStar_list(path, **kwargs):
 def load_sdss_apStar(path, data_slice=None, **kwargs):
     flux_unit = u.Unit("1e-17 erg / (Angstrom cm2 s)")  # TODO
 
-    slicer = slice(*data_slice) if data_slice is not None else slice(None)
-
     with fits.open(path) as image:
         wavelength = _wcs_log_linear(
             image[1].header["NAXIS1"],
@@ -133,8 +131,19 @@ def load_sdss_apStar(path, data_slice=None, **kwargs):
         )
         spectral_axis = u.Quantity(wavelength, unit=u.Angstrom)
 
-        flux = u.Quantity(image[1].data[slicer], unit=flux_unit)
-        e_flux = StdDevUncertainty(image[2].data[slicer])
+        slicer = slice(*data_slice) if data_slice is not None else slice(None)
+
+        try:                
+            flux = u.Quantity(image[1].data[slicer], unit=flux_unit)
+            e_flux = StdDevUncertainty(image[2].data[slicer])
+        except:
+            if data_slice is not None:
+                # HACK to do what we want without updating the pparameters for so many tasks
+                slicer = slice(*data_slice[0])
+                flux = u.Quantity(image[1].data[slicer], unit=flux_unit)
+                e_flux = StdDevUncertainty(image[2].data[slicer])
+            else:
+                raise
 
         snr = [image[0].header["SNR"]]
         n_visits = image[0].header["NVISITS"]
@@ -164,6 +173,10 @@ def load_sdss_apStar(path, data_slice=None, **kwargs):
 
         meta["SNR"] = np.array(snr)[slicer]
         meta["BITMASK"] = image[3].data[slicer]
+        meta["J_MAG"] = image[0].header["J"]
+        meta["H_MAG"] = image[0].header["H"]
+        meta["K_MAG"] = image[0].header["K"]
+        print(f"Warning: not yet loading data product entries")
 
     return Spectrum1D(
         spectral_axis=spectral_axis, flux=flux, uncertainty=e_flux, meta=meta
@@ -396,13 +409,19 @@ def _load_mwmVisit_or_mwmStar_hdu(image, hdu, **kwargs):
             meta[key] = image[hdu_idx].header[key]
 
     # Add bitmask
-    meta["BITMASK"] = np.array(image[hdu_idx].data["BITMASK"])
+    meta["BITMASK"] = np.array(image[hdu].data["BITMASK"])
     try:
-        meta["SNR"] = np.array(image[hdu_idx].data["SNR"])
+        meta["SNR"] = np.array(image[hdu].data["SNR"])
     except KeyError:
         # Early versions of mwmStar had this differently.
         # TODO: Remove this later on.
-        meta["SNR"] = np.array([image[hdu_idx].header["SNR"]])
+        meta["SNR"] = np.array([image[hdu].header["SNR"]])
+
+    # If it's a mwmVisit, then try to load in parent data product identifiers
+    try:
+        meta["DATA_PRODUCT_ID"] = image[hdu].data["DATA_PRODUCT_ID"]
+    except:
+        meta["DATA_PRODUCT_ID"] = []
 
     return Spectrum1D(
         spectral_axis=spectral_axis, flux=flux, uncertainty=e_flux, meta=meta

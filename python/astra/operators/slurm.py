@@ -10,7 +10,7 @@ from airflow.models.baseoperator import BaseOperator
 from airflow.sensors.base import BaseSensorOperator
 from airflow.utils import timezone
 from peewee import fn
-from astra.database.astradb import Task, TaskBundle, Bundle
+from astra.database.astradb import Task, TaskBundle, Bundle, Status
 
 
 from astra import log, config
@@ -104,7 +104,12 @@ class SlurmOperator(BaseOperator):
         # Load the bundles, which will be an int or list of ints.
         print(f"Loading bundles {self.bundles}")
         primary_keys = flatten(json.loads(self.bundles))
-        bundles = Bundle.select().where(Bundle.id.in_(primary_keys))
+        bundles = Bundle.select().distinct(Bundle).join(TaskBundle).join(Task).where(Bundle.id.in_(primary_keys))
+        if self.only_incomplete:
+            #bundles = bundles.where(Bundle.status_id != Status.get(description="completed").id)
+            completed_id = Status.get(description="completed").id
+            bundles = bundles.where((Task.status_id != completed_id) | (Bundle.status_id != completed_id))
+
         print(f"OK")
 
         # It's bad practice to import here, but the slurm package is
@@ -293,21 +298,29 @@ class SlurmQueueSensor(BaseSensorOperator):
 
     """Prevents overloading the Slurm queue with jobs."""
 
+    def __init__(self, max_concurrent_jobs=None, **kwargs):
+        super(SlurmQueueSensor, self).__init__(**kwargs)
+        self.max_concurrent_jobs = max_concurrent_jobs
+        return None
+
     def poke(self, context):
         # First check that we don't have too many jobs submitted/running already.
-        try:
-            max_concurrent_jobs = config["slurm"]["max_concurrent_jobs"]
-        except:
-            log.warning(f"No Astra configuration set for slurm.max_concurrent_jobs")
-            return True
+        if self.max_concurrent_jobs is None:
+            try:
+                max_concurrent_jobs = config["slurm"]["max_concurrent_jobs"]
+            except:
+                log.warning(f"No Astra configuration set for slurm.max_concurrent_jobs")
+                return True
         else:
-            me = getuser()
-            jobs = [job for job in get_slurm_queue() if job["user"] == me]
-            N = len(jobs)
+            max_concurrent_jobs = self.max_concurrent_jobs
 
-            log.info(f"Found {N} jobs running or queued for user {me}: {jobs}")
+        me = getuser()
+        jobs = [job for job in get_slurm_queue() if job["user"] == me]
+        N = len(jobs)
 
-            return N < max_concurrent_jobs
+        log.info(f"Found {N} jobs running or queued for user {me}: {jobs}")
+
+        return N < max_concurrent_jobs
 
 
 class SlurmSensor(BaseSensorOperator):

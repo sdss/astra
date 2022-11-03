@@ -2,7 +2,7 @@ from scipy import optimize  # if you remove this, everything at Utah breaks. ser
 import numpy as np
 import torch
 from astra import log
-from astra.utils import expand_path, dict_to_list, logarithmic_tqdm
+from astra.utils import flatten, expand_path, dict_to_list, logarithmic_tqdm
 from astra.base import TaskInstance, Parameter
 from astra.database.astradb import database, ApogeeNetOutput
 from astropy.nddata import StdDevUncertainty
@@ -52,7 +52,8 @@ class StellarParameters(TaskInstance):
                 # Input data products could be apStar, mwmVisit, or mwmStar files.
                 # If they are mwmVisit/mwmStar files then those could include BOSS spectra.
                 # Since we don't know yet, just load as SpectrumList.
-                flux, e_flux, meta, snrs = ([], [], [], [])
+                results = dict(snr=[], source_id=[], parent_data_product_id=[])
+                flux, e_flux, meta = ([], [], [])
                 for spectrum in SpectrumList.read(
                     data_products[0].path, data_slice=parameters.get("data_slice", None)
                 ):
@@ -69,7 +70,15 @@ class StellarParameters(TaskInstance):
                     )
                     meta_dict, metadata_norm = get_metadata(spectrum)
                     meta.append(np.tile(metadata_norm, N).reshape((N, -1)))
-                    snrs.append(spectrum.meta["SNR"])
+                    results["snr"].extend(spectrum.meta["SNR"])
+                    results["source_id"].extend([spectrum.meta.get("CAT_ID", None)] * N)
+                    parent_data_product_ids = spectrum.meta.get("DATA_PRODUCT_ID", None)
+                    if parent_data_product_ids is None or len(parent_data_product_ids) == 0:
+                        parent_data_product_ids = [data_products[0].id] * N
+                    results["parent_data_product_id"].extend(parent_data_product_ids)
+
+                assert len(results["snr"]) == len(results["source_id"])
+                assert len(results["snr"]) == len(results["parent_data_product_id"])
 
                 if len(flux) == 0:
                     log.warning(
@@ -77,8 +86,8 @@ class StellarParameters(TaskInstance):
                     )
                     continue
 
-                flux, e_flux, meta, snrs = [
-                    np.vstack(ea) for ea in (flux, e_flux, meta, snrs)
+                flux, e_flux, meta = [
+                    np.vstack(ea) for ea in (flux, e_flux, meta)
                 ]
                 median_error = 5 * np.median(e_flux, axis=1)
                 for j, value in enumerate(median_error):
@@ -91,34 +100,70 @@ class StellarParameters(TaskInstance):
                 flux = flux.reshape((N, 1, P))
                 e_flux = e_flux.reshape((N, 1, P))
 
-                flux = torch.from_numpy(flux).to(device)
-                e_flux = torch.from_numpy(e_flux).to(device)
-                meta = torch.from_numpy(meta).to(device)
+                if N == 1:
+                    flux = torch.from_numpy(flux).to(device)
+                    e_flux = torch.from_numpy(e_flux).to(device)
+                    meta = torch.from_numpy(meta).to(device)
 
-                with torch.set_grad_enabled(False):
-                    predictions = model.predict_spectra(flux, meta)
-                    if device != "cpu":
-                        predictions = predictions.cpu().data.numpy()
+                    with torch.set_grad_enabled(False):
+                        predictions = model.predict_spectra(flux, meta)
+                        if device != "cpu":
+                            predictions = predictions.cpu().data.numpy()
 
-                # Replace infinites with non-finite.
-                predictions[~np.isfinite(predictions)] = np.nan
+                    # Replace infinites with non-finite.
+                    predictions[~np.isfinite(predictions)] = np.nan
 
-                inputs = (
-                    torch.randn(
-                        (parameters["num_uncertainty_draws"], N, 1, P), device=device
+                    inputs = (
+                        torch.randn(
+                            (parameters["num_uncertainty_draws"], N, 1, P), device=device
+                        )
+                        * e_flux
+                        + flux
                     )
-                    * e_flux
-                    + flux
-                )
-                inputs = inputs.reshape((parameters["num_uncertainty_draws"] * N, 1, P))
+                    inputs = inputs.reshape((parameters["num_uncertainty_draws"] * N, 1, P))
 
-                meta_draws = meta.repeat(parameters["num_uncertainty_draws"], 1)
-                with torch.set_grad_enabled(False):
-                    draws = model.predict_spectra(inputs, meta_draws)
-                    if device != "cpu":
-                        draws = draws.cpu().data.numpy()
+                    meta_draws = meta.repeat(parameters["num_uncertainty_draws"], 1)
+                    with torch.set_grad_enabled(False):
+                        draws = model.predict_spectra(inputs, meta_draws)
+                        if device != "cpu":
+                            draws = draws.cpu().data.numpy()
 
-                draws = draws.reshape((parameters["num_uncertainty_draws"], N, -1))
+                    draws = draws.reshape((parameters["num_uncertainty_draws"], N, -1))
+
+
+                else:
+                    predictions = []
+                    with torch.set_grad_enabled(False):
+                        for j in range(N):
+                            prediction = model.predict_spectra(
+                                torch.from_numpy(flux[[j]]).to(device),
+                                torch.from_numpy(meta[[j]]).to(device),
+                            )
+                            if device != "cpu":
+                                prediction = prediction.cpu().data.numpy()
+                            predictions.append(prediction)
+                    predictions = np.array(predictions).reshape((N, -1))
+                    predictions[~np.isfinite(predictions)] = np.nan
+
+                    draws = []
+                    with torch.set_grad_enabled(False):
+                        for j in range(N):
+                            inputs = (
+                                torch.randn(
+                                    (parameters["num_uncertainty_draws"], 1, P), device=device
+                                )
+                                * torch.from_numpy(e_flux[[j]]).to(device)
+                                + torch.from_numpy(flux[[j]]).to(device)
+                            )
+                            meta_draws = torch.from_numpy(meta[[j]]).to(device).repeat(
+                                parameters["num_uncertainty_draws"], 1
+                            )
+                            draw = model.predict_spectra(inputs, meta_draws)
+                            if device != "cpu":
+                                draw = draw.cpu().data.numpy()
+                            draws.append(draw)
+
+                    draws = np.array(draws).reshape((parameters["num_uncertainty_draws"], N, -1))
 
                 # un-log10-ify the draws before calculating summary statistics
                 predictions[:, 1] = 10 ** predictions[:, 1]
@@ -139,8 +184,7 @@ class StellarParameters(TaskInstance):
                     std_draw_predictions=std_draw_predictions,
                 )
 
-                result = {
-                    "snr": snrs.flatten(),
+                results.update({
                     "teff": teff,
                     "logg": logg,
                     "fe_h": fe_h,
@@ -151,15 +195,15 @@ class StellarParameters(TaskInstance):
                     "logg_sample_median": logg_median,
                     "fe_h_sample_median": fe_h_median,
                     "bitmask_flag": bitmask_flag,
-                }
+                })
 
-                results = dict_to_list(result)
+                results_list = dict_to_list(results)
 
                 # Create or update rows.
                 with database.atomic():
-                    task.create_or_update_outputs(ApogeeNetOutput, results)
+                    task.create_or_update_outputs(ApogeeNetOutput, results_list)
 
                 pb.update()
-                all_results.append(results)
+                all_results.append(results_list)
 
         return all_results

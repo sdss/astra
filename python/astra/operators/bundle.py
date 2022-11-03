@@ -17,6 +17,12 @@ def f(task_id):
     except:
         log.exception(f"Exception in executing task id {task_id}:")
 
+def _run_bundle(bundle_id):
+    try:
+        Bundle.get(bundle_id).instance(only_incomplete=True).execute()
+    except:
+        log.exception(f"Exception in executing bundle id {bundle_id}:")
+
 class BundleExecutor(BaseOperator):
     
     template_fields = ("bundle", )
@@ -34,6 +40,7 @@ class BundleExecutor(BaseOperator):
         self,
         bundle,
         n_jobs=1,
+        only_incomplete=True,
         backend="threading",
         **kwargs,
     ) -> None:
@@ -41,6 +48,7 @@ class BundleExecutor(BaseOperator):
         self.bundle = bundle
         self.n_jobs = n_jobs
         self.backend = backend
+        self.only_incomplete = only_incomplete
         available_backends = ("loky", "threading", "multiprocessing")
         if backend not in available_backends:
             raise ValueError(f"Backend must be one of '{' '.join(available_backends)}', not '{backend}'")
@@ -63,18 +71,18 @@ class BundleExecutor(BaseOperator):
 
         # If they are embarrasingly parallel with low overhead, then this might be helpful
         if self.n_jobs > 1:
-            task_ids = (
-                TaskBundle
-                .select(TaskBundle.task_id)
-                .where(TaskBundle.bundle_id.in_(bundle_ids))
-                .tuples()
-            )            
+            if len(bundle_ids) == 1:
+                log.info(f"Splitting bundle {bundle_ids[0]} into {self.n_jobs}")
+                bundle_ids = [b.id for b in Bundle.get(id=bundle_ids[0]).split(self.n_jobs)]
+            else:
+                log.info(f"Not splitting bundle, just distributing {len(bundle_ids)} and {self.n_jobs}")
+
             with parallel_backend(self.backend, n_jobs=self.n_jobs):
-                Parallel()(delayed(f)(task_id) for task_id, in task_ids)
+                Parallel()(delayed(_run_bundle)(bundle_id) for bundle_id in bundle_ids)
         else:
             if len(bundle_ids) > 1:
                 raise ValueError(f"Cannot execute multiple bundles with n_jobs=1")
-            Bundle.get(bundle_ids[0]).instance().execute()
+            Bundle.get(bundle_ids[0]).instance(only_incomplete=self.only_incomplete).execute()
         
         return None
 

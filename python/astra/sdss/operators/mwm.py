@@ -51,9 +51,28 @@ class MWMVisitOperator(BaseOperator):
 
         log.info(f"Running {self} between {prev_ds} and {ds} (boss={self.require_boss}; apogee={self.require_apogee})")
 
+        # Get most recent status
+        sq = (
+            MWMSourceStatus
+            .select(MWMSourceStatus.output_id)
+            .distinct(MWMSourceStatus.source_id)
+            .join(Task)
+        )
+        if self.apred is not None:
+            sq = sq.where(Task.parameters["apred"] == self.apred)
+        if self.run2d is not None:
+            sq = sq.where(Task.parameters["run2d"] == self.run2d)
+        sq = (
+            sq
+            .order_by(MWMSourceStatus.source_id.desc(), MWMSourceStatus.output_id.desc())
+            .tuples()
+            .alias("most_recent")
+        )
+
         q = (
             MWMSourceStatus
             .select(MWMSourceStatus.source_id)
+            .join(sq, on=(MWMSourceStatus.output_id == sq.c.output_id))
         )
         if self.require_boss:
             q = q.where(
@@ -162,9 +181,28 @@ class MWMStarOperator(BaseOperator):
             f"run2d={self.run2d}, apred={self.apred})"
         )
 
+        # Get most recent status
+        sq = (
+            MWMSourceStatus
+            .select(MWMSourceStatus.output_id)
+            .distinct(MWMSourceStatus.source_id)
+            .join(Task)
+        )
+        if self.apred is not None:
+            sq = sq.where(Task.parameters["apred"] == self.apred)
+        if self.run2d is not None:
+            sq = sq.where(Task.parameters["run2d"] == self.run2d)
+        sq = (
+            sq
+            .order_by(MWMSourceStatus.source_id.desc(), MWMSourceStatus.output_id.desc())
+            .tuples()
+            .alias("most_recent")
+        )
+
         q = (
             MWMSourceStatus
             .select(MWMSourceStatus.source_id)
+            .join(sq, on=(MWMSourceStatus.output_id == sq.c.output_id))
         )
         if self.require_boss:
             q = q.where(
@@ -331,6 +369,7 @@ class MWMVisitStarFactory(BaseOperator):
             TaskInputDataProducts.insert_many(rows).execute()
 
         log.info(f"Done")
+
 
         bundles = [Bundle() for i in range(self.num_bundles)]
         with database.atomic():

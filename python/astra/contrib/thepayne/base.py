@@ -89,6 +89,7 @@ class ThePayne(TaskInstance):
                     v_rad_tolerance=parameters["v_rad_tolerance"],
                     opt_tolerance=parameters["opt_tolerance"],
                     continuum=continuum,
+                    data_product=data_product
                 )
                 database_results.extend(labels)
 

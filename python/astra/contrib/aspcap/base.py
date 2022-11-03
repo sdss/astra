@@ -6,9 +6,10 @@ from astra.contrib.aspcap import continuum, utils
 from astra.tools.continuum.base import Continuum
 from astra.tools.continuum.scalar import Scalar
 from typing import Union, List, Tuple, Optional, Callable
+from collections import OrderedDict
 
 from astra import log, __version__
-from astra.base import TaskInstance, TupleParameter
+from astra.base import TaskInstance, Parameter, TupleParameter
 from astra.utils import bundler, deserialize, expand_path, serialize_executable
 from astra.database.astradb import (
     database,
@@ -23,10 +24,14 @@ from astra.database.astradb import (
     DataProduct,
     TaskInputDataProducts,
 )
+from peewee import fn
 from astra.contrib.ferre.base import Ferre
 from astra.contrib.ferre.utils import read_ferre_headers, sanitise
 from astra.contrib.ferre.bitmask import ParamBitMask
+from astra.sdss.datamodels.pipeline import create_pipeline_product
 
+from astropy.io import fits
+from astra.utils import list_to_dict
 
 FERRE_TASK_NAME = serialize_executable(Ferre)
 FERRE_DEFAULTS = Ferre.get_defaults()
@@ -94,7 +99,6 @@ def initial_guess_apogeenet(data_product: DataProduct, star) -> dict:
         .join(Task, on=(ApogeeNetOutput.task_id == Task.id))
         .join(TaskInputDataProducts)
         .where(TaskInputDataProducts.data_product_id == data_product.id)
-        .where(Task.name == "astra.contrib.apogeenet.StellarParameters")
         .order_by(ApogeeNetOutput.snr.desc())
     )
 
@@ -470,7 +474,7 @@ def get_element(weight_path):
 
 
 def create_abundance_tasks(
-    stellar_parameter_tasks,
+    stellar_parameter_bundles,
     weight_paths: str = "$MWM_ASTRA/component_data/aspcap/element_masks.list",
     as_primary_keys: bool = False,
     **kwargs,
@@ -479,8 +483,6 @@ def create_abundance_tasks(
     Create FERRE tasks to estimate chemical abundances, given the stellar parameters determined from previous tasks.
     """
 
-    stellar_parameter_tasks = deserialize(stellar_parameter_tasks, Task)
-
     # Load the weight paths.
     with open(expand_path(weight_paths), "r") as fp:
         weight_paths = list(map(str.strip, fp.readlines()))
@@ -488,9 +490,21 @@ def create_abundance_tasks(
     all_headers = {}
     abundance_keywords = {}
 
-    tasks = []
-    for task in stellar_parameter_tasks:
+    if isinstance(stellar_parameter_bundles, str):
+        stellar_parameter_bundles = json.loads(stellar_parameter_bundles)
+        
+    q = (
+        Task
+        .select()
+        .distinct(Task)
+        .join(TaskBundle)
+        .switch(Task)
+        .join(FerreOutput, on=(Task.id == FerreOutput.task_id)) # Restrict to things that have outputs
+        .where(TaskBundle.bundle_id.in_(stellar_parameter_bundles))
+    )
 
+    tasks = []
+    for task in q:
         header_path = task.parameters["header_path"]
         if header_path not in abundance_keywords:
             abundance_keywords[header_path] = {}
@@ -568,9 +582,172 @@ def create_abundance_tasks(
     return tasks
 
 
-
-
 class Aspcap(TaskInstance):
+
+    stellar_parameter_task_id = Parameter()
+    chemical_abundance_task_ids = TupleParameter()
+
+    def execute(self):
+        hdu, extname = (3, "APOGEE/APO") # TODO: get extname in future
+
+        ferre_parameter_names = ("teff", "logg", "metals", "o_mg_si_s_ca_ti", "log10vdop", "lgvsini", "c", "n")
+
+        results = []
+        for task, input_data_products, parameters in self.iterable():
+            log.info(f"Executing task {task}")
+            stellar_parameter_task = Task.get(int(task.parameters["stellar_parameter_task_id"]))
+
+            data_product, = stellar_parameter_task.input_data_products
+            TaskInputDataProducts.create(task=task, data_product=data_product)
+            
+            task_results = []
+            hdu_results = {}
+            if stellar_parameter_task.count_outputs() == 0:
+                # Nothing we can do about that.
+                log.warning(f"Skipping task {task} because stellar parameter task {stellar_parameter_task} has no outputs")
+                continue
+
+            for output in stellar_parameter_task.outputs:
+                result = {}
+                for key in ferre_parameter_names:
+                    result[key] = getattr(output, key) or np.nan
+                    result[f"e_{key}"] = getattr(output, f"e_{key}") or np.nan
+                    result[f"bitmask_{key}"] = getattr(output, f"bitmask_{key}") or 0
+                
+                result.update(OrderedDict([
+                    ("snr", output.snr),
+                    ("log_chisq_fit", output.log_chisq_fit),
+                    ("log_snr_sq", output.log_snr_sq),
+                    #("frac_phot_data_points", output.frac_phot_data_points),
+                    ("source_id", output.source_id),
+                    ("parent_data_product_id", output.parent_data_product_id),
+                ]))
+                task_results.append(result)
+
+            # Load the spectra from the stellar parameter task.
+            with fits.open(stellar_parameter_task.output_data_products[0].path) as image:
+                spectra = OrderedDict([
+                    ("model_flux", image[hdu].data["MODEL_FLUX"]),
+                    ("continuum", image[hdu].data["CONTINUUM"]),
+                ])
+
+            elements = []
+            for abundance_task in Task.select().where(Task.id << tuple(map(int, task.parameters["chemical_abundance_task_ids"]))):
+                if abundance_task.count_outputs() == 0:
+                    log.warning(
+                        f"No outputs for abundance task {abundance_task} on stellar parameter task {stellar_parameter_task}. "
+                        "Skipping!"
+                    )
+                    continue
+
+                # get the element
+                element = get_element(abundance_task.parameters["weight_path"])
+
+                # Check which parameters are frozen.
+                initial = abundance_task.parameters["initial_parameters"]
+                initial = initial[0] if isinstance(initial, list) else initial
+                initial = sanitise([k for k, v in initial.items() if v is not None])
+                frozen = sanitise(
+                    [
+                        k
+                        for k, v in abundance_task.parameters[
+                            "frozen_parameters"
+                        ].items()
+                        if v
+                    ]
+                )
+                parameter_name = set(initial).difference(frozen)
+                if len(parameter_name) > 1:
+                    log.warning(f"Parameter names thawed: {parameter_name}")
+                    parameter_name = parameter_name.difference({"lgvsini"})
+
+                if len(parameter_name) == 0:
+                    log.warning(f"No free parameters for {abundance_task}")
+                    log.debug(
+                        f"initial: {initial}: {abundance_task.parameters['initial_parameters']}"
+                    )
+                    log.debug(
+                        f"frozen: {frozen}: {abundance_task.parameters['frozen_parameters']}"
+                    )
+                    continue
+
+                assert len(parameter_name) == 1
+                (parameter_name,) = parameter_name
+
+                key = f"{element.lower()}_h"
+                elements.append(key)
+                for i, output in enumerate(abundance_task.outputs):
+                    task_results[i][key] = getattr(output, parameter_name)
+                    task_results[i][f"e_{key}"] = getattr(output, f"e_{parameter_name}")
+                    task_results[i][f"bitmask_{key}"] = getattr(
+                        output, f"bitmask_{parameter_name}"
+                    )
+                    task_results[i][f"log_chisq_fit_{key}"] = output.log_chisq_fit
+                
+                with fits.open(abundance_task.output_data_products[0].path) as image:
+                    spectra[f"model_flux_{key}"] = image[hdu].data["MODEL_FLUX"]
+                    spectra[f"continuum_{key}"] = image[hdu].data["CONTINUUM"]
+
+            unsorted_hdu_result = list_to_dict(task_results)
+
+            hdu_result = OrderedDict()
+            for key in ferre_parameter_names:
+                hdu_result[key] = unsorted_hdu_result[key]
+                hdu_result[f"e_{key}"] = unsorted_hdu_result[f"e_{key}"]
+            
+            for key in elements:
+                hdu_result[key] = unsorted_hdu_result[key]
+                hdu_result[f"e_{key}"] = unsorted_hdu_result[f"e_{key}"]
+            
+            # bitmasks
+            for key in ferre_parameter_names:
+                hdu_result[f"bitmask_{key}"] = unsorted_hdu_result[f"bitmask_{key}"]
+            for key in elements:
+                hdu_result[f"bitmask_{key}"] = unsorted_hdu_result[f"bitmask_{key}"]
+            
+            # summary statistics
+            for key in ("snr", "log_chisq_fit"):
+                hdu_result[key] = unsorted_hdu_result[key]
+            for key in elements:
+                hdu_result[f"log_chisq_fit_{key}"] = unsorted_hdu_result[f"log_chisq_fit_{key}"]
+            
+            # identifiers
+            for key in ("source_id", "parent_data_product_id"):
+                hdu_result[key] = unsorted_hdu_result[key]
+            
+            # spectra
+            for key in ("model_flux", "continuum"):
+                hdu_result[key] = spectra[key]
+            
+            for key in elements:
+                hdu_result[f"model_flux_{key}"] = spectra[f"model_flux_{key}"]
+                hdu_result[f"continuum_{key}"] = spectra[f"continuum_{key}"]
+
+            # create
+            header_groups = [
+                ("TEFF", "STELLAR PARAMETERS"),
+            ]
+            if len(elements):
+                header_groups.append((elements[0].upper(), "CHEMICAL ABUNDANCES"))
+            header_groups.extend([
+                ("BITMASK_TEFF", "BITMASKS"),
+                ("SNR", "SUMMARY STATISTICS"),
+                ("SOURCE_ID", "IDENTIFIERS"),
+                ("MODEL_FLUX", "MODEL SPECTRA"),
+            ])
+            odp = create_pipeline_product(
+                task, 
+                data_product, 
+                { extname: hdu_result }, 
+                header_groups={
+                    extname: header_groups
+                }
+            )
+            with database.atomic():
+                task.create_or_update_outputs(AspcapOutput, task_results)
+            
+'''
+class OldAspcap(TaskInstance):
 
     stellar_parameter_task_ids = TupleParameter("stellar_parameter_task_ids")
     abundance_task_ids = TupleParameter("abundance_task_ids")
@@ -678,42 +855,84 @@ class Aspcap(TaskInstance):
 
             results.append(task_results)
         return results
-
+'''
 
 def create_and_execute_summary_tasks(
-    stellar_parameter_tasks,
-    abundance_tasks,
+    stellar_parameter_bundles,
+    chemical_abundance_bundles,
 ):
     """
     Create a row in the AspcapOutput database table for each input data product,
     given the stellar parameter tasks and the abundance tasks.
     """
 
-    stellar_parameter_tasks = deserialize(stellar_parameter_tasks, Task)
-    abundance_tasks = deserialize(abundance_tasks, Task)
+    if isinstance(stellar_parameter_bundles, str):
+        stellar_parameter_bundles = json.loads(stellar_parameter_bundles)
+    if isinstance(chemical_abundance_bundles, str):
+        chemical_abundance_bundles = json.loads(chemical_abundance_bundles)
 
     # Join by input data product.
-    grouped = {}
-    for task in stellar_parameter_tasks:
-        (data_product_id,) = task.input_data_products
-        grouped[data_product_id] = [task.id]
+    #for task in Task.select().join(TaskBundle).where(TaskBundle.bundle_id.in_(stellar_parameter_bundles)):
+    #    (data_product_id,) = task.input_data_products
+    #    grouped[data_product_id] = [task.id]
+    q = (
+        Task
+        .select(Task.id, DataProduct.id)
+        .join(TaskBundle)
+        .switch(Task)
+        .join(TaskInputDataProducts)
+        .join(DataProduct)
+        .where(TaskBundle.bundle_id.in_(stellar_parameter_bundles))
+        .tuples()
+    )
+    grouped = { data_product_id: [task_id] for task_id, data_product_id in q }
 
-    for task in abundance_tasks:
-        (data_product_id,) = task.input_data_products
-        grouped[data_product_id].append(task.id)
+    q = (
+        Task
+        .select(Task.id, DataProduct.id)
+        .join(TaskBundle)
+        .switch(Task)
+        .join(TaskInputDataProducts)
+        .join(DataProduct)
+        .where(TaskBundle.bundle_id.in_(chemical_abundance_bundles))
+        .tuples()
+    )
+    for task_id, data_product_id in q:
+        grouped[data_product_id].append(task_id)
+    #for task in Task.select().join(TaskBundle).where(TaskBundle.bundle_id.in_(chemical_abundance_bundles)):
+    #    (data_product_id,) = task.input_data_products
+    #    grouped[data_product_id].append(task.id)
 
     # Create and execute tasks.
     for data_product_id, (
-        stellar_parameter_task_ids,
-        *abundance_task_ids,
+        stellar_parameter_task_id,
+        *chemical_abundance_task_ids,
     ) in grouped.items():
         log.debug(
-            f"Creating Aspcap summary task for data product {data_product_id} with stellar parameter task {stellar_parameter_task_ids} and abundance tasks {abundance_task_ids}"
+            f"Checking data product {data_product_id} with stellar parameter task {stellar_parameter_task_id} and abundance tasks {chemical_abundance_task_ids}"
         )
-        task = Aspcap(
-            stellar_parameter_task_ids=stellar_parameter_task_ids,
-            abundance_task_ids=abundance_task_ids,
+        # Check to see if it already exists?
+        # TODO: revisit this, it is slow and dumb. doing it just to make sure things are idempotent
+        q = (
+            Task
+            .select()
+            .where(
+                (Task.name == 'astra.contrib.aspcap.base.Aspcap')
+            &   (Task.version == __version__)
+            &   (Task.parameters["stellar_parameter_task_id"] == f"{stellar_parameter_task_id}")
+            )
         )
-        task.execute()
+        # TODO: check by chemical abundances as well?
+        existing_task = q.first()
+        if existing_task is None:
+            log.info(f"Creating task")
+            Aspcap(
+                stellar_parameter_task_id=stellar_parameter_task_id,
+                chemical_abundance_task_ids=chemical_abundance_task_ids,
+            ).execute()
+        else:
+            log.info(f"Skipping {data_product_id}, {stellar_parameter_task_id}")
+        #else:
+        #    existing_task.instance().execute()
 
     return None

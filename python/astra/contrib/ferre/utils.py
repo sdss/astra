@@ -34,6 +34,7 @@ def validate_ferre_control_keywords(
     n_threads=1,
     f_access=None,
     f_format=1,
+    f_sort=False,
     **kwargs,
 ):
     """
@@ -171,6 +172,15 @@ def validate_ferre_control_keywords(
     :param f_format: [optional]
         File format of the FERRE grid: 0 (ASCII) or 1 (UNF format, default).
         This corresponds to the FERRE keyword `f_format`.
+    
+    :param f_sort: [optional]
+        Ask FERRE to sort the outputs to be the same ordering as the inputs (default: False)
+        
+        WARNING: FERRE does this in a very inefficient way. The sorting is an N^2
+        operation that is performed ON DISK (i.e., it is not done in memory). This
+        means it can take a huge time just to sort the outputs after the main
+        execution is complete. It's recommended that you let Astra do this for
+        you post-execution.
     """
 
     header_path = expand_path(header_path)
@@ -237,6 +247,7 @@ def validate_ferre_control_keywords(
             "nthreads": int(n_threads),
             "f_access": int(f_access or False),
             "f_format": int(f_format),
+            "f_sort": int(f_sort),
         }
     )
     wavelength_interpolation_flag = validate_wavelength_interpolation_flag(
@@ -308,6 +319,7 @@ def format_ferre_control_keywords(ferre_kwds: dict) -> str:
         "pcachi",
         "f_format",
         "f_access",
+        "f_sort",
     )
 
     contents = "&LISTA\n"
@@ -712,7 +724,13 @@ def parse_ferre_output(dir, stdout, stderr, control_file_basename="input.nml"):
     n_done = wc(os.path.join(dir, output_path))
     n_errors = stderr.lower().count("error")
 
-    return (n_done, n_errors, control_kwds)
+    meta = {}
+    for line in stdout.split("\n"):
+        if "f e r r e" in line:
+            meta["ferre_version"] = line.strip().split()[-1]
+    
+
+    return (n_done, n_errors, control_kwds, meta)
 
 
 def check_ferre_progress(

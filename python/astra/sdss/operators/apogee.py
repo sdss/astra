@@ -1,3 +1,4 @@
+import datetime
 import os
 from typing import OrderedDict, Optional
 from astropy.io import fits
@@ -19,11 +20,13 @@ class ApVisitOperator(BaseOperator):
         self,
         apred: Optional[str] = "daily",
         check_path: Optional[bool] = True,
+        minimum_snr: Optional[float] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.apred = apred
         self.check_path = check_path
+        self.minimum_snr = minimum_snr
         return None
 
 
@@ -31,11 +34,6 @@ class ApVisitOperator(BaseOperator):
 
         release, filetype = ("sdss5", "apVisit")
         prev_ds, ds = (context["prev_ds"], context["ds"])
-
-        if prev_ds is None:
-            expression = Visit.created > ds
-        else:
-            expression = Visit.created.between(prev_ds, ds)
 
         # catalogid < 0 apparently implies unassigned fibre
         # TODO: check if they are really unassigned ornot .
@@ -57,11 +55,16 @@ class ApVisitOperator(BaseOperator):
                 Visit.apred,
             )
             .where(
-                expression & (Visit.apred_vers == self.apred) & (Visit.catalogid > 0)
+                (Visit.apred_vers == self.apred) & (Visit.catalogid > 0)
             )
-            .order_by(Visit.pk.asc())
-            .tuples()
         )
+        if prev_ds is not None:
+            q = q.created.between(prev_ds, ds)
+        
+        if self.minimum_snr is not None:
+            q = q.where(Visit.snr > self.minimum_snr)
+
+        q = q.order_by(Visit.pk.asc()).tuples()
 
         N = q.count()
         if N == 0:
@@ -69,12 +72,12 @@ class ApVisitOperator(BaseOperator):
                 f"No products for {self} created between {prev_ds} and {ds}"
             )
 
-        log.info(f"Found {N} rows.")
+        log.info(f"Found {N} rows with Visit.apred_vers = {self.apred} and Visit.catalogid > 0")
 
         p = SDSSPath(release)
         keys = ("telescope", "plate", "field", "mjd", "fiber", "apred")    
         catalogids, data_product_kwds, errors = ([], [], [])
-        for N, (catalogid, *values) in enumerate(tqdm(q, total=N), start=1):
+        for N, (catalogid, *values) in enumerate(tqdm(q, total=N, desc="Preparing rows"), start=1):
             kwargs = dict(zip(keys, values))
             kwargs["field"] = kwargs["field"].strip()
             if not isinstance(catalogid, int):
@@ -112,10 +115,18 @@ class ApVisitOperator(BaseOperator):
                 DataProduct
                 .insert_many(data_product_kwds)
                 .returning(DataProduct.id)
-                .on_conflict_ignore()
+                # If we use on_conflict_ignore() then we only get IDs for the new rows.
+                .on_conflict(
+                    conflict_target=[DataProduct.release, DataProduct.filetype, DataProduct.kwargs_hash],
+                    update={
+                        DataProduct.updated: datetime.datetime.now()
+                    }
+                ) 
                 .tuples()
                 .execute()
             )
+            assert len(catalogids) == len(data_product_ids)
+            
             log.info(f"Linking data products to sources..")
             SourceDataProduct.insert_many([
                 {"source_id": cid, "data_product_id": dpid } for cid, dpid in zip(catalogids, data_product_ids)

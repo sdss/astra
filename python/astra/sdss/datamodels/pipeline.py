@@ -83,12 +83,19 @@ def create_pipeline_product(
     else:
         # If it's a `full` file then we will have a bad time.
         if source is None:
-            try:
-                (source,) = data_product.sources
-            except:
-                log.exception(
-                    f"Could not find unique source associated with data product {data_product}"
-                )
+            for k, v in results.items():
+                try:
+                    source = v["source_id"][0]
+                except:
+                    try:
+                        (source,) = data_product.sources
+                    except:
+                        log.exception(
+                            f"Could not find unique source associated with data product {data_product}"
+                        )
+                else:
+                    break
+                
         # list(map(list, ...)) so we can edit the entries.
         primary_hdu_cards = list(map(list, create_primary_hdu_cards(source, HDU_DESCRIPTIONS)))
 
@@ -143,10 +150,12 @@ def create_pipeline_product(
     primary_hdu.add_checksum()
 
     hdus = [primary_hdu]
+    matched_keys = []
     for i, (observatory, instrument) in enumerate(
         get_data_hdu_observatory_and_instrument()
     ):
         key = _get_extname(instrument, observatory)
+        matched_keys.append(key)
         hdu_header_groups = (header_groups or {}).get(key, [])
         if key not in results or len(results[key]) == 0:
             hdus.append(create_empty_hdu(observatory, instrument))
@@ -162,6 +171,10 @@ def create_pipeline_product(
                 )
             )
     # TODO: Warn about result keys that don't match any HDU.
+    ignored_keys = set(list(results.keys())).difference(matched_keys)
+    if ignored_keys:
+        log.warning(f"Ignoring results for given extension names: {ignored_keys}. Available: {matched_keys}")
+
     
     # Parse pipeline name from the task name
     pipeline = task.name.split(".")[2]
@@ -169,19 +182,27 @@ def create_pipeline_product(
     if product_name is None:
         product_name = {
             "snowwhite": "WD",
+            "ferre": "FERRE",
             "aspcap": "ASPCAP",
             "cannon": "CANNON",
             "korg": "Korg",
-            "thepayne": "ThePayne",
+            "thepayne": "Payne",
             "zetapayne": "ZetaPayne",
             "slam": "SLAM",        
         }.get(pipeline, pipeline)
 
     star_or_visit = "Visit" if data_product.filetype == "mwmVisit" else "Star"
     filetype = f"astra{star_or_visit}{product_name}"
-    cat_id = data_product.kwargs.get("cat_id", image[0].header["SDSS_ID"])
+    cat_id = data_product.kwargs.get("cat_id", None)
     task_id = task.id
+    if cat_id is None:
+        for k, v in results.items():
+            cat_id = v["source_id"][0]
+            break
+        if cat_id is None:
+            cat_id = data_product.sources[0].catalogid
 
+    
     # Add check sums to everything except the primary, since we already did it and doing it again screws it up.
     add_check_sums(hdus[1:])
 
@@ -195,24 +216,7 @@ def create_pipeline_product(
         task_id=task_id
     )
 
-    try:
-        path = SDSSPath(release).full(filetype, **kwds)
-    except:
-        log.exception(f"Could not create path for {filetype} {kwds}")
-
-        k = 100
-        catalogid_groups = f"{(cat_id // k) % k:0>2.0f}/{cat_id % k:0>2.0f}"
-
-        apred, run2d, cat_id = (kwds["apred"], kwds["run2d"], kwds["cat_id"])
-        if filetype.startswith("astraVisit"):
-            path = expand_path(
-                f"$MWM_ASTRA/{v_astra}/{run2d}-{apred}/results/visit/{catalogid_groups}/astraVisit-{product_name}-{v_astra}-{cat_id}-{task_id}.fits"
-            )
-        elif filetype.startswith("astraStar"):
-            path = expand_path(
-                f"$MWM_ASTRA/{v_astra}/{run2d}-{apred}/results/star/{catalogid_groups}/astraStar-{product_name}-{v_astra}-{cat_id}-{task_id}.fits"
-            )
-
+    path = SDSSPath(release).full(filetype, **kwds)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     image.writeto(path, overwrite=True)
 
@@ -269,16 +273,21 @@ def create_pipeline_hdu(
     # Copy header cards from input data product.
     keep, cards = (False, [])
     extname = _get_extname(instrument, observatory)
-    for key, value, comment in fits.getheader(data_product.path, extname).cards:
-        if value == "METADATA":
-            keep = True
-        if key == "TTYPE1":
-            cards.pop(-1)
-            cards.pop(-1)
-            break
+    try:
+        hdu = fits.getheader(data_product.path, extname)
+    except:
+        cards.append(("COMMENT", f"Minimal metadata. No {extname} HDU in data product."))
+    else:
+        for key, value, comment in hdu.cards:
+            if value == "METADATA":
+                keep = True
+            if key == "TTYPE1":
+                cards.pop(-1)
+                cards.pop(-1)
+                break
 
-        if keep:
-            cards.append((key, value, comment))
+            if keep:
+                cards.append((key, value, comment))
 
     # Add pipeline name.
     pipeline = task.name.split(".")[2]

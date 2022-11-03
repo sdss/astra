@@ -10,6 +10,7 @@ from peewee import fn
 from typing import Optional, List
 
 from astra.sdss.operators.base import SDSSOperator
+from astra.utils import flatten, expand_path
 
 
 class ApogeeOperator(SDSSOperator):
@@ -29,6 +30,40 @@ class ApogeeOperator(SDSSOperator):
         self.apogee_ids = apogee_ids
         return None
 
+class SelectApStarOperator(ApogeeOperator):
+    release = "dr17"
+
+    def execute(self, context: dict):
+        """
+        Execute this operator.
+
+        :param context:
+            The Airflow context dictionary.
+        """
+        q = (
+            DataProduct
+            .select(DataProduct.id)
+            .where(
+                (DataProduct.filetype.in_(("apStar", "apStar-1m")))
+            &   (DataProduct.release == self.release)
+            )
+        )
+        if self.apogee_ids is not None:
+            if isinstance(self.apogee_ids, str) and os.path.exists(expand_path(self.apogee_ids)):
+                with open(expand_path(self.apogee_ids), "r") as fp:
+                    apogee_ids = list(map(str.strip, fp.readlines()))
+            else:
+                apogee_ids = self.apogee_ids 
+            log.info(f"Restricting to {len(apogee_ids)} APOGEE_ID: {apogee_ids}")
+            q = q.where(DataProduct.kwargs["obj"].in_(apogee_ids))
+
+        assert self.return_id_kind == "data_product"
+
+        ids = flatten(q.tuples())
+        log.info(f"Found {len(ids)} apStar data products.")
+        return ids
+
+    
 
 class ApStarOperator(ApogeeOperator):
 

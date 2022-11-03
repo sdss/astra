@@ -83,21 +83,40 @@ class Classify(TaskInstance):
                 # Only use BOSS APO spectra.
                 # TODO: Revise when we have BOSS LCO spectra.
                 spectrum = Spectrum1D.read(data_product.path, hdu=1)
+                N, P = spectrum.flux.shape
+                source_id = spectrum.meta.get("CAT_ID", None)
 
+                parent_data_product_id = spectrum.meta.get("DATA_PRODUCT_ID", None)
+                if not parent_data_product_id:
+                    parent_data_product_id = data_product.id
+                    
                 all_line_ratios = line_features(
                     spectrum,
                     wavelength_regions=wavelength_regions,
                     polyfit_regions=polyfit_regions,
                     polyfit_order=polyfit_order,
                 )
-
-                for wd_type in classifier.predict(all_line_ratios):
-                    all_classifications.append({"wd_type": wd_type})
                 
+                for line_ratios in all_line_ratios:
+                    if np.all(np.isfinite(line_ratios)):
+                        wd_type, = classifier.predict(line_ratios[None])
+                    else:
+                        wd_type = "??"
+                    
+                    all_classifications.append(
+                        dict(
+                            wd_type=wd_type,
+                            source_id=source_id,
+                            parent_data_product_id=parent_data_product_id,
+                        )
+                    )
+                    
                 for line_ratios in all_line_ratios:
                     for (wl_start, wl_end), line_ratio in zip(wavelength_regions, line_ratios):
                         all_features.append(
                             dict(
+                                source_id=source_id,
+                                parent_data_product_id=parent_data_product_id,
                                 wavelength_start=wl_start,
                                 wavelength_end=wl_end,
                                 line_ratio=line_ratio
@@ -150,6 +169,11 @@ class WhiteDwarfStellarParameters(TaskInstance):
             wl = spectrum.wavelength.value
             flux = spectrum.flux.value
             flux_err = spectrum.uncertainty.represent_as(StdDevUncertainty).array
+            source_id = spectrum.meta.get("CAT_ID", None)
+
+            parent_data_product_id = spectrum.meta.get("DATA_PRODUCT_ID", None)
+            if not parent_data_product_id:
+                parent_data_product_id = data_product.id
 
             if flux.ndim == 2:
                 # TODO: Not yet handle mwmVisit
@@ -325,6 +349,7 @@ class WhiteDwarfStellarParameters(TaskInstance):
             reduced_chi_sq = (chi_sq / (np.sum(np.isfinite(pixel_chi_sq[chisq_mask])) - 3))
 
             result = dict(
+                source_id=source_id,
                 wd_type=wd_type,
                 teff=final_T,
                 e_teff=final_T_err,
@@ -335,7 +360,8 @@ class WhiteDwarfStellarParameters(TaskInstance):
                 conditioned_on_phot_g_mean_mag=phot_g_mean_mag,
                 snr=spectrum.meta["SNR"][0], # TODO: Not yet handle mwmVisit
                 chi_sq=chi_sq,
-                reduced_chi_sq=reduced_chi_sq
+                reduced_chi_sq=reduced_chi_sq,
+                parent_data_product_id=parent_data_product_id
             )
 
             log.info(

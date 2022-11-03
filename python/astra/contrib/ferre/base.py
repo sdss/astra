@@ -9,6 +9,7 @@ from astropy.nddata import StdDevUncertainty
 from collections import OrderedDict
 from astra import log, __version__
 from astra.base import TaskInstance, Parameter, TupleParameter, DictParameter
+from astra.database.astradb import Status, Task, TaskBundle, Bundle
 from astra.tools.spectrum import Spectrum1D, SpectrumList
 from astra.tools.spectrum.utils import spectrum_overlaps
 from astra.contrib.ferre import bitmask, utils
@@ -24,6 +25,9 @@ from astra.database.astradb import (
 from astra.sdss.datamodels.pipeline import create_pipeline_product
 from astra.sdss.datamodels.base import get_extname
 from astra.contrib.ferre.bitmask import (PixelBitMask, ParamBitMask)
+
+# FERRE v4.8.8 src trunk : /uufs/chpc.utah.edu/common/home/sdss09/software/apogee/Linux/apogee/trunk/external/ferre/src
+
 
 class Ferre(TaskInstance):
 
@@ -125,6 +129,30 @@ class Ferre(TaskInstance):
         i, j, k, l, snr, *obj = name.split("_")
         return dict(i=int(i), j=int(j), k=int(k), l=int(l), snr=float(snr), obj="_".join(obj))
 
+    @property
+    def working_directory(self):
+        """ The directory where FERRE is executed. """
+        parent_dir = expand_path(self.parent_dir)
+        bundle = self.context.get("bundle", None)
+        if bundle is None:
+            tasks = self.context.get("tasks", None)
+            if tasks is not None:
+                if len(tasks) == 1:
+                    descr = f"task_{tasks[0].id}"
+                else:
+                    if len(tasks) == 2:
+                        first_task, last_task = tasks
+                    else:
+                        first_task, *_, last_task = tasks
+                    descr = f"tasks/task_{first_task.id}_to_{last_task.id}"
+                dir = os.path.join(parent_dir, descr)
+            else:
+                raise ValueError(f"Can't get context to create working directory")
+        else:
+            dir = os.path.join(parent_dir, f"bundles/{bundle.id % 100:0>2.0f}/{bundle.id}")
+        return dir
+
+
     def pre_execute(self):
 
         # Check if the pre-execution has already happened somewhere else.
@@ -132,28 +160,7 @@ class Ferre(TaskInstance):
             return None
 
         # Create a temporary directory.
-        if self.parent_dir is not None:
-            parent_dir = expand_path(self.parent_dir)
-            bundle = self.context.get("bundle", None)
-            if bundle is None:
-                tasks = self.context.get("tasks", None)
-                if tasks is not None:
-                    if len(tasks) == 1:
-                        descr = f"task_{tasks[0].id}"
-                    else:
-                        if len(tasks) == 2:
-                            first_task, last_task = tasks
-                        else:
-                            first_task, *_, last_task = tasks
-                        descr = f"tasks/task_{first_task.id}_to_{last_task.id}"
-                    dir = os.path.join(parent_dir, descr)
-                else:
-                    dir = mkdtemp(dir=parent_dir)
-            else:
-                dir = os.path.join(parent_dir, f"bundles/{bundle.id % 100:0>2.0f}/{bundle.id}")
-        else:
-            dir = mkdtemp()
-
+        dir = self.working_directory
         os.makedirs(dir, exist_ok=True)
 
         log.info(f"Created directory for FERRE: {dir}")
@@ -257,9 +264,10 @@ class Ferre(TaskInstance):
                         sigma_median = np.median(sigma_, axis=1).reshape((-1, 1))
 
                         delta = (flux_ - flux_median) / flux_stddev
-                        is_spike = (delta > parameters["spike_threshold_to_inflate_uncertainty"]) * (
-                            sigma_ < (parameters["spike_threshold_to_inflate_uncertainty"] * sigma_median)
-                        )
+                        is_spike = (delta > parameters["spike_threshold_to_inflate_uncertainty"])
+                        #* (
+                        #    sigma_ < (parameters["spike_threshold_to_inflate_uncertainty"] * sigma_median)
+                        #)
                         if np.any(is_spike):
                             fraction = np.sum(is_spike) / is_spike.size
                             log.warning(
@@ -270,6 +278,8 @@ class Ferre(TaskInstance):
                                 if n > 0:
                                     log.debug(f"  {n} pixels on spectrum index {pi}")
                             sigma_[is_spike] = parameters["bad_pixel_sigma_value"]
+                            #raise a
+                            # interpolate over them too?
 
                     # Parse initial parameters. Expected types:
                     # - dictionary of single values -> apply single value to all N spectra
@@ -338,23 +348,29 @@ class Ferre(TaskInstance):
         np.savetxt(
             os.path.join(dir, control_kwds["erfile"]), sigma, **savetxt_kwds
         )
-        context = dict(dir=dir)
-        return context
+        return None
 
 
     def execute(self):
         """Execute FERRE"""
 
-        try:
-            dir = self.context["pre_execute"]["dir"]
-        except:
-            raise ValueError(
-                f"No directory prepared by pre-execute in self.context['pre_execute']['dir'] "
-            )
+        dir = self.working_directory
 
         stdout_path = os.path.join(dir, "stdout")
         stderr_path = os.path.join(dir, "stderr")
 
+        # Set the timeout based on how many spectra there are, and number of threads, and number of degrees of freedom
+        N = utils.wc(os.path.join(dir, "parameters.input"))
+        N_threads = 1
+        with open(os.path.join(dir, "input.nml"), "r") as fp:
+            for line in fp.readlines():
+                if line.startswith("NTHREADS"):
+                    N_threads = int(line.split()[-1])
+                elif line.startswith("NOV"):
+                    N_dof = int(line.split()[-1])
+
+        # worst case scenario is 5 minutes for every spectrum
+        timeout = max(300 * N / N_threads, 1800)
         try:
             with open(stdout_path, "w") as stdout:
                 with open(stderr_path, "w") as stderr:
@@ -364,11 +380,11 @@ class Ferre(TaskInstance):
                         stdout=stdout,
                         stderr=stderr,
                         check=False,
-                        timeout=7 * 24 * 60 * 60, # a week! # self.timeout
+                        timeout=timeout, # a week! # self.timeout
                     )
         except:
             log.exception(f"Exception when calling FERRE in {dir}:")
-            raise
+            log.info(f"Will continue to try and recover what we can")
 
         else:
             with open(stdout_path, "r") as fp:
@@ -376,41 +392,41 @@ class Ferre(TaskInstance):
             with open(stderr_path, "r") as fp:
                 stderr = fp.read()
 
-        """
-        # Issues with processes hanging forever, which might be related to pipe buffers being full.
+            """
+            # Issues with processes hanging forever, which might be related to pipe buffers being full.
 
-        try:
-            process = subprocess.Popen(
-                ["ferre.x"],
-                cwd=dir,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=1,
-                encoding="utf-8",
-                close_fds="posix" in sys.builtin_module_names
-            )
-        except subprocess.CalledProcessError:
-            log.exception(f"Exception when calling FERRE in {dir}")
-            raise
-        else:
             try:
-                stdout, stderr = process.communicate()
-            except subprocess.TimeoutExpired:
+                process = subprocess.Popen(
+                    ["ferre.x"],
+                    cwd=dir,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=1,
+                    encoding="utf-8",
+                    close_fds="posix" in sys.builtin_module_names
+                )
+            except subprocess.CalledProcessError:
+                log.exception(f"Exception when calling FERRE in {dir}")
                 raise
             else:
-                log.info(f"FERRE stdout:\n{stdout}")
-                log.error(f"FERRE stderr:\n{stderr}")
-        """
+                try:
+                    stdout, stderr = process.communicate()
+                except subprocess.TimeoutExpired:
+                    raise
+                else:
+                    log.info(f"FERRE stdout:\n{stdout}")
+                    log.error(f"FERRE stderr:\n{stderr}")
+            """
 
-        n_done, n_error, control_kwds = utils.parse_ferre_output(dir, stdout, stderr)
-        log.info(f"FERRE finished with {n_done} successful and {n_error} errors.")
+            n_done, n_error, control_kwds, meta = utils.parse_ferre_output(dir, stdout, stderr)
+            log.info(f"FERRE finished with {n_done} successful and {n_error} errors.")
 
         # Write stdout and stderr
-        with open(os.path.join(dir, "stdout"), "w") as fp:
-            fp.write(stdout)
-        with open(os.path.join(dir, "stderr"), "w") as fp:
-            fp.write(stderr)
+        #with open(os.path.join(dir, "stdout"), "w") as fp:
+        #    fp.write(stdout)
+        #with open(os.path.join(dir, "stderr"), "w") as fp:
+        #    fp.write(stderr)
 
         '''
         # We actually have timings per-spectrum but we aggregate this to per-task.
@@ -447,19 +463,36 @@ class Ferre(TaskInstance):
 
         Read in the output files, create rows in the database, and produce output data products.
         """
-        dir = self.context["pre_execute"]["dir"]
+        dir = self.working_directory
+
         with open(os.path.join(dir, "stdout"), "r") as fp:
             stdout = fp.read()
         with open(os.path.join(dir, "stderr"), "r") as fp:
             stderr = fp.read()
 
-        n_done, n_error, control_kwds = utils.parse_ferre_output(dir, stdout, stderr)
+        n_done, n_error, control_kwds, ferre_meta = utils.parse_ferre_output(dir, stdout, stderr)
         timings = utils.get_processing_times(stdout)
 
-        # Parse the outputs from the FERRE run.
+        path = os.path.join(dir, control_kwds["PFILE"])
+        input_names = np.atleast_1d(np.loadtxt(path, usecols=(0, ), dtype=str))
+    
+        # FFILE and ERFILE are inputs, so they will always be the right shape.
+        try:
+            path = os.path.join(dir, control_kwds["FFILE"])
+            flux = np.atleast_2d(np.loadtxt(path))
+        except:
+            log.exception(f"Failed to load input flux from {path}")
+        try:
+            path = os.path.join(dir, control_kwds["ERFILE"])
+            flux_sigma = np.atleast_2d(np.loadtxt(path))
+        except:
+            log.exception(f"Failed to load flux sigma from {path}")
+            raise
+
+        # Now parse the outputs from the FERRE run.
         path = os.path.join(dir, control_kwds["OPFILE"])
         try:
-            names, params, param_errs, meta = utils.read_output_parameter_file(
+            output_names, output_params, output_param_errs, meta = utils.read_output_parameter_file(
                 path,
                 n_dimensions=control_kwds["NDIM"],
                 full_covariance=control_kwds["COVPRINT"],
@@ -468,40 +501,111 @@ class Ferre(TaskInstance):
             log.exception(f"Exception when parsing FERRE output parameter file {path}")
             raise
 
-        # Parse flux outputs.
-        try:
-            path = os.path.join(dir, control_kwds["FFILE"])
-            flux = np.atleast_2d(np.loadtxt(path))
-        except:
-            log.exception(f"Failed to load input flux from {path}")
+        if len(input_names) > len(output_names):
+            log.warning(f"Number of input parameters does not match output parameters ({len(input_names)} > {len(output_names)}). FERRE may have failed. We will pick up the pieces..")
 
-        try:
+        # Which entries are missing?
+        missing_names = list(set(input_names).difference(output_names))
+        missing_indices = [np.where(input_names == mn)[0][0] for mn in missing_names]
+        for i in np.argsort(missing_indices):
+            missing_name, missing_index = (missing_names[i], missing_indices[i])
+            log.warning(f"Missing parameters for spectrum named {missing_name} (index {missing_index}; row {missing_index+1})")        
+
+        # We will fill the missing parameters with nans, and missing fluxes with nans too
+        N, P = flux.shape
+        D = int(control_kwds["NDIM"]) 
+        params = np.nan * np.ones((N, D), dtype=float)
+        param_errs = np.nan * np.ones((N, D), dtype=float)
+        log_chisq_fit = np.nan * np.ones(N)
+        log_snr_sq = np.nan * np.ones(N)
+        frac_phot_data_points = np.nan * np.ones(N)
+
+
+        indices = []
+        for i, name in enumerate(output_names):
+            index, = np.where(input_names == name)
+            assert len(index) == 1, f"Name {name} (index {i}) appears more than once in the input parameter file!"
+            indices.append(index[0])
+        indices = np.array(indices)
+
+        params[indices] = output_params
+        param_errs[indices] = output_param_errs
+        log_chisq_fit[indices] = meta["log_chisq_fit"]
+        log_snr_sq[indices] = meta["log_snr_sq"]
+        frac_phot_data_points[indices] = meta["frac_phot_data_points"]
+
+        # Now get outputs.
+        if ferre_meta.get("ferre_version", None) == "v4.8.9":
             path = os.path.join(dir, control_kwds["OFFILE"])
-            model_flux = np.atleast_2d(np.loadtxt(path))
-        except:
-            log.exception(f"Failed to load model flux from {path}")
-            raise
+            _model_flux = np.atleast_2d(np.loadtxt(path, usecols=1 + np.arange(P)))
+            _model_flux_names = np.atleast_1d(np.loadtxt(path, usecols=(0, ), dtype=str))
+            model_indices = []
+            for i, name in enumerate(_model_flux_names):
+                index, = np.where(input_names == name)
+                model_indices.append(index[0])
+            model_indices = np.array(model_indices)
 
-        try:
-            path = os.path.join(dir, control_kwds["ERFILE"])
-            flux_sigma = np.atleast_2d(np.loadtxt(path))
-        except:
-            log.exception(f"Failed to load flux sigma from {path}")
-            raise
+            model_flux = np.nan * np.ones((N, P), dtype=float)
+            model_flux[model_indices] = _model_flux
 
-        if "SFFILE" in control_kwds:
-            try:
-                path = os.path.join(dir, control_kwds["SFFILE"])
-                normalized_flux = np.atleast_2d(np.loadtxt(path))
-            except:
-                log.exception(f"Failed to load normalized observed flux from {path}")
-                raise
+            if "SFFILE" in control_kwds:
+                try:
+                    path = os.path.join(dir, control_kwds["SFFILE"])
+                    _normalized_flux = np.atleast_2d(np.loadtxt(path, usecols=1 + np.arange(P)))
+                    _normalized_flux_names = np.atleast_1d(np.loadtxt(path, usecols=(0, ), dtype=str))
+                except:
+                    log.exception(f"Failed to load normalized observed flux from {path}")
+                    raise
+                else:
+                    # Order the normalized flux to be the same as the inputs
+                    normalized_flux_indices = []
+                    for i, name in enumerate(_normalized_flux_names):
+                        index, = np.where(input_names == name)
+                        normalized_flux_indices.append(index[0])
+                    normalized_flux_indices = np.array(normalized_flux_indices)
+
+                    normalized_flux = np.nan * np.ones((N, P), dtype=float)
+                    normalized_flux[normalized_flux_indices] = _normalized_flux
+
+                    continuum = flux / normalized_flux
             else:
-                continuum = flux / normalized_flux
-        else:
-            continuum = np.ones_like(flux)
-            normalized_flux = flux
+                continuum = np.ones_like(flux)
+                normalized_flux = flux
 
+        else:
+            if any(missing_names):
+                raise RuntimeError(f"Missing names and FERRE version is not v4.8.9: {missing_names}")
+            try:
+                path = os.path.join(dir, control_kwds["OFFILE"])
+                model_flux = np.atleast_2d(np.loadtxt(path))
+            except:
+                log.exception(f"Failed to load model flux from {path}")
+                raise
+
+            if "SFFILE" in control_kwds:
+                try:
+                    path = os.path.join(dir, control_kwds["SFFILE"])
+                    normalized_flux = np.atleast_2d(np.loadtxt(path))
+                except:
+                    log.exception(f"Failed to load normalized observed flux from {path}")
+                    raise
+                else:
+                    continuum = flux / normalized_flux
+            else:
+                continuum = np.ones_like(flux)
+                normalized_flux = flux
+
+        has_complete_results = (
+            np.any(np.isfinite(params), axis=1)
+        *   np.any(np.isfinite(model_flux), axis=1)
+        )
+        # If we only have some things (eg params but no model flux) we should make it all nan,
+        # ebcause we dont want to rely on this downstream
+        params[~has_complete_results] = np.nan
+        model_flux[~has_complete_results] = np.nan
+        normalized_flux[~has_complete_results] = np.nan
+        continuum[~has_complete_results] = np.nan
+        
         headers, *segment_headers = utils.read_ferre_headers(
             utils.expand_path(self.header_path)
         )
@@ -523,7 +627,7 @@ class Ferre(TaskInstance):
             (params < warn_lower) | (params > warn_upper)
         ] |= param_bitmask.get_value("GRIDEDGE_WARN")
         param_bitmask_flags[
-            (params == -999) | (param_errs < -0.01)
+            (params == -999) | (param_errs < -0.01) | ~np.isfinite(params)
         ] |= param_bitmask.get_value("FERRE_FAIL")
 
         # Check for any erroneous outputs
@@ -540,7 +644,7 @@ class Ferre(TaskInstance):
         label_results = {}
         spectral_results = {}
         for z, (name, param, param_err, bitmask_flag) in enumerate(
-            zip(names, params, param_errs, param_bitmask_flags)
+            zip(input_names, params, param_errs, param_bitmask_flags)
         ):
             parsed = self.from_name(name)
 
@@ -551,9 +655,9 @@ class Ferre(TaskInstance):
             )
             result.update(
                 dict(
-                    log_chisq_fit=meta["log_chisq_fit"][z],
-                    log_snr_sq=meta["log_snr_sq"][z],
-                    frac_phot_data_points=meta["frac_phot_data_points"][z],
+                    log_chisq_fit=log_chisq_fit[z],#meta["log_chisq_fit"][z],
+                    log_snr_sq=log_snr_sq[z], #meta["log_snr_sq"][z],
+                    frac_phot_data_points=frac_phot_data_points[z],#meta["frac_phot_data_points"][z],
                     snr=parsed["snr"],
                 )
             )
@@ -574,21 +678,39 @@ class Ferre(TaskInstance):
             ))
         
         # Create outputs in the database.
+        failed_status = Status.get(description="failed-post-execution")
+        failed_task_ids = []
         for i, (task, (data_product, ), parameters) in enumerate(self.iterable()):
             hdu_results = {}
             task_results = []
             header_groups = {}
+            write_data_products = True
             for k, spectrum in enumerate(SpectrumList.read(data_product.path, data_slice=parameters["data_slice"])):
                 if not spectrum_overlaps(spectrum, np.hstack(model_wavelengths)):
                     continue
                 
                 index = (i, 0, k)
+                N, P = spectrum.flux.shape
 
                 extname = get_extname(spectrum, data_product)
 
                 # TODO: Put in the initial parameters?
                 hdu_result = list_to_dict(label_results[index])
-                
+                # If FERRE failed entirely, mark this task as failed.
+                if not np.all(np.isfinite(hdu_result["log_chisq_fit"])):
+                    log.warning(f"FERRE failed for {task} {data_product}")
+                    task.status = failed_status
+                    task.save()
+                    write_data_products = False
+                    t = Task.get(id=task.id)
+                    print(t, t.status)
+                    failed_task_ids.append(task.id)
+                    break
+
+                # TODO: Check above works correctly for visits
+                if N > 1:
+                    raise a
+            
                 spectral_results_ = list_to_dict(spectral_results[index])
                 mask = _get_ferre_mask(spectrum.wavelength.value, model_wavelengths)
                 spectral_results_ = _de_mask_values(spectral_results_, mask)
@@ -612,12 +734,42 @@ class Ferre(TaskInstance):
                     ("LOG_CHISQ_FIT", "SUMMARY STATISTICS"),
                     ("MODEL_FLUX", "MODEL SPECTRA")
                 ]
-                task_results.extend(label_results[index])
 
-            create_pipeline_product(task, data_product, hdu_results, header_groups=header_groups)
+                # Update task results to include data product ID and source ID.
+                source_id = spectrum.meta.get("CAT_ID", None)
+                parent_data_product_id = spectrum.meta.get("DATA_PRODUCT_ID", None)
+                if not parent_data_product_id:
+                    parent_data_product_id = data_product.id
+                
+                data_product_results = []
+                for label_result in label_results[index]:
+                    result = label_result.copy()
+                    result.update(
+                        source_id=source_id,
+                        parent_data_product_id=parent_data_product_id                    
+                    )          
+                    data_product_results.append(result)
 
-            # Add to database.
-            task.create_or_update_outputs(FerreOutput, task_results)
+                task_results.extend(data_product_results)
+            
+            if write_data_products:        
+                create_pipeline_product(task, data_product, hdu_results, header_groups=header_groups)
+                task.create_or_update_outputs(FerreOutput, task_results)
+        
+        recursion_level = getattr(self, "__recursion_level__", 0)
+        if failed_task_ids and recursion_level < 5 and len(failed_task_ids) > self.n_threads:
+            log.info(f"Creating a new bundle for {len(failed_task_ids)} failed tasks at recursion level {recursion_level}")
+
+            sub_bundle = Bundle.create()
+            for task_id in failed_task_ids[::-1]:
+                TaskBundle.create(task_id=task_id, bundle_id=sub_bundle.id)
+            
+            log.info(f"Sub-bundle is {sub_bundle}")
+            sbi = Bundle.get(sub_bundle.id).instance()
+            sbi.__recursion_level__ = recursion_level + 1
+            sbi.execute()
+            log.info(f"Sub-bundle done or failed?")
+
 
         return None
 
