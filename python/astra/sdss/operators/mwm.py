@@ -609,6 +609,13 @@ STELLAR_CARTONS = (
     "ops_std_boss_tic",  # ops_std
     "ops_std_eboss",  # ops_std
     "ops_tycho2_brightneighbors",  # ops
+    # Added by request of Jennifer Johnson during IPL-1 sci fest:
+    "bhm_csc_apogee",
+    "bhm_csc_boss",        
+    "bhm_csc_boss_bright",
+    "bhm_csc_boss-bright",
+    "bhm_csc_boss_dark",   
+    "bhm_csc_boss-dark"
 )
 
 

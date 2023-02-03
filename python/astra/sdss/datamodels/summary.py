@@ -2,7 +2,7 @@ from astropy.table import Table
 from astra.database.astradb import (
     Source, ApogeeNetOutput, ZetaPayneOutput, Task, DataProduct, TaskInputDataProducts, SourceDataProduct,
     WhiteDwarfLineRatiosOutput, WhiteDwarfClassifierOutput, WhiteDwarfOutput, ThePayneOutput, SlamOutput,
-    AspcapOutput, ClassifySourceOutput, ClassifierOutput
+    AspcapOutput, ClassifySourceOutput, ClassifierOutput, MDwarfTypeOutput
 )
 
 from sdss_access import SDSSPath
@@ -516,9 +516,12 @@ def construct_boss_allStar(temp_results_path, pipeline, mappings, category_heade
         ("V_RAD", "RADIAL VELOCITIES (XCSAO)"),
         #("TEFF_XCSAO", "STELLAR PARAMETERS (XCSAO)"),
         ("RELEASE", "INPUT DATA MODEL KEYWORDS"),
-        ("TEFF", f"STELLAR PARAMETERS ({pipeline})"),
-        ("SNR", "SUMMARY STATISTICS"),
     ]
+    if "TEFF" in t_temp.dtype.names:
+        all_category_headers.append(("TEFF", f"STELLAR PARAMETERS ({pipeline})"))
+    if "SNR" in t_temp.dtype.names:
+        all_category_headers.append(("SNR", "SUMMARY STATISTICS"))
+
     if category_headers is not None:
         all_category_headers.extend(category_headers)
 
@@ -1790,7 +1793,47 @@ def construct_all_star_classifier():
     return hdu_list
 
 
+
+def all_star_mdwarftype_v026():
+    fields = (
+        MDwarfTypeOutput.spectral_type,
+        MDwarfTypeOutput.sub_type,
+        MDwarfTypeOutput.chi_sq,
+    )
+    t = all_star_table_v026(fields)
+    # Extract information from the headers of the mwmStar files, since the database has become unworkably slow.
+    p = SDSSPath("sdss5")
+    keys = (
+        "CAT_ID", "TIC_ID", "GAIA_ID", "HEALPIX", "RA", "DEC", "GAIA_RA", "GAIA_DEC", "PLX", "E_PLX", "PMRA", "E_PMRA", "PMDE", "E_PMDE", "V_RAD", "E_V_RAD",
+        "G_MAG", "BP_MAG", "RP_MAG", 
+        "J_MAG", "H_MAG", "K_MAG", 
+        "CARTON_0", "PROGRAMS", "MAPPERS"
+    )
+    aux_info = {key.lower(): [] for key in keys}
+    default = {"CARTON_0": "", "PROGRAMS": "", "MAPPERS": "", "TIC_ID": -1, "GAIA_ID": -1, "HEALPIX": -1}
+    for row in tqdm(t):
+        path = p.full(**dict(zip(t.dtype.names, row)))
+        with fits.open(path) as image:
+            for key in keys:
+                value = image[0].header[key]
+                aux_info[key.lower()].append(value or default.get(key, np.nan))
+
+    t_aux = Table(data=aux_info, names=list(map(str.lower, keys)))
+    return join(t_aux, t, keys="cat_id")  
+
+
+def construct_boss_allStar_mdwarftype(): 
+    mappings = [(k.upper(), k) for k in ("spectral_type", "sub_type", "chi_sq")]
+    return construct_boss_allStar(
+        "tmp.fits",
+        "MDwarfType",
+        mappings,
+    )    
+
 if __name__ == "__main__":
+
+    t = all_star_mdwarftype_v026()
+    t.write("tmp.fits")
 
     t = all_star_thepayne_v026()
     t.write("/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/mwm/spectro/astra/0.2.6/v6_0_9-1.0/results/allStar-ThePayne-0.2.6-v6_0_9-1.0.fits", overwrite=True)

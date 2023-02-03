@@ -24,7 +24,7 @@ class Scalar(Continuum):
         method="mean",
         spectral_axis: Optional[SpectralAxis] = None,
         regions: Optional[List[Tuple[float, float]]] = None,
-        mask: Optional[np.array] = None,
+        mask: Optional[Union[List[Tuple[float, float]], np.array]] = None,
         fill_value: Optional[Union[int, float]] = np.nan,
         **kwargs,
     ) -> None:

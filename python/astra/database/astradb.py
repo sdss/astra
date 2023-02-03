@@ -644,6 +644,19 @@ class MWMSourceStatus(AstraOutputBaseModel):
 # Output tables.
 SMALL = -1e+20
 
+class MDwarfTypeOutput(AstraOutputBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
+    parent_data_product = ForeignKeyField(DataProduct, null=True)
+
+    continuum = FloatField(null=True)
+    spectral_type = TextField()
+    sub_type = FloatField()
+    chi_sq = FloatField()
+
 
 class ClassifierOutput(AstraOutputBaseModel):
 
@@ -1099,7 +1112,6 @@ class ZetaPayneOutput(AstraOutputBaseModel):
     reduced_chi_sq = FloatField()
 
 
-
 class ThePayneOutput(AstraOutputBaseModel):
 
     output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
@@ -1549,6 +1561,49 @@ class SlamOutput(AstraOutputBaseModel):
     # Statistics.
     chi_sq = FloatField()
     reduced_chi_sq = FloatField()
+
+class InitialKorgOutput(AstraOutputBaseModel):
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
+    parent_data_product = ForeignKeyField(DataProduct, null=True)
+
+    teff = FloatField()
+    logg = FloatField()
+    microturbulence = FloatField()
+    m_h = FloatField()
+    reduced_chi_sq = FloatField()      
+
+    try:
+        theta = ArrayField(FloatField)
+    except:
+        log.exception(f"Could not create ArrayField, ignoring..")
+    
+
+class KorgOutput(AstraOutputBaseModel):
+
+    output = ForeignKeyField(Output, on_delete="CASCADE", primary_key=True)
+    task = ForeignKeyField(Task)
+    meta = JSONField(null=True)
+    source = ForeignKeyField(Source, null=True)
+    parent_data_product = ForeignKeyField(DataProduct, null=True)
+
+    snr = FloatField()
+
+    teff = FloatField()
+    e_teff = FloatField()
+    logg = FloatField()
+    e_logg = FloatField()
+    microturbulence = FloatField()
+    e_microturbulence = FloatField()
+    m_h = FloatField()
+    e_m_h = FloatField()
+
+    chi_sq = FloatField()
+    reduced_chi_sq = FloatField()
+
+
 
 
 def create_tables(

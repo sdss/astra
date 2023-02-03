@@ -1,854 +1,691 @@
-from __future__ import division, print_function, absolute_import, unicode_literals
-
-""" The Cannon. """
-
-__all__ = ["CannonModel"]
-
-import multiprocessing as mp
-import numpy as np
 import os
+import numpy as np
 import pickle
-from datetime import datetime
-from functools import wraps
-from sys import version_info
-from scipy.spatial import Delaunay
-from warnings import warn
+import warnings
+from itertools import cycle
+from functools import cached_property
+from scipy import optimize as op
+from sklearn.linear_model import Lasso, LinearRegression
+from joblib import Parallel, delayed
+from time import time
 from tqdm import tqdm
 
-from astra import log
+from sklearn.exceptions import ConvergenceWarning
 
-from astra.contrib.thecannon import censoring, fitting, vectorizer as vectorizer_module
-from astra.contrib.thecannon.vectorizer.base import BaseVectorizer
-from astra.contrib.thecannon.utils.wrapper import Wrapper
+from astra.utils import expand_path
 
 
-def requires_training(method):
+class CannonModel:
+
     """
-    A decorator for model methods that require training before being run.
+    A second-order polynomial Cannon model.
 
-    :param method:
-        A method belonging to CannonModel.
+    The generative model for two labels (teff, logg) might look something like:
+
+        f(\theta) = \theta_0
+                  + (\theta_1 * teff)
+                  + (\theta_2 * teff^2)
+                  + (\theta_3 * logg)
+                  + (\theta_4 * logg * teff)
+                  + (\theta_5 * logg^2)
     """
-
-    @wraps(method)
-    def wrapper(model, *args, **kwargs):
-        if not model.is_trained:
-            raise TypeError("the model requires training first")
-        return method(model, *args, **kwargs)
-
-    return wrapper
-
-
-class CannonModel(object):
-    """
-    A model for The Cannon which includes L1 regularization and pixel censoring.
-
-    :param training_set_labels:
-        A set of objects with labels known to high fidelity. This can be
-        given as a numpy structured array, or an astropy table.
-
-    :param training_set_flux:
-        An array of normalised fluxes for stars in the labelled set, given
-        as shape `(num_stars, num_pixels)`. The `num_stars` should match the
-        number of rows in `training_set_labels`.
-
-    :param training_set_ivar:
-        An array of inverse variances on the normalized fluxes for stars in
-        the training set. The shape of the `training_set_ivar` array should
-        match that of `training_set_flux`.
-
-    :param vectorizer:
-        A vectorizer to take input labels and produce a design matrix. This
-        should be a sub-class of `vectorizer.BaseVectorizer`.
-
-    :param dispersion: [optional]
-        The dispersion values corresponding to the given pixels. If provided,
-        this should have a size of `num_pixels`.
-
-    :param regularization: [optional]
-        The strength of the L1 regularization. This should either be `None`,
-        a float-type value for single regularization strength for all pixels,
-        or a float-like array of length `num_pixels`.
-
-    :param censors: [optional]
-        A dictionary containing label names as keys and boolean censoring
-        masks as values.
-    """
-
-    _data_attributes = ("training_set_labels", "training_set_flux", "training_set_ivar")
-
-    # Descriptive attributes are needed to train *and* test the model.
-    _descriptive_attributes = ("vectorizer", "censors", "regularization", "dispersion")
-
-    # Trained attributes are set only at training time.
-    _trained_attributes = ("theta", "s2")
 
     def __init__(
         self,
-        training_set_labels,
-        training_set_flux,
-        training_set_ivar,
-        vectorizer,
+        training_labels,
+        training_flux,
+        training_ivar,
+        label_names,
         dispersion=None,
-        regularization=None,
-        censors=None,
+        regularization=0,
         **kwargs,
-    ):
-
-        # Save the vectorizer.
-        if not isinstance(vectorizer, BaseVectorizer):
-            raise TypeError(
-                "vectorizer must be a sub-class of vectorizer.BaseVectorizer"
-            )
-
-        self._vectorizer = vectorizer
-
-        if training_set_flux is None and training_set_ivar is None:
-
-            # Must be reading in a model that does not have the training set
-            # spectra saved.
-            self._training_set_flux = None
-            self._training_set_ivar = None
-            self._training_set_labels = training_set_labels
-
-        else:
-            self._training_set_flux = np.atleast_2d(training_set_flux)
-            self._training_set_ivar = np.atleast_2d(training_set_ivar)
-
-            if (
-                isinstance(training_set_labels, np.ndarray)
-                and training_set_labels.shape[0] == self._training_set_flux.shape[0]
-                and training_set_labels.shape[1] == len(vectorizer.label_names)
-            ):
-                # A valid array was given as the training set labels, not a table.
-                self._training_set_labels = training_set_labels
-            else:
-                self._training_set_labels = np.array(
-                    [training_set_labels[ln] for ln in vectorizer.label_names]
-                ).T
-
-            # Check that the flux and ivar are valid.
-            self._verify_training_data(**kwargs)
-
-        # Set regularization, censoring, dispersion.
-        self.regularization = regularization
-        self.censors = censors
+    ) -> None:
+        (
+            self.label_names,
+            self.training_labels,
+            self.training_flux,
+            self.training_ivar,
+            self.offsets,
+            self.scales,
+        ) = _check_inputs(
+            label_names, training_labels, training_flux, training_ivar, **kwargs
+        )
         self.dispersion = dispersion
+        self.regularization = regularization
 
-        # Set useful private attributes.
-        __scale_labels_function = kwargs.get(
-            "__scale_labels_function",
-            lambda l: np.ptp(np.percentile(l, [2.5, 97.5], axis=0), axis=0),
-        )
-        __fiducial_labels_function = kwargs.get(
-            "__fiducial_labels_function", lambda l: np.percentile(l, 50, axis=0)
-        )
-
-        self._scales = __scale_labels_function(self.training_set_labels)
-        self._fiducials = __fiducial_labels_function(self.training_set_labels)
-        self._design_matrix = vectorizer(
-            (self.training_set_labels - self._fiducials) / self._scales
-        ).T
-
-        self.reset()
-
+        # If we are loading from a pre-trained model.
+        self.theta = kwargs.get("theta", None)
+        self.s2 = kwargs.get("s2", None)
+        self.meta = kwargs.get("meta", {})
         return None
-
-    # Representations.
-
-    def __str__(self):
-        return (
-            "<{module}.{name} of {K} labels {trained}with a training set "
-            "of {N} stars each with {M} pixels>".format(
-                module=self.__module__,
-                name=type(self).__name__,
-                trained="trained " if self.is_trained else "",
-                K=self.training_set_labels.shape[1],
-                N=self.training_set_labels.shape[0],
-                M=self.dispersion.size,
-            )
-        )
-
-    def __repr__(self):
-        return "<{0}.{1} object at {2}>".format(
-            self.__module__, type(self).__name__, hex(id(self))
-        )
-
-    # Model attributes that cannot (well, should not) be changed.
-
-    @property
-    def training_set_labels(self):
-        """Return the labels in the training set."""
-        return self._training_set_labels
-
-    @property
-    def training_set_flux(self):
-        """Return the training set fluxes."""
-        return self._training_set_flux
-
-    @property
-    def training_set_ivar(self):
-        """Return the inverse variances of the training set fluxes."""
-        return self._training_set_ivar
-
-    @property
-    def vectorizer(self):
-        """Return the vectorizer for this model."""
-        return self._vectorizer
 
     @property
     def design_matrix(self):
-        """Return the design matrix for this model."""
-        return self._design_matrix
-
-    def _censored_design_matrix(self, pixel_index, fill_value=np.nan):
-        """
-        Return a censored design matrix for the given pixel index, and a mask of
-        which theta values to ignore when fitting.
-
-        :param pixel_index:
-            The zero-indexed pixel.
-
-        :returns:
-            A two-length tuple containing the censored design mask for this
-            pixel, and a boolean mask of values to exclude when fitting for
-            the spectral derivatives.
-        """
-
-        if (
-            not self.censors
-            or self.censors is None
-            or len(set(self.censors).intersection(self.vectorizer.label_names)) == 0
-        ):
-            return self.design_matrix
-
-        data = (self.training_set_labels.copy() - self._fiducials) / self._scales
-        for i, label_name in enumerate(self.vectorizer.label_names):
-            try:
-                use = self.censors[label_name][pixel_index]
-
-            except KeyError:
-                continue
-
-            if not use:
-                data[:, i] = fill_value
-
-        return self.vectorizer(data).T
-
-    @property
-    def theta(self):
-        """Return the theta coefficients (spectral model derivatives)."""
-        return self._theta
-
-    @property
-    def s2(self):
-        """Return the intrinsic variance (s^2) for all pixels."""
-        return self._s2
-
-    # Model attributes that can be changed after initiation.
-
-    @property
-    def censors(self):
-        """Return the wavelength censor masks for the labels."""
-        return self._censors
-
-    @censors.setter
-    def censors(self, censors):
-        """
-        Set label censoring masks for each pixel.
-
-        :param censors:
-            A dictionary-like object with label names as keys, and boolean arrays
-            as values.
-        """
-
-        censors = {} if censors is None else censors
-        if isinstance(censors, censoring.Censors):
-            # Could be a censoring dictionary from a different model,
-            # with different label names and pixels.
-
-            # But more likely: we are loading a model from disk.
-            self._censors = censors
-
-        elif isinstance(censors, dict):
-            self._censors = censoring.Censors(
-                self.vectorizer.label_names, self.training_set_flux.shape[1], censors
-            )
-
-        else:
-            raise TypeError(
-                "censors must be a dictionary or a censoring.Censors object"
-            )
-
-    @property
-    def dispersion(self):
-        """Return the dispersion points for all pixels."""
-        return self._dispersion
-
-    @dispersion.setter
-    def dispersion(self, dispersion):
-        """
-        Set the dispersion values for all the pixels.
-
-        :param dispersion:
-            An array of the dispersion values.
-        """
-        if dispersion is None:
-            self._dispersion = None
-            return None
-
-        dispersion = np.array(dispersion).flatten()
-        if (
-            self.training_set_flux is not None
-            and dispersion.size != self.training_set_flux.shape[1]
-        ):
-            raise ValueError(
-                "dispersion provided does not match the number "
-                "of pixels per star ({0} != {1})".format(
-                    dispersion.size, self.training_set_flux.shape[1]
-                )
-            )
-
-        if dispersion.dtype.kind not in "iuf":
-            raise ValueError("dispersion values are not float-like")
-
-        if not np.all(np.isfinite(dispersion)):
-            raise ValueError("dispersion values must be finite")
-
-        self._dispersion = dispersion
-        return None
-
-    @property
-    def regularization(self):
-        """Return the strength of the L1 regularization for this model."""
-        return self._regularization
-
-    @regularization.setter
-    def regularization(self, regularization):
-        """
-        Specify the strength of the regularization for the model, either as a
-        single value for all pixels, or a different strength for each pixel.
-
-        :param regularization:
-            The L1-regularization strength for the model.
-        """
-
-        if regularization is None:
-            self._regularization = None
-            return None
-
-        regularization = np.array(regularization).flatten()
-        if regularization.size == 1:
-            regularization = regularization[0]
-            if 0 > regularization or not np.isfinite(regularization):
-                raise ValueError("regularization must be positive and finite")
-
-        elif regularization.size != self.training_set_flux.shape[1]:
-            raise ValueError("regularization array must be of size `num_pixels`")
-
-            if any(0 > regularization) or not np.all(np.isfinite(regularization)):
-                raise ValueError("regularization must be positive and finite")
-
-        self._regularization = regularization
-        return None
-
-    # Convenient functions and properties.
-
-    @property
-    def is_trained(self):
-        """Return true or false for whether the model is trained."""
-        return all(
-            getattr(self, attr, None) is not None for attr in self._trained_attributes
+        return _design_matrix(
+            _normalize(self.training_labels, self.offsets, self.scales),
+            self._design_matrix_indices,
         )
 
-    def reset(self):
-        """Clear any attributes that have been trained."""
-        for attribute in self._trained_attributes:
-            setattr(self, "_{}".format(attribute), None)
-        return None
-
-    def _pixel_access(self, array, index, default=None):
-        """
-        Safely access a (potentially per-pixel) attribute of the model.
-
-        :param array:
-            Either `None`, a float value, or an array the size of the dispersion
-            array.
-
-        :param index:
-            The zero-indexed pixel to attempt to access.
-
-        :param default: [optional]
-            The default value to return if `array` is None.
-        """
-
-        if array is None:
-            return default
-        try:
-            return array[index]
-        except (IndexError, TypeError):
-            return array
-
-    def _verify_training_data(self, rho_warning=0.90):
-        """
-        Verify the training data for the appropriate shape and content.
-
-        :param rho_warning: [optional]
-            Maximum correlation value between labels before a warning is given.
-        """
-
-        if self.training_set_flux.shape != self.training_set_ivar.shape:
-            raise ValueError(
-                "the training set flux and inverse variance arrays"
-                " for the labelled set must have the same shape"
-            )
-
-        if len(self.training_set_labels) != self.training_set_flux.shape[0]:
-            raise ValueError(
-                "the first axes of the training set flux array should "
-                "have the same shape as the nuber of rows in the labelled set"
-                "(N_stars, N_pixels)"
-            )
-
-        if not np.all(np.isfinite(self.training_set_labels)):
-            raise ValueError("training set labels are not all finite")
-
-        if not np.all(np.isfinite(self.training_set_flux)):
-            raise ValueError("training set fluxes are not all finite")
-
-        if not np.all(self.training_set_ivar >= 0) or not np.all(
-            np.isfinite(self.training_set_ivar)
-        ):
-            raise ValueError("training set ivars are not all positive finite")
-
-        # Look for very high correlation coefficients between labels, which
-        # could make the training time very difficult.
-        rho = np.corrcoef(self.training_set_labels.T)
-
-        # Set the diagonal indices to zero.
-        K = rho.shape[0]
-        rho[np.diag_indices(K)] = 0.0
-        indices = np.argsort(rho.flatten())[::-1]
-
-        for index in indices:
-            x, y = (index % K, int(index / K))
-            rho_xy = rho[x, y]
-            if rho_xy >= rho_warning:
-                if x > y:  # One warning per correlated label pair.
-                    warn(
-                        "Labels '{X}' and '{Y}' are highly correlated ("
-                        "rho = {rho_xy:.2}). This may cause very slow training "
-                        "times. Are both labels needed?".format(
-                            X=self.vectorizer.label_names[x],
-                            Y=self.vectorizer.label_names[y],
-                            rho_xy=rho_xy,
-                        )
-                    )
-            else:
-                break
-        return None
-
-    def in_convex_hull(self, labels):
-        """
-        Return whether the provided labels are inside a complex hull constructed
-        from the labelled set.
-
-        :param labels:
-            A `NxK` array of `N` sets of `K` labels, where `K` is the number of
-            labels that make up the vectorizer.
-
-        :returns:
-            A boolean array as to whether the points are in the complex hull of
-            the labelled set.
-        """
-
-        labels = np.atleast_2d(labels)
-        if labels.shape[1] != self.training_set_labels.shape[1]:
-            raise ValueError(
-                "expected {} labels; got {}".format(
-                    self.training_set_labels.shape[1], labels.shape[1]
-                )
-            )
-
-        hull = Delaunay(self.training_set_labels)
-        return hull.find_simplex(labels) >= 0
-
-    def write(
-        self, path, include_training_set_spectra=False, overwrite=False, protocol=-1
-    ):
-        """
-        Serialise the trained model and save it to disk. This will save all
-        relevant training attributes, and optionally, the training data.
-
-        :param path:
-            The path to save the model to.
-
-        :param include_training_set_spectra: [optional]
-            Save the labelled set, normalised flux and inverse variance used to
-            train the model.
-
-        :param overwrite: [optional]
-            Overwrite the existing file path, if it already exists.
-
-        :param protocol: [optional]
-            The Python pickling protocol to employ. Use 2 for compatibility with
-            previous Python releases, -1 for performance.
-        """
-
-        if os.path.exists(path) and not overwrite:
-            raise IOError("path already exists: {0}".format(path))
-
-        attributes = (
-            list(self._descriptive_attributes)
-            + list(self._trained_attributes)
-            + list(self._data_attributes)
-        )
-
-        if "metadata" in attributes:
-            warn("'metadata' is a protected attribute. Ignoring.")
-            attributes.remote("metadata")
-
-        # Store up all the trained attributes and a hash of the training set.
-        state = {}
-        for attribute in attributes:
-
-            value = getattr(self, attribute)
-
-            try:
-                # If it's a vectorizer or censoring dict, etc, get the state.
-                value = value.__getstate__()
-            except:
-                None
-
-            state[attribute] = value
-
-        # Create a metadata dictionary.
-        state["metadata"] = dict(
-            model_class=type(self).__name__,
-            modified=str(datetime.now()),
-            data_attributes=self._data_attributes,
-            descriptive_attributes=self._descriptive_attributes,
-            trained_attributes=self._trained_attributes,
-        )
-
-        if not include_training_set_spectra:
-            state.pop("training_set_flux")
-            state.pop("training_set_ivar")
-
-        elif not self.is_trained:
-            warn(
-                "The training set spectra won't be saved, and this model"
-                "is not already trained. The saved model will not be "
-                "able to be trained when loaded!"
-            )
-
-        with open(path, "wb") as fp:
-            pickle.dump(state, fp, protocol)
-        return None
-
-    @classmethod
-    def read(cls, path, **kwargs):
-        """
-        Read a saved model from disk.
-
-        :param path:
-            The path where to load the model from.
-        """
-
-        encodings = ("utf-8", "latin-1")
-        for encoding in encodings:
-            kwds = {"encoding": encoding} if version_info[0] >= 3 else {}
-            try:
-                with open(path, "rb") as fp:
-                    state = pickle.load(fp, **kwds)
-
-            except UnicodeDecodeError:
-                if encoding == encodings:
-                    raise
-
-        # Parse the state.
-        metadata = state.get("metadata", {})
-        version_saved = metadata.get("version", "0.1.0")
-
-        init_attributes = list(metadata["data_attributes"]) + list(
-            metadata["descriptive_attributes"]
-        )
-
-        kwds = dict([(a, state.get(a, None)) for a in init_attributes])
-
-        # Initiate the vectorizer.
-        vectorizer_class, vectorizer_kwds = kwds["vectorizer"]
-        klass = getattr(vectorizer_module, vectorizer_class)
-        kwds["vectorizer"] = klass(**vectorizer_kwds)
-
-        # Initiate the censors.
-        kwds["censors"] = censoring.Censors(**kwds["censors"])
-
-        model = cls(**kwds)
-
-        # Set training attributes.
-        for attr in metadata["trained_attributes"]:
-            setattr(model, "_{}".format(attr), state.get(attr, None))
-
-        return model
+    @cached_property
+    def _design_matrix_indices(self):
+        return _design_matrix_indices(len(self.label_names))
 
     def train(
-        self, threads=None, op_method=None, op_strict=True, op_kwds=None, **kwargs
+        self,
+        hide_warnings=True,
+        tqdm_kwds=None,
+        n_threads=-1,
+        prefer="processes",
+        **kwargs,
     ):
         """
         Train the model.
 
-        :param threads: [optional]
-            The number of parallel threads to use.
+        :param hide_warnings: [optional]
+            Hide convergence warnings (default: True). Any convergence warnings will be recorded in
+            `model.meta['warnings']`, which can be accessed after training.
 
-        :param op_method: [optional]
-            The optimization algorithm to use: l_bfgs_b (default) and powell
-            are available.
-
-        :param op_strict: [optional]
-            Default to Powell's optimization method if BFGS fails.
-
-        :param op_kwds:
-            Keyword arguments to provide directly to the optimization function.
-
-        :returns:
-            A three-length tuple containing the spectral coefficients `theta`,
-            the squared scatter term at each pixel `s2`, and metadata related to
-            the training of each pixel.
+        :param tqdm_kwds: [optional]
+            Keyword arguments to pass to `tqdm` (default: None).
         """
 
-        kwds = dict(op_method=op_method, op_strict=op_strict, op_kwds=op_kwds)
-        kwds.update(kwargs)
+        # Calculate design matrix without bias term, using normalized labels
+        X = self.design_matrix[:, 1:]
+        flux, ivar = self.training_flux, self.training_ivar
+        N, L = X.shape
+        N, P = flux.shape
 
-        if self.training_set_flux is None or self.training_set_ivar is None:
-            raise TypeError(
-                "cannot train: training set spectra not saved with the model"
-            )
+        _tqdm_kwds = dict(total=P, desc="Training")
+        _tqdm_kwds.update(tqdm_kwds or {})
 
-        S, P = self.training_set_flux.shape
-        T = self.design_matrix.shape[1]
+        n_threads = _evaluate_n_threads(n_threads)
+        args = (X, self.regularization, hide_warnings)
 
-        log.info(
-            "Training {0}-label {1} with {2} stars and {3} pixels/star".format(
-                len(self.vectorizer.label_names), type(self).__name__, S, P
-            )
+        t_init = time()
+        results = Parallel(n_threads, prefer=prefer)(
+            delayed(_fit_pixel)(p, Y, W, *args, **kwargs)
+            for p, (Y, W) in tqdm(enumerate(zip(flux.T, ivar.T)), **_tqdm_kwds)
         )
+        t_train = time() - t_init
+        self.theta = np.zeros((1 + L, P))
+        self.meta.update(
+            t_train=t_train,
+            train_warning=np.zeros(P, dtype=bool),
+            n_iter=np.zeros(P, dtype=int),
+            dual_gap=np.zeros(P, dtype=float),
+        )
+        for index, pixel_theta, meta in results:
+            self.theta[:, index] = pixel_theta
+            self.meta["train_warning"][index] = meta.get("warning", False)
+            self.meta["n_iter"][index] = meta.get("n_iter", -1)
+            self.meta["dual_gap"][index] = meta.get("dual_gap", np.nan)
 
-        # Parallelise out.
-        if threads in (1, None):
-            mapper, pool = (map, None)
+        # Calculate the model variance given the trained coefficients.
+        self.s2 = self._calculate_s2()
+        return self
 
-        else:
-            pool = mp.Pool(threads)
-            mapper = pool.map
+    def _calculate_s2(self, SMALL=1e-12):
+        """Calculate the model variance (s^2)."""
 
-        func = Wrapper(fitting.fit_pixel_fixed_scatter, None, kwds, P)
+        L2 = (self.training_flux - self.predict(self.training_labels)) ** 2
+        mask = self.training_ivar > 0
+        inv_W = np.zeros_like(self.training_ivar)
+        inv_W[mask] = 1 / self.training_ivar[mask]
+        inv_W[~mask] = SMALL
+        # You want the mean, not the median.
+        return np.clip(np.mean(L2 - inv_W, axis=0), 0, np.inf)
 
-        meta = []
-        theta = np.nan * np.ones((P, T))
-        s2 = np.nan * np.ones(P)
+    @property
+    def trained(self):
+        """Boolean property defining whether the model is trained."""
+        return self.theta is not None and self.s2 is not None
 
-        for pixel, (flux, ivar) in enumerate(
-            zip(self.training_set_flux.T, self.training_set_ivar.T)
-        ):
-
-            args = (
-                flux,
-                ivar,
-                self._initial_theta(pixel),
-                self._censored_design_matrix(pixel),
-                self._pixel_access(self.regularization, pixel, 0.0),
-                None,
-            )
-            ((pixel_theta, pixel_s2, pixel_meta),) = mapper(func, [args])
-
-            meta.append(pixel_meta)
-            theta[pixel], s2[pixel] = (pixel_theta, pixel_s2)
-
-        self._theta, self._s2 = (theta, s2)
-
-        if pool is not None:
-            pool.close()
-            pool.join()
-
-        return (theta, s2, meta)
-
-    @requires_training
-    def __call__(self, labels):
+    def write(self, path, save_training_set=False, overwrite=False):
         """
-        Return spectral fluxes, given the labels.
+        Write the model to disk.
+
+        :param path:
+            The path to write the model to.
+
+        :param save_training_set: [optional]
+            Include the training set in the saved model (default: False).
+        """
+        full_path = expand_path(path)
+        if os.path.exists(full_path) and not overwrite:
+            raise FileExistsError(f"File {full_path} already exists.")
+        if os.path.dirname(full_path):
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+        if not save_training_set and not self.trained:
+            raise ValueError(
+                "Nothing to save: model not trained and save_training_set is False"
+            )
+
+        keys = [
+            "theta",
+            "s2",
+            "meta",
+            "dispersion",
+            "regularization",
+            "label_names",
+            "offsets",
+            "scales",
+        ]
+        if save_training_set:
+            keys += ["training_labels", "training_flux", "training_ivar"]
+
+        state = {k: getattr(self, k) for k in keys}
+        with open(path, "wb") as fp:
+            pickle.dump(state, fp)
+        return True
+
+    @classmethod
+    def read(cls, path):
+        """Read a model from disk."""
+
+        full_path = expand_path(path)
+        with open(full_path, "rb") as fp:
+            state = pickle.load(fp)
+        # if there's no training data, just give Nones
+        for k in ("training_labels", "training_flux", "training_ivar"):
+            state.setdefault(k, None)
+        return cls(**state)
+
+    @property
+    def term_descriptions(self):
+        """Return descriptions for all the terms in the design matrix."""
+        js, ks = _design_matrix_indices(len(self.label_names))
+        terms = []
+        for j, k in zip(js, ks):
+            if j == 0 and k == 0:
+                terms.append(1)
+            else:
+                term = []
+                if j > 0:
+                    term.append(self.label_names[j - 1])
+                if k > 0:
+                    term.append(self.label_names[k - 1])
+                terms.append(tuple(term))
+        return terms
+
+    @property
+    def term_type_indices(self):
+        """
+        Returns a three-length tuple that contains:
+        - indices of linear terms in the design matrix
+        - indices of quadratic terms in the design matrix
+        - indices of cross-terms in the design matrix
+        """
+        js, ks = _design_matrix_indices(len(self.label_names))
+        indices = [[], [], []]
+        for i, (j, k) in enumerate(zip(js, ks)):
+            if j == 0 and k == 0:
+                continue
+
+            if min(j, k) == 0 and max(j, k) > 0:
+                # linear term
+                indices[0].append(i)
+            elif j > 0 and j == k:
+                # quadratic term
+                indices[1].append(i)
+            else:
+                # cross-term
+                indices[2].append(i)
+        return indices
+
+    def predict(self, labels):
+        """
+        Predict spectra, given some labels.
+        """
+        try:
+            N, L = labels.shape
+        except:
+            labels = np.atleast_2d(labels)
+        L = _normalize(labels, self.offsets, self.scales)
+        return _design_matrix(L, self._design_matrix_indices) @ self.theta
+
+    def chi_sq(self, labels, flux, ivar, aggregate=np.sum):
+        """
+        Return the total \chi^2 difference of the expected flux given the labels, and the observed
+        flux. The total inverse variance (model and observed) is used to weight the \chi^2 value.
 
         :param labels:
-            An array of stellar labels.
+            An array of stellar labels with shape `(n_spectra, n_labels)`.
+
+        :param flux:
+            An array of observed flux values with shape `(n_spectra, n_pixels)`.
+
+        :param ivar:
+            An array containing the inverse variance of the observed flux, with shape `(n_spectra, n_pixels)`.
         """
+        adjusted_ivar = ivar / (1.0 + ivar * self.s2)
+        return aggregate(adjusted_ivar * (self.predict(labels) - flux) ** 2)
 
-        # Scale and offset the labels.
-        scaled_labels = (np.atleast_2d(labels) - self._fiducials) / self._scales
-        flux = np.dot(self.theta, self.vectorizer(scaled_labels)).T
-        return flux[0] if flux.shape[0] == 1 else flux
+    def reduced_chi_sq(self, labels, flux, ivar, aggregate=np.sum):
+        nu = aggregate(ivar > 0) - labels.size
+        return self.chi_sq(labels, flux, ivar, aggregate) / nu
 
-    @requires_training
-    def test(
+    def fit_spectrum(
         self,
         flux,
         ivar,
-        dispersion=None,
-        initial_labels=None,
-        initialisations=1,
-        threads=None,
-        use_derivatives=True,
-        op_kwds=None,
-        **kwargs,
+        x0=None,
+        frozen=None,
+        continuum_order=-1,
+        n_threads=None,
+        prefer="processes",
+        tqdm_kwds=None,
     ):
         """
-        Run the test step on spectra.
+        Return the stellar labels given the observed flux and inverse variance.
 
         :param flux:
-            The (pseudo-continuum-normalized) spectral flux.
+            An array of observed flux values with shape `(n_spectra, n_pixels)`.
 
         :param ivar:
-            The inverse variance values for the spectral fluxes.
+            An array containing the inverse variance of the observed flux, with shape `(n_spectra, n_pixels)`.
 
-        :param dispersion: [optional]
-            The dispersion values for the given flux and inverse variances. If given, then
-            the model will be interpolated to these dispersion values at runtime.
+        :param x0: [optional]
+            An array of initial values for the stellar labels with shape `(n_spectra, n_labels)`. If `None`
+            is given (default) then the initial guess will be estimated by linear algebra.
 
-        :param initial_labels: [optional]
-            The initial labels to try for each spectrum. This can be a single
-            set of initial values, or one set of initial values for each star.
+        :param frozen: [optional]
+            A dictionary with labels as keys and values of arrays that indicate the value to be frozen for each
+            spectrum. For example, if `frozen = {"Teff": [0.5, 1.5]}` then the Teff label will be fixed to 0.5
+            for the first spectrum and 1.5 for the second spectrum. If you supply `frozen`, then it is assumed
+            that you will freeze the given variables for every spectrum. In other words, don't freeze a label
+            for 9 spectra and hope to leave one free. Instead, just make a second call to this function.
 
-        :param initialisations: [optional]
-            The number of initial starting points to use, based on percentiles
-            of the labels in the training set. This is ignored if`initial_labels`
-            is given.
-
-        :param threads: [optional]
-            The number of parallel threads to use.
-
-        :param use_derivatives: [optional]
-            Boolean `True` indicating to use analytic derivatives provided by
-            the vectorizer, `None` to calculate on the fly, or a callable
-            function to calculate your own derivatives.
-
-        :param op_kwds: [optional]
-            Optimization keywords that get passed to `scipy.optimize.leastsq`.
+        :param tqdm_kwds: [optional]
+            Keyword arguments to pass to `tqdm` (default: None).
         """
+        P = self.s2.size
+        try:
+            N, P = flux.shape
+        except:
+            try:
+                N = int(flux.size / P)
+            except:
+                N = len(flux)
 
-        if flux is None or ivar is None:
-            raise ValueError("flux and ivar must not be None")
+        L = len(self.label_names)
 
-        if op_kwds is None:
-            op_kwds = dict()
+        _tqdm_kwds = dict(total=N, desc="Fitting")
+        _tqdm_kwds.update(tqdm_kwds or {})
 
-        if threads in (1, None):
-            mapper, pool = (map, None)
+        if x0 is None:
+            x0 = cycle([None])
 
+        # Freeze values as necessary.
+        frozen_values = np.nan * np.ones((N, L))
+        if frozen is not None:
+            for label_name, values in frozen.items():
+                index = self.label_names.index(label_name)
+                frozen_values[:, index] = values
+
+        args = (
+            self.theta,
+            self._design_matrix_indices,
+            self.s2,
+            self.offsets,
+            self.scales,
+            continuum_order,
+        )
+
+        iterable = tqdm(zip(flux, ivar, x0, frozen_values), **_tqdm_kwds)
+
+        n_threads = _evaluate_n_threads(n_threads)
+        if N == 1 or n_threads in (0, 1, None):
+            results = [_fit_spectrum(*data, *args) for data in iterable]
         else:
-            pool = mp.Pool(threads)
-            mapper = pool.map
-
-        flux, ivar = (np.atleast_2d(flux), np.atleast_2d(ivar))
-        S, P = flux.shape
-
-        if ivar.shape != flux.shape:
-            raise ValueError("flux and ivar arrays must be the same shape")
-
-        if initial_labels is None:
-            if initialisations == 1:
-                initial_labels = self._fiducials
-
-            else:
-                # Chose initialisations from the percentiles of the labels in the training set.
-                percentiles = np.linspace(0, 100, int(initialisations) + 2)[1:-1]
-                initial_labels = np.percentile(
-                    self.training_set_labels, percentiles, axis=0
-                )
-
-        initial_labels = np.atleast_2d(initial_labels)
-        if initial_labels.shape[0] != S and len(initial_labels.shape) == 2:
-            # What the hell?
-            initial_labels = np.tile(initial_labels.flatten(), S).reshape(
-                S, -1, len(self._fiducials)
+            results = Parallel(n_threads, prefer=prefer)(
+                delayed(_fit_spectrum)(*data, *args) for data in iterable
             )
 
-        args = (self.vectorizer, self.theta, self.s2, self._fiducials, self._scales)
-        kwds = dict(use_derivatives=use_derivatives, op_kwds=op_kwds)
+        # Aggregate nicely.
+        K = L
+        if continuum_order > -1:
+            K += 1 + continuum_order
 
-        message = kwargs.get("message", f"Running test step on {S} spectra")
-        N = kwargs.get("N", S)
-        func = Wrapper(
-            fitting.fit_spectrum,
-            args,
-            kwds,
-            N,
-            message=message,
+        all_labels = np.empty((N, K))
+        all_cov = np.empty((N, K, K))
+        all_meta = []
+        for i, (labels, cov, meta) in enumerate(results):
+            all_labels[i, :] = labels
+            all_cov[i, :] = cov
+            all_meta.append(meta)
+
+        return (all_labels, all_cov, all_meta)
+
+
+    def initial_estimate(self, flux, only_labels=None, clip_sigma=None):
+        """
+        Return an initial guess of the labels given a spectrum.
+
+        :param flux:
+            A (N, P) shape array of N spectra with P pixels.
+
+        :param only_labels: [optional]
+            A tuple containing label names to estimate labels for. If given, estimates will only be
+            made for these label names.
+
+            The resulting array will be ordered in the same order given by this tuple.
+            For example, if your model has label names in the order ('teff', 'logg', 'fe_h')
+            and you provide N spectra and give `only_labels=('fe_h', 'logg')` then you will
+            get a Nx2 array of labels, where the first column is 'fe_h' and the second is 'logg'.
+        """
+        P = self.s2.size
+        B = (flux - self.theta[0]).T
+        # The 1: index here is to ignore the bias term.
+        linear_term_indices = np.where((self._design_matrix_indices[1] == 0)[1:])[0]
+        offsets = np.copy(self.offsets)
+        scales = np.copy(self.scales)
+        if only_labels is not None:
+            theta_mask = np.array(
+                [
+                    (term != 1) and all([t in only_labels for t in term])
+                    for term in self.term_descriptions
+                ]
+            )
+            A = self.theta[theta_mask].T
+            idx_label = np.array([self.label_names.index(ln) for ln in only_labels])
+            offsets, scales = (offsets[idx_label], scales[idx_label])
+            linear_term_indices = linear_term_indices[idx_label]
+        else:
+            A = self.theta[1:].T
+
+        return __initial_estimate(
+            A, B, linear_term_indices, offsets, scales, clip_sigma, normalize=False
         )
 
-        labels, cov, meta = zip(*mapper(func, zip(*(flux, ivar, initial_labels))))
 
-        # fn = lambda _: fitting.fit_spectrum(*_, *args, **kwds)
-        # labels, cov, meta = zip(*(fitting.fit_spectrum(*_, *args, **kwds) for _ in tqdm(zip(*(flux, ivar, initial_labels)), desc="Fitting")))
-        # labels, cov, meta = zip(*mapper(fn, tqdm(zip(*(flux, ivar, initial_labels)), total=S, desc="Fitting")))
+def _design_matrix_indices(L):
+    return np.tril_indices(1 + L)
 
-        if pool is not None:
-            pool.close()
-            pool.join()
 
-        return (np.array(labels), np.array(cov), meta)
+def _design_matrix(labels, idx):
+    N, L = labels.shape
+    # idx = _design_matrix_indices(L)
+    iterable = np.hstack([np.ones((N, 1)), labels])[:, np.newaxis]
+    return np.vstack([l.T.dot(l)[idx] for l in iterable])
 
-    def _initial_theta(self, pixel_index, **kwargs):
-        """
-        Return a list of guesses of the spectral coefficients for the given
-        pixel index. Initial values are sourced in the following preference
-        order:
 
-            (1) a previously trained `theta` value for this pixel,
-            (2) an estimate of `theta` using linear algebra,
-            (3) a neighbouring pixel's `theta` value,
-            (4) the fiducial value of [1, 0, ..., 0].
+def _initial_guess(flux, theta, idx, offsets, scales, **kwargs):
+    B = (flux - theta[0]).T
+    A = theta[1:].T
+    linear_term_indices = np.where((idx[1] == 0)[1:])[0]
+    return __initial_estimate(A, B, linear_term_indices, offsets, scales, **kwargs)
 
-        :param pixel_index:
-            The zero-indexed integer of the pixel.
 
-        :returns:
-            A list of initial theta guesses, and the source of each guess.
-        """
+def __initial_estimate(
+    A, B, linear_term_indices, offsets, scales, clip_sigma=None, normalize=False
+):
+    try:
+        X, residuals, rank, singular = np.linalg.lstsq(A, B, rcond=-1)
+    except np.linalg.LinAlgError:
+        warnings.warn("Unable to make initial label estimate.")
+        return np.zeros_like(offsets) if normalize else offsets
+    else:
+        x0 = X[linear_term_indices].T  # offset by 1 to skip missing bias term
+        if clip_sigma is not None:
+            x0 = np.clip(x0, -clip_sigma, +clip_sigma)
+        return x0 if normalize else _denormalize(x0, offsets, scales)
 
-        guesses = []
 
-        if self.theta is not None:
-            # Previously trained theta value.
-            if np.all(np.isfinite(self.theta[pixel_index])):
-                guesses.append((self.theta[pixel_index], "previously_trained"))
+def _get_continuum_x(F):
+    S = -int(F / 2)
+    return np.arange(S, S + F)
 
-        # Estimate from linear algebra.
-        theta, cov = fitting.fit_theta_by_linalg(
-            self.training_set_flux[:, pixel_index],
-            self.training_set_ivar[:, pixel_index],
-            s2=kwargs.get("s2", 0.0),
-            design_matrix=self.design_matrix,
+
+def _predict_flux(
+    x,
+    parameters,
+    continuum_order,
+    theta,
+    idx,
+    normalized_frozen_values,
+    is_frozen,
+    any_frozen,
+):
+    if continuum_order >= 0:
+        thawed_labels = parameters[: -(continuum_order + 1)]
+        continuum = np.polyval(parameters[-(continuum_order + 1) :], x)
+    else:
+        thawed_labels = parameters
+        continuum = 1
+
+    if any_frozen:
+        labels = np.copy(normalized_frozen_values)
+        labels[~is_frozen] = parameters[: sum(~is_frozen)]
+    else:
+        labels = thawed_labels
+
+    l = np.atleast_2d(np.hstack([1, labels]))
+    A = l.T.dot(l)[idx][np.newaxis]
+    return continuum * (A @ theta)[0]
+
+
+def _fit_spectrum(
+    flux, ivar, x0, frozen_values, theta, idx, s2, offsets, scales, continuum_order=-1
+):
+
+    # NOTE: Here the design matrix is calculated with *DIFFERENT CODE* than what is used
+    #       to construct the design matrix during training. The result should be exactly
+    #       the same, but here we are taking advantage of not having to call np.tril_indices
+    #       with every log likelihood evaluation.
+    K = continuum_order + 1
+    x = _get_continuum_x(flux.size)
+    L = offsets.size
+
+    is_frozen = np.isfinite(frozen_values)
+    normalized_frozen_values = _normalize(frozen_values, offsets, scales)
+    any_frozen = np.any(is_frozen)
+
+    args = (
+        continuum_order,
+        theta,
+        idx,
+        normalized_frozen_values,
+        is_frozen,
+        any_frozen,
+    )
+    sigma = (ivar / (1.0 + ivar * s2)) ** -0.5
+
+    meta = dict()
+    if x0 is None:
+        # no continuum for initial values
+        # use combinations_with_replacement to sample (-1, 0, 1)?
+        x0_normalized_trials = [
+            np.zeros(L),
+            +np.ones(L),
+            -np.ones(L),
+            _initial_guess(flux, theta, idx, offsets, scales, normalize=True),
+        ]
+        chi_sqs = []
+        for x0_trial in x0_normalized_trials:
+            x0_ = x0_trial[~is_frozen]
+            chi_sqs.append(
+                np.sum(((_predict_flux(x, x0_, -1, *args[1:]) - flux) / sigma) ** 2)
+            )
+        x0_normalized = x0_normalized_trials[np.argmin(chi_sqs)]
+        x0 = _denormalize(x0_normalized, offsets, scales)
+        meta["trial_x0"] = np.array(x0_normalized_trials) * scales + offsets
+        meta["trial_chisq"] = np.array(chi_sqs)
+    else:
+        x0_normalized = _normalize(x0, offsets, scales)
+
+    meta["x0"] = np.copy(frozen_values)
+    meta["x0"][~is_frozen] = x0[~is_frozen]
+
+    p0 = x0_normalized[~is_frozen]
+
+    if continuum_order >= 0:
+        p0 = np.hstack([p0, np.zeros(1 + continuum_order)])
+        p0[-1] = 1
+
+    try:
+        p_opt_all, cov_norm = op.curve_fit(
+            lambda x, *parameters: _predict_flux(x, parameters, *args),
+            x,
+            flux,
+            p0=p0,
+            sigma=sigma,
+            absolute_sigma=True,
+            maxfev=10_000,
+        )
+        model_flux = _predict_flux(x, p_opt_all, *args)
+    except:
+        N, P = np.atleast_2d(flux).shape
+        p_opt = np.nan * np.ones(L)
+        cov = np.nan * np.ones((L, L))
+        meta.update(
+            chi_sq=np.nan, reduced_chi_sq=np.nan, model_flux=np.nan * np.ones(P)
+        )
+    else:
+        if continuum_order >= 0:
+            p_opt_norm = p_opt_all[:-K]
+        else:
+            p_opt_norm = p_opt_all
+        p_opt = np.copy(frozen_values)
+        p_opt[~is_frozen] = _denormalize(
+            p_opt_norm, offsets[~is_frozen], scales[~is_frozen]
         )
 
-        if np.all(np.isfinite(theta)):
-            guesses.append((theta, "linear_algebra"))
+        if any_frozen:
+            cov = np.nan * np.ones((L, L))  # TODO: deal with freezing
+        else:
+            cov = (
+                cov_norm[:L, :L] * scales**2
+            )  # TODO: define this with _normalize somehow
 
-        if self.theta is not None:
-            # Neighbouring pixels value.
-            for neighbour_pixel_index in set(
-                np.clip(
-                    [pixel_index - 1, pixel_index + 1],
-                    0,
-                    self.training_set_flux.shape[1] - 1,
-                )
-            ):
+        # WARNING: Here we are calculating chi-sq with *DIFFERENT CODE* than what is used elsewhere.
+        chi_sq = np.sum(((flux - model_flux) / sigma) ** 2)
+        nu = np.sum(np.isfinite(sigma)) - L
+        reduced_chi_sq = chi_sq / nu
+        meta.update(
+            chi_sq=chi_sq,
+            reduced_chi_sq=reduced_chi_sq,
+            p_opt_norm=p_opt_norm,
+            p_opt_cont=p_opt_all[-K:],
+            model_flux=model_flux,
+        )
+    finally:
+        return (p_opt, cov, meta)
 
-                if np.all(np.isfinite(self.theta[neighbour_pixel_index])):
-                    guesses.append(
-                        (self.theta[neighbour_pixel_index], "neighbour_pixel")
-                    )
 
-        # Fiducial value.
-        fiducial = np.hstack([1.0, np.zeros(len(self.vectorizer.terms))])
-        guesses.append((fiducial, "fiducial"))
+def _fit_pixel(index, Y, W, X, alpha, hide_warnings=True, **kwargs):
+    N, T = X.shape
+    if np.allclose(W, np.zeros_like(W)):
+        return (index, np.zeros(1 + T), {})
 
-        return guesses
+    if alpha == 0:
+        kwds = dict(**kwargs)  # defaults
+        lm = LinearRegression(**kwds)
+    else:
+        # defaults:
+        kwds = dict(max_iter=20_000, tol=1e-10, precompute=True)
+        kwds.update(**kwargs)  # defaults
+        lm = Lasso(alpha=alpha, **kwds)
+
+    args = (X, Y, W)
+    t_init = time()
+    if hide_warnings:
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=ConvergenceWarning)
+            lm.fit(*args)
+    else:
+        lm.fit(*args)
+    t_fit = time() - t_init
+
+    theta = np.hstack([lm.intercept_, lm.coef_])
+    meta = dict(t_fit=t_fit)
+    for attribute in ("n_iter", "dual_gap"):
+        try:
+            meta[attribute] = getattr(lm, f"{attribute}_")
+        except:
+            continue
+
+    if "n_iter" in meta:
+        meta["warning"] = meta["n_iter"] >= lm.max_iter
+
+    return (index, theta, meta)
+
+
+def _check_inputs(label_names, labels, flux, ivar, offsets=None, scales=None, **kwargs):
+    label_names = list(label_names)
+    if len(label_names) > len(set(label_names)):
+        raise ValueError(f"Label names must be unique!")
+
+    if labels is None and flux is None and ivar is None:
+        # Try to get offsets and scales from kwargs
+        # offsets, scales = (.get(k, None) for k in ("offsets", "scales"))
+        if offsets is None or scales is None:
+            print(f"No training set labels given, and no offsets or scales provided!")
+            offsets, scales = (0, 1)
+        return (label_names, labels, flux, ivar, offsets, scales)
+    L = len(label_names)
+    labels = np.atleast_2d(labels)
+    flux = np.atleast_2d(flux)
+    ivar = np.atleast_2d(ivar)
+
+    N_0, L_0 = labels.shape
+    N_1, P_1 = flux.shape
+    N_2, P_2 = ivar.shape
+
+    if L_0 != L:
+        raise ValueError(
+            f"{L} label names given but input labels has shape {labels.shape} and should be (n_spectra, n_labels)"
+        )
+
+    if N_0 != N_1:
+        raise ValueError(
+            f"labels should have shape (n_spectra, n_labels) and flux should have shape (n_spectra, n_pixels) "
+            f"but labels has shape {labels.shape} and flux has shape {flux.shape}"
+        )
+    if N_1 != N_2 or P_1 != P_2:
+        raise ValueError(
+            f"flux and ivar should have shape (n_spectra, n_pixels) "
+            f"but flux has shape {flux.shape} and ivar has shape {ivar.shape}"
+        )
+
+    if L_0 > N_0:
+        raise ValueError(f"I don't believe that you have more labels than spectra")
+
+    # Restrict to things that are fully sampled.
+    # good = np.all(ivar > 0, axis=0)
+    # ivar = np.copy(ivar)
+    # ivar[:, ~good] = 0
+
+    # Calculate offsets and scales.
+    offsets, scales = _offsets_and_scales(labels)
+    if not np.all(np.isfinite(offsets)):
+        raise ValueError(f"offsets are not all finite: {offsets}")
+    if len(offsets) != L:
+        raise ValueError(f"{len(offsets)} offsets given but {L} are needed")
+
+    if not np.all(np.isfinite(scales)):
+        raise ValueError(f"scales are not all finite: {scales}")
+    if len(scales) != L:
+        raise ValueError(f"{len(scales)} scales given but {L} are needed")
+
+    return (label_names, labels, flux, ivar, offsets, scales)
+
+
+def _offsets_and_scales(labels):
+    return (np.mean(labels, axis=0), np.std(labels, axis=0))
+
+
+def _normalize(labels, offsets, scales):
+    return (labels - offsets) / scales
+
+
+def _denormalize(labels, offsets, scales):
+    return labels * scales + offsets
+
+
+def _evaluate_n_threads(given_n_threads):
+    n_threads = given_n_threads or 1
+    if n_threads < 0:
+        n_threads = os.cpu_count()
+    return n_threads
+

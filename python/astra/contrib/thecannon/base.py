@@ -1,11 +1,11 @@
 import numpy as np
 import pickle
 from astra import log, __version__
-from astra.base import ExecutableTask, Parameter
+from astra.base import TaskInstance, Parameter
 from astra.utils import expand_path, flatten
 from astra.database.astradb import DataProduct, TaskOutputDataProducts
-from astra.contrib.thecannon_new.model import CannonModel
-from astra.contrib.thecannon_new.plot import (
+from astra.contrib.thecannon.model import CannonModel
+from astra.contrib.thecannon.plot import (
     plot_labels,
     plot_theta,
     plot_gridsearch_chisq,
@@ -13,6 +13,9 @@ from astra.contrib.thecannon_new.plot import (
 )
 
 
+class TheCannon(TaskInstance)
+
+"""
 class BaseCannonExecutableTask(ExecutableTask):
     def _load_training_set(self):
         task = self.context["tasks"][0]
@@ -270,126 +273,4 @@ class TheCannonRegularizationGridSearch(ExecutableTask):
         fig.savefig(chisq_figure_path)
         log.info(f"Created figure {chisq_figure_path}")
 
-
-'''
-        # TODO: Create HTML page
-        import os
-        html_content = f"""<html><body>
-Chi-sq
-<img src="{os.path.basename(chisq_figure_path)}" width=500 />
-<br />
-<br />
-
-Sparsity
-<img src="{os.path.basename(sparsity_figure_path)}" width=500 />
-<br />
-<br />
-
-Training set with initial guess
-
-<table>
-    <tr>
-        <td>0</td>
-</tr>
-    <tr>
-        <td><img src="20220523-0-train.png" width=200 /></td>
-    </tr>
-</table>
-
-Validation set, with initial guess
-<table>
-    <tr>
-        <td>0</td>
-        <td>1</td>
-        <td>2</td>
-        <td>3</td>
-        <td>4</td>
-        <td>5</td>
-        <td>6</td>
-        <td>7</td>
-        <td>8</td>
-        <td>9</td>
-        <td>10</td>
-        <td>11</td>
-        <td>12</td>
-        <td>13</td>
-        <td>14</td>
-        <td>15</td>
-        <td>16</td>
-        <td>17</td>
-        <td>18</td>
-    </tr>
-    <tr>
-        <td><img src="20220523-0-validation.png" width=200 /></td>
-        <td><img src="20220523-1-validation.png" width=200 /></td>
-        <td><img src="20220523-2-validation.png" width=200 /></td>
-        <td><img src="20220523-3-validation.png" width=200 /></td>
-        <td><img src="20220523-4-validation.png" width=200 /></td>
-        <td><img src="20220523-5-validation.png" width=200 /></td>
-        <td><img src="20220523-6-validation.png" width=200 /></td>
-        <td><img src="20220523-7-validation.png" width=200 /></td>
-        <td><img src="20220523-8-validation.png" width=200 /></td>
-        <td><img src="20220523-9-validation.png" width=200 /></td>
-        <td><img src="20220523-10-validation.png" width=200 /></td>
-        <td><img src="20220523-11-validation.png" width=200 /></td>
-        <td><img src="20220523-12-validation.png" width=200 /></td>
-        <td><img src="20220523-13-validation.png" width=200 /></td>
-        <td><img src="20220523-14-validation.png" width=200 /></td>
-        <td><img src="20220523-15-validation.png" width=200 /></td>
-        <td><img src="20220523-16-validation.png" width=200 /></td>
-        <td><img src="20220523-17-validation.png" width=200 /></td>
-        <td><img src="20220523-18-validation.png" width=200 /></td>
-    </tr>
-</table>
-
-<table>
-    <tr>
-        <td>0</td>
-        <td>1</td>
-        <td>2</td>
-        <td>3</td>
-        <td>4</td>
-        <td>5</td>
-        <td>6</td>
-        <td>7</td>
-        <td>8</td>
-        <td>9</td>
-        <td>10</td>
-        <td>11</td>
-        <td>12</td>
-        <td>13</td>
-        <td>14</td>
-        <td>15</td>
-        <td>16</td>
-        <td>17</td>
-        <td>18</td>
-    </tr>
-    <tr>
-        <td><img src="20220523-0-theta.png" width=500 /></td>
-        <td><img src="20220523-1-theta.png" width=500 /></td>
-        <td><img src="20220523-2-theta.png" width=500 /></td>
-        <td><img src="20220523-3-theta.png" width=500 /></td>
-        <td><img src="20220523-4-theta.png" width=500 /></td>
-        <td><img src="20220523-5-theta.png" width=500 /></td>
-        <td><img src="20220523-6-theta.png" width=500 /></td>
-        <td><img src="20220523-7-theta.png" width=500 /></td>
-        <td><img src="20220523-8-theta.png" width=500 /></td>
-        <td><img src="20220523-9-theta.png" width=500 /></td>
-        <td><img src="20220523-10-theta.png" width=500 /></td>
-        <td><img src="20220523-11-theta.png" width=500 /></td>
-        <td><img src="20220523-12-theta.png" width=500 /></td>
-        <td><img src="20220523-13-theta.png" width=500 /></td>
-        <td><img src="20220523-14-theta.png" width=500 /></td>
-        <td><img src="20220523-15-theta.png" width=500 /></td>
-        <td><img src="20220523-16-theta.png" width=500 /></td>
-        <td><img src="20220523-17-theta.png" width=500 /></td>
-        <td><img src="20220523-18-theta.png" width=500 /></td>
-    </tr>
-</table>
-
-</body>
-</html>
-
 """
-
-'''

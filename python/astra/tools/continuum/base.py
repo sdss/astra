@@ -134,12 +134,22 @@ def _pixel_slice_and_mask(
             region_masks.append(np.arange(lower, upper, dtype=int))
     else:
         if len(mask) != len(spectral_axis):
-            raise ValueError(
-                f"Pixel mask and spectral axis have different sizes ({len(mask)} != {len(spectral_axis)})"
-            )
-
-        for lower, upper in region_slices:
-            # Mask given, exclude those masked.
-            region_masks.append(np.where(~mask[lower:upper])[0] + lower)
+            # Assume mask is a list of regions to mask.
+            constructed_mask = np.zeros(len(spectral_axis), dtype=bool)
+            for lower, upper in mask:
+                idx_lower, idx_higher = np.clip(
+                    spectral_axis.value.searchsorted([lower, upper]) - 1,
+                    0,
+                    spectral_axis.size - 1
+                )
+                constructed_mask[idx_lower:idx_higher] = True
+            
+            for lower, upper in region_slices:
+                # Mask given, exclude those masked.
+                region_masks.append(np.where(~constructed_mask[lower:upper])[0] + lower)
+        else:
+            for lower, upper in region_slices:
+                # Mask given, exclude those masked.
+                region_masks.append(np.where(~mask[lower:upper])[0] + lower)
 
     return (region_slices, region_masks)

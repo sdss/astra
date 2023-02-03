@@ -1,17 +1,80 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-"""
-Continuum-normalization.
-"""
-
-from __future__ import division, print_function, absolute_import, unicode_literals
-
-__all__ = ["normalize", "sines_and_cosines"]
-
 import numpy as np
 import os
 from warnings import warn
+
+from astra import log
+from astra.tools.continuum.base import NormalizationBase
+
+
+class SinesAndCosines(NormalizationBase):
+
+    parameter_names = ()
+
+    def __init__(
+        self,
+        spectrum,
+        L=1400,
+        order=3,
+        wavelength_segments=(
+            (3000, 10000),
+            (15090, 15822),
+            (15823, 16451),
+            (16452, 16971),
+        ),
+        fill_value=1.0,
+        continuum_regions_path=None,
+    ) -> None:
+        super().__init__(spectrum)
+        self.L = L
+        self.order = order
+        self.wavelength_segments = wavelength_segments
+        self.fill_value = fill_value
+        if continuum_regions_path is None:
+            continuum_regions_path = os.path.join(
+                os.path.dirname(__file__), "../../etc/continuum-regions.list"
+            )
+            assert os.path.exists(continuum_regions_path)
+        self.continuum_regions = np.loadtxt(continuum_regions_path)
+        return None
+
+    def __call__(self, **kwargs):
+
+        dispersion = self.spectrum.wavelength.value
+        flux = self.spectrum.flux.value
+        ivar = self.spectrum.uncertainty.array
+
+        # Work out the continuum pixels.
+        mask = np.zeros(dispersion.size, dtype=bool)
+        for start, end in dispersion.searchsorted(self.continuum_regions):
+            mask[start:end] = True
+
+        continuum_pixels = np.arange(dispersion.size)[mask]
+
+        continuum, metadata = sines_and_cosines(
+            dispersion,
+            flux,
+            ivar,
+            continuum_pixels,
+            L=self.L,
+            order=self.order,
+            regions=self.wavelength_segments,
+            fill_value=self.fill_value,
+            **kwargs
+        )
+
+        # Apply the changes to the spectrum.
+        self.spectrum._data /= continuum
+        self.spectrum._uncertainty.array *= continuum**2
+
+        bad_pixels = (
+            (self.spectrum._uncertainty.array == 0)
+            + ~np.isfinite(self.spectrum._data)
+            + ~np.isfinite(self.spectrum._uncertainty.array)
+        )
+        self.spectrum._data[bad_pixels] = self.fill_value
+        self.spectrum._uncertainty.array[bad_pixels] = 0.0
+
+        return self.spectrum
 
 
 def _continuum_design_matrix(dispersion, L, order):
@@ -53,7 +116,7 @@ def sines_and_cosines(
     order=3,
     regions=None,
     fill_value=1.0,
-    **kwargs,
+    **kwargs
 ):
     """
     Fit the flux values of pre-defined continuum pixels using a sum of sine and
@@ -158,10 +221,9 @@ def sines_and_cosines(
                 ]
             )
 
-            warn(
-                f"Some pixels in have measured flux values (e.g., ivar > 0) but are not included "
-                f"in any specified region ({segments})."
-            )
+            # TODO: Display this warning just once.
+            # log.warning(f"Some pixels in have measured flux values (e.g., ivar > 0) but are not included "
+            #            f"in any specified region ({segments}).")
 
         # Get the flux and inverse variance for this object.
         object_metadata = []
@@ -171,6 +233,13 @@ def sines_and_cosines(
         for region_mask, region_matrix, continuum_mask, continuum_matrix in zip(
             region_masks, region_matrices, continuum_masks, continuum_matrices
         ):
+
+            # Just-in-time handling for non-finite flux/ivars.
+            finite = np.isfinite(object_flux[continuum_mask]) * np.isfinite(
+                object_ivar[continuum_mask]
+            )
+            continuum_mask = continuum_mask[finite]
+
             if continuum_mask.size == 0:
                 # Skipping..
                 object_metadata.append([order, L, fill_value, scalar, [], None])
@@ -184,7 +253,7 @@ def sines_and_cosines(
             )
 
             # Solve for the amplitudes.
-            M = continuum_matrix
+            M = continuum_matrix[:, finite]
             MTM = np.dot(M, continuum_ivar[:, None] * M.T)
             MTy = np.dot(M, (continuum_ivar * continuum_flux).T)
 
@@ -213,7 +282,7 @@ def normalize(
     order=3,
     regions=([3000, 10000], [15090, 15822], [15823, 16451], [16452, 16971]),
     fill_value=1.0,
-    **kwargs,
+    **kwargs
 ):
     """
     Pseudo-continuum-normalize the flux using a defined set of continuum pixels
@@ -284,7 +353,7 @@ def normalize(
         order=order,
         regions=regions,
         fill_value=fill_value,
-        **kwargs,
+        **kwargs
     )
 
     normalized_flux = flux / continuum

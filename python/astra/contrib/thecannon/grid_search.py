@@ -1,13 +1,66 @@
 import numpy as np
 import pickle
 from astra import log, __version__
-from astra.base import ExecutableTask, Parameter
+from astra.base import Parameter
 from astra.database.astradb import DataProduct, TaskOutputDataProducts
-from astra.contrib.thecannon_new.model import CannonModel
-from astra.contrib.thecannon_new.base import BaseCannonExecutableTask
+from astra.contrib.thecannon.model import CannonModel
 
 from astra.utils import expand_path
 
+
+def grid_search(
+    train_labels,
+    train_flux,
+    train_ivar,
+    validation_labels,
+    validation_flux,
+    validation_ivar,
+    label_names=None,
+    max_alpha=1e-1, 
+    min_alpha=0, 
+    step=5,
+    **kwargs
+):
+
+    # Train a model at the minimum alpha first. This will be the baseline.
+    if label_names is None:
+        N, L = train_labels.shape
+        label_names = list(map(str, range(L)))
+    args = (train_labels, train_flux, train_ivar, label_names)
+    baseline = CannonModel(*args, regularization=min_alpha)
+    baseline.train(**kwargs)
+
+    baseline_validation_chisq = np.sum((baseline.predict(validation_labels) - validation_flux)**2 * validation_ivar)
+
+    # Now let's start from the strongest regularization and work our way down.
+    # (It's faster that way)
+    min_log_alpha = int(np.log10(max(min_alpha, 1e-12)))
+    max_log_alpha = int(np.log10(max_alpha))
+    alphas = np.logspace(min_log_alpha, max_log_alpha, (max_log_alpha - min_log_alpha) * step + 1 )
+
+    models = {}
+    validation_chisq = {}
+
+    for i, alpha in enumerate(alphas[::-1]):
+
+        model = CannonModel(*args, regularization=alpha)
+        model.train(**kwargs)
+        validation_chisq[alpha] = np.sum((model.predict(validation_labels) - validation_flux)**2 * validation_ivar)
+
+        models[alpha] = model
+
+        print(i, alpha, validation_chisq[alpha]/baseline_validation_chisq)
+        if (validation_chisq[alpha] <= baseline_validation_chisq):
+            break
+    
+    meta = dict(models=models, validation_chisq=validation_chisq)
+    return (model, baseline, meta)
+
+
+
+
+
+'''
 
 class HyperparameterGridSearch(ExecutableTask):
 
@@ -131,3 +184,4 @@ class HyperparameterGridSearch(ExecutableTask):
                 fp,
             )
         log.info(f"Wrote summary statistics to {path}")
+'''

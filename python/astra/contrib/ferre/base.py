@@ -194,6 +194,9 @@ class Ferre(TaskInstance):
             f_format=self.f_format,
         )
 
+        # Include any explicitly set ferre kwds
+        control_kwds.update(self.ferre_kwds or dict())
+
         # Write the control file.
         with open(os.path.join(dir, "input.nml"), "w") as fp:
             fp.write(utils.format_ferre_control_keywords(control_kwds))       
@@ -752,7 +755,7 @@ class Ferre(TaskInstance):
 
                 task_results.extend(data_product_results)
             
-            if write_data_products:        
+            if write_data_products:
                 create_pipeline_product(task, data_product, hdu_results, header_groups=header_groups)
                 task.create_or_update_outputs(FerreOutput, task_results)
         
