@@ -43,7 +43,7 @@ def vacuum_to_air(wave_AA):
     return np.array(wave_new)
 
 
-def fit_spectrum(spectrum, NN, opt, logger, constraints={}, data_product=None):
+def fit_spectrum(spectrum, NN, opt, logger, constraints={}):
 
     wave_start = float(opt['wave_range'][0])
     wave_end = float(opt['wave_range'][1])
@@ -150,14 +150,8 @@ def fit_spectrum(spectrum, NN, opt, logger, constraints={}, data_product=None):
         
 
     keys = ('teff', 'e_teff', 'logg', 'e_logg', 'vsini', 'e_vsini', 'v_micro', 'e_v_micro', 'fe_h', 'e_fe_h', 'v_rel', 'e_v_rel')
-    parent_data_product_id = spectrum.meta.get("DATA_PRODUCT_ID", None)
-    if not parent_data_product_id and (data_product is not None):
-        parent_data_product_id = data_product.id
-    result = dict(
-        source_id=spectrum.meta.get("CAT_ID", None),
-        parent_data_product_id=parent_data_product_id,
-    )
-    result.update(dict(zip(keys, db_values)))
+
+    result = dict(zip(keys, db_values))
     result.update(
         theta=db_cheb,
         snr=snr,
@@ -176,8 +170,8 @@ def fit_spectrum(spectrum, NN, opt, logger, constraints={}, data_product=None):
 
     # Put the result in the format as if we had many results.
     meta = dict(model_flux=model_flux)
-
-    return ([result], [meta], [fit_res])
+    return (result, meta, fit_res)
+    #return ([result], [meta], [fit_res])
 
 
 if __name__=='__main__':

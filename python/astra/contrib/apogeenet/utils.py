@@ -3,7 +3,6 @@ import numpy as np
 from astra.tools.bitmask import BitMask
 from astra.tools.spectrum import Spectrum1D
 
-from astra.database.catalogdb import SDSS_DR17_APOGEE_Allstarmerge, Gaia_DR2
 
 class LabelBitmask(BitMask):
 
@@ -167,6 +166,7 @@ def get_metadata(spectrum: Spectrum1D):
     metadata = np.array([de_nanify(value) for value in meta.values()])
     # Special case for SDSS-IV apStar objects, which don't have Gaia data in the FITS files.
     if "ddo51" in spectrum.meta and not np.any(np.isfinite(metadata[:4])):
+        from astra.database.catalogdb import SDSS_DR17_APOGEE_Allstarmerge, Gaia_DR2
         try:    
             q = (
                 Gaia_DR2

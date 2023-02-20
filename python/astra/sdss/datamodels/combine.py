@@ -10,8 +10,7 @@ from astropy import units as u
 
 from typing import Union, List, Callable, Optional, Dict
 
-from astra.utils import flatten
-from astra import log
+from astra.utils import log, flatten
 
 C_KM_S = c.to(u.km / u.s).value
 
@@ -78,12 +77,12 @@ def pixel_weighted_spectrum(
     resampled_ivar = 1.0 / flux_error**2
     resampled_ivar[flux_error == 0] = 0
 
-    cont = np.median(continuum, axis=0)  # TODO: is this right?
+    #cont = np.median(continuum, axis=0)  # TODO: is this right?
     stacked_ivar = np.sum(resampled_ivar, axis=0)
-    stacked_flux = np.sum(flux * resampled_ivar, axis=0) / stacked_ivar * cont
-    stacked_flux_error = np.sqrt(1.0 / stacked_ivar) * cont
+    stacked_flux = np.sum(flux * resampled_ivar, axis=0) / stacked_ivar #* cont
+    stacked_flux_error = np.sqrt(1.0 / stacked_ivar) #* cont
 
-    stacked_bitmask = np.bitwise_or.reduce(bitmask, 0)
+    stacked_bitmask = np.bitwise_or.reduce(bitmask.astype(int), 0)
     return (stacked_flux, stacked_flux_error, stacked_bitmask, continuum, meta)
 
 

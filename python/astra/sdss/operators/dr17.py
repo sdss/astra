@@ -1,17 +1,16 @@
 """ Operators for ingesting data products from SDSS-IV data release 17. """
 
-from itertools import starmap
 import os
-from astra import log, config
-from astra.database.astradb import DataProduct, Source, SourceDataProduct
+from astra.database.astradb import database, DataProduct, Source
 from astropy.time import Time
 from airflow.exceptions import AirflowSkipException
 from peewee import fn
 from typing import Optional, List
 
 from astra.sdss.operators.base import SDSSOperator
-from astra.utils import flatten, expand_path
+from astra.utils import log, flatten, expand_path
 
+from tqdm import tqdm
 
 class ApogeeOperator(SDSSOperator):
     def __init__(
@@ -65,7 +64,7 @@ class SelectApStarOperator(ApogeeOperator):
 
     
 
-class ApStarOperator(ApogeeOperator):
+class IngestApStarOperator(ApogeeOperator):
 
     """An operator to retrieve and ingest ApStar data products created in SDSS-IV."""
 
@@ -149,8 +148,8 @@ class ApStarOperator(ApogeeOperator):
                 fn.MAX(Visit.mjd).between(Time(prev_ds).mjd, Time(ds).mjd)
             )
 
-        ids, errors = ([], [])
-        for star in q:
+        data_product_kwargs, catalogids, errors = ({}, [], [])
+        for star in tqdm(q, total=len(q)):
             # The database table column names do not match the path definition.
             # Thankfully, neither will change so we can hard-code this fix in.
             kwds = {
@@ -181,61 +180,90 @@ class ApStarOperator(ApogeeOperator):
                 continue
             else:
                 # Cross-match to catalogdb.
-                """
-                (catalogid,) = (
-                    Catalog.select(Catalog.catalogid)
-                    .join(CatalogToGaia_DR3)
-                    .join(Gaia_DR3)
-                    .where(Gaia_DR3.source_id == star.gaia_source_id)
-                    .tuples()
-                    .first()
-                )
-                """
+                cone = 1.0 / 3600
                 try:
-                    (catalogid,) = (
-                        Catalog.select(Catalog.catalogid)
-                        .where(Catalog.cone_search(star.ra, star.dec, 3.0 / 3600))
+                    (catalogid, ra, dec, ) = (
+                        Catalog.select(Catalog.catalogid, Catalog.ra, Catalog.dec)
+                        .where(Catalog.cone_search(star.ra, star.dec, cone))
                         .tuples()
                         .first()
                     )
                 except:
-                    log.warning(
-                        f"No Catalog entry found at ra={star.ra}, dec={star.dec}. Skipping {path} from {star}"
-                    )
-                    errors.append(
-                        {
-                            "detail": path,
-                            "origin": star,
-                            "reason": "No source found in catalog.",
-                            "kwds": kwds,
-                        }
-                    )
-                    continue
+                    # Nothing in the catalogdb. Let's create a fake entry.
+                    log.warning(f"No Catalog entry found at ra={star.ra}, dec={star.dec}")
 
-                source, _ = Source.get_or_create(catalogid=catalogid)
-                data_product, created = DataProduct.get_or_create(
-                    release=self.release,
-                    filetype=self.filetype(star.telescope),
-                    kwargs=kwds,
-                )
-                SourceDataProduct.get_or_create(
-                    source=source, data_product=data_product
-                )
-                ids.append((catalogid, data_product.id))
-                log.info(f"Created data product {data_product} for source {source}")
+                    # Cross-match against Source table for an existing fake entry
+                    try:
+                        (source, ) = (
+                            Source.select()
+                            .where(
+                                Source.cone_search(star.ra, star.dec, cone)
+                                & (Source.catalogid < 0)
+                            )
+                            .tuples()
+                            .first()
+                        )
+                    except:
+                        # Nothing found, create a new fake entry
+                        s = Source.select().order_by(Source.catalogid.asc()).first()
+                        catalogid = -1 if s is None else min(0, s.catalogid) - 1
+                        source = Source.create(
+                            catalogid=catalogid,
+                            ra=star.ra,
+                            dec=star.dec
+                        )
+                else:
+                    # Use the ra/dec returned from Catalog to create an entry.
+                    source, _ = Source.get_or_create(catalogid=catalogid, defaults=dict(ra=ra, dec=dec))
 
-        log.info(f"Ingested {len(ids)} ApStar products")
+                finally:                        
+                    '''
+                    data_product, created = DataProduct.get_or_create(
+                        release=self.release,
+                        filetype=self.filetype(star.telescope),
+                        kwargs=kwds,
+                        source=source
+                    )
+                    '''
+                    filetype = self.filetype(star.telescope)
+                    kwds, hashed = DataProduct.adapt_and_hash_kwargs(kwds)
+                    data_product_kwargs[filetype + "_" + hashed] = {
+                        "release": self.release,
+                        "filetype": filetype,
+                        "kwargs": kwds,
+                        "kwargs_hash": hashed,
+                        "source": source
+                    }
+                    catalogids.append(source.catalogid)
+
+        # Create in bulk.
+        with database.atomic():
+            data_product_ids = (
+                DataProduct
+                .insert_many(list(data_product_kwargs.values()))
+                .on_conflict(
+                    conflict_target=[DataProduct.release, DataProduct.filetype, DataProduct.kwargs_hash], 
+                    preserve=[DataProduct.updated]
+                )
+                .execute()
+            )
+        
+        #log.info(f"Ingested {len(ids)} ApStar products")
         log.info(f"Encountered {len(errors)} errors.")
         if len(errors) > 0:
             for error in errors:
                 log.warning(
                     f"Error ingesting path {error['detail']} from {error['origin']}:\n\t{error['reason']}\nwith keywords {error['kwds']}"
                 )
-        if len(ids) == 0:
+        if len(data_product_ids) == 0:
             raise AirflowSkipException(f"No data products ingested.")
 
-        index = self._available_return_id_kinds.index(self.return_id_kind)
-        return list(set([each[index] for each in ids]))
+        if self.return_id_kind == "data_product":
+            return flatten(data_product_ids)
+        elif self.return_id_kind == "catalog":
+            return list(set(catalogids))
+            
+
 
 
 class ApVisitOperator(ApogeeOperator):
@@ -363,8 +391,8 @@ class ApVisitOperator(ApogeeOperator):
                 )
                 """
                 try:
-                    (catalogid,) = (
-                        Catalog.select(Catalog.catalogid)
+                    (catalogid, ra, dec, ) = (
+                        Catalog.select(Catalog.catalogid, Catalog.ra, Catalog.dec)
                         .where(Catalog.cone_search(visit.ra, visit.dec, 3.0 / 3600))
                         .tuples()
                         .first()
@@ -382,15 +410,15 @@ class ApVisitOperator(ApogeeOperator):
                         }
                     )
                     continue
-
-                source, _ = Source.get_or_create(catalogid=catalogid)
+            
+                else:
+                    source, _ = Source.get_or_create(catalogid=catalogid, ra=ra, dec=dec)
+                
                 data_product, created = DataProduct.get_or_create(
                     release=self.release,
                     filetype=self.filetype,
                     kwargs=kwds,
-                )
-                SourceDataProduct.get_or_create(
-                    source=source, data_product=data_product
+                    source=source,
                 )
                 ids.append((catalogid, data_product.id))
                 log.info(f"Created data product {data_product} for source {source}")

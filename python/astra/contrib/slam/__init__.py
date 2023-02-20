@@ -1,1 +1,1 @@
-from .base import Slam
+from .base import slam

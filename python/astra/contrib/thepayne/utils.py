@@ -1,8 +1,9 @@
 import pickle
 import numpy as np
+from functools import cache
 from astra.utils import expand_path
 
-
+@cache
 def read_model(model_path):
     """
     Read the network coefficients from disk.
@@ -26,5 +27,6 @@ def overlap(a, b):
     return np.any((b_max >= a) & (a >= b_min))
 
 
+@cache
 def read_mask(mask_path):
-    return np.load(expand_path(mask_path))
+    return None if mask_path is None else np.load(expand_path(mask_path))

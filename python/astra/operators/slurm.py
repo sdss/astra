@@ -3,19 +3,20 @@ from getpass import getuser
 from typing import OrderedDict
 import re
 import json
+import inspect
 import numpy as np
+from tempfile import mkstemp
 from subprocess import call, Popen, PIPE
 from airflow.exceptions import AirflowRescheduleException, AirflowSkipException
 from airflow.models.baseoperator import BaseOperator
 from airflow.sensors.base import BaseSensorOperator
 from airflow.utils import timezone
 from peewee import fn
-from astra.database.astradb import Task, TaskBundle, Bundle, Status
 
 
-from astra import log, config
-from astra.utils import flatten, estimate_relative_cost
-from astra.database.astradb import database, Bundle
+from astra import config
+from astra.base import _iterable_parameter_names
+from astra.utils import log, flatten, estimate_relative_cost
 
 
 def get_slurm_queue():
@@ -69,6 +70,115 @@ def partition(items, K, return_indices=False):
 
     return [group for group in groups if len(group) > 0]
 
+def generate_dict_chunks(iterable_keys, iterable_values, N):
+    M = len(iterable_values[0])
+    K, m = divmod(M, N)
+    for n in range(N):
+        d = dict()
+        for k, v in zip(iterable_keys, iterable_values):
+            si = n * K
+            ei = None if n == N - 1 else (n + 1) * K
+            d[k] = v[si:ei]
+        yield d
+
+
+class SlurmTaskOperator(BaseOperator):
+
+    template_fields = ("task_kwargs", )
+
+    def __init__(self, task_callable=None, task_kwargs=None, slurm_kwargs=None, num_slurm_tasks=1, mkstemp_kwargs=None, continue_from_data_product=None, **kwargs):
+        super(SlurmTaskOperator, self).__init__(**kwargs)
+        self.task_callable = task_callable
+        self.mkstemp_kwargs = mkstemp_kwargs or {}
+        self.task_kwargs = task_kwargs or {}
+        self.slurm_kwargs = slurm_kwargs or {}
+        self.num_slurm_tasks = num_slurm_tasks
+        self.continue_from_data_product = continue_from_data_product
+        return None
+
+    def execute(self, context):
+        from slurm import queue
+
+        signature = inspect.signature(self.task_callable)
+        iterable_parameter_names = _iterable_parameter_names(signature)
+
+        serialized_task_callable = f"{self.task_callable.__module__}.{self.task_callable.__name__}"
+
+        slurm_kwargs = self.slurm_kwargs
+        for k in ("cpus", "ppn"):
+            try:
+                slurm_kwargs[k] = int(slurm_kwargs[k])
+            except:
+                None
+        for k, v in slurm_kwargs.items():
+            print(f"Slurm keyword {k}: {v} ({type(v)})")
+
+        q = queue(verbose=True)
+        q.create(label=self.task_callable.__name__, **slurm_kwargs)
+        print(f"Created slurm queue with {slurm_kwargs}")
+
+
+        task_kwargs = self.task_kwargs
+        if self.continue_from_data_product is not None:
+            print(f"Continuing from {self.continue_from_data_product}.. ")
+            data_product = task_kwargs["data_product"]
+            if isinstance(data_product, str):
+                data_product = json.loads(data_product)
+
+            index = data_product.index(self.continue_from_data_product)
+            print(f"That's at index {index}")
+            task_kwargs["data_product"] = data_product[1 + index:]
+
+
+        if self.num_slurm_tasks == 1 or len(iterable_parameter_names) == 0:
+            # Write to a JSON file. 
+            # TODO: If task_kwargs is a SQL query, flatten it.
+            content = {
+                "task_callable": serialized_task_callable,
+                "task_kwargs": task_kwargs,
+            }
+            _, path = mkstemp(**self.mkstemp_kwargs)
+            with open(path, "w") as fp:
+                json.dump(content, fp)
+            
+            log.info(f"Written to {path}")
+
+            q.append(f"astra run {path}")
+
+        else:
+            # Break up the task_kwargs into num_slurm_tasks chunks.
+            # First we need to find what parameters are iterable.
+            common_kwargs = task_kwargs.copy()
+            iterable_values = []
+            for k in iterable_parameter_names:
+                v = common_kwargs.pop(k)
+                if isinstance(v, str):
+                    v = json.loads(v)
+                iterable_values.append(v)
+            
+
+            N = len(flatten(iterable_values[0]))
+
+            # chunk up the list of items in iterable values into num_slurm_tasks chunks.
+
+            for iterable_kwargs in generate_dict_chunks(iterable_parameter_names, iterable_values, self.num_slurm_tasks):
+                kwargs = common_kwargs.copy()
+                kwargs.update(iterable_kwargs)
+                content = {
+                    "task_callable": serialized_task_callable,
+                    "task_kwargs": kwargs,
+                    }
+                _, path = mkstemp(**self.mkstemp_kwargs)
+                with open(path, "w") as fp:
+                    json.dump(content, fp)
+                
+                q.append(f"astra run {path}")
+
+        q.commit(hard=True, submit=True)
+        return q.key
+
+
+
 
 class SlurmOperator(BaseOperator):
 
@@ -100,6 +210,8 @@ class SlurmOperator(BaseOperator):
         self.only_incomplete = only_incomplete
 
     def execute(self, context):
+        from astra.database.astradb import Bundle, database, Task, TaskBundle, Bundle, Status
+
 
         # Load the bundles, which will be an int or list of ints.
         print(f"Loading bundles {self.bundles}")
@@ -362,3 +474,5 @@ class SlurmSensor(BaseSensorOperator):
         """
         # If complete, cat the log location.
         return complete
+
+

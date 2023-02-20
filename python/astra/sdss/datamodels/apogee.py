@@ -1,18 +1,25 @@
 """Create HDUs in mwmVisit/mwmStar products with APOGEE spectra."""
 
 import numpy as np
+import pickle
 from astropy.io import fits
 from functools import partial
 from typing import Union, List, Callable, Optional, Dict, Tuple
+from collections import OrderedDict
 
 from astra.database.astradb import DataProduct
-from astra import log
-from astra.utils import list_to_dict
+from astra.utils import flatten, expand_path, log, list_to_dict, dict_to_list
 from astra.sdss.datamodels import base, combine, util
-
+from astra.tools.spectrum import Spectrum1D
 from astra.sdss.bitmasks.apogee_drp import StarBitMask, PixelBitMask
+from astropy import units as u
+from astropy.nddata import StdDevUncertainty
+from sdss_access import SDSSPath
 
+from astra.tools.continuum.nmf import Emulator
 
+# TODO: move to tools?
+finite_or_empty = lambda _: _ if np.isfinite(_) else ""
 
 
 def create_apogee_hdus(
@@ -21,14 +28,17 @@ def create_apogee_hdus(
     cdelt: float = 6e-6,
     num_pixels: int = 8_575,
     num_pixels_per_resolution_element=(5, 4.25, 3.5),
-    observatory: Optional[str] = None,
+    median_filter_size: int = 501,
+    median_filter_mode: str = "reflect",
+    gaussian_filter_size: int = 100,
+    scale_by_pseudo_continuum: bool = False,
     **kwargs,
-) -> Tuple[fits.BinTableHDU]:
+) -> Tuple[fits.BinTableHDU]:        
     """
-    Create a HDU for resampled APOGEE visits, and a HDU for a stacked APOGEE spectrum, given the input APOGEE data products.
+    Create HDUs for resampled APOGEE visits and HDUs for stacked spectra (both separated by observatory).
 
     :param data_products:
-        A list of ApVisit data products.
+        A list of SDSS-V ApVisit data products, or SDSS-IV apStar data products.
 
     :param crval: [optional]
         The log10(lambda) of the wavelength of the first pixel to resample to.
@@ -46,26 +56,521 @@ def create_apogee_hdus(
 
     :param observatory: [optional]
         Short name for the observatory where the data products originated from. If `None` is given, this will
-        be inferred from the data model keywords.
+        be inferred from the data model keywords.    
     """
 
     instrument = "APOGEE"
-    if observatory is None:
-        try:
-            observatory = ",".join(
-                list(set([dp.kwargs["telescope"][:3].upper() for dp in data_products]))
-            )
-        except:
-            log.warning(f"Cannot infer observatory from data products.")
-            observatory = None
+    default_values = dict(prefix="")
 
-    common_headers = (
-        (f"{instrument} DATA REDUCTION PIPELINE", None),
-        "V_APRED",
+    sdss5_apVisit, sdss4_apStar, ignored = ([], [], [])
+    for data_product in data_products:
+        if data_product.release == "sdss5" and data_product.filetype == "apVisit":
+            sdss5_apVisit.append(data_product)
+        elif data_product.release == "dr17" and data_product.filetype == "apStar":
+            sdss4_apStar.append(data_product)
+        else:
+            ignored.append(data_product)
+
+    if ignored:
+        log.warning(f"Ignoring {len(ignored)} data products of incorrect type: {ignored}")
+
+    if len(sdss4_apStar) > 2:
+        """
+        Examples:
+        {'obj': '2M16294628+3914104', 'apred': 'dr17', 'field': '062+44_MGA', 'apstar': 'stars', 'prefix': 'ap', 'telescope': 'apo25m'} catalogid=5191805335
+        {'obj': '2M16294628+3914104', 'apred': 'dr17', 'field': '064+44_MGA', 'apstar': 'stars', 'prefix': 'ap', 'telescope': 'apo25m'} catalogid=5191805335
+        {'obj': '2M16294628+3914104', 'apred': 'dr17', 'field': '063+44_MGA', 'apstar': 'stars', 'prefix': 'ap', 'telescope': 'apo25m'} catalogid=5191805335
+        {'obj': '2M16294628+3914104', 'apred': 'dr17', 'field': '063+43_MGA', 'apstar': 'stars', 'prefix': 'ap', 'telescope': 'apo25m'} catalogid=5191805335
+        {'obj': '2M16294628+3914104', 'apred': 'dr17', 'field': '062+43_MGA', 'apstar': 'stars', 'prefix': 'ap', 'telescope': 'apo25m'} catalogid=5191805335
+
+        {'obj': '2M16083340+2829509', 'apred': 'dr17', 'field': '046+47_MGA', 'apstar': 'stars', 'prefix': 'ap', 'telescope': 'apo25m'} catalogid=5188086007
+        {'obj': '2M16083340+2829509', 'apred': 'dr17', 'field': '046+48', 'apstar': 'stars', 'prefix': 'ap', 'telescope': 'apo25m'} catalogid=5188086007
+        {'obj': '2M16083340+2829509', 'apred': 'dr17', 'field': '046+48_MGA', 'apstar': 'stars', 'prefix': 'ap', 'telescope': 'apo25m'} catalogid=5188086007
+        """
+        log.warning(f"Expected at most two SDSS-IV apStar data products (LCO/APO). Found {len(sdss4_apStar)}: {sdss4_apStar}")
+        log.warning(f"Only taking one apStar data product per observatory.")
+        sdss4_apStar = list({ dp.kwargs["telescope"]: dp for dp in sdss4_apStar }.values())
+
+    # Do SDSS4 data first.
+    sdss4_visit_data, sdss4_star_data, input_data_model_keys = ({}, {}, [])
+    for i, data_product in enumerate(sdss4_apStar):
+        visit, star, sdss4_keys = _format_apogee_data_from_dr17_apStar(data_product)
+        # TODO: This will lump apo-1m data with apo-25m data because we don't have a mwmVisit/mwmStar HDU for apo-1m. 
+        #       Should experiment to see what the consequences are.
+        observatory = get_observatory(data_product.kwargs["telescope"])
+        sdss4_visit_data[observatory] = visit
+        sdss4_star_data[observatory] = star
+        input_data_model_keys.extend(sdss4_keys)
+
+    # Do SDSS5 data.
+    sampling_kwargs = dict(
+        num_pixels_per_resolution_element=num_pixels_per_resolution_element,
+        median_filter_size=median_filter_size,
+        median_filter_mode=median_filter_mode,
+        gaussian_filter_size=gaussian_filter_size,
+        scale_by_pseudo_continuum=scale_by_pseudo_continuum,
     )
 
-    # Let's get STARFLAG and DITHERED from each file first, which lets us check whether any
-    # of the files are corrupted.
+    sdss5_visit_data, sdss5_keys = _format_apogee_data_from_sdssv_apVisits(sdss5_apVisit, **sampling_kwargs)
+    if sdss5_keys is not None:
+        input_data_model_keys.extend(sdss5_keys)
+
+    # Unique input_data_model_keys but keep order
+    unique_input_data_model_keys = list(dict.fromkeys(input_data_model_keys))
+
+    visit_hdu_header_groups = OrderedDict([
+        ("Spectral Data", ["snr", "flux", "e_flux", "bitmask", "continuum"]), # TODO: continuum
+        ("Data Product Keywords", ["release", "filetype"] + unique_input_data_model_keys),
+        ("Observing Conditions", ["date-obs", "exptime", "fluxflam", "npairs", "dithered"]),
+        ("Continuum Fitting", ["continuum_theta"]),
+        ("Radial Velocities (Doppler)", ["jd", "v_rad", "e_v_rad", "v_rel", "v_bc", "rchisq"]),
+        ("Radial Velocities (Cross-Correlation)", ["v_rad_xcorr", "v_rel_xcorr", "e_v_rad_xcorr", "n_rv_components"]),
+        ("Spectrum Sampling and Stacking", ["v_shift", "starflag", "in_stack"]),
+        ("Database Primary Keys", ["visit_pk", "rv_visit_pk", "data_product_id"]),
+    ])
+    star_hdu_header_groups = OrderedDict([
+        ("Spectral Data", ["snr", "lambda", "flux", "e_flux", "bitmask", "continuum"]),
+        ("Continuum Fitting", ["continuum_theta", "continuum_phi", "continuum_rchisq", "continuum_success", "continuum_warnings"]),
+    ])
+    visit_hdu_keys = flatten(visit_hdu_header_groups.values())
+    star_hdu_keys = flatten(star_hdu_header_groups.values())
+
+    # TODO: Need to do continuum fitting
+
+    # Prepare common cards.    
+    wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)
+    wavelength_cards = base.wavelength_cards(crval=crval, cdelt=cdelt, num_pixels=num_pixels)
+    spectrum_sampling_cards = base.spectrum_sampling_cards(**sampling_kwargs)
+
+    # Prepare cards for visits and stars per observatory
+    observatories = list(set(flatten([d.keys() for d in (sdss4_visit_data, sdss5_visit_data)])))
+
+    # TODO: I don't like hard-coding in paths, but here we are.
+    with open(expand_path("$MWM_ASTRA/component_data/continuum/sgGK_200921nlte_nmf_components.pkl"), "rb") as fp:
+        components = pickle.load(fp)
+
+    emulator = Emulator(
+        components,
+        regions=[
+            (15_100.0, 15_800.0), 
+            (15_840.0, 16_417.0), 
+            (16_500.0, 17_000.0)
+        ]
+    )
+    
+    fit_continuum_to_visit = {}
+    visit_cards, visit_data = ({}, {})
+    star_cards, star_data = ({}, {})
+    for observatory in observatories:
+
+        observatory_cards = base.metadata_cards(observatory, instrument)
+        # Since the data could come from multiple data reduction pipeline versions, there is no
+        # "common" thing here. Instead we will give V_APREDS.
+        
+        # NOTE: This is only true for the visit HDU. The star HDU will only stack data from a single pipeline version.
+        v_apreds = []
+        if observatory in sdss5_visit_data:
+            v_apreds.extend(sdss5_visit_data[observatory]["v_apred"])
+        if observatory in sdss4_visit_data:
+            v_apreds.extend(sdss4_visit_data[observatory]["v_apred"])
+        v_apreds = list(dict.fromkeys(v_apreds))
+
+        drp_cards_visit = [
+            base.BLANK_CARD,
+            (" ", f"{instrument} DATA REDUCTION PIPELINE", None),
+            ("V_APRED", ",".join(v_apreds), "DRP version(s)")
+        ]
+        drp_cards_star = [
+            base.BLANK_CARD,
+            (" ", f"{instrument} DATA REDUCTION PIPELINE", None),
+            ("V_APRED", v_apreds[0], "DRP version(s)")
+        ]        
+
+        # Doppler stellar parameters do vary by observatory.
+        # Where available we will take SDSS-V values.
+        # TODO: Should we do this? Or should we make DOPPLER values a per-visit value (same for all SDSS-V and same for all SDSS-IV)
+        if observatory in sdss5_visit_data:        
+            doppler_data = sdss5_visit_data[observatory]
+            doppler_release = "SDSS-V"
+        else:
+            doppler_data = sdss4_visit_data[observatory]
+            doppler_release = "SDSS-IV"
+
+        doppler_cards = [
+            base.BLANK_CARD,
+            (" ", f"DOPPLER STELLAR PARAMETERS ({doppler_release})", None),
+            *[
+                (f"{k.upper()}_D", finite_or_empty(np.round(doppler_data[f"{k}_doppler"][0], 1)))
+                for k in ("teff", "e_teff")
+            ],
+            *[
+                (f"{k.upper()}_D", finite_or_empty(np.round(doppler_data[f"{k}_doppler"][0], 3)))
+                for k in ("logg", "e_logg")
+            ],
+            *[
+                (f"{k.upper()}_D", finite_or_empty(np.round(doppler_data[f"{k}_doppler"][0], 3)))
+                for k in ("feh", "e_feh")
+            ],
+        ]
+
+        # Combine data from SDSS5 and SDSS4.
+        has_sdss5_data = (observatory in sdss5_visit_data)
+        has_sdss4_data = (observatory in sdss4_visit_data)
+        if has_sdss4_data and has_sdss5_data:
+            missing_keys = set(sdss5_visit_data[observatory]).symmetric_difference(sdss4_visit_data[observatory])
+        elif has_sdss5_data:
+            missing_keys = ["prefix"] # TODO: it's a bit hacky doing it this way
+        else:
+            missing_keys = []
+        
+        visit_observatory_data = {}
+        for data in (sdss5_visit_data, sdss4_visit_data):
+            if observatory in data:
+                for k, v in data[observatory].items():
+                    visit_observatory_data.setdefault(k, [])
+                    visit_observatory_data[k].extend(v)
+                
+                for k in missing_keys:
+                    if k not in data[observatory]:
+                        N, P = np.atleast_2d(data[observatory]["flux"]).shape
+                        visit_observatory_data.setdefault(k, [])
+                        visit_observatory_data[k].extend([default_values[k]] * N)
+        
+        # Order by julian date.
+        ordered = np.argsort(visit_observatory_data["jd"])
+        visit_observatory_data = { k: np.array(v)[ordered] for k, v in visit_observatory_data.items()}
+
+        # Add placeholder for continuum
+        N, P = np.atleast_2d(visit_observatory_data["flux"]).shape
+        visit_observatory_data.update(
+            continuum=np.ones((N, P), dtype=float),
+            continuum_theta=np.zeros((N, emulator.theta_size), dtype=float)
+        )
+
+        # Define what goes into the stack.
+        starmask = StarBitMask()
+        starflag = np.uint64(visit_observatory_data["starflag"])
+        in_stack = (
+                np.isfinite(visit_observatory_data["snr"]) 
+            & (visit_observatory_data["snr"] > 10) 
+            & np.isfinite(visit_observatory_data["v_rad"])   
+            & ((starflag & starmask.bad_value) == 0)
+            & ((starflag & starmask.get_value("RV_REJECT")) == 0)
+        )
+        # We will fit continuum to anything that has a reasonable spectrum.
+        # We can't just use "in-stack" for this, because good SDSS4 visits are excldued from the stack if we have SDSS5 data. 
+        fit_continuum_to_visit[observatory] = in_stack.copy()
+
+        # If we don't have any SDSS-V data, then we will use the star data from SDSS-IV.
+        # But if we have any useful SDSS-V data, then we will use that for stacking and ignore the SDSS-IV data.
+        is_sdss4_data = (visit_observatory_data["release"] == "dr17") # TODO: better way to distinguish this?
+        is_sdss5_data = (visit_observatory_data["release"] == "sdss5")
+        if any(in_stack * is_sdss5_data) and has_sdss4_data:
+            # Mark any sdss4 data as not being used in the stack.
+            in_stack[is_sdss4_data] = False
+            log.info(f"setting {np.sum(is_sdss4_data)} SDSS-IV visits to not be used in {observatory} stack.")
+
+        visit_observatory_data["in_stack"] = in_stack
+        
+        visit_cards[observatory] = [
+            *observatory_cards,
+            *drp_cards_visit,
+            *spectrum_sampling_cards,
+            *doppler_cards,
+            *wavelength_cards,
+            base.FILLER_CARD
+        ]
+
+        visit_columns = []
+        for name in visit_hdu_keys:
+            visit_columns.append(
+                fits.Column(
+                    name=name.upper(),
+                    array=visit_observatory_data[name], 
+                    unit=None,
+                    **base.fits_column_kwargs(visit_observatory_data[name])
+                )
+            )
+            
+        visit_data[observatory] = visit_columns
+
+        # If we only have SDSS-IV data, just use the stack.
+        if list(set(visit_observatory_data["release"][in_stack])) == ["dr17"]:
+            stacked_observatory_data = sdss4_star_data[observatory]
+
+        elif list(set(visit_observatory_data["release"][in_stack])) == ["sdss5"]:
+            (
+                combined_flux,
+                combined_e_flux,
+                combined_bitmask,
+                pseudo_continuum,
+                meta_combine,
+            ) = combine.pixel_weighted_spectrum(
+                visit_observatory_data["flux"][in_stack], 
+                visit_observatory_data["e_flux"][in_stack], 
+                visit_observatory_data["bitmask"][in_stack], 
+                **kwargs
+            )
+
+            stacked_observatory_data = dict(
+                flux=combined_flux,
+                e_flux=combined_e_flux,
+                bitmask=combined_bitmask,
+            )
+
+        else:
+            # No data wll be stacked for this obervatory
+            continue
+
+        dithered = visit_observatory_data["dithered"]
+        star_visits = np.sum(in_stack)
+        star_dithered = np.round(np.sum(dithered[in_stack])/star_visits, 1)
+        assert np.isfinite(star_visits)
+        assert np.isfinite(star_dithered)
+        star_cards[observatory] = [
+            *observatory_cards,
+            *drp_cards_star,
+            *spectrum_sampling_cards,
+
+            # add dithered / nvisits
+            ("DITHERED", star_dithered),
+            ("NVISITS", star_visits),
+
+            *doppler_cards,
+            *wavelength_cards,
+            base.FILLER_CARD
+        ]
+
+        shape = (1, -1)
+        stacked_observatory_data.update(
+            {
+                "snr": util.calculate_snr(
+                    stacked_observatory_data["flux"],
+                    stacked_observatory_data["e_flux"], 
+                    axis=None
+                ),
+                "lambda": wavelength,
+                "continuum": np.zeros(P, dtype=float),
+                "continuum_phi": np.zeros(emulator.phi_size, dtype=float),
+                "continuum_theta": np.zeros(emulator.theta_size, dtype=float),
+                "continuum_rchisq": np.array([0.0]),
+                "continuum_warnings": np.array([0]),
+                "continuum_success": np.array([False])
+            }
+        )
+        star_columns = []
+        for name in star_hdu_keys:
+            array = stacked_observatory_data[name].reshape(shape)
+            star_columns.append(
+                fits.Column(
+                    name=name.upper(),
+                    array=array,
+                    unit=None,
+                    **base.fits_column_kwargs(array)
+                )
+            )
+        star_data[observatory] = star_columns
+
+    visit_hdus = {}
+    star_hdus = {}
+    visit_category_headers = [(v[0].upper(), k.upper()) for k, v in visit_hdu_header_groups.items()]
+    star_category_headers = [(v[0].upper(), k.upper()) for k, v in star_hdu_header_groups.items()]
+
+    for observatory in ("APO", "LCO"):
+        if observatory in visit_data:
+            visit_hdu = fits.BinTableHDU.from_columns(
+                visit_data[observatory],
+                header=fits.Header(visit_cards[observatory])
+            )
+            base.add_table_category_headers(visit_hdu, visit_category_headers)
+            base.add_glossary_comments(visit_hdu)
+            visit_hdus[observatory] = visit_hdu
+
+            if observatory in star_data:                
+                star_hdu = fits.BinTableHDU.from_columns(
+                    star_data[observatory],
+                    header=fits.Header(star_cards[observatory])
+                )
+                base.add_table_category_headers(star_hdu, star_category_headers)
+                base.add_glossary_comments(star_hdu)
+
+                star_hdus[observatory] = star_hdu
+            else:
+                star_hdus[observatory] = base.create_empty_hdu(observatory, instrument)
+
+        else:
+            visit_hdus[observatory] = base.create_empty_hdu(observatory, instrument)
+            star_hdus[observatory] = base.create_empty_hdu(observatory, instrument)
+
+    # Now that everything is in the right place, do continuum fitting.
+    flux, e_flux = ([], [])
+    for observatory, mask in fit_continuum_to_visit.items():
+        flux.extend(visit_hdus[observatory].data["FLUX"][mask])
+        e_flux.extend(visit_hdus[observatory].data["E_FLUX"][mask])
+
+    if len(flux) > 0:
+        flux_unit = u.Unit("1e-17 erg / (Angstrom cm2 s)")  # TODO
+
+        spectrum = Spectrum1D(
+            spectral_axis=u.Quantity(wavelength, unit=u.Angstrom),
+            flux=np.array(flux) * flux_unit,
+            uncertainty=StdDevUncertainty(np.array(e_flux) * flux_unit),
+        )
+
+        phi, theta, continuum, model_rectified_flux, meta = emulator.fit(spectrum)
+
+        n_warnings = np.sum(np.diff(meta["chi_sqs"]) > 0)
+
+        # Set the continuum_phi values for each star HDU
+        for observatory, star_hdu in star_hdus.items():
+            if len(star_hdu.data) == 0: continue
+            star_hdu.data["CONTINUUM_PHI"][:] = phi
+            star_hdu.data["CONTINUUM_RCHISQ"][0] = np.min(meta["reduced_chi_sqs"])
+            star_hdu.data["CONTINUUM_SUCCESS"][0] = meta["success"]
+            star_hdu.data["CONTINUUM_WARNINGS"][0] = n_warnings
+
+            # Now estimate the continuum for the stacked flux.
+            flux = star_hdu.data["FLUX"].copy()
+            ivar = star_hdu.data["E_FLUX"].copy()**-2
+
+            bad_pixels = ~np.isfinite(ivar) | ~np.isfinite(flux) | (ivar == 0)
+            flux[bad_pixels] = 0
+            ivar[bad_pixels] = 0
+
+            star_theta, star_continuum = emulator._maximization(
+                flux / model_rectified_flux,
+                model_rectified_flux * ivar * model_rectified_flux,
+                meta["continuum_args"]
+            )
+            # star_theta and star_continuum will have shape (N_visits, P),
+            # but we only want the first one
+            star_hdu.data["CONTINUUM_THETA"][:] = star_theta[0].flatten()
+            star_hdu.data["CONTINUUM"][:] = star_continuum[0]
+
+        # Set the continuum_theta values for each HDU
+        si, ei = (0, 0)
+        for observatory, mask in fit_continuum_to_visit.items():
+            K = np.sum(mask)
+            ei += K
+            visit_hdus[observatory].data["CONTINUUM_THETA"][mask] = theta[si:ei].reshape((K, -1))
+            visit_hdus[observatory].data["CONTINUUM"][mask] = continuum[si:ei]
+            si += K
+
+    return (visit_hdus["APO"], visit_hdus["LCO"], star_hdus["APO"], star_hdus["LCO"])
+
+
+
+
+
+def get_observatory(telescope):
+    return telescope.upper()[:3]
+
+
+def _format_apogee_data_from_dr17_apStar(data_product):
+    """
+    Extract spectra and metadata from an APOGEE DR17 apStar data product,
+    such that it can be collated together into a mwmVisit/mwmStar data product.
+    """
+
+    sdss_path = SDSSPath("dr17")
+    input_data_model_keys = sdss_path.lookup_keys("apVisit")
+
+    telescope = data_product.kwargs["telescope"]
+
+    #with fits.open(data_product.path) as image:
+    image = fits.open(data_product.path)
+    if True:
+        flux = np.atleast_2d(image[1].data)
+        e_flux = np.atleast_2d(image[2].data)
+        bitmask = np.atleast_2d(image[3].data)
+
+        N, P = flux.shape
+        # What I was told by the APOGEE team is that the first two visits
+        # are the stacked spectra (if there are more than 1 visit), and the
+        # rest are visits. So that means there should only ever be either 1
+        # spectrum (1 visit), or >= 4 spectra (e.g., 2 visit + 2 stack).
+        
+        # However, there are some cases where there are 2 "spectra" but only 1 visit. 
+        # The second spectra are all NaNs.
+        if N in (1, 2):
+            N_visits = 1
+            visit_mask = np.zeros(N, dtype=bool)
+            visit_mask[0] = True
+            stack_mask = visit_mask
+            
+        elif N in (0, 3):
+            raise ValueError(f"Unexpected number of spectra ({N}) in data product {data_product}")
+        
+        else:
+            N_visits = N - 2
+            visit_mask = np.ones(N, dtype=bool)
+            visit_mask[:2] = False
+            stack_mask = np.zeros(N, dtype=bool)
+            stack_mask[0] = True
+        
+        visit_keys = ["date-obs", "starflag"] + input_data_model_keys
+        visit_meta = { k: [] for k in visit_keys }
+
+        for i in range(1, 1 + N_visits):
+            sfile = image[0].header[f"SFILE{i}"]
+            _, apred, plate, mjd, fiber = sfile.split("-")
+            fiber = fiber.split(".")[0]
+
+            visit_meta["apred"].append(apred)
+            visit_meta["plate"].append(plate)
+            visit_meta["mjd"].append(int(mjd))
+            visit_meta["prefix"].append(sfile[:2])
+            visit_meta["fiber"].append(int(fiber))
+            visit_meta["date-obs"].append(image[0].header[f"DATE{i}"])
+            visit_meta["starflag"].append(np.uint64(image[0].header[f"FLAG{i}"]))
+
+    visit_meta.update({
+        "release": [data_product.release] * N_visits,
+        "filetype": ["apVisit"] * N_visits,
+        "telescope": [telescope] * N_visits,
+        "field": [data_product.kwargs["field"]] * N_visits,
+        "data_product_id": [data_product.id] * N_visits,
+    })
+
+    # Some information is in the SDSS-V apVisit files that isn't in the SDSS-IV apStar files.
+    # Open the SDSS-V apVisit files to get what we need.
+    visit_paths = [sdss_path.full(**kwds) for kwds in dict_to_list(visit_meta)]
+    missing_keys = ("v_apred", "exptime", "fluxflam", "npairs")
+    visit_meta.update({ k: [] for k in missing_keys })
+    visit_meta["dithered"] = [] # determined separately.
+
+    for i, visit_path in enumerate(visit_paths):
+        with fits.open(visit_path) as image:
+            dithered = 1.0 if image[1].data.size == (3 * 4096) else 0.0
+            visit_meta["dithered"].append(dithered)
+            for key in missing_keys:
+                visit_meta[key].append(image[0].header[key.upper()])
+
+    visit_meta.update(get_apogee_visit_radial_velocity_from_apStar(data_product))
+    visit_meta.update(
+        flux=flux[visit_mask],
+        e_flux=e_flux[visit_mask],
+        bitmask=bitmask[visit_mask],
+        # Ignoring the SDSS-IV SNR value so that we consistently calcualte S/N between SDSS-4 and SDSS-5.
+        snr=util.calculate_snr(flux[visit_mask], e_flux[visit_mask], axis=1)
+    )
+    star_meta = dict(
+        flux=flux[stack_mask],
+        e_flux=e_flux[stack_mask],
+        bitmask=bitmask[stack_mask],
+    )    
+    return (visit_meta, star_meta, input_data_model_keys)
+
+
+def _format_apogee_data_from_sdssv_apVisits(
+    data_products, 
+    crval: float = 4.179,
+    cdelt: float = 6e-6,
+    num_pixels: int = 8575,
+    num_pixels_per_resolution_element=(5, 4.25, 3.5),
+    **kwargs
+) -> Tuple[dict, list]:
+
     D = len(data_products)
     keep = np.ones(D, dtype=bool)
     starflag = np.zeros(D, dtype=np.uint64)
@@ -76,7 +581,7 @@ def create_apogee_hdus(
                 starflag[i] = image[0].header["STARFLAG"]
                 dithered[i] = 1.0 if image[1].data.size == (3 * 4096) else 0.0
                 if len(image) < 5:
-                    log.exception(f"File {data_product} at {data_product.path} has unexpectedly few HDUs")
+                    log.exception(f"Data product {data_product} at {data_product.path} has unexpectedly few HDUs ({len(image)})")
                     keep[i] = False
         except:
             log.exception(f"OSError when loading {data_product}: {data_product.path}")
@@ -87,236 +592,133 @@ def create_apogee_hdus(
     data_products = [dp for dp, keep_dp in zip(data_products, keep) if keep_dp]
     dithered = dithered[keep]
     starflag = starflag[keep]
-        
-    if len(data_products) == 0:
-        empty_visits_hdu = base.create_empty_hdu(observatory, instrument)
-        empty_star_hdu = base.create_empty_hdu(observatory, instrument)
-        return (empty_visits_hdu, empty_star_hdu)
-    
-    # Data reduction pipeline keywords
-    drp_cards = base.headers_as_cards(data_products[0], common_headers)
 
-    # First get the velocity information from the APOGEE data reduction pipeline database.
+    if len(data_products) == 0:
+        return ({}, [])
+
+    input_data_model_keys = SDSSPath("sdss5").lookup_keys("apVisit")
+    keys = ("date-obs", "exptime", "fluxflam", "npairs", "starflag", "v_apred")
+    visit_meta = dict(
+        release=[data_product.release for data_product in data_products],
+        filetype=[data_product.filetype for data_product in data_products],
+        dithered=dithered,
+        data_product_id=[data_product.id for data_product in data_products],
+    )
+    visit_meta.update({ k: [] for k in keys })
+    visit_meta.update({ k: [] for k in input_data_model_keys })
+
+    for data_product in data_products:
+        for k in input_data_model_keys:
+            visit_meta[k].append(data_product.kwargs[k])
+
+        with fits.open(data_product.path) as image:
+            for k in keys:
+                visit_meta[k].append(image[0].header[k.upper()])
+
     velocity_meta = list_to_dict(
         tuple(map(get_apogee_visit_radial_velocity, data_products))
     )
 
-    flux, flux_error, bitmask, meta = resample_apogee_visit_spectra(
+    # Set velocity to use when shifting and resampling to rest-frame.
+    velocity_meta["v_shift"] = velocity_meta["v_rel"]
+
+    flux, e_flux, bitmask, sampling_meta = resample_apogee_visit_spectra(
         data_products,
         crval=crval,
         cdelt=cdelt,
         num_pixels=num_pixels,
         num_pixels_per_resolution_element=num_pixels_per_resolution_element,
-        radial_velocities=velocity_meta["V_REL"],
+        radial_velocities=velocity_meta["v_shift"],
         **kwargs,
     )
 
     # Increase the flux uncertainties at the pixel level due to persistence and significant skylines,
     # in the same way that is done for apStar data products.
-    increase_flux_uncertainties_due_to_persistence(flux_error, bitmask)
-    increase_flux_uncertainties_due_to_skylines(flux_error, bitmask)
+    increase_flux_uncertainties_due_to_persistence(e_flux, bitmask)
+    increase_flux_uncertainties_due_to_skylines(e_flux, bitmask)
 
-    # Now calculate the S/N.
-    snr_visit = util.calculate_snr(flux, flux_error, axis=1)
+    visit_meta.update(velocity_meta)
 
-    # Let's define some quality criteria of what to include in a stack.
-    # This logic follows from https://github.com/sdss/apogee_drp/blob/73cfd3f7a7fbb15963ddd2190e24a15261fb07b1/python/apogee_drp/apred/rv.py
-    use_in_stack = (
-        np.isfinite(snr_visit) & (snr_visit > 3) & np.isfinite(velocity_meta["V_RAD"])
-    )
+    # Need to group by observatory.
+    unique_observatories = list(map(get_observatory, set(visit_meta["telescope"])))
+    observatory = np.array(list(map(get_observatory, visit_meta["telescope"])))
 
-    starmask = StarBitMask()
-    use_in_stack *= ((starflag & starmask.bad_value) == 0) & (
-        (starflag & starmask.get_value("RV_REJECT")) == 0
-    )
+    visit_data = {}
+    for unique_observatory in unique_observatories:
+        mask = (observatory == unique_observatory)
+        _visit_data = { k: np.array(v)[mask] for k, v in visit_meta.items() }
+        _visit_data.update(
+            flux=flux[mask],
+            e_flux=e_flux[mask],
+            bitmask=bitmask[mask],
+            snr=util.calculate_snr(flux[mask], e_flux[mask], axis=1)
+        )
+        visit_data[unique_observatory] = _visit_data
+    
+    return (visit_data, input_data_model_keys)
 
-    (
-        combined_flux,
-        combined_flux_error,
-        combined_bitmask,
-        continuum,
-        meta_combine,
-    ) = combine.pixel_weighted_spectrum(
-        flux[use_in_stack], 
-        flux_error[use_in_stack], 
-        bitmask[use_in_stack], 
-        **kwargs
-    )
-    meta.update(meta_combine)
-
-    wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)
-
-    # Disallow zero fluxes
-    DATA_HEADER_CARD = ("SPECTRAL DATA", None)
-
-    visit_mappings = [
-        DATA_HEADER_CARD,
-        ("SNR", snr_visit),
-        # If we store the wavelength in an array in the visit file then we need to repeat the entry
-        # for every row (e.g., be the same size as the flux file).
-        # Since most users will use the mwmStar file, and more expert users will use the mwmVisit
-        # file, we will assume the more expert users can reconstruct the wavelength array themselves.
-        # ("LAMBDA", np.tile(wavelength, flux.shape[0]).reshape(flux.shape)),
-        ("FLUX", flux),
-        ("E_FLUX", flux_error),
-        ("BITMASK", bitmask),
-        ("INPUT DATA MODEL KEYWORDS", None),
-        ("RELEASE", lambda dp, image: dp.release),
-        ("FILETYPE", lambda dp, image: dp.filetype),
-        # https://stackoverflow.com/questions/6076270/lambda-function-in-list-comprehensions
-        *[
-            (k.upper(), partial(lambda dp, image, _k: dp.kwargs[_k], _k=k))
-            for k in data_products[0].kwargs.keys()
-        ],
-        ("OBSERVING CONDITIONS", None),
-        # TODO: DATE_OBS? OBS_DATE? remove entirely since we have MJD?
-        # DATE-OBS looks to be start of observation, since it is different from UT-MID
-        ("DATE-OBS", lambda dp, image: image[0].header["DATE-OBS"]),
-        ("EXPTIME", lambda dp, image: image[0].header["EXPTIME"]),
-        ("FLUXFLAM", lambda dp, image: image[0].header["FLUXFLAM"]),
-        # Some NPAIRS are encoded as a string, which is why we need the int() here.
-        ("NPAIRS", lambda dp, image: int(image[0].header["NPAIRS"])),
-        # ("NCOMBINE", lambda dp, image: image[0].header["NCOMBINE"]),
-        # Nidever (via sdss5/#mwm_software): "if the flux array has 4096 pixels, then it was definitely dithered".
-        ("DITHERED", dithered),
-        ("RADIAL VELOCITIES (DOPPLER)", None),
-        *(
-            (k, velocity_meta[k])
-            for k in (
-                "JD",
-                "V_RAD",
-                "E_V_RAD",
-                "V_REL",
-                "V_BC",
-                "RCHISQ",
-            )
-        ),
-        ("RADIAL VELOCITIES (CROSS-CORRELATION)", None),
-        *(
-            (k, velocity_meta[k])
-            for k in (
-                "V_RAD_XCORR",
-                "V_REL_XCORR",
-                "E_V_RAD_XCORR",
-                "N_RV_COMPONENTS",  # "RV_COMPONENTS",
-            )
-        ),
-        ("SPECTRUM SAMPLING AND STACKING", None),
-        ("V_SHIFT", meta["v_shift"]),
-        # TODO: This is an APOGEE-level flag that is named "STARFLAG" but is decided on a per-visit spectrum.
-        #       It doesn't make sense. Should re-name this and homogenise the description from other reduction
-        #       or analysis pipelines.
-        ("STARFLAG", lambda dp, image: np.uint64(image[0].header["STARFLAG"])),
-        ("IN_STACK", use_in_stack),
-        ("DATABASE PRIMARY KEYS", None),
-        ("VISIT_PK", velocity_meta["VISIT_PK"]),
-        ("RV_VISIT_PK", velocity_meta["RV_VISIT_PK"]),
-        ("DATA_PRODUCT_ID", lambda dp, image: dp.id),
-    ]
-
-    spectrum_sampling_cards = base.spectrum_sampling_cards(**meta)
-    wavelength_cards = base.wavelength_cards(**meta)
-
-    finite_or_empty = lambda _: _ if np.isfinite(_) else ""
-    doppler_cards = [
-        # Since DOPPLER uses the same Cannon model for the final fit of all individual visits,
-        # we include it here instead of repeating the information many times in the data table.
-        base.BLANK_CARD,
-        (" ", "DOPPLER STELLAR PARAMETERS", None),
-        *[
-            (f"{k}_D", finite_or_empty(np.round(velocity_meta[f"{k}_DOPPLER"][0], 1)))
-            for k in ("TEFF", "E_TEFF")
-        ],
-        *[
-            (f"{k}_D", finite_or_empty(np.round(velocity_meta[f"{k}_DOPPLER"][0], 3)))
-            for k in ("LOGG", "E_LOGG")
-        ],
-        *[
-            (f"{k}_D", finite_or_empty(np.round(velocity_meta[f"{k}_DOPPLER"][0], 3)))
-            for k in ("FEH", "E_FEH")
-        ],
-    ]
-
-    # These cards will be common to visit and star data products.
-    visit_header = fits.Header(
-        [
-            *base.metadata_cards(observatory, instrument),
-            *drp_cards,
-            *spectrum_sampling_cards,
-            *doppler_cards,
-            *wavelength_cards,
-            base.FILLER_CARD,
-        ]
-    )
-
-    hdu_visit = base.hdu_from_data_mappings(data_products, visit_mappings, visit_header)
-
-    if any(use_in_stack):
-        star_header = fits.Header(
-            [
-                *base.metadata_cards(observatory, instrument),
-                *drp_cards,
-                *spectrum_sampling_cards,
-                # Add the fraction that are dithered.
-                ("DITHERED", np.sum(dithered[use_in_stack]) / np.sum(use_in_stack)),
-                ("NVISITS", np.sum(use_in_stack)),
-                *doppler_cards,
-                *wavelength_cards,
-                base.FILLER_CARD,
-            ]
-        )        
-        bad_flux, bad_combined_flux = ((flux_error == 0), (combined_flux_error == 0))
-        flux[bad_flux] = np.nan
-        flux_error[bad_flux] = np.inf
-        combined_flux[bad_combined_flux] = np.nan
-        combined_flux_error[bad_combined_flux] = np.inf
-
-        snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
-        star_data_shape = (1, -1)
-        star_mappings = [
-            DATA_HEADER_CARD,
-            ("SNR", np.array([snr_star]).reshape(star_data_shape)),
-            ("LAMBDA", wavelength.reshape(star_data_shape)),
-            ("FLUX", combined_flux.reshape(star_data_shape)),
-            ("E_FLUX", combined_flux_error.reshape(star_data_shape)),
-            ("BITMASK", combined_bitmask.reshape(star_data_shape)),
-        ]
-        hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, star_header)
-    else:
-        hdu_star = base.create_empty_hdu(observatory, instrument)
-
-    # Add S/N for the stacked spectrum.
-    # hdu_star.header.insert("TTYPE1", "SNR")
-    # hdu_star.header["SNR"] = np.round(snr_star, 1)
-    # hdu_star.header.comments["SNR"] = base.GLOSSARY.get("SNR", None)
-
-    return (hdu_visit, hdu_star)
 
 def _no_rv_measurement():
     return {
-        "V_BC": np.nan,
-        "V_REL": 0,
-        "V_RAD": np.nan,
-        "E_V_REL": np.nan,
-        "E_V_RAD": np.nan,
-        "V_TYPE": -1,
-        "JD": -1,
-        "DATE-OBS": "",
-        "TEFF_DOPPLER": np.nan,
-        "E_TEFF_DOPPLER": np.nan,
-        "LOGG_DOPPLER": np.nan,
-        "E_LOGG_DOPPLER": np.nan,
-        "FEH_DOPPLER": np.nan,
-        "E_FEH_DOPPLER": np.nan,
-        "VISIT_PK": -1,
-        "RV_VISIT_PK": -1,
-        "RCHISQ": np.nan,
-        "N_RV_COMPONENTS": 0,
-        "V_REL_XCORR": np.nan,
-        "E_V_RAD_XCORR": np.nan,
-        "V_RAD_XCORR": np.nan,
-        "RV_COMPONENTS": np.array([np.nan, np.nan, np.nan]),
+        "v_bc": np.nan,
+        "v_rel": 0,
+        "v_rad": np.nan,
+        "e_v_rel": np.nan,
+        "e_v_rad": np.nan,
+        "v_type": -1,
+        "jd": -1,
+        "date-obs": "",
+        "teff_doppler": np.nan,
+        "e_teff_doppler": np.nan,
+        "logg_doppler": np.nan,
+        "e_logg_doppler": np.nan,
+        "feh_doppler": np.nan,
+        "e_feh_doppler": np.nan,
+        "visit_pk": -1,
+        "rv_visit_pk": -1,
+        "rchisq": np.nan,
+        "n_rv_components": 0,
+        "v_rel_xcorr": np.nan,
+        "e_v_rad_xcorr": np.nan,
+        "v_rad_xcorr": np.nan,
+        "rv_components": np.array([np.nan, np.nan, np.nan]),
     }    
+
+
+def get_apogee_visit_radial_velocity_from_apStar(data_product):
+    with fits.open(data_product.path) as image:
+        N_visits = image[0].header["NVISITS"]
+
+        get_visit_values = lambda key: [image[0].header[f"{key}{i}"] for i in range(1, 1 + N_visits)]
+
+        meta = {
+            "v_bc": get_visit_values("BC"),
+            "v_rel": get_visit_values("VHELIO"),
+            "v_shift": get_visit_values("VHELIO"), # TODO: is this right? how do we get what shift value was actually used?
+            "v_rad": get_visit_values("VRAD"),
+            "e_v_rel": get_visit_values("VERR"),
+            "e_v_rad": get_visit_values("VERR"),
+            "v_type": [2] * N_visits,
+            "jd": get_visit_values("JD"),
+            "date-obs": get_visit_values("DATE"),
+            "teff_doppler": image[-2].data["teff"],
+            "e_teff_doppler": image[-2].data["tefferr"],
+            "logg_doppler": image[-2].data["logg"],
+            "e_logg_doppler": image[-2].data["loggerr"],
+            "feh_doppler": image[-2].data["feh"],
+            "e_feh_doppler": image[-2].data["feherr"],
+            "visit_pk": [-1] * N_visits,
+            "rv_visit_pk": [-1] * N_visits,
+            "rchisq": image[-2].data["chisq"],
+            "n_rv_components": np.ones(N_visits),
+            "v_rel_xcorr": image[-2].data["xcorr_vrel"],
+            "e_v_rad_xcorr": image[-2].data["xcorr_vrelerr"],
+            "v_rad_xcorr": image[-2].data["xcorr_vhelio"],
+            "rv_components": np.zeros((N_visits, 3)),
+        }
+
+    return meta
+
 
 def get_apogee_visit_radial_velocity(data_product: DataProduct) -> dict:
     """
@@ -361,37 +763,41 @@ def get_apogee_visit_radial_velocity(data_product: DataProduct) -> dict:
 
         # No RV measurement for this visit.
         return _no_rv_measurement() 
+    
     # Sanity check
-    if data_product.sources[0].catalogid != result.catalogid:
+    if data_product.source.catalogid != result.catalogid:
+        # TODO: This could be because of different catalog identifiers between targeting versions.
+        #       We should probably cross-match and check for this, but for now let's raise an error in all situations.
         raise ValueError(
             f"Data product {data_product} catalogid does not match record in APOGEE DRP "
             f"table ({data_product.sources[0].catalogid} != {result.catalogid}) "
             f"on APOGEE rv_visit.pk={result.pk} and visit.pk={result.visit_pk}"
         )
+
     # Return the named metadata we need, using keys from common glossary.
     return {
-        "V_BC": result.bc,
-        "V_REL": result.vrel,
-        "V_RAD": result.vrad, # formerly vheliobary
-        "E_V_REL": result.vrelerr,
-        "E_V_RAD": result.vrelerr,
-        "V_TYPE": result.vtype,  # 1=chisq, 2=xcorr
-        "JD": result.jd,
-        "DATE-OBS": result.dateobs,
-        "TEFF_DOPPLER": result.rv_teff,
-        "E_TEFF_DOPPLER": result.rv_tefferr,
-        "LOGG_DOPPLER": result.rv_logg,
-        "E_LOGG_DOPPLER": result.rv_loggerr,
-        "FEH_DOPPLER": result.rv_feh,
-        "E_FEH_DOPPLER": result.rv_feherr,
-        "VISIT_PK": result.visit_pk,
-        "RV_VISIT_PK": result.pk,
-        "RCHISQ": result.chisq,
-        "N_RV_COMPONENTS": result.n_components,
-        "V_REL_XCORR": result.xcorr_vrel,
-        "E_V_RAD_XCORR": result.xcorr_vrelerr,
-        "V_RAD_XCORR": result.xcorr_vrad, # formerly vheliobary
-        "RV_COMPONENTS": result.rv_components,
+        "v_bc": result.bc,
+        "v_rel": result.vrel,
+        "v_rad": result.vrad, # formerly vheliobary
+        "e_v_rel": result.vrelerr,
+        "e_v_rad": result.vrelerr,
+        "v_type": result.vtype,  # 1=chisq, 2=xcorr
+        "jd": result.jd,
+        "date-obs": result.dateobs,
+        "teff_doppler": result.rv_teff,
+        "e_teff_doppler": result.rv_tefferr,
+        "logg_doppler": result.rv_logg,
+        "e_logg_doppler": result.rv_loggerr,
+        "feh_doppler": result.rv_feh,
+        "e_feh_doppler": result.rv_feherr,
+        "visit_pk": result.visit_pk,
+        "rv_visit_pk": result.pk,
+        "rchisq": result.chisq,
+        "n_rv_components": result.n_components,
+        "v_rel_xcorr": result.xcorr_vrel,
+        "e_v_rad_xcorr": result.xcorr_vrelerr,
+        "v_rad_xcorr": result.xcorr_vrad, # formerly vheliobary
+        "rv_components": result.rv_components,
     }
 
 
@@ -466,7 +872,7 @@ def resample_apogee_visit_spectra(
         radial_velocities = get_apogee_visit_radial_velocity
 
     include_visits, wavelength, v_shift = ([], [], [])
-    flux, flux_error = ([], [])
+    flux, e_flux = ([], [])
     bitmask, bad_pixel_mask = ([], [])
 
     for i, visit in enumerate(visits):
@@ -478,12 +884,12 @@ def resample_apogee_visit_spectra(
             else:
                 v = radial_velocities[i]
 
-            hdu_header, hdu_flux, hdu_flux_error, hdu_bitmask, hdu_wl, *_ = range(11)
+            hdu_header, hdu_flux, hdu_e_flux, hdu_bitmask, hdu_wl, *_ = range(11)
 
             v_shift.append(v)
             wavelength.append(image[hdu_wl].data)
             flux.append(image[hdu_flux].data)
-            flux_error.append(image[hdu_flux_error].data)
+            e_flux.append(image[hdu_e_flux].data)
             # We resample the bitmask, and we provide a bad pixel mask.
             bitmask.append(image[hdu_bitmask].data)
             bad_pixel_mask.append((bitmask[-1] & pixel_mask.bad_value) > 0)
@@ -509,9 +915,9 @@ def resample_apogee_visit_spectra(
 
     (
         resampled_flux,
-        resampled_flux_error,
+        resampled_e_flux,
         resampled_bitmask,
-    ) = combine.resample_visit_spectra(*args, flux, flux_error, bitmask, **kwds)
+    ) = combine.resample_visit_spectra(*args, flux, e_flux, bitmask, **kwds)
     # TODO: have combine.resample_visit_spectra return this so we dont repeat ourselves
     meta = dict(
         crval=crval,
@@ -527,14 +933,14 @@ def resample_apogee_visit_spectra(
 
     return (
         resampled_flux,
-        resampled_flux_error,
+        resampled_e_flux,
         resampled_bitmask,
         meta,
     )
 
 
 def increase_flux_uncertainties_due_to_persistence(
-    resampled_flux_error, resampled_bitmask
+    resampled_e_flux, resampled_bitmask
 ) -> None:
     """
     Increase the pixel-level resampled flux uncertainties (in-place, no array copying) due to persistence flags in the resampled bitmask.
@@ -549,14 +955,14 @@ def increase_flux_uncertainties_due_to_persistence(
     is_medium = (resampled_bitmask & pixel_mask.get_value("PERSIST_MED")) > 0
     is_low = (resampled_bitmask & pixel_mask.get_value("PERSIST_LOW")) > 0
 
-    resampled_flux_error[is_high] *= np.sqrt(5)
-    resampled_flux_error[is_medium & ~is_high] *= np.sqrt(4)
-    resampled_flux_error[is_low & ~is_medium & ~is_high] *= np.sqrt(3)
+    resampled_e_flux[is_high] *= np.sqrt(5)
+    resampled_e_flux[is_medium & ~is_high] *= np.sqrt(4)
+    resampled_e_flux[is_low & ~is_medium & ~is_high] *= np.sqrt(3)
     return None
 
 
 def increase_flux_uncertainties_due_to_skylines(
-    resampled_flux_error, resampled_bitmask
+    resampled_e_flux, resampled_bitmask
 ) -> None:
     """
     Increase the pixel-level resampled flux uncertainties (in-place; no array copying) due to significant skylines.
@@ -567,5 +973,25 @@ def increase_flux_uncertainties_due_to_skylines(
     is_significant_skyline = (
         resampled_bitmask & PixelBitMask().get_value("SIG_SKYLINE")
     ) > 0
-    resampled_flux_error[is_significant_skyline] *= np.sqrt(100)
+    resampled_e_flux[is_significant_skyline] *= np.sqrt(100)
     return None
+
+
+if __name__ == "__main__":
+    from astra.database.astradb import DataProduct, Source
+
+    # Example source with data in SDSS-V and SDSS-IV
+    source = Source.get(329915927)
+    from astra.sdss.datamodels.mwm import create_mwm_hdus
+    foo = create_mwm_hdus(
+        source,
+        run2d="v6_0_7",
+        apred="1.0",
+        apogee_release="sdss5",
+        boss_release="sdss5"
+    )
+
+
+    #data_products = list(source.data_products)
+    #create_apogee_hdus(data_products)
+    

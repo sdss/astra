@@ -3,9 +3,8 @@ from scipy.optimize import curve_fit
 from astropy.constants import c
 from astropy import units as u
 from astropy.nddata import StdDevUncertainty
-from astra import log
+from astra.utils import log
 from astra.tools.spectrum import Spectrum1D, SpectrumList
-#from astra.utils import
 from typing import Union, Tuple, Optional
 from collections import OrderedDict
 
@@ -83,6 +82,7 @@ def estimate_labels(
             mask.shape == model_wavelength.shape
         ), "Mask and model wavelengths do not have the same shape"
 
+    '''
     source_id = spectrum.meta.get("CAT_ID", None)        
     if source_id is None and data_product is not None:
         try:
@@ -92,6 +92,7 @@ def estimate_labels(
     parent_data_product_id = spectrum.meta.get("DATA_PRODUCT_ID", None)
     if (parent_data_product_id is None or len(parent_data_product_id) == 0) and data_product is not None:
         parent_data_product_id = [data_product.id] * N
+    '''
     results = []
     meta_results = []
     kwds = kwargs.copy()
@@ -126,10 +127,7 @@ def estimate_labels(
             ftol=opt_tolerance,
     )
 
-        result = OrderedDict([
-            ("source_id", source_id),
-            ("parent_data_product_id", parent_data_product_id[i])
-        ])
+        result = OrderedDict([])
 
         try:
             p_opt, p_cov = curve_fit(objective_function, **kwds)
@@ -173,7 +171,7 @@ def estimate_labels(
             chi_sq = np.sum(((model_flux - flux) / e_flux) ** 2)
             reduced_chi_sq = chi_sq / (model_flux.size - L - 1)
             result.update(
-                snr=spectrum.meta["SNR"][i],
+                #snr=spectrum.meta["SNR"][i],
                 chi_sq=chi_sq, 
                 reduced_chi_sq=reduced_chi_sq
             )

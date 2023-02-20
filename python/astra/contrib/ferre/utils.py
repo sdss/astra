@@ -1,16 +1,13 @@
 """General FERRE utilities."""
 
 import os
-from tkinter import N
 import numpy as np
 import re
 import subprocess
 from typing import Optional
 from tqdm import tqdm
 
-
-from astra import log
-from astra.utils import expand_path
+from astra.utils import log, expand_path
 
 
 def validate_ferre_control_keywords(

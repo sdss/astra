@@ -14,3 +14,5 @@ class SDSSOperator(BaseOperator):
     @cached_property
     def path_instance(self):
         return SDSSPath(release=self.release)
+
+    

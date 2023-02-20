@@ -3,18 +3,14 @@ from airflow.models.baseoperator import BaseOperator
 from astra.database.astradb import (
     database,
     Task,
-    Bundle,
-    TaskBundle,
-    TaskInputDataProducts,
     Source,
     DataProduct,
-    SourceDataProduct,
-    MWMSourceStatus
 )
+from astra.sdss.datamodels.mwm import MWMSourceStatus
 from peewee import fn
 from airflow.exceptions import AirflowSkipException
-from astra.utils import flatten
-from astra import log, __version__ as astra_version
+from astra.utils import log, flatten
+from astra import __version__ as astra_version
 from tqdm import tqdm
 
 from typing import Optional
@@ -124,12 +120,12 @@ class MWMVisitOperator(BaseOperator):
     
         # We need to return mwmVisit data product identifiers.
         q = (
-            SourceDataProduct
-            .select(SourceDataProduct.data_product_id)
-            .join(DataProduct)
+            DataProduct
+            .select(DataProduct.id)
+            .join(Source)
             .where(
                 (DataProduct.filetype == "mwmVisit")
-            &   (SourceDataProduct.source_id.in_(catalogids))
+            &   (Source.catalogid.in_(catalogids))
             )
         )
         if self.apred is not None:
@@ -144,7 +140,6 @@ class MWMVisitOperator(BaseOperator):
             
         return data_product_ids
         
-
         
 
 class MWMStarOperator(BaseOperator):
@@ -254,12 +249,12 @@ class MWMStarOperator(BaseOperator):
     
         # We need to return mwmStar data product identifiers.
         q = (
-            SourceDataProduct
-            .select(SourceDataProduct.data_product_id)
-            .join(DataProduct)
+            DataProduct
+            .select(DataProduct.id)
+            .join(Source)
             .where(
                 (DataProduct.filetype == "mwmStar")
-            &   (SourceDataProduct.source_id.in_(catalogids))
+            &   (Source.catalogid.in_(catalogids))
             )
         )
         if self.apred is not None:
@@ -277,7 +272,7 @@ class MWMStarOperator(BaseOperator):
 
         
 
-
+'''
 class MWMVisitStarFactory(BaseOperator):
 
     ui_color = "#A0B9D9"
@@ -312,9 +307,6 @@ class MWMVisitStarFactory(BaseOperator):
         data_product_ids = list(map(int, tuple(set(flatten(ti.xcom_pull(task_ids=task.upstream_task_ids))))))
         log.info(f"Found {len(data_product_ids)} data product identifiers")
         
-        import pickle
-        with open("/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/mwm/spectro/astra/astra/tmp.pkl", "wb") as fp:
-            pickle.dump(data_product_ids, fp)
 
         parameters = dict(
             release=self.release,
@@ -388,7 +380,7 @@ class MWMVisitStarFactory(BaseOperator):
         log.info(f"Done.")
 
         return [b.id for b in bundles]
-
+'''
 
 STELLAR_CARTONS = (
     # "bhm_aqmes_bonus_bright",                     # bhm_filler

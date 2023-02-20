@@ -2,9 +2,9 @@
 APOGEENet is a pipeline to estimate labels of young stellar objects using a neural network.
 
 
-Test :py:class:`astra.contrib.apogeenet.base.StellarParameters`
+Test :py:class:`astra.contrib.apogeenet.base.APOGEENet`
 
-.. autosummary:: astra.contrib.apogeenet.base.StellarParameters
+.. autosummary:: astra.contrib.apogeenet.base.APOGEENet
 
 foo 
 
@@ -12,13 +12,13 @@ foo
 
    .. autosummary::
 
-      StellarParameters
+      APOGEENet
 
 
 
 
 """
 
-from .base import StellarParameters
+from .base import APOGEENet
 
-__all__ = ["StellarParameter"]
+__all__ = ["APOGEENet"]

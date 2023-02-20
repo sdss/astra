@@ -1,98 +1,102 @@
-from astra import log
-from astra.utils import executable, list_to_dict
-from astra.base import Parameter, TaskInstance, DictParameter
+
+from typing import Iterable, Optional
+from peewee import FloatField, IntegerField
+
 from astra.tools.spectrum import SpectrumList
 from astra.tools.spectrum.utils import spectrum_overlaps
-from astra.database.astradb import database, ThePayneOutput
-from astra.contrib.thepayne.utils import read_mask, read_model
+from astra.database.astradb import DataProduct, SDSSOutput
+from astra.base import task_decorator
+from astra.utils import executable
+
 from astra.contrib.thepayne.model import estimate_labels
+from astra.contrib.thepayne.utils import read_mask, read_model
 
-from astra.sdss.datamodels.base import get_extname
-from astra.sdss.datamodels.pipeline import create_pipeline_product
 
-class ThePayne(TaskInstance):
+LABEL_NAMES = ("teff", "logg", "v_turb", "c_h", "n_h", "o_h", "na_h", "mg_h", "al_h", "si_h", "p_h", "s_h", "k_h", "ca_h", "ti_h", "v_h", "cr_h", "mn_h", "fe_h", "co_h", "ni_h", "cu_h", "ge_h", "c12_c13", "v_macro")
 
-    """Estimate stellar labels using a single-layer neural network."""
+class ThePayneOutput(SDSSOutput):
 
-    model_path = Parameter(
-        default="$MWM_ASTRA/component_data/ThePayne/payne_apogee_nn.pkl", bundled=True
-    )
-    # Note: mask should be relative to the model pixels, not the observed pixels.
-    # TODO: document this somewhere, or better yet, put it in the model file itself.
-    mask_path = Parameter(
-        default="$MWM_ASTRA/component_data/ThePayne/payne_apogee_mask.npy", bundled=True
-    )
+    v_rad = FloatField(null=True)
 
-    opt_tolerance = Parameter(default=5e-4)
-    v_rad_tolerance = Parameter(default=0)
-    initial_labels = Parameter(default=None)
+    chi_sq = FloatField()
+    reduced_chi_sq = FloatField()
+    bitmask_flag = IntegerField(default=0)
 
-    data_slice = Parameter(default=[0, 1])  # only relevant for ApStar data products
-    continuum_method = Parameter(
-        default="astra.tools.continuum.Chebyshev", bundled=True
-    )
-    continuum_kwargs = DictParameter(
-        default=dict(
-            deg=4,
-            regions=[(15_100.0, 15_793.0), (15_880.0, 16_417.0), (16_499.0, 17_000.0)],
-            mask="$MWM_ASTRA/component_data/ThePayne/cannon_apogee_pixels.npy",
-        ),
-        bundled=True,
-    )
 
-    def execute(self):
+for field_name in LABEL_NAMES:
+    ThePayneOutput._meta.add_field(field_name, FloatField())
+    ThePayneOutput._meta.add_field(f"e_{field_name}", FloatField())
+    ThePayneOutput._meta.add_field(f"bitmask_{field_name}", IntegerField(default=0))
 
-        model = read_model(self.model_path)
+for i, field_name_i in enumerate(LABEL_NAMES):
+    for field_name_j in LABEL_NAMES[i+1:]:
+        ThePayneOutput._meta.add_field(f"rho_{field_name_i}_{field_name_j}", FloatField())
 
-        if self.continuum_method is not None:
-            f_continuum = executable(self.continuum_method)(**self.continuum_kwargs)
+
+@task_decorator
+def the_payne(
+    data_product: DataProduct,
+    model_path: str = "$MWM_ASTRA/component_data/ThePayne/payne_apogee_nn.pkl",
+    mask_path: str = "$MWM_ASTRA/component_data/ThePayne/payne_apogee_mask.npy",
+    opt_tolerance: Optional[float] = 5e-4,
+    v_rad_tolerance: Optional[float] = 0,
+    initial_labels: Optional[Iterable[float]] = None,
+    continuum_method: str = "astra.tools.continuum.Chebyshev",
+    continuum_kwargs: dict = dict(
+        deg=4,
+        regions=[(15_100.0, 15_793.0), (15_880.0, 16_417.0), (16_499.0, 17_000.0)],
+        mask="$MWM_ASTRA/component_data/ThePayne/cannon_apogee_pixels.npy",
+    ),
+) -> Iterable[ThePayneOutput]:
+
+    model = read_model(model_path)
+    mask = read_mask(mask_path)
+    
+    args = [
+        model[k]
+        for k in (
+            "weights",
+            "biases",
+            "x_min",
+            "x_max",
+            "wavelength",
+            "label_names",
+        )
+    ]
+
+    for spectrum in SpectrumList.read(data_product.path):
+        if not spectrum_overlaps(spectrum, model["wavelength"]):
+            continue
+        
+        if continuum_method is not None:
+            f_continuum = executable(continuum_method)(**continuum_kwargs)
+            f_continuum.fit(spectrum)
+            continuum = f_continuum(spectrum)
         else:
-            f_continuum = None
+            continuum = None
 
-        mask = None if self.mask_path is None else read_mask(self.mask_path)
-        # Here we are assuming the mask is the same size as the number of model pixels.
+        labels, meta = estimate_labels(
+            spectrum,
+            *args,
+            mask=mask,
+            initial_labels=initial_labels,
+            v_rad_tolerance=v_rad_tolerance,
+            opt_tolerance=opt_tolerance,
+            continuum=continuum,
+            data_product=data_product
+        )
+        assert len(labels) == 1, "Expected 1 spectrum"
+        result = ThePayneOutput(
+            data_product=data_product,
+            spectrum=spectrum,
+            **labels[0]
+        )
 
-        args = [
-            model[k]
-            for k in (
-                "weights",
-                "biases",
-                "x_min",
-                "x_max",
-                "wavelength",
-                "label_names",
-            )
-        ]
+        print(f"Write out astraStar product")
+        yield result
+        # TODO: Write out astrastar product
 
-        for task, data_products, parameters in self.iterable():
-            data_product, = data_products
-            results, database_results, header_groups = ({}, [], {})
-            for spectrum in SpectrumList.read(
-                data_product.path, data_slice=parameters.get("data_slice", None)
-            ):
-                if not spectrum_overlaps(spectrum, model["wavelength"]):
-                    continue
-            
-                if f_continuum is not None:
-                    f_continuum.fit(spectrum)
-                    continuum = f_continuum(spectrum)
-                else:
-                    continuum = None
-
-                extname = get_extname(spectrum, data_product)
-                
-                labels, meta = estimate_labels(
-                    spectrum,
-                    *args,
-                    mask=mask,
-                    initial_labels=parameters["initial_labels"],
-                    v_rad_tolerance=parameters["v_rad_tolerance"],
-                    opt_tolerance=parameters["opt_tolerance"],
-                    continuum=continuum,
-                    data_product=data_product
-                )
-                database_results.extend(labels)
-
+'''
                 hdu_results = list_to_dict(labels)
                 hdu_results.update(list_to_dict(meta))
                 results[extname] = hdu_results
@@ -108,3 +112,4 @@ class ThePayne(TaskInstance):
 
             # Create astraStar/astraVisit data product and link it to this task.
             create_pipeline_product(task, data_product, results, header_groups=header_groups)
+'''

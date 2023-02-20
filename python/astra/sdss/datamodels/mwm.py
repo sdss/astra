@@ -6,21 +6,17 @@ import numpy as np
 from astropy.io import fits
 from astropy.time import Time
 from sdss_access import SDSSPath
-from typing import Union, List, Callable, Optional, Dict, Tuple
+from typing import Union, List, Callable, Optional, Dict, Tuple, Iterable
 
-from astra import log, __version__ as v_astra
+from astra import __version__ as v_astra
+from astra.base import task_decorator
 
-from astra.base import TaskInstance, Parameter
-from astra.database.astradb import (
-    Source,
-    MWMSourceStatus,
-    DataProduct,
-    SourceDataProduct,
-    TaskOutputDataProducts,
-)
-from astra.utils import expand_path
+#from astra.base import TaskInstance, Parameter
+from astra.database.astradb import Source, DataProduct, BaseTaskOutput
+from astra.utils import log, flatten, expand_path
 from astra.sdss.datamodels import base, apogee, boss
 
+from peewee import IntegerField, DateTimeField
 
 HDU_DESCRIPTIONS = [
     "Source information only",
@@ -30,10 +26,156 @@ HDU_DESCRIPTIONS = [
     "APOGEE spectra from Las Campanas Observatory",
 ]
 
+class MWMSourceStatus(BaseTaskOutput):
 
+    num_apogee_apo_visits = IntegerField(default=0)
+    num_apogee_lco_visits = IntegerField(default=0)
+    num_boss_apo_visits = IntegerField(default=0)
+    num_boss_lco_visits = IntegerField(default=0)
+
+    num_apogee_apo_visits_in_stack = IntegerField(default=0)
+    num_apogee_lco_visits_in_stack = IntegerField(default=0)
+    num_boss_apo_visits_in_stack = IntegerField(default=0)
+    num_boss_lco_visits_in_stack = IntegerField(default=0)
+
+    obs_start_apogee_apo = DateTimeField(null=True)
+    obs_end_apogee_apo = DateTimeField(null=True)
+    obs_start_apogee_lco = DateTimeField(null=True)
+    obs_end_apogee_lco = DateTimeField(null=True)
+
+    obs_start_boss_apo = DateTimeField(null=True)
+    obs_end_boss_apo = DateTimeField(null=True)
+    obs_start_boss_lco = DateTimeField(null=True)
+    obs_end_boss_lco = DateTimeField(null=True)
+
+    updated = DateTimeField(default=datetime.datetime.now)
+
+
+@task_decorator
 def create_mwm_data_products(
+    source: Iterable[Union[Source, int]],
+    run2d: str,
+    apred: str,
+    release: str = "sdss5",
+    boss_release: str = "sdss5",
+    apogee_release: str = "sdss5",
+    boss_kwargs: Optional[Dict] = None,
+    apogee_kwargs: Optional[Dict] = None,
+) -> Iterable[MWMSourceStatus]: 
+    """
+    Create Milky Way Mapper data products (mwmVisit and mwmStar) for the given source.
+
+    :param source:
+        The SDSS-V source to create data products for.
+
+    :param boss_kwargs: [optional]
+        Keyword arguments to pass to the `boss.create_boss_hdus` function.
+
+    :param apogee_kwargs: [optional]
+        Keyword arguments to pass to the `apogee.create_apogee_hdus` function.
+    """
+
+    for source in flatten(source):
+        log.info(f"Creating data products for source {source}")
+        meta = _create_mwm_data_products(
+            source,
+            run2d=run2d,
+            apred=apred,
+            release=release,
+            boss_release=boss_release,
+            apogee_release=apogee_release,
+            boss_kwargs=boss_kwargs,
+            apogee_kwargs=apogee_kwargs,
+        )
+        yield MWMSourceStatus(
+            source=source, 
+            data_product=None,
+            **meta
+        )
+
+
+def _create_mwm_data_products(
     source: Union[Source, int],
-    input_data_products: Optional[List[DataProduct]] = None,
+    run2d: str,
+    apred: str,
+    release: str = "sdss5",
+    boss_release: str = "sdss5",
+    apogee_release: str = "sdss5",
+    boss_kwargs: Optional[Dict] = None,
+    apogee_kwargs: Optional[Dict] = None,
+):
+
+    if isinstance(source, int):
+        source = Source.get(catalogid=source)
+
+    hdu_visit_list, hdu_star_list, meta = create_mwm_hdus(
+        source, 
+        run2d=run2d,
+        apred=apred,
+        boss_release=boss_release,
+        apogee_release=apogee_release,
+        boss_kwargs=boss_kwargs, 
+        apogee_kwargs=apogee_kwargs
+    )
+    any_stacked_spectra = sum([sum(hdu.data["IN_STACK"]) for hdu in hdu_visit_list if hdu.size > 0]) > 0
+    kwds = dict(
+        cat_id=source.catalogid,
+        v_astra=v_astra,
+        run2d=run2d,
+        apred=apred,
+    )
+    p = SDSSPath(release)
+    mwmStar_path = p.full("mwmStar", **kwds)
+    mwmVisit_path = p.full("mwmVisit", **kwds)
+
+    # Create necessary folders
+    os.makedirs(os.path.dirname(mwmVisit_path), exist_ok=True)
+    if any_stacked_spectra:
+        os.makedirs(os.path.dirname(mwmStar_path), exist_ok=True)
+    else:
+        # Remove an existing mwmStar file if there are no stacked spectra.
+        if os.path.exists(mwmStar_path):
+            os.unlink(mwmStar_path)
+    
+    # Ensure mwmVisit and mwmStar files are always synchronised.
+    try:
+        hdu_visit_list.writeto(mwmVisit_path, overwrite=True)
+        if any_stacked_spectra:
+            hdu_star_list.writeto(mwmStar_path, overwrite=True)
+    except:
+        log.exception(
+            f"Exception when trying to write to either:\n{mwmVisit_path}\n{mwmStar_path}"
+        )
+        # Delete both.
+        for path in (mwmVisit_path, mwmStar_path):
+            if os.path.exists(path):
+                os.unlink(path)
+    else:
+        log.info(f"Wrote mwmVisit product to {mwmVisit_path}")
+    
+        # Create output data product records that link to this task.
+        dp_visit, visit_created = DataProduct.get_or_create(
+            source=source, release=release, filetype="mwmVisit", kwargs=kwds
+        )
+        log.info(f"Created data product {dp_visit} for source {source}")
+
+        if any_stacked_spectra:
+            log.info(f"Wrote mwmStar product to {mwmStar_path}")
+            dp_star, star_created = DataProduct.get_or_create(
+                source=source, release=release, filetype="mwmStar", kwargs=kwds
+            )        
+        else:
+            log.info(f"No stacked spectra to store for {source}")
+
+    return meta
+
+
+def create_mwm_hdus(
+    source: Union[Source, int],
+    run2d: str,
+    apred: str,
+    apogee_release: str,
+    boss_release: str,
     boss_kwargs: Optional[Dict] = None,
     apogee_kwargs: Optional[Dict] = None,
 ):  # -> Tuple[DataProduct, DataProduct]:
@@ -43,10 +185,6 @@ def create_mwm_data_products(
     :param source:
         The SDSS-V source to create data products for.
 
-    :param input_data_products: [optional]
-        The input data products to use when creating these products. If `None`
-        is given then all possible data products linked to this source will be used.
-
     :param boss_kwargs: [optional]
         Keyword arguments to pass to the `boss.create_boss_hdus` function.
 
@@ -54,50 +192,46 @@ def create_mwm_data_products(
         Keyword arguments to pass to the `apogee.create_apogee_hdus` function.
     """
 
-    input_filetypes = boss_filetype, apogee_filetype = ("specFull", "apVisit")
+    boss_filetype, apogee_filetype = ("specFull", "apVisit")
 
-    if input_data_products is None:
-        input_data_products = tuple(
-            [dp for dp in source.data_products if dp.filetype in input_filetypes]
-        )
-
-    for dp in input_data_products:
-        if dp.filetype not in input_filetypes:
-            log.warning(
-                f"Ignoring file type '{dp.filetype}' ({dp}: {dp.path}). It's not used for creating MWM Visit/Star products."
-            )
+    data_products = list(source.data_products)
 
     cards = base.create_primary_hdu_cards(source, HDU_DESCRIPTIONS)
     primary_visit_hdu = fits.PrimaryHDU(header=fits.Header(cards))
     primary_star_hdu = fits.PrimaryHDU(header=fits.Header(cards))
 
+    is_boss = lambda dp: (
+        (dp.filetype == boss_filetype) 
+    &   ((run2d is None) or (dp.kwargs.get("run2d", None) == run2d))
+    &   ((boss_release is None) or (dp.release == boss_release))
+    )
+    is_apogee_dr17_apstar = lambda dp: (dp.filetype == "apStar") & (dp.release == "dr17")
+    is_apogee_sdss5_apvisit = lambda dp: (
+        (dp.filetype == apogee_filetype)
+    &   ((apred is None) or (dp.kwargs.get("apred", None) == apred))
+    &   ((apogee_release is None) or (dp.release == apogee_release))
+    )
+    is_apogee = lambda dp: is_apogee_dr17_apstar(dp) or is_apogee_sdss5_apvisit(dp)
+
+    ignored = [dp for dp in data_products if not is_apogee(dp) and not is_boss(dp)]
+    for dp in ignored:
+        log.warning(
+            f"Ignoring file type '{dp.filetype}' ({dp}: {dp.path}). It's not used for creating MWM Visit/Star products."
+        )
+
     boss_north_visits, boss_north_star = boss.create_boss_hdus(
-        [dp for dp in input_data_products if dp.filetype == boss_filetype],
+        list(filter(is_boss, data_products)),
         observatory="APO",
         **(boss_kwargs or dict()),
     )
 
+    apogee_north_visits, apogee_south_visits, apogee_north_star, apogee_south_star = apogee.create_apogee_hdus(
+        list(filter(is_apogee, data_products)),
+        **(apogee_kwargs or dict()),
+    )
+
     boss_south_visits = base.create_empty_hdu("LCO", "BOSS")
     boss_south_star = base.create_empty_hdu("LCO", "BOSS")
-
-    apogee_north_visits, apogee_north_star = apogee.create_apogee_hdus(
-        [
-            dp
-            for dp in input_data_products
-            if dp.filetype == apogee_filetype and dp.kwargs["telescope"] == "apo25m"
-        ],
-        observatory="APO",
-        **(apogee_kwargs or dict()),
-    )
-    apogee_south_visits, apogee_south_star = apogee.create_apogee_hdus(
-        [
-            dp
-            for dp in input_data_products
-            if dp.filetype == apogee_filetype and dp.kwargs["telescope"] == "lco25m"
-        ],
-        observatory="LCO",
-        **(apogee_kwargs or dict()),
-    )
 
     hdu_visit_list = fits.HDUList(
         [
@@ -193,108 +327,3 @@ def get_data_hdu_observatory_and_instrument():
         ("LCO", "APOGEE"),
     ]
 
-
-class CreateMWMVisitStarProducts(TaskInstance):
-
-    """A task to create mwmVisit and mwmStar data products."""
-
-    catalogid = Parameter()
-    release = Parameter(bundled=True)
-    run2d = Parameter(bundled=True)
-    apred = Parameter(bundled=True)
-
-    def execute(self):
-
-        sdss_path = SDSSPath(self.release)
-
-        for task, data_products, parameters in self.iterable():
-
-            if len(data_products) == 0:
-                raise ValueError(f"No data products given for task {task}")
-
-            catalogid = parameters["catalogid"]
-
-            log.info(f"Creating products for {catalogid}")
-            
-            hdu_visit_list, hdu_star_list, meta = create_mwm_data_products(
-                catalogid, input_data_products=data_products
-            )
-            log.info(f"Created HDUs for {catalogid}")
-            # Is there any data in the stacked spectra?
-            any_stacked_spectra = sum([sum(hdu.data["IN_STACK"]) for hdu in hdu_visit_list if hdu.size > 0]) > 0
-            
-            kwds = dict(
-                cat_id=catalogid,
-                v_astra=v_astra,
-                run2d=self.run2d,
-                apred=self.apred,
-            )
-            # Write to disk.
-            log.warn("Setting mwmVisit/mwmStar paths by hand because we are waiting on a new release of sdss_access and the tree product") # TODO
-            k = 100
-            #catalogid_groups = f"{(catalogid // k) % k:.0f}/{catalogid % k:.0f}"
-            log.warn("catalogid groups still wrong")
-            #catalogid_groups = f"{catalogid % 1_000:.0f}/{catalogid & 1_000:.0f}"
-            catalogid_groups = f"{(catalogid // k) % k:0>2.0f}/{catalogid % k:0>2.0f}"
-            mwmStar_path = expand_path("$MWM_ASTRA/{v_astra}/{run2d}-{apred}/spectra/star/{catalogid_groups}/mwmStar-{v_astra}-{cat_id}.fits".format(catalogid_groups=catalogid_groups, **kwds))
-            mwmVisit_path = expand_path("$MWM_ASTRA/{v_astra}/{run2d}-{apred}/spectra/visit/{catalogid_groups}/mwmVisit-{v_astra}-{cat_id}.fits".format(catalogid_groups=catalogid_groups, **kwds))
-            #mwmVisit_path = sdss_path.full("mwmVisit", **kwds)
-            #mwmStar_path = sdss_path.full("mwmStar", **kwds)
-
-            # Create necessary folders
-            os.makedirs(os.path.dirname(mwmVisit_path), exist_ok=True)
-            if any_stacked_spectra:
-                os.makedirs(os.path.dirname(mwmStar_path), exist_ok=True)
-            else:
-                if os.path.exists(mwmStar_path):
-                    os.unlink(mwmStar_path)
-            
-            # Ensure mwmVisit and mwmStar files are always synchronised.
-            try:
-                hdu_visit_list.writeto(mwmVisit_path, overwrite=True)
-                if any_stacked_spectra:
-                    hdu_star_list.writeto(mwmStar_path, overwrite=True)
-            except:
-                log.exception(
-                    f"Exception when trying to write to either:\n{mwmVisit_path}\n{mwmStar_path}"
-                )
-                # Delete both.
-                for path in (mwmVisit_path, mwmStar_path):
-                    if os.path.exists(path):
-                        os.unlink(path)
-            else:
-                log.info(f"Wrote mwmVisit product to {mwmVisit_path}")
-            
-                # Create output data product records that link to this task.
-                dp_visit, visit_created = DataProduct.get_or_create(
-                    release=self.release, filetype="mwmVisit", kwargs=kwds
-                )
-                TaskOutputDataProducts.get_or_create(task=task, data_product=dp_visit)
-                SourceDataProduct.get_or_create(
-                    data_product=dp_visit, source_id=catalogid
-                )
-                log.info(f"Created data product {dp_visit} for catalogid {catalogid}")
-
-                if any_stacked_spectra:
-                    log.info(f"Wrote mwmStar product to {mwmStar_path}")
-                    dp_star, star_created = DataProduct.get_or_create(
-                        release=self.release, filetype="mwmStar", kwargs=kwds
-                    )
-                    TaskOutputDataProducts.get_or_create(task=task, data_product=dp_star)
-                    SourceDataProduct.get_or_create(
-                        data_product=dp_star, source_id=catalogid
-                    )
-                    log.info(f"Created data product {dp_star} for catalogid {catalogid}")
-                
-                else:
-                    log.info(f"No stacked spectra to store for {catalogid}")
-
-                # Get or create an output record.
-                task.create_or_update_outputs(MWMSourceStatus, [meta])
-
-        return None
-
-    def post_execute(self):
-        """Generate JSON files for the spectra inspecta."""
-        # TODO
-        return None

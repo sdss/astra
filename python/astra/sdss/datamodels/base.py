@@ -2,9 +2,10 @@ import datetime
 import numpy as np
 from typing import Union, List, Callable, Optional, Dict
 from astropy.io import fits
-from astra import log, __version__ as astra_version
+from astra import __version__ as astra_version
+from astra.utils import log
 from peewee import Alias, JOIN, fn
-from astra.database.astradb import Source
+from astra.database.astradb import Source, database
 
 
 from healpy import ang2pix
@@ -331,11 +332,12 @@ GLOSSARY = {
     "CATALOGID": "SDSS-V catalog identifier",
     "ISPLATE": "Whether the data were taken with plates",
     # APOGEE data model keywords
+    "PREFIX": "DR17 prefix for APOGEE north (ap) or south (as)",
     "FIBER": "Fiber number",
     "TELESCOPE": "Telescope name",
     "PLATE": "Plate number",
     "FIELD": "Field number",
-    "APRED": "APOGEE reduction tag",
+    "APRED": "APOGEE DRP version(s)",
     # MWM data model keywords not specified elsewhere
     "V_ASTRA": "Astra version",
     "CAT_ID": "SDSS-V catalog identifier",
@@ -356,12 +358,19 @@ GLOSSARY = {
     
     "CAT_ID": "SDSS-V catalog identifier",
     "TIC_ID": "TESS Input Catalog (v8) identifier",
-    "GAIA_ID": "Gaia DR2 source identifier",
+    #"GAIA_ID": "Gaia DR2 source identifier",
 
 
-    "G_MAG": f"Gaia DR2 mean apparent G magnitude [mag]",
-    "RP_MAG": f"Gaia DR2 mean apparent RP magnitude [mag]",
-    "BP_MAG": f"Gaia DR2 mean apparent BP magnitude [mag]",
+    # Continuum kwargs
+    "CONTINUUM_THETA": "Sine and cosine coefficients for continuum fit",
+    "CONTINUUM_PHI": "Amplitudes to approximate the rectified flux",    
+    "CONTINUUM_RCHISQ": "Reduced chi-squared of the continuum fit",
+    "CONTINUUM_SUCCESS": "Success flag for the continuum fit",
+    "CONTINUUM_WARNINGS": "Number of warnings from the continuum fit",
+
+    #"G_MAG": f"Gaia DR2 mean apparent G magnitude [mag]",
+    #"RP_MAG": f"Gaia DR2 mean apparent RP magnitude [mag]",
+    #"BP_MAG": f"Gaia DR2 mean apparent BP magnitude [mag]",
     "J_MAG": "2MASS mean apparent J magnitude [mag]",
     "H_MAG": "2MASS mean apparent H magnitude [mag]",
     "K_MAG": "2MASS mean apparent K magnitude [mag]",
@@ -371,17 +380,19 @@ GLOSSARY = {
 
     "RA": "SDSS-V catalog right ascension (J2000) [deg]",
     "DEC": "SDSS-V catalog declination (J2000) [deg]",
-    "RA_GAIA": f"Gaia DR2 right ascension [deg]",
-    "DEC_GAIA": f"Gaia DR2 declination [deg]",
-    "PLX": f"Gaia DR2 parallax [mas]",
-    "E_PLX": f"Gaia DR2 parallax error [mas]",
-    "PMRA": f"Gaia DR2 proper motion in RA [mas/yr]",
-    "E_PMRA": f"Gaia DR2 proper motion in RA error [mas/yr]",
-    "PMDE": f"Gaia DR2 proper motion in DEC [mas/yr]",
-    "E_PMDE": f"Gaia DR2 proper motion in DEC error [mas/yr]",
-    "V_RAD_GAIA": f"Gaia DR2 radial velocity [km/s]",
-    "E_V_RAD_GAIA": f"Gaia DR2 radial velocity error [km/s]",
+    #"RA_GAIA": f"Gaia DR2 right ascension [deg]",
+    #"DEC_GAIA": f"Gaia DR2 declination [deg]",
+    #"PLX": f"Gaia DR2 parallax [mas]",
+    #"E_PLX": f"Gaia DR2 parallax error [mas]",
+    #"PMRA": f"Gaia DR2 proper motion in RA [mas/yr]",
+    #"E_PMRA": f"Gaia DR2 proper motion in RA error [mas/yr]",
+    #"PMDE": f"Gaia DR2 proper motion in DEC [mas/yr]",
+    #"E_PMDE": f"Gaia DR2 proper motion in DEC error [mas/yr]",
+    #"V_RAD_GAIA": f"Gaia DR2 radial velocity [km/s]",
+    #"E_V_RAD_GAIA": f"Gaia DR2 radial velocity error [km/s]",
     
+    "V_XMATCH": "Cross-match version used for auxillary data",
+
     # APOGEE DRP stuff
     "V_SCATTER": "Scatter in radial velocity measurements [km/s]",
     "E_V_MED": "Median of RV errors of individual visits [km/s]",
@@ -546,6 +557,61 @@ def get_first_carton(source: Union[Source, int]):
     return Carton.select().join(sq, on=(sq.c.carton_pk == Carton.pk)).first()
 
 
+def _resolve_v1_catalogid(catalogid):
+    """
+    Resolve the catalog identifier for version 1 for this source. 
+
+    This is a temporary function so that we can still use cross-matches when we don't have a `sdss_id`.
+    """
+
+    # Try matching directly to v1.
+    cursor = database.execute_sql(
+        f"""
+        SELECT lowest_catalogid, highest_catalogid
+        FROM sandbox.catalog_ver25_to_ver31_full_unique
+        WHERE lowest_catalogid = {catalogid}
+        OR highest_catalogid = {catalogid}
+        """
+    )
+    try:
+        (lowest_catalogid, highest_catalogid) = cursor.fetchone()
+    except:
+        return None
+    else:
+        return highest_catalogid
+
+
+def _resolve_v0p5_catalogid(catalogid):
+    # Must be a v0.5 source.
+    v0p5_cursor = database.execute_sql(
+        f"""
+        SELECT lowest_catalogid, highest_catalogid
+        FROM sandbox.catalog_ver21_to_ver25_full_unique
+        WHERE lowest_catalogid = {catalogid}
+        OR highest_catalogid = {catalogid}
+        """
+    )
+    try:
+        (lowest_catalogid, highest_catalogid) = v0p5_cursor.fetchone()
+    except:
+        return None
+    else:
+        return highest_catalogid
+
+
+def resolve_v1_catalogid(catalogid):
+    v1_catalogid = _resolve_v1_catalogid(catalogid)
+    if v1_catalogid is None:
+        v0p5_catalogid = _resolve_v0p5_catalogid(catalogid)
+        if v0p5_catalogid is None:
+            return None
+        else:
+            return _resolve_v1_catalogid(v0p5_catalogid)
+    else:
+        return v1_catalogid
+
+
+
 def get_auxiliary_source_data(source: Union[Source, int]):
     """
     Return auxiliary data (e.g., photometry) for a given SDSS-V source.
@@ -558,23 +624,29 @@ def get_auxiliary_source_data(source: Union[Source, int]):
         Catalog,
         CatalogToTIC_v8,
         TIC_v8 as TIC,
+        CatalogToTwoMassPSC,
         TwoMassPSC,
-        Gaia_DR2 as Gaia
+        CatalogToGaia_DR3 as CatalogToGaia,
+        Gaia_DR2,
+        Gaia_DR2_Neighbourhood,
+        Gaia_DR3 as Gaia
     )
 
     catalogid = get_catalog_identifier(source)
+    catalogid_v1 = resolve_v1_catalogid(catalogid)
     tic_dr = TIC.__name__.split("_")[-1]
     gaia_dr = Gaia.__name__.split("_")[-1]
 
-    ignore = lambda c: c is None or isinstance(c, str)
+    ignore = lambda c: c is None or isinstance(c, (str, int))
 
     # Define the columns and associated comments.
     field_descriptors = [
         BLANK_CARD,
         (" ", "IDENTIFIERS", None),
-        ("CAT_ID", Catalog.catalogid, f"SDSS-V catalog identifier"),
-        ("TIC_ID", TIC.id.alias("tic_id"), f"TESS Input Catalog ({tic_dr}) identifier"),
         ("GAIA_ID", Gaia.source_id, f"Gaia {gaia_dr} source identifier"),
+        ("TIC_ID", TIC.id.alias("tic_id"), f"TESS Input Catalog ({tic_dr}) identifier"),
+        ("CAT_ID", catalogid, f"SDSS-V catalog identifier"),        
+        ("CAT_ID_1", catalogid_v1, f"SDSS-V catalog identifier (v1)"),
         BLANK_CARD,
         (" ", "ASTROMETRY", None),
         ("RA", Catalog.ra, "SDSS-V catalog right ascension (J2000) [deg]"),
@@ -625,7 +697,9 @@ def get_auxiliary_source_data(source: Union[Source, int]):
         ("K_MAG", TwoMassPSC.k_m, f"2MASS mean apparent K magnitude [mag]"),
         ("E_K_MAG", TwoMassPSC.k_cmsig, f"2MASS mean apparent K magnitude error [mag]"),
     ]
-
+    
+    """
+    # This is how we had to query before we had cross-matches in the database.
     q = (
         Catalog.select(*[c for k, c, comment in field_descriptors if not ignore(c)])
         .distinct(Catalog.catalogid)
@@ -638,45 +712,87 @@ def get_auxiliary_source_data(source: Union[Source, int]):
         .dicts()
     )
     row = q.first()
+    """
+    cols = [c for k, c, comment in field_descriptors if not ignore(c)]
+    q = (
+        Catalog
+        .select(*cols)
+        .join(CatalogToTIC_v8, JOIN.LEFT_OUTER)
+        .join(TIC, JOIN.LEFT_OUTER)
+        .switch(Catalog)
+        .join(CatalogToGaia, JOIN.LEFT_OUTER)
+        .join(Gaia, JOIN.LEFT_OUTER)
+        .switch(Catalog)
+        .join(CatalogToTwoMassPSC, JOIN.LEFT_OUTER)
+        .join(TwoMassPSC, JOIN.LEFT_OUTER)
+        .where(Catalog.catalogid == catalogid_v1)
+        .dicts()
+    )
+
+    only_fields_of = lambda model: [c for k, c, comment in field_descriptors if not ignore(c) and not isinstance(c, Alias) and c.model == model]
+    row = q.first()
 
     if row is None:
-        log.warning(f"Trouble getting auxillary data for Source {catalogid}. Using separate queries and cone searches.")
-
-        only_fields_of = lambda model: [c for k, c, comment in field_descriptors if not ignore(c) and not isinstance(c, Alias) and c.model == model]
-        # Fill it with what we can.
-        row = (
-            Catalog
-            .select(*only_fields_of(Catalog))
+        log.warning(f"Failed to cross-match with v1, using v0 instead..")
+        # Try again with catalog_v0, and use Gaia_DR2_neighbourhood
+        q = (
+            Catalog.select(*[c for k, c, comment in field_descriptors if not ignore(c)])
+            .distinct(Catalog.catalogid)
+            .join(CatalogToTIC_v8, JOIN.LEFT_OUTER)
+            .join(TIC)
+            .join(Gaia_DR2, JOIN.LEFT_OUTER)
+            .join(Gaia_DR2_Neighbourhood, on=(Gaia_DR2.source_id == Gaia_DR2_Neighbourhood.dr2_source_id))
+            .join(Gaia, on=(Gaia.source_id == Gaia_DR2_Neighbourhood.dr3_source_id))
+            .switch(TIC)
+            .join(TwoMassPSC, JOIN.LEFT_OUTER)
             .where(Catalog.catalogid == catalogid)
             .dicts()
-            .first()
-        )
-        row.update(
-            CatalogToTIC_v8
-            .select(CatalogToTIC_v8.target_id.alias("tic_id"))
-            .where(CatalogToTIC_v8.catalogid == catalogid)
-            .dicts()
-            .first()
-            or {"tic_id": None}
-        )
-        # Cone search Gaia and 2MASS
-        # TODO: Don't do this!
-        row.update(
-            Gaia
-            .select(*only_fields_of(Gaia))
-            .where(Gaia.cone_search(row["ra"], row["dec"], 1.0 / 3600.0))
-            .dicts()
-            .first() or dict()
-        )
+        )        
 
-        # TODO: Don't do this!
-        row.update(
-            TwoMassPSC
-            .select(*only_fields_of(TwoMassPSC))
-            .where(TwoMassPSC.cone_search(row["ra"], row["dec"], 1.0 / 3600.0, dec_col="decl"))
-            .dicts()
-            .first() or dict()
-        )
+        row = q.first()
+
+        if row is None:
+            xmatch_used = "xm"
+            log.warning(f"Trouble getting auxillary data for Source {catalogid_v1}. Using separate queries and cone searches.")
+
+            # Fill it with what we can.
+            row = (
+                Catalog
+                .select(*only_fields_of(Catalog))
+                .where(Catalog.catalogid == catalogid)
+                .dicts()
+                .first()
+            )
+            row.update(
+                CatalogToTIC_v8
+                .select(CatalogToTIC_v8.target_id.alias("tic_id"))
+                .where(CatalogToTIC_v8.catalogid == catalogid)
+                .dicts()
+                .first()
+                or {"tic_id": None}
+            )
+            # Cone search Gaia and 2MASS
+            # TODO: Don't do this!
+            row.update(
+                Gaia
+                .select(*only_fields_of(Gaia))
+                .where(Gaia.cone_search(row["ra"], row["dec"], 1.0 / 3600.0))
+                .dicts()
+                .first() or dict()
+            )
+
+            # TODO: Don't do this!
+            row.update(
+                TwoMassPSC
+                .select(*only_fields_of(TwoMassPSC))
+                .where(TwoMassPSC.cone_search(row["ra"], row["dec"], 1.0 / 3600.0, dec_col="decl"))
+                .dicts()
+                .first() or dict()
+            )
+        else:
+            xmatch_used = "v0"
+    else:
+        xmatch_used = "v1"
 
     #  Damn. Floating point nan values are not allowed in FITS headers.
     default_values = {}
@@ -717,6 +833,7 @@ def get_auxiliary_source_data(source: Union[Source, int]):
                 ",".join(list(set([p.split("_")[0] for p in programs]))),
                 f"SDSS-V mappers",
             ),
+            ("V_XMATCH", xmatch_used, "Cross-match version used for auxillary data"),
         ]
     )
     return data

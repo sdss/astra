@@ -6,9 +6,8 @@ from airflow.models.baseoperator import BaseOperator
 from airflow.exceptions import AirflowFailException, AirflowSkipException
 from sdss_access import SDSSPath
 from astra.database.apogee_drpdb import Star, Visit
-from astra.database.astradb import database, DataProduct, Source, SourceDataProduct
-from astra import log
-from astra.utils import flatten
+from astra.database.astradb import database, DataProduct, Source
+from astra.utils import log, flatten
 
 from functools import lru_cache
 
@@ -47,6 +46,8 @@ class ApVisitOperator(BaseOperator):
         q = (
             Visit.select(
                 Visit.catalogid,
+                Visit.ra,
+                Visit.dec,
                 Visit.telescope,
                 Visit.plate,
                 Visit.field,
@@ -77,7 +78,7 @@ class ApVisitOperator(BaseOperator):
         p = SDSSPath(release)
         keys = ("telescope", "plate", "field", "mjd", "fiber", "apred")    
         catalogids, data_product_kwds, errors = ([], [], [])
-        for N, (catalogid, *values) in enumerate(tqdm(q, total=N, desc="Preparing rows"), start=1):
+        for N, (catalogid, ra, dec, *values) in enumerate(tqdm(q, total=N, desc="Preparing rows"), start=1):
             kwargs = dict(zip(keys, values))
             kwargs["field"] = kwargs["field"].strip()
             if not isinstance(catalogid, int):
@@ -92,6 +93,10 @@ class ApVisitOperator(BaseOperator):
                     errors.append(error)
                     continue
 
+            source, _ = Source.get_or_create(
+                catalogid=catalogid,
+                defaults=dict(ra=ra, dec=dec)
+            )
             kwargs, kwargs_hash = DataProduct.adapt_and_hash_kwargs(kwargs)
             catalogids.append(catalogid)
             data_product_kwds.append(
@@ -99,6 +104,7 @@ class ApVisitOperator(BaseOperator):
                     release=release,
                     filetype=filetype,
                     kwargs=kwargs,
+                    source=source,
                     kwargs_hash=kwargs_hash
                 )
             )
@@ -107,8 +113,8 @@ class ApVisitOperator(BaseOperator):
 
         log.info(f"Doing bulk upserts..")
         with database.atomic():
-            log.info(f"Creating {N} sources..")
-            Source.insert_many([dict(catalogid=catalogid) for catalogid in catalogids]).on_conflict_ignore().execute()
+            #log.info(f"Creating {N} sources..")
+            #Source.insert_many([dict(catalogid=catalogid) for catalogid in catalogids]).on_conflict_ignore().execute()
 
             log.info(f"Creating {N} data products..")
             data_product_ids = flatten(
@@ -127,11 +133,6 @@ class ApVisitOperator(BaseOperator):
             )
             assert len(catalogids) == len(data_product_ids)
             
-            log.info(f"Linking data products to sources..")
-            SourceDataProduct.insert_many([
-                {"source_id": cid, "data_product_id": dpid } for cid, dpid in zip(catalogids, data_product_ids)
-            ]).on_conflict_ignore().execute()
-
         log.info(f"Done!")
         
         log.info(f"Created {len(data_product_ids)} data products.")
@@ -197,6 +198,7 @@ class ApStarOperator(BaseOperator):
         ids = []
         errors = []
         for origin in q:
+            raise NotUpdatedErrorYet
             success, result = get_or_create_data_product_from_apogee_drpdb(origin)
             if success:
                 log.info(
@@ -254,24 +256,22 @@ def get_or_create_data_product_from_apogee_drpdb(
 
     # TODO: If we the data product already exists, check that the size matches
     # with database.atomic() as txn:
-    if True:
-        data_product, data_product_created = DataProduct.get_or_create(
-            release=release,
-            filetype=filetype,
-            kwargs=kwds,
-        )
-        # if not data_product_created:
-        #    # Update the size
-        #    if data_product.size != size:
-        #        log.info(f"Updating size of data product {data_product} from {data_product.size} to {size}")
-        #        data_product.size = size
-        #        data_product.save()
+    # Have to make sure the source exists before we link SourceDataProduct..
+    source, _ = Source.get_or_create(catalogid=origin.catalogid)
 
-        # Have to make sure the source exists before we link SourceDataProduct..
-        source, _ = Source.get_or_create(catalogid=origin.catalogid)
-        SourceDataProduct.get_or_create(
-            source_id=origin.catalogid, data_product=data_product
-        )
+    data_product, data_product_created = DataProduct.get_or_create(
+        release=release,
+        filetype=filetype,
+        source=source,
+        kwargs=kwds,
+    )
+    # if not data_product_created:
+    #    # Update the size
+    #    if data_product.size != size:
+    #        log.info(f"Updating size of data product {data_product} from {data_product.size} to {size}")
+    #        data_product.size = size
+    #        data_product.save()
+
 
     result = dict(data_product_id=data_product.id, source_id=origin.catalogid)
     return (True, result)

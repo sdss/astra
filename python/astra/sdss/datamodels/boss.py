@@ -1,6 +1,7 @@
 """Create HDUs in mwmVisit/mwmStar products with BOSS spectra."""
 
 import numpy as np
+import pickle
 from astropy.io import fits
 from astropy.time import Time
 from astropy import units as u
@@ -8,10 +9,13 @@ from astropy.coordinates import SkyCoord, EarthLocation
 from functools import partial
 from typing import Union, List, Callable, Optional, Dict, Tuple
 
-from astra import log
-from astra.database.astradb import DataProduct
-from astra.utils import list_to_dict
+from astra.tools.spectrum import Spectrum1D
+from astropy.nddata import StdDevUncertainty
 
+from astra.database.astradb import DataProduct
+from astra.utils import expand_path, log, list_to_dict
+
+from astra.tools.continuum.nmf import Emulator
 from astra.sdss.datamodels import base, util, combine
 
 
@@ -101,7 +105,9 @@ def create_boss_hdus(
         num_pixels_per_resolution_element=num_pixels_per_resolution_element,
         **kwargs,
     )
+
     snr_visit = util.calculate_snr(flux, flux_error, axis=1)
+
 
     # There's some metadata that we need before we can create the mappings.
     # We need ZWARNING before everything else.
@@ -127,7 +133,7 @@ def create_boss_hdus(
 
     # Let's define some quality criteria of what to include in a stack.
     # Check if it's in a WD carton.
-    cartons, programs = base.get_cartons_and_programs(data_products[0].sources[0])
+    cartons, programs = base.get_cartons_and_programs(data_products[0].source)
     in_wd_carton = ("mwm_wd_core" in cartons)
 
     use_in_stack = (
@@ -153,15 +159,52 @@ def create_boss_hdus(
     )
     meta.update(meta_combine)
     wavelength = util.log_lambda_dispersion(crval, cdelt, num_pixels)
+        
+    # Do continuum fits.
+    # TODO: Switch to using SYNTHE grid if this is a mwm_ob_core carton
+    with open(expand_path("$MWM_ASTRA/component_data/continuum/20230217_bosz_nmf.pkl"), "rb") as fp:
+        components = pickle.load(fp)
 
-    # Disallow zero fluxes.
+    emulator = Emulator(
+        components,
+        deg=3,
+        L=10_000,
+        regions=[
+            (3_750,  6_250),
+            (6_350, 12_000)
+        ]
+    )
+
+    continuum = np.ones_like(flux)
+    continuum_theta = np.zeros((flux.shape[0], emulator.theta_size))
+
+    if any(use_in_stack):
+        flux_unit = u.Unit("1e-17 erg / (Angstrom cm2 s)")  # TODO
+            
+        spectrum = Spectrum1D(
+            spectral_axis=u.Quantity(wavelength, unit=u.Angstrom),
+            flux=np.array(flux[use_in_stack]) * flux_unit,
+            uncertainty=StdDevUncertainty(np.array(flux_error[use_in_stack]) * flux_unit),
+        )
+
+        phi, theta_, continuum_, model_rectified_flux, continuum_meta = emulator.fit(spectrum)
+        n_warnings = np.sum(np.diff(continuum_meta["chi_sqs"]) > 0)
+
+        continuum[use_in_stack] = continuum_
+        continuum_theta[use_in_stack] = theta_.reshape((-1, emulator.theta_size))
+        continuum_rchisq = np.min(continuum_meta["reduced_chi_sqs"])
+        continuum_success = continuum_meta["success"]
+
+    else:
+        continuum_rchisq = 999
+        continuum_success = False
+        n_warnings = 0
+
 
     DATA_HEADER_CARD = ("SPECTRAL DATA", None)
 
     nanify = lambda x: np.nan if x == "NaN" else x
-    log.info(
-        f"Using default 'sdss5' for data product release if not specified. TODO: Andy, you can remove this in next database burn."
-    )        
+
     visit_mappings = [
         DATA_HEADER_CARD,
         ("SNR", snr_visit),
@@ -169,8 +212,9 @@ def create_boss_hdus(
         ("FLUX", flux),
         ("E_FLUX", flux_error),
         ("BITMASK", bitmask),
+        ("CONTINUUM", continuum),
         ("WRESL", meta["resampled_wresl"]),
-        ("INPUT DATA MODEL KEYWORDS", None),
+        ("DATA PRODUCT KEYWORDS", None),
         ("RELEASE", lambda dp, image: dp.release or "sdss5"),
         ("FILETYPE", lambda dp, image: dp.filetype),
         # https://stackoverflow.com/questions/6076270/lambda-function-in-list-comprehensions
@@ -256,6 +300,8 @@ def create_boss_hdus(
         ("V_SHIFT", meta["v_shift"]),
         ("IN_STACK", use_in_stack),
         ("ZWARNING", zwarnings),
+        ("CONTINUUM FITTING", None),
+        ("CONTINUUM_THETA", continuum_theta),
         ("DATABASE PRIMARY KEYS", None),
         ("DATA_PRODUCT_ID", lambda dp, image: dp.id)
     ]
@@ -282,6 +328,29 @@ def create_boss_hdus(
         combined_flux[bad_combined_flux] = np.nan
         combined_flux_error[bad_combined_flux] = np.inf
 
+
+        # Now estimate the continuum for the stacked flux.
+        flux = combined_flux.copy()
+        ivar = combined_flux_error.copy()**-2
+
+        bad_pixels = ~np.isfinite(ivar) | ~np.isfinite(flux) | (ivar == 0)
+        flux[bad_pixels] = 0
+        ivar[bad_pixels] = 0
+        
+        try:
+            star_theta, star_continuum = emulator._maximization(
+                (flux / model_rectified_flux).reshape((1, -1)),
+                (model_rectified_flux * ivar * model_rectified_flux).reshape((1, -1)),
+                continuum_meta["continuum_args"]
+            )
+            star_continuum = star_continuum[0]
+            star_theta = star_theta[0]
+        except:
+            star_continuum = np.nan * np.ones(star_data_shape)
+        
+        # star_theta and star_continuum will have shape (N_visits, P),
+        # but we only want the first one
+
         snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
         star_data_shape = (1, -1)
         star_mappings = [
@@ -292,10 +361,18 @@ def create_boss_hdus(
             ("E_FLUX", combined_flux_error.reshape(star_data_shape)),
             ("BITMASK", combined_bitmask.reshape(star_data_shape)),
             ("WRESL", np.nanmedian(meta["resampled_wresl"][use_in_stack], axis=0).reshape(star_data_shape)),
+            ("CONTINUUM FITTING", None),
+            ("CONTINUUM", star_continuum.reshape(star_data_shape)),
+            ("CONTINUUM_PHI", phi.reshape(star_data_shape)),
+            ("CONTINUUM_THETA", star_theta.reshape(star_data_shape)),
+            ("CONTINUUM_RCHISQ", np.array([continuum_rchisq])),
+            ("CONTINUUM_SUCCESS", np.array([continuum_success])),
+            ("CONTINUUM_WARNINGS", np.array([n_warnings]))
         ]
         hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, header)
     else:
         hdu_star = base.create_empty_hdu(observatory, instrument)
+
     return (hdu_visit, hdu_star)
 
 

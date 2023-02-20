@@ -1,6 +1,7 @@
 """Utilities."""
 # from .logger import log
 
+import importlib
 from dataclasses import is_dataclass
 import json
 import os, tempfile
@@ -20,6 +21,18 @@ import tempfile
 
 import numpy as np
 from tqdm import tqdm
+
+from sdsstools.logger import get_logger
+logger_kwds = {}
+#if "logging" in config and "level" in config["logging"]:
+#    logger_kwds.update(log_level=config["logging"]["level"])
+log = get_logger("astra", **logger_kwds)
+
+
+def to_callable(string):
+    module_name, func_name = string.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, func_name)
 
 
 def transfer_mask(original_wavelength, original_mask, new_wavelength):

@@ -2,15 +2,19 @@
 from collections import OrderedDict
 from functools import wraps
 import numpy as np
+import os
 from astropy.io import fits
 from astropy import units as u
 from astropy.nddata import StdDevUncertainty, InverseVariance
 from specutils import SpectralAxis, Spectrum1D, SpectrumList
 from specutils.io.registers import get_loaders_by_extension, io_registry
 
+
+from astra.utils import log
+
 """
 From the specutils documentation:
-- For spectra that have different sahapes, use SpectrumList.
+- For spectra that have different shapes, use SpectrumList.
 - For spectra that have the same shape but different spectral axes, see SpectrumCollection. 
 - For a spectrum or spectra that all share the same spectral axis, use Spectrum1D. 
 """
@@ -33,7 +37,6 @@ clear_fits_registry_for_spectrum_objects(
 
 # The `specutils.io.registers.data_loader` doesn't respect the `priority` keyword,
 # and does some funky incompatible shit by double-registering things as SpectrumList objects
-from astra import log
 
 
 def data_loader(label, identifier, dtype, extensions=None, priority=0, force=False):
@@ -87,7 +90,7 @@ def load_sdss_mwmVisit_1d(path, hdu, **kwargs):
     extensions=["fits"],
 )
 def load_sdss_mwmVisit_list(path, **kwargs):
-    return _load_mwmVisit_or_mwmStar(path, **kwargs)
+    return _load_mwmVisit_or_mwmStar_spectrum_list(path, **kwargs)
 
 
 @data_loader(
@@ -110,7 +113,7 @@ def load_sdss_mwmStar_1d(path, hdu, **kwargs):
     extensions=["fits"],
 )
 def load_sdss_mwmStar_list(path, **kwargs):
-    return _load_mwmVisit_or_mwmStar(path, **kwargs)
+    return _load_mwmVisit_or_mwmStar_spectrum_list(path, **kwargs)
 
 
 @data_loader(
@@ -191,7 +194,86 @@ def load_sdss_apStar(path, data_slice=None, **kwargs):
     extensions=["fits"],
 )
 def load_sdss_apStar_list(path, **kwargs):
-    return SpectrumList([load_sdss_apStar(path, **kwargs)])
+    flux_unit = u.Unit("1e-17 erg / (Angstrom cm2 s)")  # TODO
+
+    spectra = []
+    with fits.open(path) as image:
+        wavelength = _wcs_log_linear(
+            image[1].header["NAXIS1"],
+            image[1].header["CDELT1"],
+            image[1].header["CRVAL1"],
+        )
+        spectral_axis = u.Quantity(wavelength, unit=u.Angstrom)
+        flux = u.Quantity(np.atleast_2d(image[1].data), unit=flux_unit)
+        e_flux = StdDevUncertainty(np.atleast_2d(image[2].data))
+
+        N, P = flux.shape
+
+        snr = [image[0].header["SNR"]]
+        n_visits = image[0].header["NVISITS"]
+        mjd = [image[0].header[f"JD{i}"] - 2400000.5 for i in range(1, 1 + n_visits)]
+        fiber = [image[0].header[f"FIBER{i}"] for i in range(1, 1 + n_visits)]
+        telescope = "lco25m" if image[0].header["SFILE1"].startswith("as") else "apo25m"
+        date_obs = [image[0].header[f"DATE{i}"] for i in range(1, 1 + n_visits)]
+
+        if n_visits > 1:
+            snr.append(snr[0])  # duplicate S/N value for second stacking method
+            snr.extend([image[0].header[f"SNRVIS{i}"] for i in range(1, 1 + n_visits)])
+
+            mjd.insert(0, None)
+            mjd.insert(0, None)
+            fiber.insert(0, None)
+            fiber.insert(0, None)
+            date_obs.insert(0, None)
+            date_obs.insert(0, None)
+
+
+
+        meta = OrderedDict([])
+        for key in image[0].header.keys():
+            if key.startswith(("TTYPE", "TFORM", "TDIM")) or key in (
+                "",
+                "COMMENT",
+                "CHECKSUM",
+                "DATASUM",
+                "NAXIS",
+                "NAXIS1",
+                "NAXIS2",
+                "XTENSION",
+                "BITPIX",
+                "PCOUNT",
+                "GCOUNT",
+                "TFIELDS",
+            ):
+                continue
+            meta[key.lower()] = image[0].header[key]
+        
+        meta["J_MAG"] = image[0].header["J"]
+        meta["H_MAG"] = image[0].header["H"]
+        meta["K_MAG"] = image[0].header["K"]
+
+        # Some strange situations where N_visits = 1 and flux has shape (2, 8575).
+        for i in range(n_visits if n_visits == 1 else N):
+            meta_i = meta.copy()
+            meta_i.update(
+                SNR=snr[i],
+                TELESCOPE=telescope,
+                FIBER=fiber[i],
+                MJD=mjd[i],
+                BITMASK=image[3].data[i],
+                DATE=date_obs[i],
+            )
+            spectra.append(
+                Spectrum1D(
+                    spectral_axis=spectral_axis,
+                    flux=flux[i],
+                    uncertainty=e_flux[i],
+                    meta=meta_i
+                )
+            )
+
+        
+    return SpectrumList(spectra)
 
 
 @data_loader(
@@ -356,6 +438,17 @@ def _wcs_log_linear(naxis, cdelt, crval):
     return 10 ** (np.arange(naxis) * cdelt + crval)
 
 
+def _load_mwmVisit_or_mwmStar_spectrum_list(path, **kwargs):
+    spectra = SpectrumList()
+    #with fits.open(path) as image:
+    image = fits.open(path)
+    if True:
+        for hdu in range(1, len(image)):
+            if image[hdu].header["DATASUM"] == "0":
+                continue
+            spectra.extend(_load_mwmVisit_or_mwmStar_hdu_as_spectrum_list(image, hdu))
+    return spectra
+
 def _load_mwmVisit_or_mwmStar(path, **kwargs):
     spectra = SpectrumList()
     with fits.open(path) as image:
@@ -364,6 +457,82 @@ def _load_mwmVisit_or_mwmStar(path, **kwargs):
                 spectra.append(None)
                 continue
             spectra.append(_load_mwmVisit_or_mwmStar_hdu(image, hdu))
+    return spectra
+
+def _load_mwmVisit_or_mwmStar_hdu_as_spectrum_list(image, hdu, **kwargs):
+    flux_unit = u.Unit("1e-17 erg / (Angstrom cm2 s)")  # TODO
+    try:
+        wavelength = np.array(image[hdu].data["LAMBDA"])[0]
+    except:
+        wavelength = _wcs_log_linear(
+            image[hdu].header["NPIXELS"],
+            image[hdu].header["CDELT"],
+            image[hdu].header["CRVAL"],
+        )
+    finally:
+        spectral_axis = u.Quantity(wavelength, unit=u.Angstrom)
+
+    flux_value = np.atleast_2d(image[hdu].data["FLUX"])
+    N, P = flux_value.shape
+
+    common_meta = OrderedDict([])
+    for hdu_idx in (0, hdu):
+        for key in image[hdu_idx].header.keys():
+            if key.startswith(("TTYPE", "TFORM", "TDIM")) or key in (
+                "",
+                "COMMENT",
+                "CHECKSUM",
+                "DATASUM",
+                "NAXIS",
+                "NAXIS1",
+                "NAXIS2",
+                "XTENSION",
+                "BITPIX",
+                "PCOUNT",
+                "GCOUNT",
+                "TFIELDS",
+            ):
+                continue
+            common_meta[key] = image[hdu_idx].header[key]    
+
+    keys = (
+        "MJD", 
+        "FIBER", 
+        ("FIELD", "FIELDID"), "PLATE", "TELESCOPE", "DATE-OBS", "DITHERED", "NPAIRS",
+        "CONTINUUM_THETA", "V_RAD", "E_V_RAD", "V_REL", "V_BC", "VISIT_PK", "RV_VISIT_PK", "DATA_PRODUCT_ID",
+        "SNR",
+    )
+    spectra = []
+    for i in range(N):
+        flux = u.Quantity(flux_value[i], unit=flux_unit)
+        e_flux = StdDevUncertainty(array=image[hdu].data["E_FLUX"][i])
+
+        meta = common_meta.copy()
+        use_keys = []
+        values = []
+        for key in keys:
+            if isinstance(key, tuple):
+                use_keys.append(key[0])
+                for k in key:
+                    if k in image[hdu].data.dtype.names:
+                        values.append(image[hdu].data[k][i])
+                        break
+                else:
+                    values.append(None)
+            else:
+                use_keys.append(key)
+                values.append(image[hdu].data[key][i] if key in image[hdu].data.dtype.names else None)
+
+
+        meta.update(dict(zip(use_keys, values)))
+        spectra.append(
+            Spectrum1D(
+                spectral_axis=spectral_axis, 
+                flux=flux, 
+                uncertainty=e_flux, 
+                meta=meta
+            )
+        )
     return spectra
 
 

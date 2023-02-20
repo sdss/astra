@@ -5,8 +5,8 @@ import os
 import numpy as np
 from typing import Dict, List, Union, Optional, Tuple
 from sdss_access import SDSSPath
-from astra import log, __version__ as v_astra
-from astra.database.astradb import Task, DataProduct, Source, TaskOutputDataProducts
+from astra import __version__ as v_astra
+from astra.database.astradb import Task, DataProduct, Source #TaskOutputDataProducts
 from astropy.io import fits
 from functools import partial
 
@@ -28,7 +28,7 @@ from astra.sdss.datamodels.mwm import (
     HDU_DESCRIPTIONS,
     get_data_hdu_observatory_and_instrument,
 )
-from astra.utils import list_to_dict, expand_path
+from astra.utils import log, list_to_dict, expand_path
 
 
 def create_pipeline_product(
@@ -225,8 +225,8 @@ def create_pipeline_product(
         release=release, filetype=filetype, kwargs=kwds
     )
     # Link to this task as an output
-    TaskOutputDataProducts.get_or_create(task=task, data_product=output_data_product)
-    log.info(f"Created data product {output_data_product} and wrote to {path}")
+    #TaskOutputDataProducts.get_or_create(task=task, data_product=output_data_product)
+    #log.info(f"Created data product {output_data_product} and wrote to {path}")
 
     return output_data_product
 

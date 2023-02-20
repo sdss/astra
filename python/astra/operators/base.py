@@ -1,79 +1,72 @@
 import json
-import os
-from airflow.compat.functools import cached_property
-from airflow.hooks.subprocess import SubprocessHook
 from airflow.models.baseoperator import BaseOperator
-from airflow.utils.operator_helpers import context_to_airflow_vars
 
-from astra import log
-from astra.utils import deserialize, flatten
-from astra.operators.utils import to_callable
-from astra.database.astradb import Task
+from astra.utils import log, flatten, to_callable
+from astra.database.astradb import DataProduct
 
 
-class AstraOperator(BaseOperator):
+class TaskOperator(BaseOperator):
 
-    template_fields = ("task_parameters",)
+    template_fields = ("task_kwargs", )
 
-    def __init__(
-        self, task_name, task_parameters=None, return_id_kind="task", **kwargs
-    ) -> None:
-        super(AstraOperator, self).__init__(**kwargs)
-        self.task_name = task_name
-        self.task_parameters = task_parameters or {}
-        self.return_id_kind = f"{return_id_kind}".lower()
-        if self.return_id_kind not in ("task", "data_product"):
-            raise ValueError(f"return_id_kind must be either `task` or `data_product`")
+    def __init__(self, task_callable, task_kwargs=None, **kwargs):
+        super(TaskOperator, self).__init__(**kwargs)
+        self.task_callable = task_callable
+        self.task_kwargs = task_kwargs or {}
+        return None
+
 
     def execute(self, context):
+        
+        task_callable = to_callable(self.task_callable) if isinstance(self.task_callable, str) else self.task_callable
+        
         log.info(
-            f"Creating task {self.task_name} with task_parameters {self.task_parameters}"
+            f"Executing task {task_callable} with task_kwargs {self.task_kwargs}"
         )
-        executable_class = to_callable(self.task_name)
-        task = executable_class(**self.task_parameters)
+
+        # Resolve data_products from identifiers.
+        kwargs = self.task_kwargs.copy()
+        dp_key = "data_product"
+        if dp_key in kwargs:
+            if isinstance(kwargs[dp_key], str):
+                kwargs[dp_key] = json.loads(kwargs[dp_key])
+            if isinstance(kwargs[dp_key], (list, tuple)) and isinstance(kwargs[dp_key][0], int):
+                kwargs[dp_key] = DataProduct.select().where(DataProduct.id << kwargs[dp_key])
 
         log.info(f"Executing")
-        task.execute()
+        results = task_callable(**kwargs)
         log.info(f"Done")
 
-        if self.return_id_kind == "task":
-            outputs = [task.id for task in task.context["tasks"]]
-        elif self.return_id_kind == "data_product":
-            outputs = []
-            for t in task.context["tasks"]:
-                for dp in t.output_data_products:
-                    outputs.append(dp.id)
-
-        return outputs
+        task_ids = [result.task.id for result in results]
+        return task_ids
 
 
-class TaskExecutor(BaseOperator):
+class GetSourceOperator(BaseOperator):
 
-    template_fields = ("execute_task_ids",)
+    template_fields = ("data_product", )
 
-    def __init__(
-        self,
-        execute_task_ids,
-        **kwargs,
-    ) -> None:
-        super(TaskExecutor, self).__init__(**kwargs)
-        self.execute_task_ids = execute_task_ids
+    def __init__(self, data_product, **kwargs):
+        super(GetSourceOperator, self).__init__(**kwargs)
+        self.data_product = data_product
         return None
 
     def execute(self, context):
+        from astra.database.astradb import Source, DataProduct
 
-        tasks = deserialize(self.execute_task_ids, Task)
-        N = len(tasks)
+        data_product = self.data_product
+        if isinstance(data_product, str):
+            data_product = flatten(json.loads(data_product))
+        print(f"data products: {len(data_product)}")
+        
+        q = (
+            Source
+            .select(Source.catalogid)
+            .distinct()
+            .join(DataProduct)
+            .where(
+                DataProduct.id << data_product
+            )
+            .tuples()
+        )
 
-        log.info(f"Executing {N} tasks.")
-
-        for i, task in enumerate(tasks, start=1):
-            log.info(f"Executing item {i}/{N}: {task}")
-            try:
-                result = task.instance().execute()
-            except:
-                log.exception(f"Exception when executing item {task}")
-            else:
-                log.info(f"Completed task {task}")
-
-        return None
+        return flatten(q)

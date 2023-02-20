@@ -3,13 +3,13 @@ from typing import Optional
 from airflow.models.baseoperator import BaseOperator
 from airflow.exceptions import AirflowSkipException
 from sdss_access import SDSSPath
-from astra.database.astradb import database, DataProduct, Source, SourceDataProduct
-from astra import log
-from astra.utils import expand_path
+from astra.database.astradb import database, DataProduct, Source
+from astra.utils import log, expand_path
 from astropy.time import Time
 import numpy as np
 
 from astropy.table import Table
+from astra.database.targetdb import Target
 
 from functools import lru_cache
 
@@ -124,17 +124,19 @@ class BossSpectrumOperator(BaseOperator):
                 errors.append(error)
                 continue
 
+            target = Target.get(catalogid=catalogid)
             with database.atomic() as txn:
+                source, _ = Source.get_or_create(
+                    catalogid=catalogid,
+                    defaults=dict(ra=target.ra, dec=target.dec)
+                )
                 data_product, _ = DataProduct.get_or_create(
                     release=self.release,
                     filetype=self.filetype,
+                    source=source,
                     kwargs=kwds,
                 )
-                source, _ = Source.get_or_create(catalogid=catalogid)
                 source_ids.append(int(catalogid))
-                SourceDataProduct.get_or_create(
-                    source=source, data_product=data_product
-                )
 
             log.info(f"Data product {data_product} matched to {source}")
             data_product_ids.append(int(data_product.id))
