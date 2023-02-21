@@ -115,15 +115,21 @@ def _write_database_outputs(params, results, time_elapsed, function, time_bundle
         r.__data__.setdefault("time_elapsed", te)
         r.__data__.setdefault("time_bundle", time_bundle)
 
-    # TODO: If no Astra database, just return the results.
-    model = _get_or_create_database_table_for_task(function)
-    items = filter(lambda x: isinstance(x, BaseTaskOutput), flatten(results))
+    # TODO: make this more explicit? ASTRA_WRITE_OUTPUTS?
+    if os.getenv("ASTRA_ENVIRONMENT", None) in ("dev", "develop", "staging"):
+        log.warning(f"Not writing database outputs because ASTRA_ENVIRONMENT is {os.getenv('ASTRA_ENVIRONMENT')}.")
     
-    with database.atomic():
-        model.bulk_create(items)
+    else:
+        # TODO: If no Astra database, just return the results.
+        model = _get_or_create_database_table_for_task(function)
+        items = filter(lambda x: isinstance(x, BaseTaskOutput), flatten(results))
+        
+        with database.atomic():
+            model.bulk_create(items)
 
-    print(f"Saved {len(results)} results to database.")
-
+        log.info(f"Saved {len(results)} results to database.")
+        
+    return None
 
 
 def _get_return_annotation_output_class(signature):

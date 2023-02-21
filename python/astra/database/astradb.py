@@ -80,7 +80,7 @@ else:
         
     database = AstraDatabaseConnection(autoconnect=True)
     database.set_profile("astra")
-    schema = "astra_test"
+    schema = "astra_ipl2"
 
 
 class BaseModel(_BaseModel):
@@ -95,7 +95,7 @@ class Task(BaseModel):
     """Unique task counter."""
 
     id = AutoField()
-    #created = DateTimeField(default=datetime.datetime.now)
+    created = DateTimeField(default=datetime.datetime.now)
 
 
 
@@ -114,16 +114,8 @@ class Source(BaseModel):
 
     catalogid = BigIntegerField(primary_key=True)
 
-    # Some catalog identifiers to make things easier later on.
-    tic_v8_identifier = BigIntegerField(null=True)
-    gaia_dr2_source_identifier = BigIntegerField(null=True)
-    gaia_dr3_source_identifier = BigIntegerField(null=True)
-
     ra = FloatField(null=True)
     dec = FloatField(null=True)
-
-    # TODO: Duplicate photometry?
-    # TODO: Duplicate cartons?
 
     @property
     def outputs(self):
@@ -329,6 +321,8 @@ class SDSSOutput(BaseTaskOutput):
     apvisit_pk = IntegerField(null=True) # set foreign relational key to apvisit table
     apstar_pk = IntegerField(null=True) # set foreign relational key to apstar table
 
+    output_data_product = ForeignKeyField(DataProduct, null=True)
+
     def __init__(self, data_product, spectrum=None, **kwargs):
 
         try:
@@ -364,7 +358,9 @@ def create_tables(drop_existing_tables=False, reuse_if_open=True):
 
     log.info(f"Connecting to database to create tables.")
     database.connect(reuse_if_open=reuse_if_open)
-    models = BaseModel.__subclasses__()
+    ignore = (BaseTaskOutput, SDSSOutput, )
+
+    models = [model for model in BaseModel.__subclasses__() if model not in ignore]
     log.info(
         f"Tables ({len(models)}): {', '.join([model.__name__ for model in models])}"
     )
