@@ -47,6 +47,24 @@ def read_model(model_path):
     return model
 
 
+def classify_all_apVisit():
+    q = (
+        DataProduct
+        .select()
+        .where(DataProduct.filetype == "apVisit")
+    )
+    r = list(classify_apVisit(q))
+
+def classify_all_specFull():
+    q = (
+        DataProduct
+        .select()
+        .where(DataProduct.filetype == "specFull")
+    )
+    r = list(classify_specFull(q))
+
+
+
 @task_decorator
 def classify_apVisit(
     data_product: Iterable[DataProduct],
@@ -56,11 +74,15 @@ def classify_apVisit(
     expected_shape = (3, 4096)
 
     model = read_model(model_path)
-    for data_product_ in flatten(data_product):
-        assert data_product_.filetype.lower() == "apvisit"
+    for data_product in data_product:
+        assert data_product.filetype.lower() == "apvisit"
 
-        spectrum = Spectrum1D.read(data_product_.path)
-        
+        try:
+            spectrum = Spectrum1D.read(data_product.path)
+        except:
+            log.exception(f"Exception on data product {data_product} ")
+            continue
+
         dithered = (spectrum.flux.size == np.prod(expected_shape))
         if dithered:
             flux = spectrum.flux.reshape(expected_shape)
@@ -101,16 +123,24 @@ def classify_specFull(
     model = read_model(model_path)
     si, ei = (0, 3800)  # MAGIC: same done in training
 
-    for data_product_ in flatten(data_product):
-        assert data_product_.filetype.lower() == "specfull"
+    for data_product in data_product:
+        assert data_product.filetype.lower() == "specfull"
 
-        spectrum = Spectrum1D.read(data_product_.path)
+        try:
+            spectrum = Spectrum1D.read(data_product.path)
+        except:
+            log.exception(f"Exception on data product {data_product} ")
+            continue
 
         flux = spectrum.flux[si:ei]
         continuum = np.nanmedian(flux)
         batch = flux / continuum
         # remove nans
         finite = np.isfinite(batch)
+        if not any(finite):
+            log.warning(f"Skipping {data_product} because all values are NaN")
+            continue
+        
         if any(~finite):
             batch[~finite] = np.interp(
                 spectrum.wavelength.value[si:ei][~finite],
@@ -132,6 +162,8 @@ def classify_specFull(
                 spectrum=spectrum,
                 **result
             )
+
+   
 
 @task_decorator
 def classify_source(source_id: int) -> ClassifierOutput:

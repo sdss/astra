@@ -6,7 +6,7 @@ import re
 import subprocess
 from typing import Optional
 from tqdm import tqdm
-
+from itertools import cycle
 from astra.utils import log, expand_path
 
 
@@ -25,10 +25,11 @@ def validate_ferre_control_keywords(
     continuum_segment=None,
     continuum_reject=0.3,
     continuum_observations_flag=1,
-    full_covariance=False,
+    full_covariance=True,
     pca_project=False,
     pca_chi=False,
     n_threads=1,
+    n_runs=1,
     f_access=None,
     f_format=1,
     f_sort=False,
@@ -211,9 +212,12 @@ def validate_ferre_control_keywords(
 
         unknown_parameters = set(frozen_parameters).difference(parameter_names)
         if unknown_parameters:
-            raise ValueError(
-                f"Unknown parameters: {unknown_parameters} (available: {parameter_names})"
-            )
+            # Only warn.
+            log.warning(f"Ignoring unknown parameters given in frozen parameters: {unknown_parameters} (available: {parameter_names})")
+            #raise ValueError(
+            #    f"Unknown parameters: {unknown_parameters} (available: {parameter_names})"
+            #)
+            # TODO: we should probably raise an error here, but for now we are freezing C,N for all initial runs, and it's likely failing on the BA-type grids.
 
         indices = [
             i
@@ -234,7 +238,8 @@ def validate_ferre_control_keywords(
             "nov": L,
             "indv": " ".join([f"{i:.0f}" for i in indices]),
             "init": 0,
-            "indini": " ".join(["1"] * L),
+            "nruns": n_runs,
+            #"indini": " ".join(["1"] * L),
             "inter": validate_interpolation_order(interpolation_order),
             "errbar": validate_error_algorithm_flag(error_algorithm_flag),
             "algor": validate_optimization_algorithm_flag(optimization_algorithm_flag),
@@ -307,7 +312,7 @@ def format_ferre_control_keywords(ferre_kwds: dict) -> str:
         "errbar",
         "nruns",
         "init",
-        "indini",
+        #"indini",
         "winter",
         "algor",
         "lsf",
@@ -551,15 +556,18 @@ def validate_initial_and_frozen_parameters(
 
     mid_point = grid_mid_point(headers)
     initial_parameters_array = np.tile(mid_point, N).reshape((N, -1))
+    warning_messages = []
 
     for i, ip in enumerate(initial_parameters):
         for parameter_name, value in ip.items():
             try:
                 j = parameter_names.index(sanitise(parameter_name))
             except ValueError:
-                log.warning(
-                    f"Ignoring initial parameter '{parameter_name}' as it is not in {parameter_names}"
-                )
+                message = f"Ignoring initial parameter '{parameter_name}' as it is not in {parameter_names}"
+                if message not in warning_messages:
+                    log.warning(message)
+                    warning_messages.append(message)
+                
                 continue
             else:
                 if np.isfinite(value):
@@ -571,14 +579,15 @@ def validate_initial_and_frozen_parameters(
             try:
                 j = parameter_names.index(sanitise(parameter_name))
             except ValueError:
-                log.warning(
-                    f"Ignoring frozen parameter '{parameter_name}' as it is not in {parameter_names}"
-                )
+                message = f"Ignoring frozen parameter '{parameter_name}' as it is not in {parameter_names}"
+                if message not in warning_messages:
+                    log.warning(message)
+                    warning_messages.append(message)
                 continue
             else:
-                log.debug(
-                    f"Over-writing initial values for {parameter_name} with frozen value of {value}"
-                )
+                message = f"Over-writing initial values for {parameter_name} with frozen value of {value}"
+                log.debug(message)
+
                 initial_parameters_array[:, j] = value
 
     # Let's check the initial values are all within the grid boundaries.
@@ -798,29 +807,29 @@ def read_output_parameter_file(path, n_dimensions, full_covariance, **kwargs):
 
     N_cols = 2 * n_dimensions + 3
     if full_covariance:
-        raise NotImplementedError("needs testing")
-        N_cols += 3 + n_dimensions**2
+        N_cols += n_dimensions**2
 
     results = np.atleast_2d(np.loadtxt(path, usecols=1 + np.arange(N_cols)))
 
     param = results[:, 0:n_dimensions]
+    P, L = param.shape
+
     param_err = results[:, n_dimensions : 2 * n_dimensions]
+    if full_covariance:
+        cov = results[:, 2*n_dimensions + 3:].reshape((P, L, L))
+    else:
+        cov = cycle(np.eye(L))
 
     frac_phot_data_points, log_snr_sq, log_chisq_fit = results[
         :, 2 * n_dimensions : 2 * n_dimensions + 3
     ].T
+
     meta = dict(
         frac_phot_data_points=frac_phot_data_points,
         log_snr_sq=log_snr_sq,
-        log_chisq_fit=log_chisq_fit
-        #    cov=cov,
+        log_chisq_fit=log_chisq_fit,
+        cov=cov,
     )
-    if full_covariance:
-        cov = results[
-            :, 2 * n_dimensions + 3 : 2 * n_dimensions + 3 + n_dimensions**2
-        ]
-        cov = cov.reshape((-1, n_dimensions, n_dimensions))
-        meta.update(cov=cov)
 
     return (names, param, param_err, meta)
 

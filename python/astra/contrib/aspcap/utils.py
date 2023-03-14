@@ -1,9 +1,95 @@
 import os
 import datetime
 import numpy as np
+import json
 
+from astra.utils import log, expand_path
 from astra.contrib.ferre.utils import read_ferre_headers
 
+
+def chunks(l, n):
+    """ Yield n successive chunks from l.
+    """
+    newn = int(len(l) / n)
+    for i in range(0, n-1):
+        yield l[i*newn:i*newn+newn]
+    yield l[n*newn-newn:]
+
+
+def partition(items, K, return_indices=False):
+    """
+    Partition items into K semi-equal groups.
+    """
+    groups = [[] for _ in range(K)]
+    N = len(items)
+    sorter = np.argsort(items)
+    if return_indices:
+        sizes = dict(zip(range(N), items))
+        itemizer = list(np.arange(N)[sorter])
+    else:
+        itemizer = list(np.array(items)[sorter])
+
+    while itemizer:
+        if return_indices:
+            group_index = np.argmin(
+                [sum([sizes[idx] for idx in group]) for group in groups]
+            )
+        else:
+            group_index = np.argmin(list(map(sum, groups)))
+        groups[group_index].append(itemizer.pop(-1))
+
+    return [group for group in groups if len(group) > 0]
+
+
+
+# need some task that takes in data products, executes to slurm
+def submit_astra_instructions(instructions, parent_dir, n_threads, slurm_kwargs):
+    from slurm import queue
+
+    q = queue(verbose=True)
+    slurm_kwargs = slurm_kwargs or {}
+    
+    N = len(instructions)
+    n_tasks_per_node = int(128 / n_threads)
+    nodes = slurm_kwargs.get("nodes", 1)
+    n_tasks = int(nodes * n_tasks_per_node)
+    log.info(f"Splitting {N} runable paths into {n_tasks} chunks across {nodes} nodes with {n_tasks_per_node} tasks per node")
+
+    os.makedirs(expand_path(parent_dir), exist_ok=True)
+    #slurm_kwargs.setdefault("ncpus", 32)
+
+    z = 0
+    q.create(**slurm_kwargs)
+
+    # Estimate the cost of each task, and partition into nearly K equal groups
+    costs = [len(instruction["task_kwargs"]["data_product"]) for instruction in instructions]
+
+    for chunk_indices in partition(costs, n_tasks, return_indices=True):
+        
+        content = [instructions[i] for i in chunk_indices]
+
+        while os.path.exists(expand_path(os.path.join(parent_dir, f"batch_{z:03d}.json"))):
+            z += 1
+
+        path = expand_path(os.path.join(parent_dir, f"batch_{z:03d}.json"))
+
+        log.info(f"Created {path}")
+        try:
+            with open(path, "w") as fp:
+                json.dump(content, fp)
+        except:
+            print(content)
+            raise 
+
+        q.append(f"astra run {path}")
+    
+    print(f"Created slurm queue with {slurm_kwargs}")
+
+    q.commit(hard=True, submit=True)
+    return q.key
+
+
+    
 
 def group_header_paths(header_paths):
     """
@@ -100,8 +186,17 @@ def yield_suitable_grids(
 
         # We will take the RV parameters as the initial parameters.
         # Check to see if they are within bounds of the grid.
-        if np.all(point >= lower_limits[-P:]) and np.all(point <= upper_limits[-P:]):
-            yield (header_path, meta)
+        try:
+            if np.all(point >= lower_limits[-P:]) and np.all(point <= upper_limits[-P:]):
+                yield (header_path, meta)
+        except:
+            from astra.utils import log
+            log.exception(f"Exception when checking grid edges")
+            print(type(point), point)
+            print(type(lower_limits), lower_limits)
+            print(type(upper_limits), upper_limits)
+            print(P)
+            raise 
 
 
 def get_lsf_grid_name(fibre_number):

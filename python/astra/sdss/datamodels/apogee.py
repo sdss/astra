@@ -121,7 +121,7 @@ def create_apogee_hdus(
     visit_hdu_header_groups = OrderedDict([
         ("Spectral Data", ["snr", "flux", "e_flux", "bitmask", "continuum"]), # TODO: continuum
         ("Data Product Keywords", ["release", "filetype"] + unique_input_data_model_keys),
-        ("Observing Conditions", ["date-obs", "exptime", "fluxflam", "npairs", "dithered"]),
+        ("Observing Conditions", ["date-obs", "exptime", "fluxflam", "npairs", "dithered", "fps"]),
         ("Continuum Fitting", ["continuum_theta"]),
         ("Radial Velocities (Doppler)", ["jd", "v_rad", "e_v_rad", "v_rel", "v_bc", "rchisq"]),
         ("Radial Velocities (Cross-Correlation)", ["v_rad_xcorr", "v_rel_xcorr", "e_v_rad_xcorr", "n_rv_components"]),
@@ -129,8 +129,8 @@ def create_apogee_hdus(
         ("Database Primary Keys", ["visit_pk", "rv_visit_pk", "data_product_id"]),
     ])
     star_hdu_header_groups = OrderedDict([
-        ("Spectral Data", ["snr", "lambda", "flux", "e_flux", "bitmask", "continuum"]),
-        ("Continuum Fitting", ["continuum_theta", "continuum_phi", "continuum_rchisq", "continuum_success", "continuum_warnings"]),
+        ("Spectral Data", ["snr", "lambda", "flux", "e_flux", "bitmask"]),
+        ("Continuum Fitting", ["model_flux", "continuum", "continuum_theta", "continuum_phi", "continuum_rchisq", "continuum_success"]),
     ])
     visit_hdu_keys = flatten(visit_hdu_header_groups.values())
     star_hdu_keys = flatten(star_hdu_header_groups.values())
@@ -149,13 +149,17 @@ def create_apogee_hdus(
     with open(expand_path("$MWM_ASTRA/component_data/continuum/sgGK_200921nlte_nmf_components.pkl"), "rb") as fp:
         components = pickle.load(fp)
 
+    with open(expand_path("$MWM_ASTRA/component_data/continuum/20230222_sky_mask_ivar_scalar.pkl"), "rb") as f:
+        ivar_scalar = pickle.load(f)
+
     emulator = Emulator(
         components,
         regions=[
             (15_100.0, 15_800.0), 
             (15_840.0, 16_417.0), 
             (16_500.0, 17_000.0)
-        ]
+        ],   
+        mask=(ivar_scalar != 1)     
     )
     
     fit_continuum_to_visit = {}
@@ -325,6 +329,7 @@ def create_apogee_hdus(
         dithered = visit_observatory_data["dithered"]
         star_visits = np.sum(in_stack)
         star_dithered = np.round(np.sum(dithered[in_stack])/star_visits, 1)
+        star_fps_fraction = np.round(np.sum(visit_observatory_data["fps"][in_stack])/star_visits, 1)
         assert np.isfinite(star_visits)
         assert np.isfinite(star_dithered)
         star_cards[observatory] = [
@@ -335,6 +340,7 @@ def create_apogee_hdus(
             # add dithered / nvisits
             ("DITHERED", star_dithered),
             ("NVISITS", star_visits),
+            ("FPS", star_fps_fraction),
 
             *doppler_cards,
             *wavelength_cards,
@@ -350,11 +356,12 @@ def create_apogee_hdus(
                     axis=None
                 ),
                 "lambda": wavelength,
+                "model_flux": np.zeros(P, dtype=float),
                 "continuum": np.zeros(P, dtype=float),
                 "continuum_phi": np.zeros(emulator.phi_size, dtype=float),
                 "continuum_theta": np.zeros(emulator.theta_size, dtype=float),
                 "continuum_rchisq": np.array([0.0]),
-                "continuum_warnings": np.array([0]),
+                #"continuum_warnings": np.array([0]),
                 "continuum_success": np.array([False])
             }
         )
@@ -424,10 +431,11 @@ def create_apogee_hdus(
         # Set the continuum_phi values for each star HDU
         for observatory, star_hdu in star_hdus.items():
             if len(star_hdu.data) == 0: continue
-            star_hdu.data["CONTINUUM_PHI"][:] = phi
+            star_hdu.data["MODEL_FLUX"][0] = model_rectified_flux
+            star_hdu.data["CONTINUUM_PHI"][0] = phi
             star_hdu.data["CONTINUUM_RCHISQ"][0] = np.min(meta["reduced_chi_sqs"])
             star_hdu.data["CONTINUUM_SUCCESS"][0] = meta["success"]
-            star_hdu.data["CONTINUUM_WARNINGS"][0] = n_warnings
+            #star_hdu.data["CONTINUUM_WARNINGS"][0] = n_warnings
 
             # Now estimate the continuum for the stacked flux.
             flux = star_hdu.data["FLUX"].copy()
@@ -451,14 +459,13 @@ def create_apogee_hdus(
         si, ei = (0, 0)
         for observatory, mask in fit_continuum_to_visit.items():
             K = np.sum(mask)
+            if K == 0: continue
             ei += K
             visit_hdus[observatory].data["CONTINUUM_THETA"][mask] = theta[si:ei].reshape((K, -1))
             visit_hdus[observatory].data["CONTINUUM"][mask] = continuum[si:ei]
             si += K
 
     return (visit_hdus["APO"], visit_hdus["LCO"], star_hdus["APO"], star_hdus["LCO"])
-
-
 
 
 
@@ -508,7 +515,7 @@ def _format_apogee_data_from_dr17_apStar(data_product):
             stack_mask = np.zeros(N, dtype=bool)
             stack_mask[0] = True
         
-        visit_keys = ["date-obs", "starflag"] + input_data_model_keys
+        visit_keys = ["date-obs", "starflag", "fps"] + input_data_model_keys
         visit_meta = { k: [] for k in visit_keys }
 
         for i in range(1, 1 + N_visits):
@@ -519,6 +526,7 @@ def _format_apogee_data_from_dr17_apStar(data_product):
             visit_meta["apred"].append(apred)
             visit_meta["plate"].append(plate)
             visit_meta["mjd"].append(int(mjd))
+            visit_meta["fps"].append(0) # no fps in SDSS-IV
             visit_meta["prefix"].append(sfile[:2])
             visit_meta["fiber"].append(int(fiber))
             visit_meta["date-obs"].append(image[0].header[f"DATE{i}"])
@@ -575,11 +583,16 @@ def _format_apogee_data_from_sdssv_apVisits(
     keep = np.ones(D, dtype=bool)
     starflag = np.zeros(D, dtype=np.uint64)
     dithered = np.zeros(D, dtype=float)
+    fps = np.zeros(D, dtype=int)
     for i, data_product in enumerate(data_products):
         try:    
             with fits.open(data_product.path) as image:
                 starflag[i] = image[0].header["STARFLAG"]
                 dithered[i] = 1.0 if image[1].data.size == (3 * 4096) else 0.0
+                mjd = int(data_product.kwargs["mjd"])
+                # Start of FPS ops according to https://wiki.sdss.org/display/IPL/Caveats+for+BHM+IPL-1
+                fps[i] = int(int(mjd) >= 59635)
+            
                 if len(image) < 5:
                     log.exception(f"Data product {data_product} at {data_product.path} has unexpectedly few HDUs ({len(image)})")
                     keep[i] = False
@@ -592,6 +605,7 @@ def _format_apogee_data_from_sdssv_apVisits(
     data_products = [dp for dp, keep_dp in zip(data_products, keep) if keep_dp]
     dithered = dithered[keep]
     starflag = starflag[keep]
+    fps = fps[keep]
 
     if len(data_products) == 0:
         return ({}, [])
@@ -602,6 +616,7 @@ def _format_apogee_data_from_sdssv_apVisits(
         release=[data_product.release for data_product in data_products],
         filetype=[data_product.filetype for data_product in data_products],
         dithered=dithered,
+        fps=fps,
         data_product_id=[data_product.id for data_product in data_products],
     )
     visit_meta.update({ k: [] for k in keys })

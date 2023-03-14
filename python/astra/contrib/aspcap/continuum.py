@@ -3,17 +3,26 @@ import numpy as np
 from scipy.ndimage.filters import median_filter
 
 import pickle
-from astra import log
-from astra.utils import expand_path
+from astra.utils import log, expand_path
 from astra.contrib.ferre import bitmask
-from astra.contrib.ferre.utils import read_ferre_headers
-from astra.database.astradb import Task
+from astra.contrib.ferre.utils import read_ferre_headers, wavelength_array
+from astra.database.astradb import DataProduct
 from astra.tools.continuum.base import Continuum
 from astra.tools.spectrum import Spectrum1D
 from astropy.io import fits
 
 from typing import Optional, List, Tuple, Union
 from astra.tools.spectrum import SpectralAxis
+
+def _get_ferre_chip_mask(observed_wavelength, chip_wavelengths):
+    P = observed_wavelength.size
+    mask = np.zeros(P, dtype=bool)
+    for model_wavelength in chip_wavelengths:
+        s_index = observed_wavelength.searchsorted(model_wavelength[0])
+        e_index = s_index + model_wavelength.size
+        mask[s_index:e_index] = True
+    return mask     
+
 
 class MedianFilter(Continuum):
 
@@ -66,18 +75,18 @@ class MedianFilter(Continuum):
         self.mode = mode
         return None
 
-
-    def _initialize(self, spectrum, task=None):
+    def _initialize(self, spectrum, task):
         try:
             self._initialized_args
         except AttributeError:
             if self.regions is None:
                 # Get the regions from the model wavelength segments.        
-                if task is None:
-                    task = Task.get(self.upstream_task_id)
+
+                segment_headers = read_ferre_headers(expand_path(task.header_path))[1:]
+                self.chip_wavelengths = tuple(map(wavelength_array, segment_headers))
 
                 regions = []
-                for header in read_ferre_headers(expand_path(task.parameters["header_path"]))[1:]:
+                for header in segment_headers:
                     crval, cdelt = header["WAVE"]
                     npix = header["NPIX"]
                     regions.append((10**crval, 10**(crval + cdelt * npix)))
@@ -90,7 +99,8 @@ class MedianFilter(Continuum):
         
     def fit(self, spectrum: Spectrum1D, hdu=3):
 
-        task = Task.get(self.upstream_task_id)
+        from astra.contrib.aspcap.models import ASPCAPInitial
+        task = ASPCAPInitial.get(self.upstream_task_id)
         region_slices, region_masks = self._initialize(spectrum, task)
 
         #flux/continuum and model_flux
@@ -101,13 +111,18 @@ class MedianFilter(Continuum):
         # ratio = continuum * (ferre_flux / model_flux)
 
         # This is an astraStar-FERRE product, but let's just use fits.open
-        with fits.open(task.output_data_products[0].path) as image:
-            # How do we decide on the HDU for this product just from the spectrum?
-            continuum = image[hdu].data["CONTINUUM"]
-            flux = image[hdu].data["FERRE_FLUX"]
-            rectified_model_flux = image[hdu].data["MODEL_FLUX"] / continuum
-                    
+        output_data_product = DataProduct.get(task.output_data_product_id)
+        print(f"Loading upstream from {output_data_product.path}")
+        with open(output_data_product.path, "rb") as fp:
+            rectified_model_flux_masked, continuum = pickle.load(fp)
+
+        ferre_mask = _get_ferre_chip_mask(spectrum.wavelength.value, self.chip_wavelengths)
+
+        flux = np.atleast_2d(spectrum.flux.value)
         N, P = flux.shape
+        rectified_model_flux = np.nan * np.ones((N, P))
+        rectified_model_flux[:, ferre_mask] = rectified_model_flux_masked
+                    
         self._continuum = np.nan * np.ones((N, P))
         for i in range(N):
             for region_mask in region_masks:
@@ -115,21 +130,26 @@ class MedianFilter(Continuum):
 
                 # TODO: It's a little counter-intuitive how this is documented, so we should fix that.
                 #       Or allow for a MAGIC number 5 instead.
-                median = median_filter(flux[i, region_mask], [self.median_filter_width], mode=self.mode)
-
-                bad = np.where(
-                    (flux_region < self.bad_minimum_flux) | (flux_region > (np.nanmedian(flux_region) + 3 * np.nanstd(flux_region)))
-                )[0]
-                flux_region[bad] = median[bad]
-
+                
+                bad = (
+                    (flux_region < self.bad_minimum_flux) 
+                |   (flux_region > (np.nanmedian(flux_region) + 3 * np.nanstd(flux_region)))
+                |   (~np.isfinite(flux_region))
+                )
+                x = np.arange(flux_region.size)
+                flux_region[bad] = np.interp(x[bad], x[~bad], flux_region[~bad])
+                
                 ratio_region = flux_region / model_flux_region
                 self._continuum[i, region_mask] = median_filter(
                     ratio_region, 
                     [self.median_filter_width], 
                     mode=self.mode,
-                    cval=1.0
+                    cval=0.0
                 )
-
+                E = 10
+                self._continuum[i, region_mask[:E]] = 0.0
+                self._continuum[i, region_mask[-E:]] = 0.0
+                
         scalars = np.nanmedian(spectrum.flux.value / self._continuum, axis=1)
         self._continuum *= scalars
         return None
@@ -143,7 +163,7 @@ class MedianFilter(Continuum):
     ) -> np.ndarray:
         if theta is not None:
             log.warning(f"Continuum coefficients ignored here")
-        return self._continuum
+        return self._continuum.reshape(spectrum.flux.shape)
 
 
 

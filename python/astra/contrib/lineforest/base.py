@@ -1,23 +1,22 @@
 import scipy.optimize as op
 import numpy as np
 import os
-import tensorflow as tf
+import copy
 from functools import cache
 from astropy.nddata import StdDevUncertainty
 from astropy import units as u
 from astra.base import task_decorator
 from astra.database.astradb import DataProduct, SDSSOutput
-from astra.utils import expand_path
+from astra.utils import log, flatten, expand_path
 from astra.tools.spectrum import (Spectrum1D, SpectrumList)
 from astra.tools.spectrum.utils import spectrum_overlaps
 from specutils.manipulation import SplineInterpolatedResampler
 
 from typing import Iterable
 
-from peewee import FloatField, IntegerField, TextField
+from peewee import FloatField, TextField
 from playhouse.postgres_ext import ArrayField
 
-tf.autograph.set_verbosity(0)
 
 LINES = [
     ['Halpha',      'hlines.model', 6562.8, 200],
@@ -96,82 +95,90 @@ class LineForestOutput(SDSSOutput):
 
 
 @task_decorator
-def lineforest(data_product: DataProduct, steps: int = 128, reps: int = 100) -> Iterable[LineForestOutput]:
+def line_forest(
+    data_product: Iterable[DataProduct], 
+    steps: int = 128, 
+    reps: int = 100
+) -> Iterable[LineForestOutput]:
+    
+    for data_product in flatten(data_product):
+        for spectrum in SpectrumList.read(data_product.path):
+            if not spectrum_overlaps(spectrum, 5_000):
+                # Exclude non-BOSS things
+                continue
 
-    for spectrum in SpectrumList.read(data_product.path):
-        if not spectrum_overlaps(spectrum, 5_000):
-            # Exclude non-BOSS things
-            continue
+            flux = spectrum.flux.value.flatten()
+            flux_error = spectrum.uncertainty.represent_as(StdDevUncertainty).array.flatten()
+            median_flux_error = np.median(flux_error[np.isfinite(flux_error)])
 
-        flux = spectrum.flux.flatten()
-        flux_error = spectrum.uncertainty.represent_as(StdDevUncertainty).array.flatten()
-        median_flux_error = np.nanmedian(flux_error)
+            high_error = (flux_error > (5 * median_flux_error))
+            bad_pixel = (flux <= 0) | ~np.isfinite(flux)
 
-        high_error = (flux_error > (5 * median_flux_error))
-        bad_pixel = (flux <= 0) | ~np.isfinite(flux)
-
-        flux_error[high_error] = 5 * median_flux_error
-        flux.value[bad_pixel] = 1
-        # TODO: increase flux error at bad pixels?
-        
-        specs = Spectrum1D(
-            spectral_axis=spectrum.spectral_axis,
-            flux=np.log10(flux.value) * flux.unit,
-            uncertainty=StdDevUncertainty(flux_error/flux.value/np.log(10))
-        )
-
-        spline = SplineInterpolatedResampler()
-
-        for name, model_path, wavelength_air, minmax in LINES:
+            flux_error[high_error] = 5 * median_flux_error
+            flux[bad_pixel] = 1
+            # TODO: increase flux error at bad pixels?
+            uncertainty = flux_error/flux/np.log(10)
+            uncertainty[~np.isfinite(uncertainty)] = 5 * median_flux_error
             
-            wavelength_vac = airtovac(wavelength_air)
-            
-            model = read_model(os.path.join(f"$MWM_ASTRA/component_data/lineforest/{model_path}"))
+            specs = Spectrum1D(
+                spectral_axis=spectrum.spectral_axis,
+                flux=np.log10(flux) * spectrum.flux.unit,
+                uncertainty=StdDevUncertainty(uncertainty)
+            )
 
-            spec = spline(specs, (np.linspace(-minmax, minmax, steps) + wavelength_vac) * u.AA)
-            window = spec.flux.value.reshape((1,(steps) , 1))
-            window = np.tile(window,(reps+1,1,1))
-            scatter= spec.uncertainty.array.reshape((1,(steps) , 1))
-            scatter= np.tile(scatter,(reps+1,1,1))*np.random.normal(size=(reps+1,steps,1),loc=0,scale=1)
-            scatter[0]=0
-            window=window+scatter
+            spline = SplineInterpolatedResampler()
 
-            predictions = unnormalize(np.array(model(window[0:1,:,:])))
-
-            if np.abs(predictions[0,2])>0.5: 
-                eqw, abs = (predictions[0, 0], predictions[0, 1])
-                detection_lower = predictions[0, 2]
-
-                predictions = unnormalize(np.array(model(window[1:,:,:])))  
-
-                a = np.where(np.abs(predictions[1:,2])>0.5)[0]
-                detection_upper = np.round(len(a)/reps,2)
-
-                kwds = dict(
-                    data_product=data_product,
-                    spectrum=spectrum,
-                    name=name,
-                    wavelength_vac=wavelength_vac,
-                    minmax=minmax,
-                    eqw=eqw,
-                    abs=abs,
-                    detection_lower=detection_lower,
-                    detection_upper=detection_upper,
-                )
-
-                if len(a)>2:
-                    eqw_percentile_16, eqw_percentile_50, eqw_percentile_84 = np.round(np.percentile(predictions[1:,0][a],[16,50,84]),4)
-                    abs_percentile_16, abs_percentile_50, abs_percentile_84 = np.round(np.percentile(predictions[1:,1][a],[16,50,84]),4)
-                    kwds.update(
-                        eqw_percentile_16=eqw_percentile_16,
-                        eqw_percentile_50=eqw_percentile_50,
-                        eqw_percentile_84=eqw_percentile_84,
-                        abs_percentile_16=abs_percentile_16,
-                        abs_percentile_50=abs_percentile_50,
-                        abs_percentile_84=abs_percentile_84,
-                    )
+            for name, model_path, wavelength_air, minmax in LINES:
                 
-                yield LineForestOutput(**kwds)
+                wavelength_vac = airtovac(wavelength_air)
+                
+                model = read_model(os.path.join(f"$MWM_ASTRA/component_data/lineforest/{model_path}"))
+
+                spec = spline(specs, (np.linspace(-minmax, minmax, steps) + wavelength_vac) * u.AA)
+
+                window = spec.flux.value.reshape((1,(steps) , 1))
+                window = np.tile(window,(reps+1,1,1))
+                scatter= spec.uncertainty.array.reshape((1,(steps) , 1))
+                scatter= np.tile(scatter,(reps+1,1,1))*np.random.normal(size=(reps+1,steps,1),loc=0,scale=1)
+                scatter[0]=0
+                window=window+scatter
+
+                predictions = unnormalize(np.array(model(window[0:1,:,:])))
+
+                if np.abs(predictions[0,2])>0.5: 
+                    eqw, abs = (predictions[0, 0], predictions[0, 1])
+                    detection_lower = predictions[0, 2]
+
+                    predictions = unnormalize(np.array(model(window[1:,:,:])))  
+
+                    a = np.where(np.abs(predictions[1:,2])>0.5)[0]
+                    detection_upper = np.round(len(a)/reps,2)
+
+                    kwds = dict(
+                        data_product=data_product,
+                        spectrum=spectrum,
+                        name=name,
+                        wavelength_vac=wavelength_vac,
+                        minmax=minmax,
+                        eqw=eqw,
+                        abs=abs,
+                        detection_lower=detection_lower,
+                        detection_upper=detection_upper,
+                    )
+
+                    if len(a)>2:
+                        eqw_percentile_16, eqw_percentile_50, eqw_percentile_84 = np.round(np.percentile(predictions[1:,0][a],[16,50,84]),4)
+                        abs_percentile_16, abs_percentile_50, abs_percentile_84 = np.round(np.percentile(predictions[1:,1][a],[16,50,84]),4)
+                        kwds.update(
+                            eqw_percentile_16=eqw_percentile_16,
+                            eqw_percentile_50=eqw_percentile_50,
+                            eqw_percentile_84=eqw_percentile_84,
+                            abs_percentile_16=abs_percentile_16,
+                            abs_percentile_50=abs_percentile_50,
+                            abs_percentile_84=abs_percentile_84,
+                        )
+                    
+                    yield LineForestOutput(**kwds)
 
 
 def unnormalize(predictions):
@@ -185,22 +192,29 @@ def unnormalize(predictions):
 
 @cache
 def read_model(path):
+    import tensorflow as tf
+    tf.autograph.set_verbosity(0)
     return tf.keras.models.load_model(expand_path(path))
 
+# TODO: move this to a utility
+def airtovac(wave_air) :
+    """ Convert air wavelengths to vacuum wavelengths
+        Corrects for the index of refraction of air under standard conditions.  
+        Wavelength values below 2000 A will not be altered.  Accurate to about 10 m/s.
+        From IDL Astronomy Users Library, which references Ciddor 1996 Applied Optics 35, 1566
+    """
+    if not isinstance(wave_air, np.ndarray) : 
+        air = np.array([wave_air])
+    else :
+        air = wave_air
 
-def airtovac(wvl, xc=None):
-    # Constants in [(10-6 m)**-2] from Ciddor 1996, Applied Optics, Vol. 35, Issue 9, pp. 1566-1573
-    # Appendix A
-    k0 = 238.0185
-    k1 = 5792105.
-    k2 = 57.362
-    k3 = 167917.0
-    
-    s2 = (1e4/wvl)**2
-    
-    # Eqs. 1 and 2
-    nas = (k1/(k0 - s2) + k3/(k2 - s2)) / 1e8 + 1.0
-    if xc is not None:
-        naxs = (nas - 1.0)*(1.0 + 0.534e-6*(xc - 450.)) + 1.0
-        return naxs
-    return nas
+    vac = copy.copy(air)
+    g = np.where(vac >= 2000)[0]     #Only modify above 2000 A
+
+    for iter in range(2) :
+        sigma2 = (1e4/vac[g])**2.     # Convert to wavenumber squared
+        # Compute conversion factor
+        fact = 1. +  5.792105E-2/(238.0185E0 - sigma2) + 1.67917E-3/( 57.362E0 - sigma2)
+
+        vac[g] = air[g]*fact              #Convert Wavelength
+    return vac    

@@ -15,8 +15,8 @@ from peewee import fn
 
 
 from astra import config
-from astra.base import _iterable_parameter_names
-from astra.utils import log, flatten, estimate_relative_cost
+from astra.base import _iterable_parameter_names, _get_or_create_database_table_for_task
+from astra.utils import log, to_callable, flatten
 
 
 def get_slurm_queue():
@@ -28,7 +28,8 @@ def get_slurm_queue():
         "(?P<time_left>[-\d\:]+)\s+(?P<status>\w*)\s+(?P<nodelist>[\w\d\(\)]+)"
     )
     popen_args = [
-        "/uufs/chpc.utah.edu/sys/installdir/slurm/std/bin/squeue",
+        #"/uufs/chpc.utah.edu/sys/installdir/slurm/std/bin/squeue",
+        "/uufs/notchpeak.peaks/sys/installdir/slurm/std/bin/squeue",
         "--account=sdss-np,notchpeak-gpu,sdss-np-fast",
         '--format="%14i %50j %10u %10g %13a %13P %11l %11L %2t %R"',
     ]
@@ -82,27 +83,36 @@ def generate_dict_chunks(iterable_keys, iterable_values, N):
         yield d
 
 
+
+
+
 class SlurmTaskOperator(BaseOperator):
 
     template_fields = ("task_kwargs", )
 
-    def __init__(self, task_callable=None, task_kwargs=None, slurm_kwargs=None, num_slurm_tasks=1, mkstemp_kwargs=None, continue_from_data_product=None, **kwargs):
+    def __init__(self, task_callable=None, task_kwargs=None, slurm_kwargs=None, num_slurm_tasks=1, mkstemp_kwargs=None, continue_from_previous=False, **kwargs):
         super(SlurmTaskOperator, self).__init__(**kwargs)
         self.task_callable = task_callable
         self.mkstemp_kwargs = mkstemp_kwargs or {}
         self.task_kwargs = task_kwargs or {}
         self.slurm_kwargs = slurm_kwargs or {}
         self.num_slurm_tasks = num_slurm_tasks
-        self.continue_from_data_product = continue_from_data_product
+        self.continue_from_previous = continue_from_previous
         return None
 
     def execute(self, context):
         from slurm import queue
 
-        signature = inspect.signature(self.task_callable)
+        if isinstance(self.task_callable, str):
+            log.info(f"Task callable is string: {self.task_callable}")
+            task_callable = to_callable(self.task_callable)
+        else:
+            task_callable = self.task_callable
+            
+        signature = inspect.signature(task_callable)
         iterable_parameter_names = _iterable_parameter_names(signature)
 
-        serialized_task_callable = f"{self.task_callable.__module__}.{self.task_callable.__name__}"
+        serialized_task_callable = f"{task_callable.__module__}.{task_callable.__name__}"
 
         slurm_kwargs = self.slurm_kwargs
         for k in ("cpus", "ppn"):
@@ -114,13 +124,59 @@ class SlurmTaskOperator(BaseOperator):
             print(f"Slurm keyword {k}: {v} ({type(v)})")
 
         q = queue(verbose=True)
-        q.create(label=self.task_callable.__name__, **slurm_kwargs)
+        q.create(label=task_callable.__name__, **slurm_kwargs)
         print(f"Created slurm queue with {slurm_kwargs}")
 
 
         task_kwargs = self.task_kwargs
-        if self.continue_from_data_product is not None:
-            print(f"Continuing from {self.continue_from_data_product}.. ")
+        if self.continue_from_previous:
+            print(f"Continuing from previous.. ")
+            
+            # It'll be either data product or source.
+            # Need to know where we read out to.
+            model = _get_or_create_database_table_for_task(task_callable)
+            if "data_product" in task_kwargs:
+
+                data_product_ids = task_kwargs["data_product"]
+                if isinstance(data_product_ids, str):
+                    data_product_ids = json.loads(data_product_ids)
+
+                print(f"Found {len(data_product_ids)} upstream: {data_product_ids}")
+
+                sq = (
+                    model
+                    .select(model.data_product_id)
+                    .tuples()                
+                )
+                done = flatten(sq)
+                print(f"Found {len(done)} done")
+                remaining = list(set(data_product_ids) - set(done))
+                print(f"There are {len(remaining)} remaining")
+                task_kwargs["data_product"] = remaining
+
+            elif "source" in task_kwargs:
+                source_ids = task_kwargs["source"]
+                if isinstance(source_ids, str):
+                    source_ids = json.loads(source_ids)                
+
+                # TODO: should match on all other task_kwargs too, but CBF
+                log.warning("NOT MATCHING ON ALL THINGS!!!")
+                sq = (
+                    model
+                    .select(model.source_id)
+                    .tuples()
+                )
+                done = flatten(sq)
+                print(f"Found {len(done)} done")
+                remaining = list(set(source_ids) - set(done))
+                print(f"There are {len(remaining)} remaining")
+
+                task_kwargs["source"] = remaining
+
+            else:
+                raise ValueError("don't know what iterable")
+
+            '''
             data_product = task_kwargs["data_product"]
             if isinstance(data_product, str):
                 data_product = json.loads(data_product)
@@ -128,7 +184,7 @@ class SlurmTaskOperator(BaseOperator):
             index = data_product.index(self.continue_from_data_product)
             print(f"That's at index {index}")
             task_kwargs["data_product"] = data_product[1 + index:]
-
+            '''
 
         if self.num_slurm_tasks == 1 or len(iterable_parameter_names) == 0:
             # Write to a JSON file. 
@@ -278,6 +334,7 @@ class SlurmOperator(BaseOperator):
             group_bundle_ids = [[bundle.id for bundle in bundles]]
 
         elif B > Q_free:
+            raise NotImplementedError
             """
             # Estimate the cost of each bundle.
             bundle_costs = (

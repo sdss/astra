@@ -5,7 +5,7 @@ from itertools import repeat, zip_longest
 from decorator import decorator
 from time import time
 from typing import Union, Dict, get_origin, get_args
-from peewee import IntegerField, BooleanField, TextField, FloatField
+from peewee import IntegrityError, IntegerField, BooleanField, TextField, FloatField
 from playhouse.postgres_ext import ArrayField
 from playhouse.postgres_ext import BinaryJSONField as JSONField
 
@@ -109,11 +109,34 @@ task = task_decorator
 
 def _write_database_outputs(params, results, time_elapsed, function, time_bundle=0):
 
-    for r, p, te in zip(flatten(results), params, time_elapsed):
-        #p = params_fn(**r.__data__)
-        r.__data__.update(**p)
-        r.__data__.setdefault("time_elapsed", te)
-        r.__data__.setdefault("time_bundle", time_bundle)
+    for r, p, te in zip(results, params, time_elapsed):
+        N = len(r) if isinstance(r, (tuple, list)) else 1
+
+        # To allow for one-to-many mappings, we need to update the parameters for each result.
+        for result in flatten(r):
+            # TODO: sanity check that results and params dont contain conflicting information?
+            common_keys = set(p).intersection(result.__data__)
+            for k in common_keys:
+                expected_from_params = p[k]
+                actual_from_result = result.__data__[k]
+
+                if expected_from_params != actual_from_result and k == "data_product":
+                    try:
+                        expected_from_params = expected_from_params.id
+                    except:
+                        None
+                    try:
+                        actual_from_result = actual_from_result.id
+                    except:
+                        None
+                    
+                if expected_from_params != actual_from_result:
+                    log.warning(f"Overwriting {k}={actual_from_result} instead of {expected_from_params} for {function.__name__}.")
+                    raise a
+
+            result.__data__.update(**p)
+            result.__data__.setdefault("time_elapsed", te / N)
+            result.__data__.setdefault("time_bundle", time_bundle)
 
     # TODO: make this more explicit? ASTRA_WRITE_OUTPUTS?
     if os.getenv("ASTRA_ENVIRONMENT", None) in ("dev", "develop", "staging"):
@@ -124,10 +147,16 @@ def _write_database_outputs(params, results, time_elapsed, function, time_bundle
         model = _get_or_create_database_table_for_task(function)
         items = filter(lambda x: isinstance(x, BaseTaskOutput), flatten(results))
         
-        with database.atomic():
-            model.bulk_create(items)
-
-        log.info(f"Saved {len(results)} results to database.")
+        try:
+            with database.atomic():
+                model.bulk_create(items)
+        except IntegrityError:
+            log.exception(f"Integrity error when saving results to database.")
+            raise a
+            for j, item in enumerate(items):
+                log.debug(f"Item: {j} {item} {item.__data__}")
+        else:
+            log.info(f"Saved {len(results)} results to database.")
         
     return None
 
@@ -143,6 +172,11 @@ def _is_optional(field):
 
 def _is_iterable(annotation):
     return getattr(annotation, "_name", None) == "Iterable"
+
+def _is_list_or_tuple(annotation):
+    name = getattr(annotation, "_name", None)
+    return name in ("List", "Tuple")
+
 
 def _iterable_parameter_names(signature):
     return [k for k, v in signature.parameters.items() if _is_iterable(v.annotation)]
@@ -162,9 +196,20 @@ def _create_parameter_generator(common_args, iterable_keys, iterable_values, fil
         yield {**common_args, **dict(zip(iterable_keys, v)) }
     
 
+def _has_many_iterators(function):
+    signature = inspect.signature(function)
+    _RESTRICTED_KEYS = (_SOURCE_KEY, _DATA_PRODUCT_KEY)
+
+    iterable_parameter_names = _iterable_parameter_names(signature)
+    simple = not set(iterable_parameter_names).difference(_RESTRICTED_KEYS)
+    return not simple
+
+
 def _parse_arguments(function, *args, **kwargs):
     signature = inspect.signature(function)
     _RESTRICTED_KEYS = (_SOURCE_KEY, _DATA_PRODUCT_KEY)
+
+    flat_params = dict(zip(signature.parameters, args))
 
     iterable_parameter_names = _iterable_parameter_names(signature)
     if not set(iterable_parameter_names).difference(_RESTRICTED_KEYS):
@@ -175,54 +220,29 @@ def _parse_arguments(function, *args, **kwargs):
         all_params = repeat(flat_params)
         yield from all_params
 
-
-        #return lambda *_, **__: flat_params
-        
     else:
-        # There are iterables. We need to figure out which ones are the same as the data product.
-        raise NotImplementedError
-    try:
-        data_product_is_iterable = _is_iterable(signature.parameters[_DATA_PRODUCT_KEY].annotation)
-    except:
-        data_product_is_iterable = False
+        iterable_kwds = {}
+        for k in list(flat_params.keys()):
+            if k in iterable_parameter_names:
+                iterable_kwds[k] = flat_params.pop(k)
+            
+        yield from ({ **flat_params, **dict(zip(iterable_kwds, t)) } for t in zip(*iterable_kwds.values()))
 
-    flat_params = dict(zip(signature.parameters, args))
-    flat_params.pop(_DATA_PRODUCT_KEY, None) # We get this from the results.
-    flat_params.pop(_SOURCE_KEY, None)
-
-    if any((k not in (_SOURCE_KEY, _DATA_PRODUCT_KEY)) and _is_iterable(v.annotation) for k, v in signature.parameters.items()):
-        # There is another annotation that is Iterable.
-
-
-        raise NotImplementedError
-
-    
-    if data_product_is_iterable and False:
-        common_keys, iterable_keys = _separate_iterable_args(signature.parameters)
-        common_args = { k: flat_params[k] for k in common_keys }
-        all_params = _create_parameter_generator(
-            common_args, 
-            iterable_keys, 
-            (flatten(flat_params[k]) for k in iterable_keys)
-        )
-    else:
-        all_params = repeat(flat_params)
-
-    assert "data_products" not in flat_params, "Use `data_product` instead of `data_products`."
-
-    yield from all_params
 
 
 def _get_field(parameter):
     annotation = parameter.annotation
-    optional = _is_optional(parameter.annotation)
+
+
+    optional = _is_optional(parameter.annotation) 
     if optional:
         check_field_type = get_args(annotation)[0]
     else:
         check_field_type = annotation
 
     iterable = _is_iterable(check_field_type)
-    if iterable:
+    is_list_or_tuple = _is_list_or_tuple(check_field_type)
+    if iterable or is_list_or_tuple:
         check_field_type = get_args(check_field_type)[0]
     
     field_type = {
@@ -235,16 +255,22 @@ def _get_field(parameter):
         Dict: JSONField,
     }[check_field_type]
 
-    kwds = {}
-    if optional:
-        kwds["null"] = True
+    try:
+        parameter.default
+    except:
+        has_default = False
+    else:
+        has_default = True
 
+    kwds = {}
+    if optional or (has_default and parameter.default is None):
+        kwds["null"] = True
     try:
         kwds["default"] = parameter.default
     except:
         None
     
-    if iterable:
+    if is_list_or_tuple:
         field = ArrayField(field_type, **kwds)
     else:
         field = field_type(**kwds)

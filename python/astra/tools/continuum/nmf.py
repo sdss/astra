@@ -3,7 +3,7 @@ import os
 import pickle
 import warnings
 from sklearn.decomposition import NMF
-from sklearn.decomposition._nmf import non_negative_factorization
+from sklearn.decomposition._nmf import non_negative_factorization, _fit_multiplicative_update
 from sklearn.exceptions import ConvergenceWarning
 from astropy.nddata import InverseVariance
 from astra.tools.continuum.base import Continuum, _pixel_slice_and_mask
@@ -20,6 +20,10 @@ class Emulator:
     def __init__(
         self,
         components: np.ndarray,
+        alpha_W: Optional[float] = 1e-5,
+        nmf_solver: Optional[str] = "mu",
+        nmf_max_iter: Optional[int] = 100,
+        nmf_tol: Optional[float] = 1e-1,
         deg: Optional[int] = 3,
         L: Optional[float] = 1400,
         scalar: Optional[float] = 1e-6,
@@ -27,7 +31,6 @@ class Emulator:
         regions: Optional[List[Tuple[float, float]]] = None,
         mask: Optional[np.array] = None,
         fill_value: Optional[Union[int, float]] = np.nan,
-        expectation_kwds: Optional[dict] = None,
         **kwargs,
     ) -> None:
         
@@ -40,10 +43,14 @@ class Emulator:
             L=L,
             scalar=scalar
         )
+        self.mask = mask
+        self.alpha_W = alpha_W
+        self.nmf_solver = nmf_solver
+        self.nmf_max_iter = nmf_max_iter
+        self.nmf_tol = nmf_tol
         self.components = components
         self.phi_size = components.shape[0]
         self.theta_size = self.continuum_model.num_regions * (2 * self.continuum_model.deg + 1)
-        self._expectation_kwds = expectation_kwds or {}
         return None
 
     
@@ -66,39 +73,41 @@ class Emulator:
         return (theta, continuum)
     
 
-    def _expectation(
-            self, 
-            flux, 
-            W=None,
-            solver="mu",
-            **kwargs
-        ):
+    def _expectation(self, flux, W, **kwargs):
 
-        X = 1 - flux # absorption
+        absorption = 1 - flux # absorption
 
         # Only use non-negative finite pixels.
-        use = np.isfinite(flux) & (X >= 0)
+        use = np.isfinite(flux) & (absorption >= 0)
         n_components, n_pixels = self.components.shape
         assert flux.size == n_pixels
+
+        if self.mask is not None:
+            use *= ~self.mask
 
         if np.sum(use) < n_components:
             log.warning(f"Number of non-negative finite pixels ({np.sum(use)}) is less than the number of components ({n_components}).")
 
+        X = absorption[use].reshape((1, -1))
+        H = self.components[:, use]
+
+
+        # TODO: Scale alpha_W based on the number of pixels being used in the mask?    
         kwds = dict(
             # If W is None it means it's the first iteration.
             init=None if W is None else "custom",
             # The documentation says that custom matrices W and H can only be used if `update_H=True`.
             # Since we want it to use W from the previous iteration, we will set `update_H=True`, and ignore H_adjusted.
             update_H=True,
-            solver=solver,
+            solver=self.nmf_solver,
             W=W,
-            H=self.components[:, use],
+            H=H,
             n_components=n_components,
             beta_loss="frobenius",
-            tol=1e-4, # Irrelevant since we are only taking 1 step, usually.
-            max_iter=1,
-            # No regularization! We are at the test step here, and we want our absorption model to be flexible.
-            alpha_W=0.0, 
+            tol=self.nmf_tol,
+            max_iter=self.nmf_max_iter,
+            # Only regularization on W, because we are at the test step here.
+            alpha_W=self.alpha_W, 
             alpha_H=0.0,
             l1_ratio=1.0,
             random_state=None,
@@ -108,17 +117,49 @@ class Emulator:
         # Only include kwargs that non_negative_factorization accepts.
         kwds.update({k: v for k, v in kwargs.items() if k in kwds})
 
-        W_next, H_adjusted, n_iter = non_negative_factorization(X[use].reshape((1, -1)), **kwds)
+        W_next, H_adjusted_and_masked, n_iter = non_negative_factorization(X, **kwds)
+        #H_adjusted = np.zeros(self.components.shape, dtype=float)
+        #H_adjusted[:, use] = H_adjusted_and_masked
+
+        #if adjusted:
+        #    use_H = H_adjusted
+        #else:
+        use_H = self.components
+
+        rectified_model_flux = 1 - (W_next @ use_H)[0]
+        return (W_next, rectified_model_flux, np.sum(use), n_iter)
+        '''
+
+        X = absorption[use].reshape((1, -1))
+        kwds = dict(
+            beta_loss="frobenius",
+            max_iter=self.nmf_max_iter,
+            tol=self.nmf_tol,
+            l1_reg_W=self.alpha_W,
+            l1_reg_H=0,
+            l2_reg_W=0,
+            l2_reg_H=0,
+            update_H=False,
+            verbose=1
+        )
+        if W is None:
+            n_components = H.shape[0]
+            avg = np.sqrt(X.mean() / n_components)
+            W = np.full((1, n_components), avg, dtype=X.dtype)
+
+        W_next, H_adjusted, n_iter = _fit_multiplicative_update(
+            X,
+            W=W,
+            H=H,
+            **kwds
+        )
         rectified_model_flux = 1 - (W_next @ self.components)[0]
-        return (W_next, rectified_model_flux, np.sum(use))
+        return (W_next, rectified_model_flux, np.sum(use), n_iter)
+        '''
 
 
-    def fit(
-            self, 
-            spectrum: Spectrum1D, 
-            tol: float = 1e-1, 
-            max_iter: int = 1_000, 
-        ):
+
+    def fit(self, spectrum: Spectrum1D, tol: float = 1e-1, max_iter: int = 1_000):
         """
         Simultaneously fit the continuum and stellar absorption.
 
@@ -140,7 +181,7 @@ class Emulator:
             sensible number of max iterations.
 
         :param max_iter: [optional]
-            The maximum number of iterations.
+            The maximum number of expectation-maximization iterations.
         
         :returns:
             A tuple of (phi, theta, continuum, model_rectified_flux, meta) where:
@@ -174,10 +215,10 @@ class Emulator:
             return (phi, theta, continuum, model_rectified_flux, meta)
 
     def _expectation_maximization(self, flux, ivar, stacked_flux, phi, continuum_args, **kwargs):
-        phi_next, model_rectified_flux, n_pixels = self._expectation(
+        phi_next, model_rectified_flux, n_pixels, n_nmf_iter = self._expectation(
             stacked_flux, 
             W=phi.copy() if phi is not None else phi, # make sure you copy 
-            **{**self._expectation_kwds, **kwargs}
+            **kwargs
         )
 
         theta_next, continuum = self._maximization(
@@ -190,7 +231,7 @@ class Emulator:
         finite = np.isfinite(chi_sq)
         chi_sq = np.sum(chi_sq[finite])
 
-        args = (phi_next, theta_next, continuum, model_rectified_flux, n_pixels, np.sum(finite))
+        args = (phi_next, theta_next, continuum, model_rectified_flux, n_pixels, np.sum(finite), n_nmf_iter)
         return (chi_sq, args)
 
 
@@ -205,51 +246,45 @@ class Emulator:
             phi = None # phi is the same as W used in NMF
             theta, continuum = self._maximization(flux, ivar, continuum_args)
 
-            alpha_Ws = [0]
-            min_log_alpha_W, max_log_alpha_W = (None, None)
-            if min_log_alpha_W is not None and max_log_alpha_W is not None:
-                alpha_Ws = np.hstack([alpha_Ws, np.logspace(min_log_alpha_W, max_log_alpha_W, 1 + max_log_alpha_W - min_log_alpha_W)])
+            # initial trick
+            #continuum *= 1.5
+            #print("doing a hack")
             
-            chi_sqs, n_pixels_used_in_chisq, n_pixels_used_in_nmf, alpha_Ws_used = ([], [], [], [])
+            chi_sqs, n_pixels_used_in_chisq, n_pixels_used_in_nmf, n_nmf_iters = ([], [], [], [])
             for iter in range(max_iter):
 
                 conditional_flux = flux / continuum
                 conditional_ivar = continuum * flux * continuum
                 stacked_flux = np.sum(conditional_flux * conditional_ivar, axis=0) / np.sum(conditional_ivar, axis=0) 
 
-                # Use increasing regularisation for noisy spectra to ensure we converge.
-                for alpha_W in alpha_Ws:
-                    chi_sq, em_args = self._expectation_maximization(
-                        flux, 
-                        ivar, 
-                        stacked_flux, 
-                        phi, 
-                        continuum_args,
-                        alpha_W=alpha_W
-                    )
-                    if iter == 0 or chi_sq < chi_sqs[-1]:
-                        # first iteration, or chi-sq improved.
-                        break
-                else:
+                chi_sq, em_args = self._expectation_maximization(
+                    flux, 
+                    ivar, 
+                    stacked_flux, 
+                    phi, #phi, #None, # phi
+                    continuum_args,
+                )
+                if iter > 0:
+                    assert phi is not None
+                if iter > 0 and (chi_sq > chi_sqs[-1]):                    
+                    log.warning(f"Failed to improve \chi^2")
                     success, message = (False, "Failed to improve \chi^2")
                     break
 
-                (phi, theta, continuum, model_rectified_flux, n_pixels, n_finite) = em_args
+                (phi, theta, continuum, model_rectified_flux, n_pixels, n_finite, n_nmf_iter) = em_args
 
                 chi_sqs.append(chi_sq)
                 n_pixels_used_in_nmf.append(n_pixels)
                 n_pixels_used_in_chisq.append(n_finite)
-                alpha_Ws_used.append(alpha_W)
-                if alpha_W > 0:
-                    print(f"{iter} alpha_W={alpha_W}")
+                n_nmf_iters.append(n_nmf_iter)
 
-            
                 if iter > 0:
                     delta_chi_sq = chi_sqs[-1] - chi_sqs[-2]
                     if (delta_chi_sq < 0) and abs(delta_chi_sq) <= tol:
                         # Converged
                         success, message = (True, f"Convergence reached after {iter} iterations")
                         break
+                    
             
             else:
                 success, message = (True, f"Convergence not reached after {max_iter} iterations ({abs(delta_chi_sq)} > {tol:.2e})")
@@ -263,6 +298,7 @@ class Emulator:
             success=success,
             iter=iter,
             message=message,
-            continuum_args=continuum_args
+            continuum_args=continuum_args,
+            n_nmf_iters=n_nmf_iters
         )
         return (phi, theta, continuum, model_rectified_flux, meta)

@@ -8,8 +8,6 @@ from peewee import Alias, JOIN, fn
 from astra.database.astradb import Source, database
 
 
-from healpy import ang2pix
-
 BLANK_CARD = (" ", " ", None)
 FILLER_CARD = (FILLER_CARD_KEY, *_) = ("TTYPE0", "Water cuggle", None)
 
@@ -341,6 +339,11 @@ GLOSSARY = {
     # MWM data model keywords not specified elsewhere
     "V_ASTRA": "Astra version",
     "CAT_ID": "SDSS-V catalog identifier",
+    "CAT_ID05": "SDSS-V catalog identifier (v0.5)",
+    "CAT_ID10": "SDSS-V catalog identifier (v1.0)",
+    "GAIA_SOURCE_ID": "Gaia source identifier",
+    "GAIA_DATA_RELEASE": "Gaia data release used",
+        
     "COMPONENT": "Disentangled stellar component",
     "OUTPUT_ID": "Astra unique output identifier",
     "DATA_PRODUCT_ID": "Astra data product identifier",
@@ -374,12 +377,34 @@ GLOSSARY = {
     "J_MAG": "2MASS mean apparent J magnitude [mag]",
     "H_MAG": "2MASS mean apparent H magnitude [mag]",
     "K_MAG": "2MASS mean apparent K magnitude [mag]",
+    "E_J_MAG": f"2MASS mean apparent J magnitude error [mag]",
+    "E_H_MAG": f"2MASS mean apparent H magnitude error [mag]",
+    "E_K_MAG": f"2MASS mean apparent K magnitude error [mag]",
+
+    "SPECTRAL_TYPE": "Stellar spectral type",
+    "SUB_TYPE": "Stellar sub-type",
 
     "CREATED": f"File creation time (UTC {datetime_fmt})",
     "HEALPIX": f"Healpix location (128 sides)",
 
     "RA": "SDSS-V catalog right ascension (J2000) [deg]",
     "DEC": "SDSS-V catalog declination (J2000) [deg]",
+
+    "GAIA_RA": "Gaia right ascension [deg]",
+    "GAIA_DEC": "Gaia declination [deg]",
+    "PLX": "Gaia parallax [mas]",
+    "E_PLX": "Gaia parallax error [mas]",
+    "PMRA": "Gaia proper motion in RA [mas/yr]",
+    "E_PMRA": "Gaia proper motion in RA error [mas/yr]",
+    "PMDE": "Gaia proper motion in DEC [mas/yr]",
+    "E_PMDE": "Gaia proper motion in DEC error [mas/yr]",
+    "GAIA_V_RAD": "Gaia radial velocity [km/s]",
+    "GAIA_E_V_RAD": "Gaia radial velocity error [km/s]",
+
+    "G_MAG": "Gaia mean apparent G magnitude [mag]",
+    "RP_MAG": "Gaia mean apparent RP magnitude [mag]",
+    "BP_MAG": "Gaia mean apparent BP magnitude [mag]",
+
     #"RA_GAIA": f"Gaia DR2 right ascension [deg]",
     #"DEC_GAIA": f"Gaia DR2 declination [deg]",
     #"PLX": f"Gaia DR2 parallax [mas]",
@@ -390,7 +415,8 @@ GLOSSARY = {
     #"E_PMDE": f"Gaia DR2 proper motion in DEC error [mas/yr]",
     #"V_RAD_GAIA": f"Gaia DR2 radial velocity [km/s]",
     #"E_V_RAD_GAIA": f"Gaia DR2 radial velocity error [km/s]",
-    
+    "FPS": "Fraction of observation taken with fiber positioning system",
+
     "V_XMATCH": "Cross-match version used for auxillary data",
 
     # APOGEE DRP stuff
@@ -407,12 +433,50 @@ GLOSSARY = {
 
     "BITMASK_FLAG": "Results bitmask flag (see documentation)",
     # Doppler keys
+    "DOPPLER_TEFF": "Effective temperature from DOPPLER [K]",
     "TEFF_D": "Effective temperature from DOPPLER [K]",
+    "DOPPLER_E_TEFF":  "Error in effective temperature from DOPPLER [K]",
     "E_TEFF_D": "Error in effective temperature from DOPPLER [K]",
+    "DOPPLER_LOGG": "Surface gravity from DOPPLER",
     "LOGG_D": "Surface gravity from DOPPLER",
+    "DOPPLER_E_LOGG": "Error in surface gravity from DOPPLER",
     "E_LOGG_D": "Error in surface gravity from DOPPLER",
+    "DOPPLER_FE_H": "Metallicity from DOPPLER",
     "FEH_D": "Metallicity from DOPPLER",
+    "DOPPLER_E_FE_H": "Error in metallicity from DOPPLER",
     "E_FEH_D": "Error in metallicity from DOPPLER",
+    "DOPPLER_V_RAD": "Radial velocity from DOPPLER [km/s]",
+    "DOPPLER_VERSION": "DOPPLER version used for fit",
+    "DOPPLER_FLAG": "Flag for DOPPLER results as bit array",
+
+    "TEFF_SAMPLE_MEDIAN": "Median of effective temperature samples [K]",
+    "LOGG_SAMPLE_MEDIAN": "Median of surface gravity samples",
+    "FE_H_SAMPLE_MEDIAN": "Median of metallicity samples",
+
+    "XCSAO_TEFF": "Effective temperature from XCSAO [K]",
+    "XCSAO_E_TEFF": "Error in effective temperature from XCSAO [K]",
+    "XCSAO_LOGG": "Surface gravity from XCSAO",
+    "XCSAO_E_LOGG": "Error in surface gravity from XCSAO",
+    "XCSAO_FE_H": "Metallicity from XCSAO",
+    "XCSAO_E_FE_H": "Error in metallicity from XCSAO",
+    "XCSAO_V_RAD": "Radial velocity from XCSAO [km/s]",
+    "XCSAO_RXC": "Cross-correlation R-value (1979AJ.....84.1511T)",
+    "XCSAO_E_V_RAD": "Error in radial velocity from XCSAO [km/s]",
+    
+    "ASTRA_VERSION_MAJOR": "Astra version major number",
+    "ASTRA_VERSION_MINOR": "Astra version minor number",
+    "ASTRA_VERSION_PATCH": "Astra version patch number",
+    
+    "COMPLETED": "Task completed",
+    "TIME_ELAPSED": "Time elapsed for task [s]",
+    "TASK": "Task identifier",
+    "DATA_PRODUCT": "Data product identifier",
+    "SOURCE": "Source identifier",
+    "OUTPUT_DATA_PRODUCT": "Output data product identifier",
+    
+    "INSTRUMENT": "Instrument",
+
+    "FLAG": "Flag for results as a bit array",
     
     "V_TURB": "Microturbulent velocity [km/s]",
     "E_V_TURB": "Error in microturbulent velocity [km/s]",
@@ -557,61 +621,6 @@ def get_first_carton(source: Union[Source, int]):
     return Carton.select().join(sq, on=(sq.c.carton_pk == Carton.pk)).first()
 
 
-def _resolve_v1_catalogid(catalogid):
-    """
-    Resolve the catalog identifier for version 1 for this source. 
-
-    This is a temporary function so that we can still use cross-matches when we don't have a `sdss_id`.
-    """
-
-    # Try matching directly to v1.
-    cursor = database.execute_sql(
-        f"""
-        SELECT lowest_catalogid, highest_catalogid
-        FROM sandbox.catalog_ver25_to_ver31_full_unique
-        WHERE lowest_catalogid = {catalogid}
-        OR highest_catalogid = {catalogid}
-        """
-    )
-    try:
-        (lowest_catalogid, highest_catalogid) = cursor.fetchone()
-    except:
-        return None
-    else:
-        return highest_catalogid
-
-
-def _resolve_v0p5_catalogid(catalogid):
-    # Must be a v0.5 source.
-    v0p5_cursor = database.execute_sql(
-        f"""
-        SELECT lowest_catalogid, highest_catalogid
-        FROM sandbox.catalog_ver21_to_ver25_full_unique
-        WHERE lowest_catalogid = {catalogid}
-        OR highest_catalogid = {catalogid}
-        """
-    )
-    try:
-        (lowest_catalogid, highest_catalogid) = v0p5_cursor.fetchone()
-    except:
-        return None
-    else:
-        return highest_catalogid
-
-
-def resolve_v1_catalogid(catalogid):
-    v1_catalogid = _resolve_v1_catalogid(catalogid)
-    if v1_catalogid is None:
-        v0p5_catalogid = _resolve_v0p5_catalogid(catalogid)
-        if v0p5_catalogid is None:
-            return None
-        else:
-            return _resolve_v1_catalogid(v0p5_catalogid)
-    else:
-        return v1_catalogid
-
-
-
 def get_auxiliary_source_data(source: Union[Source, int]):
     """
     Return auxiliary data (e.g., photometry) for a given SDSS-V source.
@@ -632,8 +641,8 @@ def get_auxiliary_source_data(source: Union[Source, int]):
         Gaia_DR3 as Gaia
     )
 
-    catalogid = get_catalog_identifier(source)
-    catalogid_v1 = resolve_v1_catalogid(catalogid)
+    #catalogid = get_catalog_identifier(source)
+    #catalogid_v1 = resolve_v1_catalogid(catalogid)
     tic_dr = TIC.__name__.split("_")[-1]
     gaia_dr = Gaia.__name__.split("_")[-1]
 
@@ -645,8 +654,9 @@ def get_auxiliary_source_data(source: Union[Source, int]):
         (" ", "IDENTIFIERS", None),
         ("GAIA_ID", Gaia.source_id, f"Gaia {gaia_dr} source identifier"),
         ("TIC_ID", TIC.id.alias("tic_id"), f"TESS Input Catalog ({tic_dr}) identifier"),
-        ("CAT_ID", catalogid, f"SDSS-V catalog identifier"),        
-        ("CAT_ID_1", catalogid_v1, f"SDSS-V catalog identifier (v1)"),
+        ("CAT_ID", source.catalogid, f"SDSS-V catalog identifier"),        
+        ("CAT_ID05", source.catalogid_v0p5, f"SDSS-V catalog identifier (v0.5)"),
+        ("CAT_ID10", source.catalogid_v1, f"SDSS-V catalog identifier (v1)"),
         BLANK_CARD,
         (" ", "ASTROMETRY", None),
         ("RA", Catalog.ra, "SDSS-V catalog right ascension (J2000) [deg]"),
@@ -714,26 +724,29 @@ def get_auxiliary_source_data(source: Union[Source, int]):
     row = q.first()
     """
     cols = [c for k, c, comment in field_descriptors if not ignore(c)]
-    q = (
-        Catalog
-        .select(*cols)
-        .join(CatalogToTIC_v8, JOIN.LEFT_OUTER)
-        .join(TIC, JOIN.LEFT_OUTER)
-        .switch(Catalog)
-        .join(CatalogToGaia, JOIN.LEFT_OUTER)
-        .join(Gaia, JOIN.LEFT_OUTER)
-        .switch(Catalog)
-        .join(CatalogToTwoMassPSC, JOIN.LEFT_OUTER)
-        .join(TwoMassPSC, JOIN.LEFT_OUTER)
-        .where(Catalog.catalogid == catalogid_v1)
-        .dicts()
-    )
-
     only_fields_of = lambda model: [c for k, c, comment in field_descriptors if not ignore(c) and not isinstance(c, Alias) and c.model == model]
-    row = q.first()
 
-    if row is None:
-        log.warning(f"Failed to cross-match with v1, using v0 instead..")
+    if source.catalogid_v1 is not None:
+
+        q = (
+            Catalog
+            .select(*cols)
+            .join(CatalogToTIC_v8, JOIN.LEFT_OUTER)
+            .join(TIC, JOIN.LEFT_OUTER)
+            .switch(Catalog)
+            .join(CatalogToGaia, JOIN.LEFT_OUTER)
+            .join(Gaia, JOIN.LEFT_OUTER)
+            .switch(Catalog)
+            .join(CatalogToTwoMassPSC, JOIN.LEFT_OUTER)
+            .join(TwoMassPSC, JOIN.LEFT_OUTER)
+            .where(Catalog.catalogid == source.catalogid_v1)
+            .dicts()
+        )
+        xmatch_used = "v1"
+
+        row = q.first()
+
+    else:
         # Try again with catalog_v0, and use Gaia_DR2_neighbourhood
         q = (
             Catalog.select(*[c for k, c, comment in field_descriptors if not ignore(c)])
@@ -745,28 +758,30 @@ def get_auxiliary_source_data(source: Union[Source, int]):
             .join(Gaia, on=(Gaia.source_id == Gaia_DR2_Neighbourhood.dr3_source_id))
             .switch(TIC)
             .join(TwoMassPSC, JOIN.LEFT_OUTER)
-            .where(Catalog.catalogid == catalogid)
+            .where(Catalog.catalogid == source.catalogid)
             .dicts()
         )        
 
         row = q.first()
 
-        if row is None:
+        if row is not None:
+            xmatch_used = "v0"
+        else:
             xmatch_used = "xm"
-            log.warning(f"Trouble getting auxillary data for Source {catalogid_v1}. Using separate queries and cone searches.")
+            log.warning(f"Trouble getting auxillary data for Source {source}. Using separate queries and cone searches.")
 
             # Fill it with what we can.
             row = (
                 Catalog
                 .select(*only_fields_of(Catalog))
-                .where(Catalog.catalogid == catalogid)
+                .where(Catalog.catalogid == source.catalogid)
                 .dicts()
                 .first()
             )
             row.update(
                 CatalogToTIC_v8
                 .select(CatalogToTIC_v8.target_id.alias("tic_id"))
-                .where(CatalogToTIC_v8.catalogid == catalogid)
+                .where(CatalogToTIC_v8.catalogid == source.catalogid)
                 .dicts()
                 .first()
                 or {"tic_id": None}
@@ -789,10 +804,7 @@ def get_auxiliary_source_data(source: Union[Source, int]):
                 .dicts()
                 .first() or dict()
             )
-        else:
-            xmatch_used = "v0"
-    else:
-        xmatch_used = "v1"
+
 
     #  Damn. Floating point nan values are not allowed in FITS headers.
     default_values = {}
@@ -991,7 +1003,7 @@ def hdu_from_data_mappings(data_products, mappings, header):
     return hdu
 
 
-def add_table_category_headers(hdu, category_headers):
+def add_table_category_headers(hdu, category_headers, upper=True):
     """
     Add comments to the HDU to categorise different headers.
 
@@ -1002,11 +1014,17 @@ def add_table_category_headers(hdu, category_headers):
         A list of (`DATA_COLUMN_NAME`, `HEADER`) tuples, where the header
         comment `HEADER` will be added above the `DATA_COLUMN_NAME` column.
     """
+    existing_names = hdu.data.dtype.names
+    if upper:
+        existing_names = [ea.upper() for ea in existing_names]
+
     for dtype_name, category_header in category_headers:
-        index = 1 + hdu.data.dtype.names.index(dtype_name)
+        dtype_name = dtype_name.upper() if upper else dtype_name
+        index = 1 + existing_names.index(dtype_name)
         key = f"TTYPE{index}"
         hdu.header.insert(key, BLANK_CARD)
-        hdu.header.insert(key, (" ", category_header))
+        header = category_header.upper() if upper else category_header
+        hdu.header.insert(key, (" ", header))
     return None
 
 
@@ -1020,15 +1038,22 @@ def get_most_likely_label_names(input_string, names):
     raise ValueError(f"Unable to work out label names from {input_string} and {names}")
 
 def add_glossary_comments(hdu):
-    for key in hdu.header.keys(): 
-        if hdu.header.comments[key] is None or hdu.header.comments[key] == "":
-            hdu.header.comments[key] = GLOSSARY.get(key, None)
+    #for key in hdu.header.keys(): 
+    #    if hdu.header.comments[key] is None or hdu.header.comments[key] == "":
+    #        hdu.header.comments[key] = GLOSSARY.get(key, None)
+    for i, (key, value, comment) in enumerate(hdu.header.cards):
+        if comment is None or comment == "":
+            hdu.header.comments[i] = GLOSSARY.get(key, None)
+
     if hdu.data is not None:        
         for i, key in enumerate(hdu.data.dtype.names, start=1):
             # Special case for RHO_ because there are too many
             if key.startswith("RHO_"):
                 label_a, label_b = get_most_likely_label_names(key[4:], hdu.data.dtype.names)
                 hdu.header.comments[f"TTYPE{i}"] = f"Correlation between {label_a} and {label_b}"
+            elif key.startswith("FLAG_"):
+                label = key[5:]
+                hdu.header.comments[f"TTYPE{i}"] = f"Flag for {label} as bit array"
             else:
                 hdu.header.comments[f"TTYPE{i}"] = GLOSSARY.get(key, None)
     remove_filler_card(hdu)
@@ -1095,15 +1120,21 @@ def create_primary_hdu_cards(
     catalogid = get_catalog_identifier(source)
 
     from astra.database.catalogdb import Catalog
+    from healpy import ang2pix
 
     # Sky position.
-    ra, dec = (
+    position = (
         Catalog.select(Catalog.ra, Catalog.dec)
         .where(Catalog.catalogid == catalogid)
         .tuples()
         .first()
     )
-
+    # Some negative catalog identifiers aren't in the SDSS-V catalog.
+    # Maybe we shouldn't include them, but we have the ra and dec.
+    if position is None:
+        ra, dec = (source.ra, source.dec)
+    else:
+        ra, dec = position
     healpix = ang2pix(nside, ra, dec, lonlat=True)
 
     # I would like to use .isoformat(), but it is too long and makes headers look disorganised.

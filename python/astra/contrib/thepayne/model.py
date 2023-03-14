@@ -138,10 +138,12 @@ def estimate_labels(
             result.update(dict(zip([f"e_{ln}" for ln in label_names], [np.nan] * len(label_names))))
             for j, k in zip(*np.triu_indices(L, 1)):
                 result[f"rho_{label_names[j]}_{label_names[k]}"] = np.nan
-            result.update(
-                snr=spectrum.meta["SNR"][i],
-                chi_sq=np.nan,
-                reduced_chi_sq=np.nan
+            result.update(OrderedDict([
+                    ("snr", spectrum.meta["SNR"][i]),
+                    ("chi_sq", np.nan),
+                    ("reduced_chi_sq", np.nan),
+                    ("bitmask_flag", 1), # TODO: bitmask flag definitions
+                ])
             )
             
             meta = OrderedDict([("model_flux", np.nan * np.ones_like(flux))])
@@ -171,9 +173,12 @@ def estimate_labels(
             chi_sq = np.sum(((model_flux - flux) / e_flux) ** 2)
             reduced_chi_sq = chi_sq / (model_flux.size - L - 1)
             result.update(
-                #snr=spectrum.meta["SNR"][i],
-                chi_sq=chi_sq, 
-                reduced_chi_sq=reduced_chi_sq
+                OrderedDict([
+                    ("snr", spectrum.meta["SNR"][i]),
+                    ("chi_sq", chi_sq),
+                    ("reduced_chi_sq", reduced_chi_sq),
+                    ("bitmask_flag", 0), # TODO: bitmask flag definitions
+                ])
             )
             meta = OrderedDict([("model_flux", resampled_model_flux)])
             if continuum is not None:

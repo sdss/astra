@@ -19,17 +19,13 @@ def initdb(drop_tables):
     """Initialize the database."""
     from astra.database.astradb import create_tables
 
-    create_tables(
-        drop_existing_tables=drop_tables,
-        reuse_if_open=True,
-        insert_status_rows=True,
-    )
+    create_tables(drop_existing_tables=drop_tables, reuse_if_open=True)
     return None
 
 
 @cli.command()
-@click.argument("path")
-def run(path, **kwargs):
+@click.argument("paths", nargs=-1)
+def run(paths, **kwargs):
     """Execute one or many tasks."""
     import os
     import json
@@ -38,36 +34,49 @@ def run(path, **kwargs):
     from astra.database.astradb import DataProduct
     from tqdm import tqdm
 
-    with open(path, "r") as fp:
-        content = json.load(fp)
-    
-    # Get the task executable.
-    module_name, function_name = content["task_callable"].rsplit(".", 1)
-    module = import_module(module_name)
-    task_callable = getattr(module, function_name)
+    for path in paths:
+        log.info(f"Running {path}")
+        with open(path, "r") as fp:
+            content = json.load(fp)
+         
+        instructions = [content] if isinstance(content, dict) else content
+        for instruction in instructions:
 
-    task_kwargs = content.get("task_kwargs", {})
-    has_data_products = "data_product" in task_kwargs # TODO: this special key should be defined elsewhere
-    if has_data_products:
-        # Resolve the data products
-        data_products = task_kwargs.pop("data_product", [])
-        if isinstance(data_products, str):
-            data_products = json.loads(data_products)
-        task_kwargs["data_product"] = DataProduct.select().where(DataProduct.id << data_products)
-    
-    log.info(f"Executing..")
+            # Get the task executable.
+            module_name, function_name = instruction["task_callable"].rsplit(".", 1)
+            module = import_module(module_name)
+            task_callable = getattr(module, function_name)
 
-    results = task_callable(**task_kwargs)
+            task_kwargs = instruction.get("task_kwargs", {})
+            has_data_products = "data_product" in task_kwargs # TODO: this special key should be defined elsewhere
+            if has_data_products:
+                # Resolve the data products
+                input_data_products = task_kwargs.pop("data_product", [])
+                if isinstance(input_data_products, str):
+                    input_data_products = json.loads(input_data_products)
+                # The same data product can appear in this list multiple times, and we want to preserve order.
+                q = DataProduct.select().where(DataProduct.id << input_data_products)
+                unique_data_products = { dp.id: dp for dp in q }
+                task_kwargs["data_product"] = [unique_data_products[dp_id] for dp_id in input_data_products]
+                
+            log.info(f"Executing..")
+            try:
+                results = task_callable(**task_kwargs)
+                for result in results:
+                    None
+            except:
+                log.exception(f"Exception in {task_callable} with {task_kwargs}")
+                raise
+                continue
 
-    for result in results:
-        None
+
     log.info(f"Done")
     
     # Remove the path now that we're done.
-    try:
-        os.unlink(path)
-    except:
-        None
+    #try:
+    #    os.unlink(path)
+    #except:
+    #    None
 
 
 

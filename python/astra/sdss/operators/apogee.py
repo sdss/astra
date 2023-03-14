@@ -4,8 +4,6 @@ from typing import OrderedDict, Optional
 from astropy.io import fits
 from airflow.models.baseoperator import BaseOperator
 from airflow.exceptions import AirflowFailException, AirflowSkipException
-from sdss_access import SDSSPath
-from astra.database.apogee_drpdb import Star, Visit
 from astra.database.astradb import database, DataProduct, Source
 from astra.utils import log, flatten
 
@@ -30,6 +28,8 @@ class ApVisitOperator(BaseOperator):
 
 
     def execute(self, context):
+        from astra.database.apogee_drpdb import Star, Visit
+        from sdss_access import SDSSPath
 
         release, filetype = ("sdss5", "apVisit")
         prev_ds, ds = (context["prev_ds"], context["ds"])
@@ -161,6 +161,8 @@ class ApStarOperator(BaseOperator):
         context,
         latest_only=True,
     ):
+        from astra.database.apogee_drpdb import Star, Visit
+
         where = (Star.ngoodvisits > 0) & (Star.catalogid > 0)
         prev_ds, ds = (context["prev_ds"], context["ds"])
 
@@ -219,14 +221,7 @@ class ApStarOperator(BaseOperator):
         return ids
 
 
-@lru_cache
-def path_instance(release):
-    return SDSSPath(release=release)
-
-
-@lru_cache
-def lookup_keys(release, filetype):
-    return path_instance(release).lookup_keys(filetype)
+from sdss_access import SDSSPath
 
 
 def get_or_create_data_product_from_apogee_drpdb(
@@ -245,11 +240,13 @@ def get_or_create_data_product_from_apogee_drpdb(
     """
     release = release or origin.release
     filetype = filetype or origin.filetype
-
+    from sdss_access import SDSSPath
+    lookup_keys = lambda release, filetype: SDSSPath(release).lookup_keys(filetype)
+    
     kwds = {k: getattr(origin, k) for k in lookup_keys(release, filetype)}
     if "field" in kwds:
         kwds["field"] = kwds["field"].strip()
-    path = path_instance(release).full(filetype, **kwds)
+    path = SDSSPath(release).full(filetype, **kwds)
     if not os.path.exists(path):
         error = {"detail": path, "origin": origin, "reason": "File does not exist"}
         return (False, error)
@@ -281,6 +278,8 @@ def get_apvisit_metadata(apstar_data_product):
     # It's stupid to open the file for this, but I can't yet seem to find the magic to
     # match visits to apstar files in apogee_drpdb because visits are excluded from the
     # stack for a variety of reasons.
+    from astra.database.apogee_drpdb import Star, Visit
+
     apogee_id = apstar_data_product.kwargs["obj"]
     meta = []
     with fits.open(apstar_data_product.path) as image:

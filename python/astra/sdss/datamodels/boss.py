@@ -112,6 +112,7 @@ def create_boss_hdus(
     # There's some metadata that we need before we can create the mappings.
     # We need ZWARNING before everything else.
     zwarnings = np.zeros(len(data_products), dtype=int)
+    mjds = np.zeros(len(data_products), dtype=int)
     for i, data_product in enumerate(data_products):
         with fits.open(data_product.path) as image:
             try:
@@ -120,7 +121,9 @@ def create_boss_hdus(
                 zwarning = -1
             finally:
                 zwarnings[i] = zwarning
-
+            mjds[i] = image[0].header["MJD"]
+    # Start of FPS ops according to https://wiki.sdss.org/display/IPL/Caveats+for+BHM+IPL-1    
+    fps = (mjds >= 59635).astype(int)
     missing_zwarnings = np.sum(zwarnings == -1)
     if missing_zwarnings > 0:
         log.warning(f"Missing ZWARNING from {missing_zwarnings} data products:")
@@ -275,6 +278,7 @@ def create_boss_hdus(
         ("FIBER_OFFSET", lambda dp, image: bool(image[2].data["FIBER_OFFSET"][0])),
         ("DELTA_RA", lambda dp, image: image[2].data["DELTA_RA"][0]),
         ("DELTA_DEC", lambda dp, image: image[2].data["DELTA_DEC"][0]),
+        ("FPS", fps),
         ("RADIAL VELOCITIES (XCSAO)", None),
         ("V_RAD", get_radial_velocity),
         ("E_V_RAD", lambda dp, image: image[2].data["XCSAO_ERV"][0]),
@@ -350,7 +354,6 @@ def create_boss_hdus(
         
         # star_theta and star_continuum will have shape (N_visits, P),
         # but we only want the first one
-
         snr_star = util.calculate_snr(combined_flux, combined_flux_error, axis=None)
         star_data_shape = (1, -1)
         star_mappings = [
@@ -361,13 +364,14 @@ def create_boss_hdus(
             ("E_FLUX", combined_flux_error.reshape(star_data_shape)),
             ("BITMASK", combined_bitmask.reshape(star_data_shape)),
             ("WRESL", np.nanmedian(meta["resampled_wresl"][use_in_stack], axis=0).reshape(star_data_shape)),
+            ("FPS", np.array(np.mean(fps)).reshape(star_data_shape)),
             ("CONTINUUM FITTING", None),
             ("CONTINUUM", star_continuum.reshape(star_data_shape)),
             ("CONTINUUM_PHI", phi.reshape(star_data_shape)),
             ("CONTINUUM_THETA", star_theta.reshape(star_data_shape)),
             ("CONTINUUM_RCHISQ", np.array([continuum_rchisq])),
             ("CONTINUUM_SUCCESS", np.array([continuum_success])),
-            ("CONTINUUM_WARNINGS", np.array([n_warnings]))
+            #("CONTINUUM_WARNINGS", np.array([n_warnings]))
         ]
         hdu_star = base.hdu_from_data_mappings(data_products, star_mappings, header)
     else:

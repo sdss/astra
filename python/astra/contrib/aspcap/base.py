@@ -8,311 +8,159 @@ from astra.tools.continuum.scalar import Scalar
 from typing import Union, List, Tuple, Optional, Callable
 from collections import OrderedDict
 
-from astra import log, __version__
-from astra.base import TaskInstance, Parameter, TupleParameter
-from astra.utils import bundler, deserialize, expand_path, serialize_executable
+from astra import __version__
+from astra.utils import log, flatten, list_to_dict, deserialize, expand_path, serialize_executable
+from tempfile import mkstemp
+
 from astra.database.astradb import (
     database,
-    FerreOutput,
-    AspcapOutput,
-    Output,
-    TaskOutput,
     Source,
     Task,
-    Bundle,
-    TaskBundle,
     DataProduct,
-    TaskInputDataProducts,
 )
-from peewee import fn
-from astra.contrib.ferre.base import Ferre
+from peewee import fn, prefetch
+#from astra.contrib.ferre.base import FerreOutput
 from astra.contrib.ferre.utils import read_ferre_headers, sanitise
 from astra.contrib.ferre.bitmask import ParamBitMask
-from astra.sdss.datamodels.pipeline import create_pipeline_product
+#from astra.sdss.datamodels.pipeline import create_pipeline_product
 
 from astropy.io import fits
-from astra.utils import list_to_dict
-
-FERRE_TASK_NAME = serialize_executable(Ferre)
-FERRE_DEFAULTS = Ferre.get_defaults()
 
 
-def initial_guess_doppler(
-    data_product: DataProduct,
-    source: Optional[Source] = None,
-    star = None,
-) -> dict:
+#@task
+'''
+        # TODO: better naming of temp files (e.g, ferre_xxx.)
+        _, path = mkstemp(**mkstemp_kwargs)
+        log.info(f"Wrote executable for {header_path} to {path}")
+        with open(path, "w") as fp:
+            json.dump(content, fp)
+            
+        runable_paths.append(path)
+
+    yield from runable_paths
+'''
+
+
+# TODO: put these to utils?
+
+def create_stellar_parameter_tasks(
+    data_product,
+    parent_dir,
+    weight_path: Optional[str] = "$MWM_ASTRA/component_data/aspcap/global_mask_v02.txt",
+    continuum_method: Optional[Union[Continuum, str]] = "astra.contrib.aspcap.continuum.MedianFilter",
+    continuum_kwargs: Optional[dict] = None,
+    n_threads: Optional[int] = 1,
+    **kwargs
+):
     """
-    Return an initial guess for FERRE from Doppler given a data product.
-
-    :param data_product:
-        The data product to be analyzed with FERRE.
-
-    :param source: [optional]
-        The associated Source in the Astra database for this data product.
-
-    :param star: [optional]
-        The associated Star in the APOGEE DRP database for this data product.
+    Create FERRE tasks to estimate stellar parameters, given the best result from the first round of
+    stellar parameter determination.
     """
-    if star is None:
-        from astra.database.apogee_drpdb import Star
-        if source is None:
-            (source,) = data_product.sources
 
-        # Be sure to get the record of the Star with the latest and greatest stack,
-        # and latest and greatest set of Doppler values.
-        star = (
-            Star.select()
-            .where(Star.catalogid == source.catalogid)
-            .order_by(Star.created.desc())
-            .first()
+    parent_dir = expand_path(parent_dir)
+    os.makedirs(parent_dir, exist_ok=True)
+
+    # For each data product/HDU pair, find the best result.
+    if isinstance(data_product, str):
+        data_product_ids = json.loads(data_product)
+    else:
+        data_product_ids = [ea.id for ea in data_product]
+
+    Alias = FerreOutput.alias()
+    sq = (
+        Alias
+        .select(
+            Alias.data_product_id,
+            Alias.hdu,
+            fn.MIN(Alias.penalized_log_chisq_fit).alias("min_chisq"),
         )
-    if star is None:
-        return None
-
-    return dict(
-        telescope=star.telescope,
-        mean_fiber=int(star.meanfib),
-        teff=np.round(star.rv_teff, 0),
-        logg=np.round(star.rv_logg, 3),
-        metals=np.round(star.rv_feh, 3),
-        log10vdop=utils.approximate_log10_microturbulence(star.rv_logg),
-        lgvsini=1.0,
-        c=0,
-        n=0,
-        o_mg_si_s_ca_ti=0,
+        .where(Alias.data_product_id << data_product_ids)
+        .group_by(Alias.data_product_id, Alias.hdu)
+        .alias("sq")
     )
-
-def initial_guess_apogeenet(data_product: DataProduct, star) -> dict:
-    """
-    Return an initial guess for FERRE from APOGEENet given a data product.
-
-    :param data_product:
-        The data prodcut to be analyzed with FERRE.
-    """
-
-    from astra.database.astradb import ApogeeNetOutput, TaskInputDataProducts, Task
 
     q = (
-        ApogeeNetOutput
-        .select()
-        .join(Task, on=(ApogeeNetOutput.task_id == Task.id))
-        .join(TaskInputDataProducts)
-        .where(TaskInputDataProducts.data_product_id == data_product.id)
-        .order_by(ApogeeNetOutput.snr.desc())
+        FerreOutput
+        .select(
+            FerreOutput.task_id,
+            FerreOutput.data_product_id,
+            FerreOutput.hdu,
+            FerreOutput.header_path,
+            FerreOutput.penalized_log_chisq_fit,
+            FerreOutput.teff,
+            FerreOutput.logg,
+            FerreOutput.metals,
+            FerreOutput.o_mg_si_s_ca_ti,
+            FerreOutput.lgvsini,
+            FerreOutput.c,
+            FerreOutput.n,
+            FerreOutput.log10vdop,
+        )
+        .distinct(
+            FerreOutput.data_product_id,
+            FerreOutput.hdu
+        )
+        .join(sq, on=(
+            (FerreOutput.data_product_id == sq.c.data_product_id) &
+            (FerreOutput.hdu == sq.c.hdu) &
+            (FerreOutput.penalized_log_chisq_fit == sq.c.min_chisq)
+        ))
+        .order_by(FerreOutput.data_product_id.asc())
+        .tuples()
     )
 
-    output = q.first()
-    if output is None:
-        return None
+    # Group by header_path, generate tasks.
+    group_task_kwds = {}
+    for result in q:
+        task_id, data_product_id, hdu, header_path, penalized_log_chisq_fit, teff, logg, metals, o_mg_si_s_ca_ti, lgvsini, c, n, log10vdop = result
+
+        log.info(f'Taking {task_id} as initial guess for {data_product} (hdu={hdu}) with penalized chisq={penalized_log_chisq_fit}')
+
+        kwds = dict(
+            data_product=data_product_id,
+            header_path=header_path,
+            hdu=hdu,
+            initial_teff=teff,
+            initial_logg=logg,
+            initial_metals=metals,
+            initial_o_mg_si_s_ca_ti=o_mg_si_s_ca_ti,
+            initial_lgvsini=lgvsini,
+            initial_c=c,
+            initial_n=n,
+            initial_log10vdop=log10vdop,
+            initial_guess_source=task_id,            
+        )
+        group_task_kwds.setdefault(header_path, [])
+        group_task_kwds[header_path].append(kwds)
+    
+
+    for z, header_path in enumerate(group_task_kwds.keys()):
+        group_task_kwds[header_path] = list_to_dict(group_task_kwds[header_path])
+
+        while os.path.exists(f"{parent_dir}/{z:03d}"):
+            z += 1
         
-    teff, logg, metals = (output.teff, output.logg, output.fe_h)
+        this_parent_dir = f"{parent_dir}/{z:03d}"
+        os.makedirs(expand_path(this_parent_dir), exist_ok=True)
 
-    if star is None:
-        print(f"WARNING: TODO: Fix this andy")
-        return None
-    
-    return dict(
-        telescope=star.telescope,
-        mean_fiber=int(star.meanfib),
-        teff=np.round(teff, 0),
-        logg=np.round(logg, 3),
-        metals=np.round(metals, 3),
-        log10vdop=utils.approximate_log10_microturbulence(logg),
-        lgvsini=1.0,
-        c=0,
-        n=0,
-        o_mg_si_s_ca_ti=0,
-    )
+        group_task_kwds[header_path].update(        
+            weight_path=weight_path,
+            continuum_method=continuum_method,
+            continuum_kwargs=continuum_kwargs,
+            parent_dir=this_parent_dir,
+            n_threads=n_threads,
+        )
 
-
-def initial_guesses(data_product: DataProduct) -> List[dict]:
-    """
-    Return initial guesses for FERRE given a data product.
-    
-    :param data_product:
-        The data product containing 1D spectra for a source.
-    """
-    # TODO: get defaults from Star (telescope, mean_fiber, etc) in a not-so-clumsy way
-
-    from astra.database.apogee_drpdb import Star
-    (source,) = data_product.sources
-
-    # Be sure to get the record of the Star with the latest and greatest stack,
-    # and latest and greatest set of Doppler values.
-    star = (
-        Star.select()
-        .where(Star.catalogid == source.catalogid)
-        .order_by(Star.created.desc())
-        .first()
-    )
-
-    try:
-        int(star.meanfib)
-    except:
-        return []
-
-    # TODO: Add estimates from other pipelines? Gaia?
-    return [
-        initial_guess_doppler(data_product, star=star),
-        initial_guess_apogeenet(data_product, star=star)
-    ]
-
-
-def create_initial_stellar_parameter_tasks(
-    input_data_products,
-    header_paths: Optional[Union[List[str], Tuple[str], str]] = "$MWM_ASTRA/component_data/aspcap/synspec_dr17_marcs_header_paths.list",
-    weight_path: Optional[str] = "$MWM_ASTRA/component_data/aspcap/global_mask_v02.txt",
-    continuum_method: Optional[Union[Continuum, str]] = Scalar,
-    continuum_kwargs: Optional[dict] = dict(method="median"),
-    data_slice: Optional[List[Tuple[int]]] = [(0, 1)],
-    initial_guess_callable: Optional[Callable] = None,
-    **kwargs,
-) -> List[Union[Task, int]]:
-    """
-    Create tasks that will use FERRE to estimate the stellar parameters given a data product.
-
-    :param input_data_products:
-        The input data products, or primary keys for those data products.
-
-    :param header_paths:
-        A list of FERRE header path files, or a path to a file that has one FERRE header path per line.
-
-    :param weight_path: [optional]
-        The weights path to supply to FERRE. By default this is set to the global mask used by SDSS.
-
-    :param continuum_method: [optional]
-        The method to use for continuum normalization before FERRE is executed. By default this is set to
-
-    :param data_slice: [optional]
-        Slice the input spectra and only analyze those rows that meet the slice. This is only relevant for ApStar
-        input data products, where the first spectrum represents the stacked spectrum. The parmaeter is ignored
-        for all other input data products.
+    instructions = []
+    for header_path, task_kwds in group_task_kwds.items():
+        # TODO: put this functionality to a utility?
+        instructions.append({
+            "task_callable": "astra.contrib.ferre.base.ferre",
+            "task_kwargs": task_kwds,
+        })
         
-    :param initial_guess_callable: [optional]
-        A callable function that takes in a data product and returns a list of dictionaries of initial guesses.
-        Each dictionary should contain at least the following keys:
-            - telescope
-            - mean_fiber
-            - teff
-            - logg
-            - metals
-            - log10vdop
-            - lgvsini
-            - c
-            - n
-            - o_mg_si_s_ca_ti
+    return instructions
 
-        If the callable cannot supply an initial guess for a data product, it should return None instead of a dict.
-    """
-
-    log.debug(f"Data products {type(input_data_products)}: {input_data_products}")
-
-    # Data products.
-    input_data_products = deserialize(input_data_products, DataProduct)
-
-    # Header paths.
-    if isinstance(header_paths, str):
-        if header_paths.lower().endswith(".hdr"):
-            header_paths = [header_paths]
-        else:
-            # Load from file.
-            with open(os.path.expandvars(os.path.expanduser(header_paths)), "r") as fp:
-                header_paths = [line.strip() for line in fp]
-
-    if continuum_method is not None:
-        continuum_method = serialize_executable(continuum_method)
-
-    grid_info = utils.parse_grid_information(header_paths)
-
-    if initial_guess_callable is None:
-        initial_guess_callable = initial_guesses
-
-    # Round the initial guesses to something sensible.
-    round = lambda _, d=3: np.round(_, d).astype(float)
-
-    # For each (data product, initial guess) permutation we need to create tasks based on suitable grids.
-    task_data_products = []
-    for data_product in input_data_products:
-        for initial_guess in initial_guess_callable(data_product):
-            if initial_guess is None:
-                continue
-
-            for header_path, meta in utils.yield_suitable_grids(
-                grid_info, **initial_guess
-            ):
-
-                frozen_parameters = {}
-                if meta["gd"] == "d":
-                    # If it's a main-sequence grid, we freeze C and N in the initial round.
-                    frozen_parameters.update(c=True, n=True)
-
-                kwds = dict(
-                    header_path=header_path,
-                    weight_path=weight_path,
-                    continuum_method=continuum_method,
-                    continuum_kwargs=continuum_kwargs,
-                    data_slice=data_slice,
-                    frozen_parameters=frozen_parameters,
-                    initial_parameters=dict(
-                        teff=round(initial_guess["teff"], 0),
-                        logg=round(initial_guess["logg"]),
-                        metals=round(initial_guess["metals"]),
-                        o_mg_si_s_ca_ti=round(initial_guess["o_mg_si_s_ca_ti"]),
-                        lgvsini=round(initial_guess["lgvsini"]),
-                        c=round(initial_guess["c"]),
-                        n=round(initial_guess["n"]),
-                        log10vdop=round(initial_guess["log10vdop"]),
-                    ),
-                )
-
-                parameters = FERRE_DEFAULTS.copy()
-                parameters.update(kwds)
-                parameters.update(
-                    {k: v for k, v in kwargs.items() if k in FERRE_DEFAULTS}
-                )
-
-                # Create a task.
-                task = Task(
-                    name=FERRE_TASK_NAME, version=__version__, parameters=parameters
-                )
-                task_data_products.append((task, data_product))
-
-    with database.atomic():
-        Task.bulk_create([t for t, dp in task_data_products])
-        TaskInputDataProducts.insert_many([
-            { "task_id": t.id, "data_product_id": dp.id } for t, dp in task_data_products
-        ]).execute()
-
-    return [t for t, dp in task_data_products]
-
-def create_initial_stellar_parameter_task_bundles(
-    input_data_products,
-    header_paths: Optional[Union[List[str], Tuple[str], str]] = "$MWM_ASTRA/component_data/aspcap/synspec_dr17_marcs_header_paths.list",
-    weight_path: Optional[str] = "$MWM_ASTRA/component_data/aspcap/global_mask_v02.txt",
-    continuum_method: Optional[Union[Continuum, str]] = Scalar,
-    continuum_kwargs: Optional[dict] = dict(method="median"),
-    data_slice: Optional[List[Tuple[int]]] = [(0, 1)],
-    initial_guess_callable: Optional[Callable] = None,
-    **kwargs,
-) -> List[Union[Bundle, int]]:
-
-    tasks = create_initial_stellar_parameter_tasks(
-        input_data_products=input_data_products,
-        header_paths=header_paths,
-        weight_path=weight_path,
-        continuum_method=continuum_method,
-        continuum_kwargs=continuum_kwargs,
-        data_slice=data_slice,
-        initial_guess_callable=initial_guess_callable,
-        **kwargs
-    )
-    log.info(f"Created {len(tasks)} tasks")
-
-    bundles = bundler(tasks)
-    log.info(f"Created {len(bundles)} bundles")
-    return [bundle.id for bundle in bundles]
-    
 
 def create_stellar_parameter_task_bundles(
     initial_task_bundles,
@@ -581,7 +429,7 @@ def create_abundance_tasks(
         return [task.id for task in tasks]
     return tasks
 
-
+'''
 class Aspcap(TaskInstance):
 
     stellar_parameter_task_id = Parameter()
@@ -746,7 +594,6 @@ class Aspcap(TaskInstance):
             with database.atomic():
                 task.create_or_update_outputs(AspcapOutput, task_results)
             
-'''
 class OldAspcap(TaskInstance):
 
     stellar_parameter_task_ids = TupleParameter("stellar_parameter_task_ids")
@@ -936,3 +783,13 @@ def create_and_execute_summary_tasks(
         #    existing_task.instance().execute()
 
     return None
+
+
+
+if __name__ == "__main__":
+
+    # Some data product from DR17.
+
+    dp = DataProduct.get(filetype="mwmStar")
+
+    create_initial_stellar_parameter_tasks([dp])

@@ -2,21 +2,15 @@ import os
 from typing import Optional
 from airflow.models.baseoperator import BaseOperator
 from airflow.exceptions import AirflowSkipException
-from sdss_access import SDSSPath
 from astra.database.astradb import database, DataProduct, Source
 from astra.utils import log, expand_path
 from astropy.time import Time
 import numpy as np
 
 from astropy.table import Table
-from astra.database.targetdb import Target
 
 from functools import lru_cache
 
-
-@lru_cache
-def path_instance(release):
-    return SDSSPath(release=release)
 
 
 class BossSpectrumOperator(BaseOperator):
@@ -37,6 +31,7 @@ class BossSpectrumOperator(BaseOperator):
         run2d: Optional[str] = None,
         require_mwm_carton: Optional[bool] = False,
         return_id_type: Optional[str] = "data_product",
+        use_boss_spAll_path: Optional[str] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -45,16 +40,24 @@ class BossSpectrumOperator(BaseOperator):
         self.run2d = run2d
         self.require_mwm_carton = require_mwm_carton
         self.return_id_type = return_id_type
+        self.use_boss_spAll_path = use_boss_spAll_path
         available_return_id_types = ("source", "data_product")
         if return_id_type not in available_return_id_types:
             raise ValueError(f"return_id_type must be one of {', '.join(available_return_id_types)}, not {return_id_type}")
         return None
 
     def execute(self, context):
+        from sdss_access import SDSSPath
+        sdss_path = SDSSPath(self.release)
 
-        data = Table.read(
-            expand_path(f"$BOSS_SPECTRO_REDUX/{self.run2d}/spAll-{self.run2d}.fits")
-        )
+        if self.use_boss_spAll_path is None:
+            boss_spAll_path = f"$BOSS_SPECTRO_REDUX/{self.run2d}/spAll-{self.run2d}.fits"
+        else:
+            boss_spAll_path = self.use_boss_spAll_path
+
+        log.info(f"Loading from {boss_spAll_path}")
+
+        data = Table.read(expand_path(boss_spAll_path))
 
         prev_ds, ds = (context.get("prev_ds", None), context.get("ds", None))
         if prev_ds is None:
@@ -118,7 +121,7 @@ class BossSpectrumOperator(BaseOperator):
                 run2d=row["RUN2D"],
                 isplate=isplate,
             )
-            path = path_instance(self.release).full(self.filetype, **kwds)
+            path = sdss_path.full(self.filetype, **kwds)
             if not os.path.exists(path):
                 error = {"detail": path, "origin": row, "reason": "File does not exist"}
                 errors.append(error)

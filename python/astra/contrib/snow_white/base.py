@@ -18,7 +18,7 @@ from astra.sdss.datamodels.base import get_extname
 
 from astra.sdss.datamodels.pipeline import create_pipeline_data_product
 
-from astra.contrib.snowwhite.fitting import (
+from astra.contrib.snow_white.fitting import (
     norm_spectra,
     fit_line,
     fit_func,
@@ -197,7 +197,10 @@ def classify_white_dwarf(
 
 
 @task
-def snow_white(data_product: DataProduct, model_grid: str = "$MWM_ASTRA/component_data/wd/da2014") -> SnowWhite:
+def snow_white(
+    data_product: Iterable[DataProduct], 
+    model_grid: str = "$MWM_ASTRA/component_data/wd/da2014"
+) -> Iterable[SnowWhite]:
     """
     Estimate effective temperature and surface gravity for DA-type white dwarfs.
     """
@@ -207,246 +210,247 @@ def snow_white(data_product: DataProduct, model_grid: str = "$MWM_ASTRA/componen
     model_basename = os.path.basename(model_grid)
     wd_type = ''.join([i for i in os.path.basename(model_grid).upper() if not i.isdigit()])
 
-    # Do the classification first.
-    if not any((c.wd_type == wd_type) for c in classify_white_dwarf(data_product)):
-        # TODO: put in the spectrum-level meta from one of the classifications?
-        yield SnowWhite(
-            data_product=data_product,
-            wd_type=wd_type
-        )
+    for data_product in flatten(data_product):
 
-    outputs, results = ([], {})
-    for spectrum in SpectrumList.read(data_product.path):
-        if not spectrum_overlaps(spectrum, 5000 * u.Angstrom):
-            # Skip non-BOSS spectra.
-            continue
-    
-        parallax = spectrum.meta.get("PLX", None)
-        phot_g_mean_mag = spectrum.meta.get("G_MAG", None)
-        if parallax is None or phot_g_mean_mag is None:
-            log.warning(f"Missing PLX or G_MAG in spectrum header of {data_product}")
-            continue
+        # Do the classification first.
+        if not any((c.wd_type == wd_type) for c in classify_white_dwarf(data_product)):
+            # TODO: put in the spectrum-level meta from one of the classifications?
+            yield SnowWhite(data_product=data_product, wd_type=wd_type)
 
-        wl = spectrum.wavelength.value
-        data = np.vstack([
-            wl,
-            spectrum.flux.value,
-            spectrum.uncertainty.represent_as(StdDevUncertainty).array
-        ]).T
+            continue # to next data product
 
-        data = data[
-            (np.isnan(data[:, 1]) == False) & (data[:, 0] > 3500) & (data[:, 0] < 8000)
-        ]
+        outputs, results = ([], {})
+        for spectrum in SpectrumList.read(data_product.path):
+            if not spectrum_overlaps(spectrum, 5000 * u.Angstrom):
+                # Skip non-BOSS spectra.
+                continue
+        
+            parallax = spectrum.meta.get("PLX", None)
+            phot_g_mean_mag = spectrum.meta.get("G_MAG", None)
+            if parallax is None or phot_g_mean_mag is None:
+                log.warning(f"Missing PLX or G_MAG in spectrum header of {data_product}")
+                continue
 
-        # normalize data
-        spec_n, cont_flux = norm_spectra(data, type=wd_type)
+            wl = spectrum.wavelength.value
+            data = np.vstack([
+                wl,
+                spectrum.flux.value,
+                spectrum.uncertainty.represent_as(StdDevUncertainty).array
+            ]).T
 
-        # crop the  relevant lines for initial guess
-        line_crop = np.loadtxt(data_dir + "/line_crop.dat")
-        l_crop = line_crop[(line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())]
+            data = data[
+                (np.isnan(data[:, 1]) == False) & (data[:, 0] > 3500) & (data[:, 0] < 8000)
+            ]
 
-        # fit entire grid to find good starting point
-        best = fit_line(
-            spec_n, l_crop, model_in=None, quick=True, model=model_basename
-        )
-        first_T, first_g = best[2][0], best[2][1]
-        all_chi, all_TL = best[4], best[3]
+            # normalize data
+            spec_n, cont_flux = norm_spectra(data, type=wd_type)
 
-        # Teff values determine what line ranges to use precise fit
-        if first_T >= 16000 and first_T <= 40000:
+            # crop the  relevant lines for initial guess
             line_crop = np.loadtxt(data_dir + "/line_crop.dat")
-            l_crop = line_crop[
-                (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
-            ]
-        elif first_T >= 8000 and first_T < 16000:
-            line_crop = np.loadtxt(data_dir + "/line_crop_cool.dat")
-            l_crop = line_crop[
-                (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
-            ]
-        elif first_T < 8000:
-            line_crop = np.loadtxt(data_dir + "/line_crop_vcool.dat")
-            l_crop = line_crop[
-                (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
-            ]
-        elif first_T > 40000:
-            line_crop = np.loadtxt(data_dir + "/line_crop_hot.dat")
-            l_crop = line_crop[
-                (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
-            ]
+            l_crop = line_crop[(line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())]
 
-        # fit the spectrum
-        teff_bounds, logg_bounds = [(6000, 89000), (650, 899)]
-        # ARC notes:
-        # if the first_T and first_g are on the edge of the grid, then the optimization fails.
-        # clip it to be within some amount
-        first_T = np.clip(first_T, teff_bounds[0] + 100, teff_bounds[1] - 100)
-        first_g = np.clip(first_g, logg_bounds[0] + 10, logg_bounds[1] - 10)
-        
-        new_best = op.minimize(
-            fit_func,
-            (first_T, first_g, 10.0),
-            bounds=[teff_bounds, logg_bounds, (None, None)],
-            args=(spec_n, l_crop, model_basename, 0),
-            method="L-BFGS-B",
-        )
-        other_T = op.minimize(
-            err_func,
-            (first_T, first_g),
-            bounds=(teff_bounds, logg_bounds),
-            args=(new_best.x[2], new_best.fun, spec_n, l_crop, model_basename),
-            method="L-BFGS-B",
-        )
-        Teff, Teff_err, logg, logg_err, rv = (
-            new_best.x[0],
-            abs(new_best.x[0] - other_T.x[0]),
-            new_best.x[1],
-            abs((new_best.x[1] - other_T.x[1]) / 100),
-            new_best.x[2],
-        )
-
-        # Repeat everything for second solution
-        if first_T <= 13000.0:
-            other_TL, other_chi = (
-                all_TL[all_TL[:, 0] > 13000.0],
-                all_chi[all_TL[:, 0] > 13000.0],
+            # fit entire grid to find good starting point
+            best = fit_line(
+                spec_n, l_crop, model_in=None, quick=True, model=model_basename
             )
-            other_sol = other_TL[other_chi == np.min(other_chi)]
-        elif first_T > 13000.0:
-            other_TL, other_chi = (
-                all_TL[all_TL[:, 0] <= 13000.0],
-                all_chi[all_TL[:, 0] <= 13000.0],
+            first_T, first_g = best[2][0], best[2][1]
+            all_chi, all_TL = best[4], best[3]
+
+            # Teff values determine what line ranges to use precise fit
+            if first_T >= 16000 and first_T <= 40000:
+                line_crop = np.loadtxt(data_dir + "/line_crop.dat")
+                l_crop = line_crop[
+                    (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
+                ]
+            elif first_T >= 8000 and first_T < 16000:
+                line_crop = np.loadtxt(data_dir + "/line_crop_cool.dat")
+                l_crop = line_crop[
+                    (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
+                ]
+            elif first_T < 8000:
+                line_crop = np.loadtxt(data_dir + "/line_crop_vcool.dat")
+                l_crop = line_crop[
+                    (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
+                ]
+            elif first_T > 40000:
+                line_crop = np.loadtxt(data_dir + "/line_crop_hot.dat")
+                l_crop = line_crop[
+                    (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
+                ]
+
+            # fit the spectrum
+            teff_bounds, logg_bounds = [(6000, 89000), (650, 899)]
+            # ARC notes:
+            # if the first_T and first_g are on the edge of the grid, then the optimization fails.
+            # clip it to be within some amount
+            first_T = np.clip(first_T, teff_bounds[0] + 100, teff_bounds[1] - 100)
+            first_g = np.clip(first_g, logg_bounds[0] + 10, logg_bounds[1] - 10)
+            
+            new_best = op.minimize(
+                fit_func,
+                (first_T, first_g, 10.0),
+                bounds=[teff_bounds, logg_bounds, (None, None)],
+                args=(spec_n, l_crop, model_basename, 0),
+                method="L-BFGS-B",
             )
-            other_sol = other_TL[other_chi == np.min(other_chi)]
+            other_T = op.minimize(
+                err_func,
+                (first_T, first_g),
+                bounds=(teff_bounds, logg_bounds),
+                args=(new_best.x[2], new_best.fun, spec_n, l_crop, model_basename),
+                method="L-BFGS-B",
+            )
+            Teff, Teff_err, logg, logg_err, rv = (
+                new_best.x[0],
+                abs(new_best.x[0] - other_T.x[0]),
+                new_best.x[1],
+                abs((new_best.x[1] - other_T.x[1]) / 100),
+                new_best.x[2],
+            )
 
-        if other_sol[0][0] >= 16000 and other_sol[0][0] <= 40000:
-            line_crop = np.loadtxt(data_dir + "/line_crop.dat")
-            l_crop_s = line_crop[
-                (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
+            # Repeat everything for second solution
+            if first_T <= 13000.0:
+                other_TL, other_chi = (
+                    all_TL[all_TL[:, 0] > 13000.0],
+                    all_chi[all_TL[:, 0] > 13000.0],
+                )
+                other_sol = other_TL[other_chi == np.min(other_chi)]
+            elif first_T > 13000.0:
+                other_TL, other_chi = (
+                    all_TL[all_TL[:, 0] <= 13000.0],
+                    all_chi[all_TL[:, 0] <= 13000.0],
+                )
+                other_sol = other_TL[other_chi == np.min(other_chi)]
+
+            if other_sol[0][0] >= 16000 and other_sol[0][0] <= 40000:
+                line_crop = np.loadtxt(data_dir + "/line_crop.dat")
+                l_crop_s = line_crop[
+                    (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
+                ]
+            elif other_sol[0][0] >= 8000 and other_sol[0][0] < 16000:
+                line_crop = np.loadtxt(data_dir + "/line_crop_cool.dat")
+                l_crop_s = line_crop[
+                    (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
+                ]
+            elif other_sol[0][0] < 8000:  # first_T<other_sol[0][0]:
+                line_crop = np.loadtxt(data_dir + "/line_crop_vcool.dat")
+                l_crop_s = line_crop[
+                    (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
+                ]
+            elif other_sol[0][0] > 40000:  # first_T>other_sol[0][0]:
+                line_crop = np.loadtxt(data_dir + "/line_crop_hot.dat")
+                l_crop_s = line_crop[
+                    (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
+                ]
+
+            sec_best = op.minimize(
+                fit_func,
+                (other_sol[0][0], other_sol[0][1], new_best.x[2]),
+                bounds=((6000, 89000), (650, 899), (None, None)),
+                args=(spec_n, l_crop, model_basename, 0),
+                method="L-BFGS-B",
+            )  # xtol=1. ftol=1.
+            other_T2 = op.minimize(
+                err_func,
+                (other_sol[0][0], other_sol[0][1]),
+                bounds=((6000, 89000), (650, 899)),
+                args=(new_best.x[2], sec_best.fun, spec_n, l_crop, model_basename),
+                method="L-BFGS-B",
+            )
+
+            Teff2, Teff_err2, logg2, logg_err2 = (
+                sec_best.x[0],
+                abs(sec_best.x[0] - other_T2.x[0]),
+                sec_best.x[1],
+                abs((sec_best.x[1] - other_T2.x[1]) / 100),
+            )
+
+            # Use Gaia parallax and photometry to determine best solution
+            final_T, final_T_err, final_g, final_g_err = hot_vs_cold(
+                Teff,
+                Teff_err,
+                logg,
+                logg_err,
+                Teff2,
+                Teff_err2,
+                logg2,
+                logg_err2,
+                parallax,
+                phot_g_mean_mag,
+                model=model_basename,
+            )
+
+            lines_s, lines_m, mod_n = fit_func(
+                (final_T, 100 * final_g, rv), spec_n, l_crop, models=model_basename, mode=1
+            )
+            spec_w = data[:, 0]
+            mod_n[np.isnan(mod_n)] = 0.0
+            check_f_spec = data[:, 1][(spec_w > 4500.0) & (spec_w < 4700.0)]
+            check_f_model = mod_n[:, 1][(mod_n[:, 0] > 4500.0) & (mod_n[:, 0] < 4700.0)]
+            continuum = np.average(check_f_model) / np.average(check_f_spec)    
+
+            # Resample model flux to match spectrum
+            resampled_model_flux = np.interp(
+                spectrum.wavelength.value,
+                mod_n[:, 0] * (rv + 299792.458) / 299792.458,
+                mod_n[:, 1] / continuum,
+                left=np.nan,
+                right=np.nan
+            )
+            
+            # Let's only consider chi-sq between say 3750 - 8000
+            chisq_mask = (8000 >= spectrum.wavelength.value) * (spectrum.wavelength.value >= 3750)
+            ivar = spectrum.uncertainty.represent_as(InverseVariance).array.flatten()
+            pixel_chi_sq = (resampled_model_flux - spectrum.flux.value.flatten())**2 * ivar
+            chi_sq = np.nansum(pixel_chi_sq[chisq_mask])
+            reduced_chi_sq = (chi_sq / (np.sum(np.isfinite(pixel_chi_sq[chisq_mask])) - 3))
+
+            result_kwds = OrderedDict([
+                ("wd_type", wd_type),
+                ("teff", final_T),
+                ("e_teff", final_T_err),
+                ("logg", final_g),
+                ("e_logg", final_g_err),
+                ("v_rel", rv),
+                ("conditioned_on_parallax", parallax),
+                ("conditioned_on_phot_g_mean_mag", phot_g_mean_mag),
+                ("snr", flatten(spectrum.meta["SNR"])[0]),
+                ("chi_sq", chi_sq),
+                ("reduced_chi_sq", reduced_chi_sq),
+            ])
+
+            output = SnowWhite(data_product=data_product, spectrum=spectrum, **result_kwds)
+            outputs.append(output)
+
+            # Put in results for pipeline product.
+            extname = get_extname(spectrum, data_product)
+            results.setdefault(extname, [])
+            result_kwds.update(OrderedDict([
+                ("model_flux", resampled_model_flux),
+                ("continuum", continuum * np.ones_like(resampled_model_flux)),
+                ("task_id", output.task.id)
+            ]))
+            results[extname].append(result_kwds)
+
+        # Create pipeline product.
+        if outputs:
+            # TODO: capiTAlzIE?
+            common_header_groups = [
+                ("WD_TYPE", "STELLAR PARAMETERS"),
+                ("SNR", "SUMMARY STATISTICS"),
+                ("MODEL_FLUX", "MODEL SPECTRA"),
             ]
-        elif other_sol[0][0] >= 8000 and other_sol[0][0] < 16000:
-            line_crop = np.loadtxt(data_dir + "/line_crop_cool.dat")
-            l_crop_s = line_crop[
-                (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
-            ]
-        elif other_sol[0][0] < 8000:  # first_T<other_sol[0][0]:
-            line_crop = np.loadtxt(data_dir + "/line_crop_vcool.dat")
-            l_crop_s = line_crop[
-                (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
-            ]
-        elif other_sol[0][0] > 40000:  # first_T>other_sol[0][0]:
-            line_crop = np.loadtxt(data_dir + "/line_crop_hot.dat")
-            l_crop_s = line_crop[
-                (line_crop[:, 0] > wl.min()) & (line_crop[:, 1] < wl.max())
-            ]
+            output_data_product = create_pipeline_data_product(
+                "WD", # TODO: rename to SnowWhite once data models are updated
+                data_product,
+                results,
+                header_groups={ k: common_header_groups for k in results.keys() }
+            )
 
-        sec_best = op.minimize(
-            fit_func,
-            (other_sol[0][0], other_sol[0][1], new_best.x[2]),
-            bounds=((6000, 89000), (650, 899), (None, None)),
-            args=(spec_n, l_crop, model_basename, 0),
-            method="L-BFGS-B",
-        )  # xtol=1. ftol=1.
-        other_T2 = op.minimize(
-            err_func,
-            (other_sol[0][0], other_sol[0][1]),
-            bounds=((6000, 89000), (650, 899)),
-            args=(new_best.x[2], sec_best.fun, spec_n, l_crop, model_basename),
-            method="L-BFGS-B",
-        )
-
-        Teff2, Teff_err2, logg2, logg_err2 = (
-            sec_best.x[0],
-            abs(sec_best.x[0] - other_T2.x[0]),
-            sec_best.x[1],
-            abs((sec_best.x[1] - other_T2.x[1]) / 100),
-        )
-
-        # Use Gaia parallax and photometry to determine best solution
-        final_T, final_T_err, final_g, final_g_err = hot_vs_cold(
-            Teff,
-            Teff_err,
-            logg,
-            logg_err,
-            Teff2,
-            Teff_err2,
-            logg2,
-            logg_err2,
-            parallax,
-            phot_g_mean_mag,
-            model=model_basename,
-        )
-
-        lines_s, lines_m, mod_n = fit_func(
-            (final_T, 100 * final_g, rv), spec_n, l_crop, models=model_basename, mode=1
-        )
-        spec_w = data[:, 0]
-        mod_n[np.isnan(mod_n)] = 0.0
-        check_f_spec = data[:, 1][(spec_w > 4500.0) & (spec_w < 4700.0)]
-        check_f_model = mod_n[:, 1][(mod_n[:, 0] > 4500.0) & (mod_n[:, 0] < 4700.0)]
-        continuum = np.average(check_f_model) / np.average(check_f_spec)    
-
-        # Resample model flux to match spectrum
-        resampled_model_flux = np.interp(
-            spectrum.wavelength.value,
-            mod_n[:, 0] * (rv + 299792.458) / 299792.458,
-            mod_n[:, 1] / continuum,
-            left=np.nan,
-            right=np.nan
-        )
+            # Add this output data product to the database outputs
+            for output in outputs:
+                output.output_data_product = output_data_product
+            
+        # send back the results
+        yield from outputs
         
-        # Let's only consider chi-sq between say 3750 - 8000
-        chisq_mask = (8000 >= spectrum.wavelength.value) * (spectrum.wavelength.value >= 3750)
-        ivar = spectrum.uncertainty.represent_as(InverseVariance).array.flatten()
-        pixel_chi_sq = (resampled_model_flux - spectrum.flux.value.flatten())**2 * ivar
-        chi_sq = np.nansum(pixel_chi_sq[chisq_mask])
-        reduced_chi_sq = (chi_sq / (np.sum(np.isfinite(pixel_chi_sq[chisq_mask])) - 3))
-
-        result_kwds = OrderedDict([
-            ("wd_type", wd_type),
-            ("teff", final_T),
-            ("e_teff", final_T_err),
-            ("logg", final_g),
-            ("e_logg", final_g_err),
-            ("v_rel", rv),
-            ("conditioned_on_parallax", parallax),
-            ("conditioned_on_phot_g_mean_mag", phot_g_mean_mag),
-            ("snr", spectrum.meta["SNR"][0]),
-            ("chi_sq", chi_sq),
-            ("reduced_chi_sq", reduced_chi_sq),
-        ])
-
-        output = SnowWhite(data_product=data_product, spectrum=spectrum, **result_kwds)
-        outputs.append(output)
-
-        # Put in results for pipeline product.
-        extname = get_extname(spectrum, data_product)
-        results.setdefault(extname, [])
-        result_kwds.update(OrderedDict([
-            ("model_flux", resampled_model_flux),
-            ("continuum", continuum * np.ones_like(resampled_model_flux)),
-            ("task_id", output.task.id)
-        ]))
-        results[extname].append(result_kwds)
-
-    # Create pipeline product.
-    if outputs:
-        # TODO: capiTAlzIE?
-        common_header_groups = [
-            ("WD_TYPE", "STELLAR PARAMETERS"),
-            ("SNR", "SUMMARY STATISTICS"),
-            ("MODEL_FLUX", "MODEL SPECTRA"),
-        ]
-        output_data_product = create_pipeline_data_product(
-            "SnowWhite",
-            data_product,
-            results,
-            header_groups={ k: common_header_groups for k in results.keys() }
-        )
-
-        # Add this output data product to the database outputs
-        for output in outputs:
-            output.output_data_product = output_data_product
-        
-    # send back the results
-    yield from outputs
-    

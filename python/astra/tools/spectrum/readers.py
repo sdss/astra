@@ -89,8 +89,8 @@ def load_sdss_mwmVisit_1d(path, hdu, **kwargs):
     priority=1,
     extensions=["fits"],
 )
-def load_sdss_mwmVisit_list(path, **kwargs):
-    return _load_mwmVisit_or_mwmStar_spectrum_list(path, **kwargs)
+def load_sdss_mwmVisit_list(path, hdu=None, **kwargs):
+    return _load_mwmVisit_or_mwmStar_spectrum_list(path, hdu, **kwargs)
 
 
 @data_loader(
@@ -112,8 +112,8 @@ def load_sdss_mwmStar_1d(path, hdu, **kwargs):
     priority=20,
     extensions=["fits"],
 )
-def load_sdss_mwmStar_list(path, **kwargs):
-    return _load_mwmVisit_or_mwmStar_spectrum_list(path, **kwargs)
+def load_sdss_mwmStar_list(path, hdu=None, **kwargs):
+    return _load_mwmVisit_or_mwmStar_spectrum_list(path, hdu, **kwargs)
 
 
 @data_loader(
@@ -438,12 +438,11 @@ def _wcs_log_linear(naxis, cdelt, crval):
     return 10 ** (np.arange(naxis) * cdelt + crval)
 
 
-def _load_mwmVisit_or_mwmStar_spectrum_list(path, **kwargs):
+def _load_mwmVisit_or_mwmStar_spectrum_list(path, hdu=None, **kwargs):
     spectra = SpectrumList()
-    #with fits.open(path) as image:
-    image = fits.open(path)
-    if True:
-        for hdu in range(1, len(image)):
+    with fits.open(path) as image:
+        hdu = range(1, len(image)) if hdu is None else [hdu]
+        for hdu in hdu:
             if image[hdu].header["DATASUM"] == "0":
                 continue
             spectra.extend(_load_mwmVisit_or_mwmStar_hdu_as_spectrum_list(image, hdu))
@@ -472,6 +471,7 @@ def _load_mwmVisit_or_mwmStar_hdu_as_spectrum_list(image, hdu, **kwargs):
     finally:
         spectral_axis = u.Quantity(wavelength, unit=u.Angstrom)
 
+    pixel_bitmask = np.atleast_2d(image[hdu].data["BITMASK"])
     flux_value = np.atleast_2d(image[hdu].data["FLUX"])
     N, P = flux_value.shape
 
@@ -525,6 +525,7 @@ def _load_mwmVisit_or_mwmStar_hdu_as_spectrum_list(image, hdu, **kwargs):
 
 
         meta.update(dict(zip(use_keys, values)))
+        meta["BITMASK"] = pixel_bitmask[i]
         spectra.append(
             Spectrum1D(
                 spectral_axis=spectral_axis, 

@@ -70,12 +70,12 @@ def create_bitmask(
         show be the same as `label_predictions`.
     """
 
-    N, L = label_predictions.shape
+    L, N = label_predictions.shape
 
     flag_map = LabelBitmask()
     bitmask = np.zeros(N, dtype=int)
 
-    log_g, teff, fe_h = label_predictions.T
+    log_g, teff, fe_h = label_predictions
     log_teff = np.log10(teff)
 
     bitmask[(fe_h > 0.5) | (fe_h < -2) | (log_teff > 3.82)] |= flag_map.get_value(
@@ -87,7 +87,7 @@ def create_bitmask(
     )
 
     if median_draw_predictions is not None:
-        med_log_g, med_teff, med_fe_h = median_draw_predictions.T
+        med_log_g, med_teff, med_fe_h = median_draw_predictions
         med_log_teff = np.log10(med_teff)
 
         bitmask[
@@ -101,7 +101,7 @@ def create_bitmask(
         )
 
     if std_draw_predictions is not None:
-        std_log_g, std_teff, std_fe_h = std_draw_predictions.T
+        std_log_g, std_teff, std_fe_h = std_draw_predictions
         std_log_teff = np.log10(std_teff)
         bitmask[std_log_g > 0.3] |= flag_map.get_value("LOGG_ERROR_LARGE")
         bitmask[std_log_teff > 2.7] |= flag_map.get_value("TEFF_ERROR_LARGE")
@@ -115,8 +115,7 @@ def create_bitmask(
     is_bad = ((meta["RP_MAG"] - meta["K_MAG"]) > 2.3) & (
         (meta["H_MAG"] - 5 * np.log10(1000 / meta["PLX"]) + 5) > 6
     )
-    if is_bad:
-        bitmask |= flag_map.get_value("PARAMS_UNRELIABLE")
+    bitmask[is_bad] |= flag_map.get_value("PARAMS_UNRELIABLE")
     return bitmask
 
 
@@ -165,7 +164,7 @@ def get_metadata(spectrum: Spectrum1D):
     
     metadata = np.array([de_nanify(value) for value in meta.values()])
     # Special case for SDSS-IV apStar objects, which don't have Gaia data in the FITS files.
-    if "ddo51" in spectrum.meta and not np.any(np.isfinite(metadata[:4])):
+    if False and "ddo51" in spectrum.meta and not np.any(np.isfinite(metadata[:4])):
         from astra.database.catalogdb import SDSS_DR17_APOGEE_Allstarmerge, Gaia_DR2
         try:    
             q = (

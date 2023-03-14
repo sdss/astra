@@ -113,7 +113,14 @@ class Source(BaseModel):
     """An astronomical source in the SDSS catalog database."""
 
     catalogid = BigIntegerField(primary_key=True)
-
+    
+    catalogid_v0p5 = BigIntegerField(null=True)
+    catalogid_v1 = BigIntegerField(null=True)
+    
+    gaia_dr3_source_id = BigIntegerField(null=True)
+    tic_v8_id = BigIntegerField(null=True)
+    twomass_psc_designation = TextField(null=True)
+    
     ra = FloatField(null=True)
     dec = FloatField(null=True)
 
@@ -292,11 +299,17 @@ def _get_sdss_metadata(data_product=None, spectrum=None, **kwargs):
     if spectrum is None and data_product is None:
         return {}
 
+    telescope = _get_meta_key(spectrum.meta, "TELESCOPE", data_product.kwargs.get("telescope", None))
+    if telescope is None:
+        telescope = _get_meta_key(spectrum.meta, "OBSRVTRY", None)
+        if isinstance(telescope, str):
+            telescope = telescope.lower() + "25m"
+
     meta = dict(
         snr=_get_meta_key(spectrum.meta, "SNR", None),
         obj=_get_meta_key(spectrum.meta, "OBJID", None),
         mjd=_get_meta_key(spectrum.meta, "MJD", data_product.kwargs.get("mjd", None)),
-        telescope=_get_meta_key(spectrum.meta, "TELESCOPE", data_product.kwargs.get("telescope", None)),
+        telescope=telescope,
         instrument=_get_meta_key(spectrum.meta, "INSTRMNT", _infer_instrument(data_product, spectrum)),      
         plate=_get_meta_key(spectrum.meta, "PLATE", data_product.kwargs.get("plate", None)),
         field=_get_meta_keys(spectrum.meta, ("FIELD", "FIELDID"), data_product.kwargs.get("field", None)),
@@ -328,7 +341,8 @@ class SDSSOutput(BaseTaskOutput):
         try:
             kwds = _get_sdss_metadata(data_product, spectrum, **kwargs)
         except:
-            #log.exception(f"Unable to get metadata for spectrum in data product {data_product}")
+            if spectrum is not None:
+                log.exception(f"Unable to get metadata for spectrum in data product {data_product} and {spectrum}")
             kwds = kwargs
         else:
             # Inject metadata

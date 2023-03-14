@@ -11,9 +11,6 @@ from peewee import fn
 from airflow.exceptions import AirflowSkipException
 from astra.utils import log, flatten
 from astra import __version__ as astra_version
-from tqdm import tqdm
-
-from typing import Optional
 
 
 
@@ -28,6 +25,7 @@ class MWMVisitOperator(BaseOperator):
         cartons=None,
         run2d=None,
         apred=None,
+        run_all=False,
         **kwargs
     ) -> None:
         super().__init__(**kwargs)
@@ -36,6 +34,7 @@ class MWMVisitOperator(BaseOperator):
         self.cartons = cartons
         self.apred = apred
         self.run2d = run2d
+        self.run_all = run_all
         return None
 
 
@@ -45,9 +44,13 @@ class MWMVisitOperator(BaseOperator):
             # Happens when we are running the DAG @once.
             prev_ds, ds = (ds, "2100-01-01")
 
+        if self.run_all:
+            prev_ds, ds = ("2000-01-01", "2100-01-01")
+
         log.info(f"Running {self} between {prev_ds} and {ds} (boss={self.require_boss}; apogee={self.require_apogee})")
 
         # Get most recent status
+        '''
         sq = (
             MWMSourceStatus
             .select(MWMSourceStatus.output_id)
@@ -55,9 +58,9 @@ class MWMVisitOperator(BaseOperator):
             .join(Task)
         )
         if self.apred is not None:
-            sq = sq.where(Task.parameters["apred"] == self.apred)
+            sq = sq.where(MWMSourceStatus.apred == self.apred)
         if self.run2d is not None:
-            sq = sq.where(Task.parameters["run2d"] == self.run2d)
+            sq = sq.where(MWMSourceStatus.run2d == self.run2d)
         sq = (
             sq
             .order_by(MWMSourceStatus.source_id.desc(), MWMSourceStatus.output_id.desc())
@@ -69,6 +72,36 @@ class MWMVisitOperator(BaseOperator):
             MWMSourceStatus
             .select(MWMSourceStatus.source_id)
             .join(sq, on=(MWMSourceStatus.output_id == sq.c.output_id))
+        )
+        if self.require_boss:
+            q = q.where(
+                (
+                    (MWMSourceStatus.obs_end_boss_lco.between(prev_ds, ds))
+                &   (MWMSourceStatus.num_boss_lco_visits > 0)
+                )
+            |  
+                (
+                    (MWMSourceStatus.obs_end_boss_apo.between(prev_ds, ds))
+                &   (MWMSourceStatus.num_boss_apo_visits > 0)
+                )
+            )
+        if self.require_apogee:
+            q = q.where(
+                (
+                    (MWMSourceStatus.obs_end_apogee_lco.between(prev_ds, ds))
+                &   (MWMSourceStatus.num_apogee_lco_visits > 0)
+                )
+            |
+                (
+                    (MWMSourceStatus.obs_end_apogee_apo.between(prev_ds, ds))
+                &   (MWMSourceStatus.num_apogee_apo_visits > 0)
+                )
+            )
+        '''
+        q = (
+            MWMSourceStatus
+            .select(MWMSourceStatus.source_id)
+            .distinct(MWMSourceStatus.source_id)
         )
         if self.require_boss:
             q = q.where(
@@ -154,6 +187,7 @@ class MWMStarOperator(BaseOperator):
         apred=None,
         run2d=None,
         cartons=None,
+        run_all=False,
         **kwargs
     ) -> None:
         super().__init__(**kwargs)
@@ -162,6 +196,7 @@ class MWMStarOperator(BaseOperator):
         self.cartons = cartons
         self.apred = apred
         self.run2d = run2d
+        self.run_all = run_all
         return None
 
 
@@ -171,34 +206,79 @@ class MWMStarOperator(BaseOperator):
             # Happens when we are running the DAG @once.
             prev_ds, ds = (ds, "2100-01-01")
 
+        if self.run_all:
+            prev_ds, ds = ("2000-01-01", "2100-01-01")
+
+
         log.info(
             f"Running {self} between {prev_ds} and {ds} (boss={self.require_boss}; apogee={self.require_apogee} "
             f"run2d={self.run2d}, apred={self.apred})"
         )
 
-        # Get most recent status
-        sq = (
-            MWMSourceStatus
-            .select(MWMSourceStatus.output_id)
-            .distinct(MWMSourceStatus.source_id)
-            .join(Task)
-        )
-        if self.apred is not None:
-            sq = sq.where(Task.parameters["apred"] == self.apred)
-        if self.run2d is not None:
-            sq = sq.where(Task.parameters["run2d"] == self.run2d)
-        sq = (
-            sq
-            .order_by(MWMSourceStatus.source_id.desc(), MWMSourceStatus.output_id.desc())
-            .tuples()
-            .alias("most_recent")
-        )
+        if self.cartons is None:
+            
+            # We need to return mwmStar data product identifiers.
+            q = (
+                DataProduct
+                .select(DataProduct.id)
+                .join(MWMSourceStatus, on=(MWMSourceStatus.source_id == DataProduct.source_id))
+                .where(
+                    (DataProduct.filetype == "mwmStar")
+                )
+            )
+            if self.apred is not None:
+                q = q.where(MWMSourceStatus.apred == self.apred)
+            if self.run2d is not None:
+                q = q.where(MWMSourceStatus.run2d == self.run2d)
+
+            if self.require_boss:
+                q = q.where(
+                    (
+                        (MWMSourceStatus.obs_end_boss_lco >= prev_ds)
+                    &   (MWMSourceStatus.obs_end_boss_lco < ds)
+                    &   (MWMSourceStatus.num_boss_lco_visits_in_stack > 0)
+                    )
+                |  
+                    (
+                        (MWMSourceStatus.obs_end_boss_apo >= prev_ds)
+                    &   (MWMSourceStatus.obs_end_boss_apo < ds)
+                    &   (MWMSourceStatus.num_boss_apo_visits_in_stack > 0)
+                    )
+                )
+            if self.require_apogee:
+                q = q.where(
+                    (
+                        # Only select by LCO if there are no APO visits. We should prefer APO timing.
+                        (MWMSourceStatus.obs_end_apogee_lco >= prev_ds)
+                    &   (MWMSourceStatus.obs_end_apogee_lco < ds)
+                    &   (MWMSourceStatus.num_apogee_lco_visits_in_stack > 0)
+                    &   (MWMSourceStatus.num_apogee_apo_visits_in_stack == 0)
+                    )
+                |
+                    (
+                        (MWMSourceStatus.obs_end_apogee_apo >= prev_ds)
+                    &   (MWMSourceStatus.obs_end_apogee_apo < ds)
+                    &   (MWMSourceStatus.num_apogee_apo_visits_in_stack > 0)
+                    )
+                )
+
+            data_product_ids = flatten(list(q.tuples()))
+            log.info(f"Matched against {len(data_product_ids)} data product identifiers")
+            if len(data_product_ids) == 0:
+                raise AirflowSkipException("No data products")
+                
+            return data_product_ids
+
 
         q = (
             MWMSourceStatus
             .select(MWMSourceStatus.source_id)
-            .join(sq, on=(MWMSourceStatus.output_id == sq.c.output_id))
+            .distinct(MWMSourceStatus.source_id)
         )
+        if self.apred is not None:
+            q = q.where(MWMSourceStatus.apred == self.apred)
+        if self.run2d is not None:
+            q = q.where(MWMSourceStatus.run2d == self.run2d)
         if self.require_boss:
             q = q.where(
                 (
@@ -223,6 +303,8 @@ class MWMStarOperator(BaseOperator):
                 &   (MWMSourceStatus.num_apogee_apo_visits_in_stack > 0)
                 )
             )
+        
+        #q = q.order_by(MWMSourceStatus.task_id.desc())
 
         catalogids = flatten(list(q.tuples()))
         log.info(f"There are {len(catalogids)} sources matched to require")
@@ -246,7 +328,7 @@ class MWMStarOperator(BaseOperator):
 
             catalogids = flatten(list(q.tuples()))
             log.info(f"There are {len(catalogids)} sources matched to those cartons")
-    
+
         # We need to return mwmStar data product identifiers.
         q = (
             DataProduct

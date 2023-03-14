@@ -9,7 +9,7 @@ from sdss_access import SDSSPath
 from typing import Union, List, Callable, Optional, Dict, Tuple, Iterable
 
 from astra import __version__ as v_astra
-from astra.base import task_decorator
+from astra.base import task
 
 #from astra.base import TaskInstance, Parameter
 from astra.database.astradb import Source, DataProduct, BaseTaskOutput
@@ -51,7 +51,7 @@ class MWMSourceStatus(BaseTaskOutput):
     updated = DateTimeField(default=datetime.datetime.now)
 
 
-@task_decorator
+@task
 def create_mwm_data_products(
     source: Iterable[Union[Source, int]],
     run2d: str,
@@ -76,6 +76,11 @@ def create_mwm_data_products(
     """
 
     for source in flatten(source):
+        catalogid = source if isinstance(source, int) else source.catalogid
+        if catalogid < 0:
+            log.warning(f"Skipping negative catalog identifier {source}")
+            continue
+    
         log.info(f"Creating data products for source {source}")
         meta = _create_mwm_data_products(
             source,
