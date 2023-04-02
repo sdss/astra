@@ -2,9 +2,140 @@ import os
 import datetime
 import numpy as np
 import json
+from tqdm import tqdm
 
 from astra.utils import log, expand_path
 from astra.contrib.ferre.utils import read_ferre_headers
+
+
+
+ABUNDANCE_CONTROLS = {
+    "Al": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+    "Ca": {
+        "INDV_LABEL": ("O Mg Si S Ca Ti",),
+    },
+    "Ce": {
+        "INDV_LABEL": ("METALS",),
+    },
+    "CI": {
+        "INDV_LABEL": ("C",),
+    },
+    "C": {
+        "INDV_LABEL": ("C",),
+    },
+    "C13": {
+        "INDV_LABEL": ("METALS", ),
+    }, 
+    "CN": {
+        "INDV_LABEL": (
+            "C",
+            "O Mg Si S Ca Ti",
+        ),
+    },
+    "Co": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+    "Cr": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+    "Cu": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+    "Fe": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+    "Ge": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+    "K": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+    "Mg": {
+        "INDV_LABEL": ("O Mg Si S Ca Ti",),
+    },
+    "Mn": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+    "Na": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+    "Nd": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+    "Ni": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+    "N": {
+        "INDV_LABEL": ("N",),
+    },
+    "O": {
+        "INDV_LABEL": ("O Mg Si S Ca Ti",),
+    },
+    "P": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+    "Rb": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+    "Si": {
+        "INDV_LABEL": ("O Mg Si S Ca Ti",),
+    },
+    "S": {
+        "INDV_LABEL": ("O Mg Si S Ca Ti",),
+    },
+    "TiII": {
+        "INDV_LABEL": ("O Mg Si S Ca Ti",),
+    },
+    "Ti": {
+        "INDV_LABEL": ("O Mg Si S Ca Ti",),
+    },
+    "V": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+    "Yb": {
+        "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
+    },
+}
+
+def get_species_label_references():
+    species_label_reference = {}
+    for species, controls in ABUNDANCE_CONTROLS.items():
+        if species == "CN": 
+            continue
+
+        label, = controls["INDV_LABEL"]
+        # From https://www.sdss4.org/dr17/irspec/parameters/
+        # metals is [M/H], alpha is [alpha/M], C is [C/M], N is [N/M]
+
+        # TODO: allow for more complex ties?
+        has_ties = controls.get("TIES", None) is not None
+
+        if label in ("O Mg Si S Ca Ti", "C", "N"):
+            is_x_m = True
+        elif label in ("METALS", ):
+            is_x_m = not has_ties
+        else:
+            raise ValueError("AAAAAHHHHH")
+
+        species_label_reference[species] = (label, is_x_m)
+    return species_label_reference
 
 
 def chunks(l, n):
@@ -16,31 +147,32 @@ def chunks(l, n):
     yield l[n*newn-newn:]
 
 
-def partition(items, K, return_indices=False):
-    """
-    Partition items into K semi-equal groups.
-    """
+def partition_indices(costs, K):
     groups = [[] for _ in range(K)]
-    N = len(items)
-    sorter = np.argsort(items)
-    if return_indices:
-        sizes = dict(zip(range(N), items))
-        itemizer = list(np.arange(N)[sorter])
-    else:
-        itemizer = list(np.array(items)[sorter])
+    N = len(costs)
+    sizes = np.zeros(K)
+    for index in np.argsort(costs)[::-1]:
+        group_index = np.argmin(sizes)
+        sizes[group_index] += costs[index]
+        groups[group_index].append(index)
 
-    while itemizer:
-        if return_indices:
-            group_index = np.argmin(
-                [sum([sizes[idx] for idx in group]) for group in groups]
-            )
-        else:
-            group_index = np.argmin(list(map(sum, groups)))
-        groups[group_index].append(itemizer.pop(-1))
+    for group, size in zip(groups, sizes):
+        if size > 0:
+            yield group
+    
 
-    return [group for group in groups if len(group) > 0]
+def partition_indices(items, costs, K):
+    groups = [[] for _ in range(K)]
+    group_costs = np.zeros(K)
+    for index in np.argsort(costs)[::-1]:
+        group_index = np.argmin(group_costs)
+        group_costs[group_index] += costs[index]
+        groups[group_index].append(items[index])
 
-
+    for group, cost in zip(groups, group_costs):
+        if cost > 0:
+            yield (group, cost)
+    
 
 # need some task that takes in data products, executes to slurm
 def submit_astra_instructions(instructions, parent_dir, n_threads, slurm_kwargs):
@@ -64,23 +196,22 @@ def submit_astra_instructions(instructions, parent_dir, n_threads, slurm_kwargs)
     # Estimate the cost of each task, and partition into nearly K equal groups
     costs = [len(instruction["task_kwargs"]["data_product"]) for instruction in instructions]
 
-    for chunk_indices in partition(costs, n_tasks, return_indices=True):
+    for chunk, cost in partition_indices(instructions, costs, n_tasks):
         
-        content = [instructions[i] for i in chunk_indices]
-
+        print(f"Chunk has cost {cost}")
         while os.path.exists(expand_path(os.path.join(parent_dir, f"batch_{z:03d}.json"))):
             z += 1
 
         path = expand_path(os.path.join(parent_dir, f"batch_{z:03d}.json"))
 
-        log.info(f"Created {path}")
+        log.info(f"Creating {path}")
         try:
             with open(path, "w") as fp:
-                json.dump(content, fp)
+                json.dump(chunk, fp)
         except:
-            print(content)
+            print(chunk)
             raise 
-
+        log.info("Written")
         q.append(f"astra run {path}")
     
     print(f"Created slurm queue with {slurm_kwargs}")
@@ -345,117 +476,15 @@ def get_abundance_keywords(element, header_label_names):
     # cd /uufs/chpc.utah.edu/common/home/sdss50/dr16/apogee/spectro/aspcap/r12/l33/apo25m/cal_all_apo25m007/ferre
     # egrep 'INDV|TIE|FILTERFILE' */input.nml
 
-    controls = {
-        "Al": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-        "Ca": {
-            "INDV_LABEL": ("O Mg Si S Ca Ti",),
-        },
-        "Ce": {
-            "INDV_LABEL": ("METALS",),
-        },
-        "CI": {
-            "INDV_LABEL": ("C",),
-        },
-        "C": {
-            "INDV_LABEL": ("C",),
-        },
-        "CN": {
-            "INDV_LABEL": (
-                "C",
-                "O Mg Si S Ca Ti",
-            ),
-        },
-        "Co": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-        "Cr": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-        "Cu": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-        "Fe": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-        "Ge": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-        "K": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-        "Mg": {
-            "INDV_LABEL": ("O Mg Si S Ca Ti",),
-        },
-        "Mn": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-        "Na": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-        "Nd": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-        "Ni": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-        "N": {
-            "INDV_LABEL": ("N",),
-        },
-        "O": {
-            "INDV_LABEL": ("O Mg Si S Ca Ti",),
-        },
-        "P": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-        "Rb": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-        "Si": {
-            "INDV_LABEL": ("O Mg Si S Ca Ti",),
-        },
-        "S": {
-            "INDV_LABEL": ("O Mg Si S Ca Ti",),
-        },
-        "TiII": {
-            "INDV_LABEL": ("O Mg Si S Ca Ti",),
-        },
-        "Ti": {
-            "INDV_LABEL": ("O Mg Si S Ca Ti",),
-        },
-        "V": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-        "Yb": {
-            "INDV_LABEL": ("METALS",),
-            "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
-        },
-    }
-
     def get_header_index(label):
         # FERRE uses 1-indexing and Python uses 0-indexing.
         return 1 + header_label_names.index(label)
 
     try:
-        c = controls[element]
+        c = ABUNDANCE_CONTROLS[element]
     except:
         raise ValueError(
-            f"no abundance controls known for element '{element}' (available: {tuple(controls.keys())}"
+            f"no abundance controls known for element '{element}' (available: {tuple(ABUNDANCE_CONTROLS.keys())}"
         )
 
     try:

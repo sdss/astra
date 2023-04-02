@@ -159,7 +159,7 @@ class Emulator:
 
 
 
-    def fit(self, spectrum: Spectrum1D, tol: float = 1e-1, max_iter: int = 1_000):
+    def fit(self, spectrum: Spectrum1D, tol: float = 1e-1, max_iter: int = 1_000, initial_phi=None):
         """
         Simultaneously fit the continuum and stellar absorption.
 
@@ -193,7 +193,7 @@ class Emulator:
             - `meta` is a dictionary of metadata
         """
         try:
-            return self._fit(spectrum, tol, max_iter)
+            return self._fit(spectrum, tol, max_iter, initial_phi=initial_phi)
         except:
             raise 
             N, P = self.continuum_model._get_shape(spectrum)
@@ -235,7 +235,7 @@ class Emulator:
         return (chi_sq, args)
 
 
-    def _fit(self, spectrum, tol, max_iter):
+    def _fit(self, spectrum, tol, max_iter, initial_phi=None):
         flux, ivar = self._check_data(spectrum)
         continuum_args = self.continuum_model._initialize(spectrum)
 
@@ -243,8 +243,17 @@ class Emulator:
             for category in (RuntimeWarning, ConvergenceWarning):
                 warnings.filterwarnings("ignore", category=category)
 
-            phi = None # phi is the same as W used in NMF
-            theta, continuum = self._maximization(flux, ivar, continuum_args)
+            phi = None
+            if initial_phi is not None:
+                initial_rectified_flux = 1 - (initial_phi @ self.components)[0]
+            else:
+                initial_rectified_flux = 1
+        
+            theta, continuum = self._maximization(
+                flux / initial_rectified_flux, 
+                initial_rectified_flux * ivar * initial_rectified_flux, 
+                continuum_args
+            )
 
             # initial trick
             #continuum *= 1.5

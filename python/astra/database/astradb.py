@@ -242,7 +242,7 @@ class BaseTaskOutput(BaseModel):
 
     task = ForeignKeyField(
         Task, 
-        default=Task.create,
+        default=Task,
         on_delete="CASCADE", 
         primary_key=True
     )
@@ -320,6 +320,8 @@ def _get_sdss_metadata(data_product=None, spectrum=None, **kwargs):
     return meta
 
 
+from time import time
+
 class SDSSOutput(BaseTaskOutput):
     
     # Define the metadata we want recorded for every SDSS analysis task.
@@ -336,8 +338,7 @@ class SDSSOutput(BaseTaskOutput):
 
     output_data_product = ForeignKeyField(DataProduct, null=True)
 
-    def __init__(self, data_product, spectrum=None, **kwargs):
-
+    def __init__(self, data_product=None, spectrum=None, **kwargs):
         try:
             kwds = _get_sdss_metadata(data_product, spectrum, **kwargs)
         except:
@@ -346,9 +347,9 @@ class SDSSOutput(BaseTaskOutput):
             kwds = kwargs
         else:
             # Inject metadata
-            kwds.update(kwargs)
+            kwds.update(kwargs)        
         try:
-            kwds["source"] = data_product.source
+            kwds["source_id"] = data_product.source_id
         except:
             None
         

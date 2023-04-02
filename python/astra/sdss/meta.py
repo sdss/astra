@@ -52,10 +52,27 @@ class StarMeta(BaseModel):
     doppler_e_logg = FloatField(null=True)
     doppler_fe_h = FloatField(null=True)
     doppler_e_fe_h = FloatField(null=True)
-    doppler_starflag = IntegerField(null=True)
     doppler_version = TextField(null=True)
     doppler_v_rad = FloatField(null=True)
-    
+
+    doppler_n_good_visits = IntegerField(default=-1)
+    doppler_n_good_rvs = IntegerField(default=-1)
+    doppler_starflag = IntegerField(default=0)
+    doppler_v_scatter = FloatField(null=True)
+    doppler_v_err = FloatField(null=True)
+    doppler_chi_sq = FloatField(null=True)
+    doppler_ccpfwhm = FloatField(null=True)
+    doppler_autofwhm = FloatField(null=True)
+    doppler_n_components = IntegerField(default=-1)
+
+    sdss4_apogee_target1 = IntegerField(default=0)
+    sdss4_apogee_target2 = IntegerField(default=0)
+    sdss4_apogee2_target1 = IntegerField(default=0)
+    sdss4_apogee2_target2 = IntegerField(default=0)
+    sdss4_apogee2_target3 = IntegerField(default=0)
+    sdss4_apogee2_target4 = IntegerField(default=0)
+
+
     # The RXC SAO results are done per visit, not per star.
     # For convenience we include them here, but we will take
     # The result with the highest S/N.
@@ -72,6 +89,15 @@ class StarMeta(BaseModel):
     xcsao_e_v_rad = FloatField(null=True)
 
 
+    sdss4_dr17_apogee_id = TextField(default="")
+    sdss4_dr17_field = TextField(default="")
+
+    fps_apo25m_apogee = IntegerField(default=-1)
+    dithered_apo25m_apogee = IntegerField(default=-1)
+    fps_lco25m_apogee = IntegerField(default=-1)
+    dithered_lco25m_apogee = IntegerField(default=-1)
+    fps_apo25m_boss = IntegerField(default=-1)
+    dithered_apo25m_boss = IntegerField(default=-1)
 
 
 class VisitMeta(BaseModel):
@@ -233,3 +259,6 @@ class VisitMeta(BaseModel):
     xcsao_fe_h = FloatField(null=True)
     xcsao_e_fe_h = FloatField(null=True)            
     xcsao_rxc = FloatField(null=True)
+
+    sdss4_dr17_apogee_id = TextField(default="")
+    sdss4_dr17_field = TextField(default="")

@@ -1,15 +1,17 @@
 import numpy as np
+import datetime
 from scipy import optimize as op
 from scipy.special import logsumexp
 from typing import Iterable
-from astra.database.astradb import DataProduct, SDSSOutput
+from astra.database.astradb import DataProduct, SDSSOutput, BaseModel, Task, Source
 from astra.base import task_decorator
 from astra.utils import log, expand_path, flatten
 from astra.contrib.classifier.utils import read_network
 from astra.contrib.classifier import networks
 from astra.tools.spectrum import Spectrum1D
 from functools import cache
-from peewee import BooleanField, FloatField
+from peewee import fn, Case, JOIN, BooleanField, FloatField, IntegerField, TextField, ForeignKeyField, DateTimeField
+from tqdm import tqdm
 
 import torch
 
@@ -17,6 +19,40 @@ SMALL = -1e+20
 
 CUDA_AVAILABLE = torch.cuda.is_available()
 DEVICE = torch.device("cuda:0") if CUDA_AVAILABLE else torch.device("cpu")
+
+
+class StarClassification(BaseModel):
+
+    task = ForeignKeyField(
+        Task, 
+        default=Task,
+        on_delete="CASCADE", 
+        primary_key=True
+    )
+
+    time_elapsed = FloatField(null=True)
+    time_bundle = FloatField(null=True)
+    completed = DateTimeField(default=datetime.datetime.now)
+
+    source = ForeignKeyField(Source, null=True)    
+
+    most_probable_class = TextField()
+    num_apogee_classifications = IntegerField()
+    num_boss_classifications = IntegerField()
+
+    p_cv = FloatField()
+    lp_cv = FloatField()
+    p_fgkm = FloatField()
+    lp_fgkm = FloatField()
+    p_hotstar = FloatField()
+    lp_hotstar = FloatField()
+    p_wd = FloatField()
+    lp_wd = FloatField()
+    p_sb2 = FloatField()
+    lp_sb2 = FloatField()
+    p_yso = FloatField()
+    lp_yso = FloatField()
+
 
 
 class ClassifierOutput(SDSSOutput):
@@ -51,15 +87,35 @@ def classify_all_apVisit():
     q = (
         DataProduct
         .select()
-        .where(DataProduct.filetype == "apVisit")
-    )
+        .join(
+            ClassifierOutput, 
+            JOIN.LEFT_OUTER, 
+            on=(DataProduct.id == ClassifierOutput.data_product_id)
+        )
+        .where(
+            (DataProduct.filetype == "apVisit")
+        &   (ClassifierOutput.data_product_id.is_null())
+        )
+        .objects()
+        .limit(30000)
+    )    
     r = list(classify_apVisit(q))
 
 def classify_all_specFull():
     q = (
         DataProduct
         .select()
-        .where(DataProduct.filetype == "specFull")
+        .join(
+            ClassifierOutput, 
+            JOIN.LEFT_OUTER, 
+            on=(DataProduct.id == ClassifierOutput.data_product_id)
+        )
+        .where(
+            (DataProduct.filetype == "specFull")
+        &   (ClassifierOutput.data_product_id.is_null())
+        )
+        .objects()
+        .limit(30000)
     )
     r = list(classify_specFull(q))
 
@@ -74,7 +130,9 @@ def classify_apVisit(
     expected_shape = (3, 4096)
 
     model = read_model(model_path)
-    for data_product in data_product:
+    log.info(f"Making predictions..")
+
+    for data_product in tqdm(data_product):
         assert data_product.filetype.lower() == "apvisit"
 
         try:
@@ -91,15 +149,13 @@ def classify_apVisit(
             flux = np.empty(expected_shape)
             for j in range(3):
                 flux[j, ::2] = existing_flux[j]
-                flux[j, 1::2] = existing_flux[j]
-            
+                flux[j, 1::2] = existing_flux[j]            
         
         continuum = np.nanmedian(flux, axis=1)
         batch = flux / continuum.reshape((-1, 1))
         batch = batch.reshape((-1, *expected_shape)).astype(np.float32)
         batch = torch.from_numpy(batch).to(DEVICE)
 
-        log.info(f"Making predictions")
         with torch.no_grad():
             prediction = model.forward(batch)
 
@@ -112,6 +168,8 @@ def classify_apVisit(
                 dithered=dithered,
                 **result
             )
+    log.info(f"Done")
+
 
 
 @task_decorator
@@ -122,6 +180,7 @@ def classify_specFull(
 
     model = read_model(model_path)
     si, ei = (0, 3800)  # MAGIC: same done in training
+    log.info(f"Making predictions")
 
     for data_product in data_product:
         assert data_product.filetype.lower() == "specfull"
@@ -140,7 +199,7 @@ def classify_specFull(
         if not any(finite):
             log.warning(f"Skipping {data_product} because all values are NaN")
             continue
-        
+
         if any(~finite):
             batch[~finite] = np.interp(
                 spectrum.wavelength.value[si:ei][~finite],
@@ -150,7 +209,6 @@ def classify_specFull(
         batch = batch.reshape((1, 1, -1)).astype(np.float32)
         batch = torch.from_numpy(batch).to(DEVICE)
 
-        log.info(f"Making predictions")
         with torch.no_grad():
             prediction = model.forward(batch)
 
@@ -163,28 +221,66 @@ def classify_specFull(
                 **result
             )
 
-   
+    log.info("Done")
+
+
+
 
 @task_decorator
-def classify_source(source_id: int) -> ClassifierOutput:
+def classify_all_sources() -> Iterable[StarClassification]:
+
+    # These should match the select order below
+    class_names = ("fgkm", "hotstar", "sb2", "yso", "cv", "wd")
 
     q = (
         ClassifierOutput
-        .select()
-        .where(
-            (ClassifierOutput.source_id == source_id)
-        &   ClassifierOutput.data_product.is_null(False)
+        .select(
+            ClassifierOutput.source_id, 
+            fn.SUM(Case(None, ((ClassifierOutput.instrument == "BOSS", 1), ), 0)).alias("num_boss_classifications"),
+            fn.SUM(Case(None, ((ClassifierOutput.instrument == "APOGEE", 1), ), 0)).alias("num_apogee_classifications"),
+            fn.SUM(ClassifierOutput.lp_fgkm), 
+            fn.SUM(ClassifierOutput.lp_hotstar), 
+            fn.SUM(ClassifierOutput.lp_sb2), 
+            fn.SUM(ClassifierOutput.lp_yso),             
+            # Only the BOSS net can predict CVs/WDs
+            fn.SUM(Case(
+                None,
+                (
+                    (ClassifierOutput.lp_cv <= (SMALL + 1), 0),
+                ),
+                ClassifierOutput.lp_cv,
+                )
+            ),
+            fn.SUM(Case(
+                None,
+                (
+                    (ClassifierOutput.lp_wd <= (SMALL + 1), 0),
+                ),
+                ClassifierOutput.lp_wd
+                )
+            ),
         )
+        .group_by(ClassifierOutput.source_id)
+        .tuples()
     )
-    log_probs = sum_log_probs(q)
-    result = classification_result(log_probs)
 
-    # TODO: not yet tested..
-    foo = ClassifierOutput(
-        source_id=source_id,
-        **result
-    )
-    raise a
+    for source_id, num_boss, num_apogee, *log_probs in tqdm(q):
+        if num_boss == 0:
+            # log_prob(0) can be big
+            log_probs[-2] = SMALL
+            log_probs[-1] = SMALL
+        
+        result = classification_result(log_probs, class_names)
+        result.update(
+            source_id=source_id,
+            num_boss_classifications=num_boss,
+            num_apogee_classifications=num_apogee,
+            most_probable_class=class_names[np.argmax(log_probs)]
+        )
+        
+        yield StarClassification(**result)
+
+    log.info("Done")
 
 
 def sum_log_probs(iterable):

@@ -7,7 +7,7 @@ from typing import Optional, Iterable
 from functools import cache
 from astropy.nddata import StdDevUncertainty
 from astropy import units as u
-from peewee import FloatField, IntegerField
+from peewee import FloatField, IntegerField, BitField
 from itertools import cycle
 
 from astra.base import task
@@ -20,6 +20,8 @@ from astra.utils import log, expand_path, flatten, list_to_dict
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+from playhouse.hybrid import hybrid_property
+
 
 class ApogeeNetOutput(SDSSOutput):
     teff = FloatField()
@@ -31,9 +33,102 @@ class ApogeeNetOutput(SDSSOutput):
     teff_sample_median = FloatField()
     logg_sample_median = FloatField()
     fe_h_sample_median = FloatField()
-    bitmask_flag = IntegerField()
+    bitmask_flag = BitField()
 
+    flag_teff_unreliable = bitmask_flag.flag(1)
+    flag_logg_unreliable = bitmask_flag.flag(2)
+    flag_fe_h_unreliable = bitmask_flag.flag(4)
+    
+    flag_e_teff_unreliable = bitmask_flag.flag(8)
+    flag_e_logg_unreliable = bitmask_flag.flag(16)
+    flag_e_fe_h_unreliable = bitmask_flag.flag(32)
 
+    flag_e_teff_large = bitmask_flag.flag(64)
+    flag_e_logg_large = bitmask_flag.flag(128)
+    flag_e_fe_h_large = bitmask_flag.flag(256)
+    flag_missing_photometry = bitmask_flag.flag(512)
+    flag_result_unreliable = bitmask_flag.flag(1024)
+    
+    @hybrid_property
+    def warnflag(self):
+        return (
+            self.flag_e_teff_large |
+            self.flag_e_logg_large |
+            self.flag_e_fe_h_large |
+            self.flag_missing_photometry
+        )
+
+    @warnflag.expression
+    def warnflag(self):
+        return (
+            self.flag_e_teff_large |
+            self.flag_e_logg_large |
+            self.flag_e_fe_h_large |
+            self.flag_missing_photometry
+        )
+
+    @hybrid_property
+    def badflag(self):
+        return (
+            self.flag_result_unreliable |
+            self.flag_teff_unreliable |
+            self.flag_logg_unreliable |
+            self.flag_fe_h_unreliable |
+            self.flag_e_teff_unreliable |
+            self.flag_e_logg_unreliable |
+            self.flag_e_fe_h_unreliable
+        )
+
+    @badflag.expression
+    def badflag(self):
+        return (
+            self.flag_result_unreliable |
+            self.flag_teff_unreliable |
+            self.flag_logg_unreliable |
+            self.flag_fe_h_unreliable |
+            self.flag_e_teff_unreliable |
+            self.flag_e_logg_unreliable |
+            self.flag_e_fe_h_unreliable
+        )
+    
+'''
+
+    warnflag = bitmask_flag.
+
+    DEFINITIONS = [
+        (1, "TEFF_UNRELIABLE", "log(teff) is outside the range (3.1, 4.7)"),
+        (1, "LOGG_UNRELIABLE", "log(g) is outside the range (-1.5, 6)"),
+        (
+            1,
+            "FE_H_UNRELIABLE",
+            "Metallicity is outside the range (-2, 0.5), or the log(teff) exceeds 3.82",
+        ),
+        (
+            1,
+            "TEFF_ERROR_UNRELIABLE",
+            "The median of log(teff) draws is outside the range (3.1, 4.7)",
+        ),
+        (
+            1,
+            "LOGG_ERROR_UNRELIABLE",
+            "The median of log(g) draws is outside the range (-1.5, 6)",
+        ),
+        (
+            1,
+            "FE_H_ERROR_UNRELIABLE",
+            "The median of metallicity draws is outside the range (-2, 0.5) or the median of log(teff) draws exceeds 3.82",
+        ),
+        (1, "TEFF_ERROR_LARGE", "The error on log(teff) is larger than 0.03"),
+        (1, "LOGG_ERROR_LARGE", "The error on log(g) is larger than 0.3"),
+        (1, "FE_H_ERROR_LARGE", "The error on metallicity is larger than 0.5"),
+        (1, "MISSING_PHOTOMETRY", "There is some Gaia/2MASS photometry missing."),
+        (
+            1,
+            "PARAMS_UNRELIABLE",
+            "Do not trust these results as there are known issues with the reported stellar parameters in this region.",
+        ),
+    ]
+'''
 @cache
 def read_model(model_path, device):
     return Model(expand_path(model_path), device)    

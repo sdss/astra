@@ -702,6 +702,7 @@ def read_control_file(path):
         ("OPFILE", "OPFILE"),
         ("SFFILE", "SFFILE"),
         ("PFILE", "PFILE"),
+        ("FILTERFILE", "FILTERFILE"),
         ("NDIM", "NDIM"),
         ("COVPRINT", "COVPRINT"),
         ("SYNTHFILE(1)", "SYNTHFILE(1)"),

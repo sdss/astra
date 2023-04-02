@@ -16,8 +16,11 @@ from astra.tools.spectrum import Spectrum1D, SpectrumList
 from astra.tools.spectrum.utils import spectrum_overlaps
 from astra.contrib.ferre import bitmask, utils
 from astra.utils import log, dict_to_list, list_to_dict, flatten, executable, expand_path, nested_list
+from astra.database.astradb import database, Task
+
 from astra.database.astradb import (
     database,
+    Task,
     DataProduct,
     SDSSOutput
 )
@@ -28,6 +31,10 @@ from peewee import BitField, FloatField, IntegerField, BooleanField
 
 # FERRE v4.8.8 src trunk : /uufs/chpc.utah.edu/common/home/sdss09/software/apogee/Linux/apogee/trunk/external/ferre/src
 
+#import logging
+#logger = logging.getLogger('peewee')
+#logger.addHandler(logging.StreamHandler())
+#logger.setLevel(logging.DEBUG)
 
  
 """
@@ -145,7 +152,7 @@ def _prepare_ferre(
         '''
 
     # TODO: this part could be refactored to a function
-    values_or_cycle_none = lambda x: x if x is not None else cycle([None])
+    values_or_cycle_none = lambda x: x if (x is not None and len(x) > 0) else cycle([None])
     initial_parameters = dict_to_list(dict(
         teff=values_or_cycle_none(initial_teff),
         logg=values_or_cycle_none(initial_logg),
@@ -168,16 +175,16 @@ def _prepare_ferre(
         # together and everything with HDU=4 would be bundled together.
 
         spectra = SpectrumList.read(_data_product.path, hdu=_hdu)
-        batch_spectra.setdefault((_data_product.id, _hdu), [])
-        batch_spectra[(_data_product.id, _hdu)] = spectra
+        #batch_spectra.setdefault((_data_product.id, _hdu), [])
+        #batch_spectra[(_data_product.id, _hdu)] = spectra
 
         for k, spectrum in enumerate(spectra):
             if max_spectrum_per_data_product_hdu is not None and max_spectrum_per_data_product_hdu >= k:
                 break
 
-            wavelength = spectrum.wavelength.value
-            flux = spectrum.flux.value
-            e_flux = spectrum.uncertainty.represent_as(StdDevUncertainty).array
+            wavelength = np.copy(spectrum.wavelength.value)
+            flux = np.copy(spectrum.flux.value)
+            e_flux = np.copy(spectrum.uncertainty.represent_as(StdDevUncertainty).array)
             pixel_bitmask = spectrum.meta["BITMASK"]
 
             # Inflate errors around skylines, etc.
@@ -253,6 +260,7 @@ def _prepare_ferre(
             batch_name.append(f"{i}_{k}_{_data_product.id}_{_hdu}")
         
         n_obj.append(1 + k)
+        del spectra
 
     # Convert list of dicts of initial parameters to array.
     batch_initial_parameters_array = utils.validate_initial_and_frozen_parameters(
@@ -282,6 +290,346 @@ def _prepare_ferre(
     n_obj = batch_flux.shape[0]
     return n_obj
 
+
+
+def _post_process_ferre_abundance_run(pwd, all_headers):
+
+    from astra.contrib.aspcap.models import ASPCAPAbundances
+
+    control_kwds = utils.read_control_file(os.path.join(pwd, "input.nml"))
+    input_parameters_path = os.path.join(pwd, "parameters.input")
+
+    input_flux_path = os.path.join(pwd, f"../flux.input")    
+    if not os.path.exists(input_flux_path):
+        input_flux_path = os.path.join(pwd, "flux.input")
+
+    input_e_flux_path = os.path.join(pwd, f"../uncertainties.input")
+    if not os.path.exists(input_e_flux_path):
+        input_e_flux_path = os.path.join(pwd, "uncertainties.input")
+
+
+    output_parameters_path = os.path.join(pwd, "parameters.output")
+    output_flux_path = os.path.join(pwd, "flux.output")
+
+    total = utils.wc(os.path.join(pwd, input_parameters_path))
+    n_done = utils.wc(os.path.join(pwd, output_parameters_path))
+
+    log.info(f"Found {n_done} completed successfully (of {total})")
+
+    input_names = np.atleast_1d(np.loadtxt(input_parameters_path, usecols=(0, ), dtype=str))
+
+    # FFILE and ERFILE are inputs, so they will always be the right shape.
+    try:
+        flux = np.atleast_2d(np.loadtxt(input_flux_path))
+    except:
+        log.exception(f"Failed to load input flux from {input_flux_path}")
+        raise
+    #try:
+    #    e_flux = np.atleast_2d(np.loadtxt(input_e_flux_path))
+    #except:
+    #    log.exception(f"Failed to load flux sigma from {input_e_flux_path}")
+    #    raise
+
+
+    # Now parse the outputs from the FERRE run.
+    try:
+        output_names, output_params, output_param_errs, meta = utils.read_output_parameter_file(
+            output_parameters_path,
+            n_dimensions=control_kwds["NDIM"],
+            full_covariance=control_kwds["COVPRINT"],
+        )
+    except:
+        log.exception(f"Exception when parsing FERRE output parameter file {output_parameters_path}")
+        raise
+
+    if len(input_names) > len(output_names):
+        log.warning(f"Number of input parameters does not match output parameters ({len(input_names)} > {len(output_names)}). FERRE may have failed. We will pick up the pieces..")
+
+
+    # Which entries are missing?
+    missing_names = list(set(input_names).difference(output_names))
+    missing_indices = [np.where(input_names == mn)[0][0] for mn in missing_names]
+    for i in np.argsort(missing_indices):
+        missing_name, missing_index = (missing_names[i], missing_indices[i])
+        log.warning(f"Missing parameters for spectrum named {missing_name} (index {missing_index}; row {missing_index+1})")        
+
+    # We will fill the missing parameters with nans, and missing fluxes with nans too
+    N, P = flux.shape
+    D = int(control_kwds["NDIM"]) 
+    params = np.nan * np.ones((N, D), dtype=float)
+    param_errs = np.nan * np.ones((N, D), dtype=float)
+    log_chisq_fit = np.nan * np.ones(N)
+    log_snr_sq = np.nan * np.ones(N)
+    frac_phot_data_points = np.nan * np.ones(N)
+
+    indices = []
+    for i, name in enumerate(output_names):
+        index, = np.where(input_names == name)
+        assert len(index) == 1, f"Name {name} (index {i}) appears more than once in the input parameter file!"
+        indices.append(index[0])
+    indices = np.array(indices)
+
+    params[indices] = output_params
+    param_errs[indices] = output_param_errs
+    log_chisq_fit[indices] = meta["log_chisq_fit"]
+    log_snr_sq[indices] = meta["log_snr_sq"]
+    frac_phot_data_points[indices] = meta["frac_phot_data_points"]
+
+
+    
+    _model_flux = np.atleast_2d(np.loadtxt(output_flux_path, usecols=1 + np.arange(P)))
+    _model_flux_names = np.atleast_1d(np.loadtxt(output_flux_path, usecols=(0, ), dtype=str))
+    model_indices = []
+    for i, name in enumerate(_model_flux_names):
+        index, = np.where(input_names == name)
+        model_indices.append(index[0])
+    model_indices = np.array(model_indices)
+
+    model_flux = np.nan * np.ones((N, P), dtype=float)
+    model_flux[model_indices] = _model_flux
+
+    output_normalized_flux_path = os.path.join(pwd, "normalized_flux.output")
+
+    if "SFFILE" in control_kwds:
+        try:
+            _normalized_flux = np.atleast_2d(np.loadtxt(output_normalized_flux_path, usecols=1 + np.arange(P)))
+            _normalized_flux_names = np.atleast_1d(np.loadtxt(output_normalized_flux_path, usecols=(0, ), dtype=str))
+        except:
+            log.exception(f"Failed to load normalized observed flux from {output_normalized_flux_path}")
+            raise
+        else:
+            # Order the normalized flux to be the same as the inputs
+            normalized_flux_indices = []
+            for i, name in enumerate(_normalized_flux_names):
+                index, = np.where(input_names == name)
+                normalized_flux_indices.append(index[0])
+            normalized_flux_indices = np.array(normalized_flux_indices)
+
+            normalized_flux = np.nan * np.ones((N, P), dtype=float)
+            normalized_flux[normalized_flux_indices] = _normalized_flux
+
+            continuum = flux / normalized_flux
+    else:
+        continuum = np.ones_like(flux)
+        normalized_flux = flux
+
+    has_complete_results = (
+        np.any(np.isfinite(params), axis=1)
+    *   np.any(np.isfinite(model_flux), axis=1)
+    )
+
+    fill_value = -999
+    # If we only have some things (eg params but no model flux) we should make it all nan,
+    # ebcause we dont want to rely on this downstream
+    params[~has_complete_results] = fill_value
+    model_flux[~has_complete_results] = fill_value
+    normalized_flux[~has_complete_results] = fill_value
+    continuum[~has_complete_results] = fill_value
+    
+    header_path = control_kwds["SYNTHFILE(1)"]
+    headers = all_headers[header_path]
+    parameter_names = utils.sanitise(headers["LABEL"])
+
+    # Flag things.
+    param_bitmask = bitmask.ParamBitMask()
+    param_bitmask_flags = np.zeros(params.shape, dtype=np.int64)
+
+    bad_lower = headers["LLIMITS"] + headers["STEPS"] / 8
+    bad_upper = headers["ULIMITS"] - headers["STEPS"] / 8
+    param_bitmask_flags[
+        (params < bad_lower) | (params > bad_upper)
+    ] |= param_bitmask.get_value("GRIDEDGE_BAD")
+
+    warn_lower = headers["LLIMITS"] + headers["STEPS"]
+    warn_upper = headers["ULIMITS"] - headers["STEPS"]
+    param_bitmask_flags[
+        (params < warn_lower) | (params > warn_upper)
+    ] |= param_bitmask.get_value("GRIDEDGE_WARN")
+    param_bitmask_flags[
+        (params == fill_value) | (param_errs < -0.01) | ~np.isfinite(params)
+    ] |= param_bitmask.get_value("FERRE_FAIL")
+    
+    # Check for any erroneous outputs
+    if np.any(param_bitmask_flags & param_bitmask.get_value("FERRE_FAIL")):
+        v = param_bitmask_flags & param_bitmask.get_value("FERRE_FAIL")
+        idx = np.where(
+            np.any(
+                param_bitmask_flags & param_bitmask.get_value("FERRE_FAIL"), axis=1
+            )
+        )
+        log.warning(f"FERRE returned all erroneous values for an entry: {idx} {v}")
+
+    # We need to yield N times, where N is len(data_products) == len(hdu), etc.
+    # So we need to link things by (i, k) where i is the index of the data product
+    # and k is the index of the segment.
+    si = 0
+    ferre_n_obj = params.shape[0]
+    
+    ferre_time_load = None
+    ferre_times_elapsed = cycle([None])
+
+    # Get data products if necessary.
+    log.info(f"Collecting data products")
+    '''
+    data_product_ids = list(set(map(int, (ea.split("_")[2] for ea in input_names))))
+    dps = (
+        DataProduct
+        .select()
+        .where(DataProduct.id << data_product_ids)
+    )
+    data_product_dict = {}
+    for data_product in dps:
+        data_product_dict[data_product.id] = data_product
+    '''
+
+
+
+
+    # telescope
+
+
+    # Load spectra.
+    #log.info(f"Loading spectra")
+    #spectra = {}
+    #for input_name in input_names:
+    #    z, k, data_product_id, hdu = map(int, input_name.split("_"))
+
+    #    key = (data_product_id, hdu)
+    #    if key not in spectra: 
+    #        spectra[key] = SpectrumList.read(data_product_dict[data_product_id].path, hdu=hdu)
+    
+    log.info("Yield results")
+    header_path = control_kwds["SYNTHFILE(1)"]
+    sas_base_dir = os.environ["SAS_BASE_DIR"]
+    if header_path.startswith(sas_base_dir):
+        header_path = f"$SAS_BASE_DIR{header_path[len(sas_base_dir):]}"
+    
+    weight_path = control_kwds["FILTERFILE"]
+    mwm_astra = os.environ["MWM_ASTRA"]
+    if weight_path.startswith(mwm_astra):
+        weight_path = f"$MWM_ASTRA{weight_path[len(mwm_astra):]}"
+
+    # Here we have no time to parse everything, so we will just put in the things we absolutely need.
+
+    common_kwds = dict(
+        pwd=pwd,
+        header_path=header_path,
+        initial_teff=-1,
+        initial_logg=-1,
+        initial_metals=-1,
+        initial_lgvsini=-1,
+        initial_log10vdop=-1,
+        initial_o_mg_si_s_ca_ti=-1,
+        initial_c=-1,
+        initial_n=-1,
+        initial_guess_source="",
+        frozen_parameters={},
+        interpolation_order=3,
+        weight_path=weight_path,
+        lsf_shape_flag=0,
+        error_algorithm_flag=1,
+        wavelength_interpolation_flag=0,
+        optimization_algorithm_flag=3,
+        continuum_flag=1,
+        continuum_order=4,
+        continuum_reject=0.3,
+        continuum_observations_flag=1,
+        full_covariance=True,
+        pca_project=False,
+        pca_chi=False,
+        f_access=0,
+        f_format=1,
+        ferre_kwds={"N/A": None},
+        n_threads=-1,
+        bad_pixel_flux_value=1e-4,
+        bad_pixel_error_value=1e10,
+        skyline_sigma_multiplier=100,
+        min_sigma_value=0.05,
+        spike_threshold_to_inflate_uncertainty=3,
+    )
+    
+
+    # outputs must be per data_product_id, hdu
+    # TODO: This has a strong implicit assumption of 1 spectrum per spectrumlist.
+    #       wwill need to track number of objects per data_product and hdu so that we
+    #       yield back the right things in the right order.
+    items = []
+    for j, (z, k, data_product_id, hdu) in enumerate(map(lambda _: map(int, _.split("_")), input_names)):
+
+        key = (data_product_id, hdu)
+        #spectrum = spectra[key][k]
+
+        # TODO: check for failure.
+        result = dict(zip(parameter_names, params[j]))
+        result.update(dict(zip([f"e_{pn}" for pn in parameter_names], param_errs[j])))
+        result.update(dict(zip([f"bitmask_{pn}" for pn in parameter_names], param_bitmask_flags[j])))
+        result.update(
+            log_chisq_fit=log_chisq_fit[j],
+            log_snr_sq=log_snr_sq[j], 
+            frac_phot_data_points=frac_phot_data_points[j],
+        )
+        # Insert metadata instead of loading spectra for this.
+        telescope = {
+            3: "apo25m",
+            4: "lco25m",
+        }.get(hdu)
+        result.update(
+            telescope=telescope,
+            instrument="APOGEE",
+            snr=-1 # don't load spectrum jut to get this.
+        )
+
+        try:
+            ferre_time_elapsed = ferre_times_elapsed[j]
+        except:
+            ferre_time_elapsed = None
+        
+        # Database writes are the bottleneck. See if we can just yield and use the data product id and HDU.
+        # TODO NOTE this will fail for individual visits.
+        #print(f"Using new output path")
+        #output_path = os.path.join(pwd, f"{data_product_id}_{hdu}.pkl")
+
+        #output_path = os.path.join(pwd, f"{output.task.id}.pkl")
+        #os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        #with open(output_path, "wb") as fp:
+        #    pickle.dump((model_flux[z], continuum[z]), fp, -1)
+
+        #output_data_product, _ = DataProduct.get_or_create(
+        #    release="sdss5",
+        #    filetype="full",
+        #    kwargs=dict(full=output_path)
+        #)
+        #output.output_data_product = output_data_product        
+        items.append(
+                ASPCAPAbundances(
+                data_product_id=data_product_id,
+                hdu=hdu,
+                ferre_n_obj=ferre_n_obj,
+                ferre_time_load=ferre_time_load,
+                ferre_time_elapsed=ferre_time_elapsed,
+                ferre_timeout=-1,
+                **result,
+                **common_kwds
+            )
+        )
+        #print(ts)
+        #print(100 * np.diff(ts)/np.ptp(ts))
+
+    #for key, output in outputs.items():
+    #    print(f"yielding {key} and {output}")
+    #    yield output
+    with database.atomic():
+        tasks = [Task() for _ in range(len(items))]
+        Task.bulk_create(tasks)
+    
+    for item, task in zip(items, tasks):
+        item.task_id = task.id
+    
+    with database.atomic():
+        N = ASPCAPAbundances.bulk_create(items)
+
+    log.info(f"Items {items[0]} to {items[-1]}")
+    return len(items)
 
 
 def _post_process_ferre(pwd, model, data_product=None, ferre_timeout=None):
@@ -490,8 +838,12 @@ def _post_process_ferre(pwd, model, data_product=None, ferre_timeout=None):
     # TODO: This has a strong implicit assumption of 1 spectrum per spectrumlist.
     #       wwill need to track number of objects per data_product and hdu so that we
     #       yield back the right things in the right order.
-    for z, k, data_product_id, hdu in map(lambda _: map(int, _.split("_")), input_names):
+    from time import time
 
+    ts_diffs = []
+    for (z, k, data_product_id, hdu) in map(lambda _: map(int, _.split("_")), input_names):
+
+        t_a = time()
         key = (data_product_id, hdu)
         spectrum = spectra[key][k]
 
@@ -504,12 +856,35 @@ def _post_process_ferre(pwd, model, data_product=None, ferre_timeout=None):
             log_snr_sq=log_snr_sq[z], 
             frac_phot_data_points=frac_phot_data_points[z],
         )
+        t_b = time()
         try:
             ferre_time_elapsed = ferre_times_elapsed[z]
         except:
             ferre_time_elapsed = None
         
-        output = model(
+        t_c = time()
+
+        # Database writes are the bottleneck. See if we can just yield and use the data product id and HDU.
+        # TODO NOTE this will fail for individual visits.
+        print(f"Using new output path")
+        output_path = os.path.join(pwd, f"{data_product_id}_{hdu}.pkl")
+
+        #output_path = os.path.join(pwd, f"{output.task.id}.pkl")
+        #os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, "wb") as fp:
+            pickle.dump((model_flux[z], continuum[z]), fp, -1)
+
+        print(f"Not creating data product, get it from pwd and output task id.")
+
+        #output_data_product, _ = DataProduct.get_or_create(
+        #    release="sdss5",
+        #    filetype="full",
+        #    kwargs=dict(full=output_path)
+        #)
+        #output.output_data_product = output_data_product        
+        print(f"yielding {key} to ")
+        t_d = time()
+        g =  model(
             data_product=data_product_dict[data_product_id],
             spectrum=spectrum,
             ferre_n_obj=ferre_n_obj,
@@ -518,25 +893,23 @@ def _post_process_ferre(pwd, model, data_product=None, ferre_timeout=None):
             ferre_timeout=ferre_timeout,
             **result
         )
+        t_e = time()
+        yield g
+        t_f = time()
 
-        output_path = os.path.join(pwd, f"{output.task.id}.pkl")
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        with open(output_path, "wb") as fp:
-            pickle.dump((model_flux[z], continuum[z]), fp, -1)
-        
-        output_data_product, _ = DataProduct.get_or_create(
-            release="sdss5",
-            filetype="full",
-            kwargs=dict(full=output_path)
-        )
-        output.output_data_product = output_data_product        
+        ts = np.array([t_a, t_b, t_c, t_d, t_e, t_f])
+        ts_diffs.append(ts)
+        #print(ts)
+        #print(100 * np.diff(ts)/np.ptp(ts))
 
-        print(f"yielding {key} and {output} with {type(output.data_product)}: {output.data_product}")
-        yield output
-    
     #for key, output in outputs.items():
     #    print(f"yielding {key} and {output}")
     #    yield output
+
+    ts_diffs = np.array(ts_diffs)
+    foo = np.sum(np.diff(ts_diffs, axis=1), axis=0)
+    print(f"SUMMARY")
+    print(foo / np.sum(foo))
 
 
 def ferre(
@@ -650,6 +1023,7 @@ def ferre(
 
     ferre_timeout = False
     stdout_path, stderr_path = _stdout_stderr_paths(pwd)
+    log.info(f"Starting ferre in {pwd} with timeout of {timeout}")
     try:
         with open(stdout_path, "w") as stdout:
             with open(stderr_path, "w") as stderr:
@@ -670,6 +1044,9 @@ def ferre(
         log.exception(f"Exception when calling FERRE in {pwd}:")
         log.info(f"Will continue to try and recover what we can")
         raise
+
+    else:
+        log.info(f"Ferre finished")
 
     finally:
         yield from _post_process_ferre(pwd, model, ferre_timeout=ferre_timeout)
@@ -693,6 +1070,7 @@ def _get_ferre_chip_mask(observed_wavelength, chip_wavelengths):
 
 if __name__ == "__main__":
 
+    '''
     from astra.database.astradb import DataProduct
 
     dp = DataProduct.get(filetype="apStar")
@@ -707,3 +1085,5 @@ if __name__ == "__main__":
             {"TEFF": 5777, "LOGG": 4.4, "METALS": 0.0}
         ])
     )
+    '''
+

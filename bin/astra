@@ -30,7 +30,7 @@ def run(paths, **kwargs):
     import os
     import json
     from importlib import import_module
-    from astra.utils import log
+    from astra.utils import log, expand_path
     from astra.database.astradb import DataProduct
     from tqdm import tqdm
 
@@ -40,14 +40,30 @@ def run(paths, **kwargs):
             content = json.load(fp)
          
         instructions = [content] if isinstance(content, dict) else content
-        for instruction in instructions:
+        N = len(instructions)
+        for i, instruction in enumerate(instructions, start=1):
+            log.info(f"Starting on instruction {i}/{N} in {path}")
+
+            task_kwargs = instruction.get("task_kwargs", {})
+
+            # A couple of unfortunate hacks to fix instructions that were incomplete.
+            if (instruction["task_callable"] == "astra.contrib.aspcap.abundances.aspcap_abundances"):
+                if "pwd" not in task_kwargs:
+                    # This one will fail.
+                    log.warning(f"Skipping {i}-th (1-indexed) instruction because it's ASPCAP abundances without a pwd")
+                    continue
+                
+                # Check if outputs already exist.
+                pwd = task_kwargs["pwd"]
+                if os.path.exists(os.path.join(expand_path(pwd), "stdout")):
+                    log.warning(F"Skipping {i}-th (1-indexed) instruction because it's ASPCAP abundances and the outputs already exist")
+                    continue            
 
             # Get the task executable.
             module_name, function_name = instruction["task_callable"].rsplit(".", 1)
             module = import_module(module_name)
             task_callable = getattr(module, function_name)
 
-            task_kwargs = instruction.get("task_kwargs", {})
             has_data_products = "data_product" in task_kwargs # TODO: this special key should be defined elsewhere
             if has_data_products:
                 # Resolve the data products

@@ -1,11 +1,10 @@
 import numpy as np
 import pickle
-from astra import log, __version__
-from astra.base import Parameter
-from astra.database.astradb import DataProduct, TaskOutputDataProducts
+#from astra import log, __version__
+#from astra.base import Parameter
+#from astra.database.astradb import DataProduct, TaskOutputDataProducts
 from astra.contrib.thecannon.model import CannonModel
-
-from astra.utils import expand_path
+#from astra.utils import expand_path
 
 
 def grid_search(
@@ -19,6 +18,8 @@ def grid_search(
     max_alpha=1e-1, 
     min_alpha=0, 
     step=5,
+    n_threads=None,
+    prefer="processes",
     **kwargs
 ):
 
@@ -28,7 +29,7 @@ def grid_search(
         label_names = list(map(str, range(L)))
     args = (train_labels, train_flux, train_ivar, label_names)
     baseline = CannonModel(*args, regularization=min_alpha)
-    baseline.train(**kwargs)
+    baseline.train(n_threads=n_threads, prefer=prefer)
 
     baseline_validation_chisq = np.sum((baseline.predict(validation_labels) - validation_flux)**2 * validation_ivar)
 
@@ -44,7 +45,7 @@ def grid_search(
     for i, alpha in enumerate(alphas[::-1]):
 
         model = CannonModel(*args, regularization=alpha)
-        model.train(**kwargs)
+        model.train(n_threads=n_threads, prefer=prefer)
         validation_chisq[alpha] = np.sum((model.predict(validation_labels) - validation_flux)**2 * validation_ivar)
 
         models[alpha] = model

@@ -10,7 +10,7 @@ from playhouse.postgres_ext import ArrayField
 from playhouse.postgres_ext import BinaryJSONField as JSONField
 
 from astra.utils import log, flatten
-from astra.database.astradb import BaseTaskOutput, database
+from astra.database.astradb import Task, BaseModel, BaseTaskOutput, database
 
 
 _DATA_PRODUCT_KEY = "data_product"
@@ -145,7 +145,22 @@ def _write_database_outputs(params, results, time_elapsed, function, time_bundle
     else:
         # TODO: If no Astra database, just return the results.
         model = _get_or_create_database_table_for_task(function)
-        items = filter(lambda x: isinstance(x, BaseTaskOutput), flatten(results))
+        items = []
+        needs_task_at_index = []
+        for i, item in enumerate(filter(lambda x: isinstance(x, BaseModel), flatten(results))):
+            if hasattr(item, "task_id") and isinstance(item.task_id, Task) and item.task_id.id is None:
+                needs_task_at_index.append(i)
+            items.append(item)
+
+        if needs_task_at_index:
+            print(f"adding {len(needs_task_at_index)} tasks just in time")
+            # Bulk create task IDs ahead of time.
+            with database.atomic():
+                tasks = [Task() for _ in range(len(needs_task_at_index))]
+                Task.bulk_create(tasks)
+
+            for i, task in zip(needs_task_at_index, tasks):
+                items[i].task_id = task.id
         
         try:
             with database.atomic():

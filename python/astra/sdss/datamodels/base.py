@@ -18,7 +18,40 @@ GLOSSARY = {
     "INSTRMNT": "Instrument name",
     "OBSRVTRY": "Observatory name",
     "EXTNAME": "Short extension name",
+
+    "WARNFLAG": "Flag warning that results may be unreliable",
+    "BADFLAG": "Flag warning that results are unreliable",
+
+    "DOPPLER_STARFLAG": "Bitmask of flags for DOPPLER fit",
+    "DOPPLER_V_SCATTER": "Scatter in radial velocity [km/s]",
+    "DOPPLER_V_ERR": "Radial velocity error [km/s]",
+    "DOPPLER_N_GOOD_VISITS": "Number of good visits used in DOPPLER fit",
+    "DOPPLER_N_GOOD_RVS": "Number of good RVs used in DOPPLER fit",
+    "DOPPLER_CHI_SQ": "Reduced chi-squared of DOPPLER fit",
+    "DOPPLER_CCPFWHM": "Cross-correlation peak FWHM",
+    "DOPPLER_AUTOFWHM": "Autocorrelation peak FWHM",
+    "DOPPLER_N_COMPONENTS" : "Number of components in DOPPLER fit",
+    "TIC_V8_ID": "TESS Input Catalog (v8) identifier",
+    "GAIA_DR3_SOURCE_ID": "Gaia (DR3) source identifier",
+    "SDSS4_DR17_APOGEE_ID": "SDSS-IV (DR17) APOGEE identifier (not unique)",
+    "SDSS4_DR17_FIELD": "SDSS-IV (DR17) APOGEE field (not unique)",
+    "SDSS4_APOGEE_TARGET1": "SDSS-IV APOGEE targeting bitmask",
+    "SDSS4_APOGEE_TARGET2": "SDSS-IV APOGEE targeting bitmask",
+    "SDSS4_APOGEE2_TARGET1": "SDSS-IV APOGEE-2 targeting bitmask",
+    "SDSS4_APOGEE2_TARGET2": "SDSS-IV APOGEE-2 targeting bitmask",
+    "SDSS4_APOGEE2_TARGET3": "SDSS-IV APOGEE-2 targeting bitmask",
+    
+    "M_H": "Metallicity [dex]",
+    "E_M_H": "Error on metallicity [dex]",
+    "BITMASK_M_H": "Bitmask flag for metallicity",
+
+    "V_SINI": "Projected rotational velocity [km/s]",
+    "E_V_SINI": "Error on projected rotational velocity [km/s]",
+    "BITMASK_V_SINI": "Bitmask flag for projected rotational velocity",
+    
+
     # Observing conditions
+
     "ALT": "Telescope altitude [deg]",
     "AZ": "Telescope azimuth [deg]",
     "EXPTIME": "Total exposure time [s]",
@@ -36,7 +69,9 @@ GLOSSARY = {
     "WINDD": "Wind direction [deg]",
     "WINDS": "Wind speed [km/s]",
     "TAI-BEG": "MJD (TAI) at start of integrations [s]",
+    "TAI_BEG": "MJD (TAI) at start of integrations [s]",
     "TAI-END": "MJD (TAI) at end of integrations [s]",
+    "TAI_END": "MJD (TAI) at end of integrations [s]",
     "NGUIDE": "Number of guider frames during integration",
     # Stacking
     "V_HELIO": "Heliocentric velocity correction [km/s]",
@@ -79,6 +114,8 @@ GLOSSARY = {
     "DELTA_DEC": "Offset in declination [arcsecond]",
     # APOGEE data reduction pipeline
     "DATE-OBS": "Observation date (UTC)",
+    "DATE_OBS": "Observation date (UTC)",
+    "V_APRED": "APOGEE Data Reduction Pipeline version",
     "JD-MID": "Julian date at mid-point of visit",
     "UT-MID": "Date at mid-point of visit",
     "FLUXFLAM": "ADU to flux conversion factor [ergs/s/cm^2/A]",
@@ -236,6 +273,28 @@ GLOSSARY = {
     'MODEL_FLUX_YB_H': 'Best-fitting model for YB_H fit',
     'CONTINUUM_YB_H': 'Continuum flux used in YB_H fit',
     #V_TURB..
+
+    "C_FE": "Carbon abundance as [C/Fe] [dex]",
+    "N_FE": "Nitrogen abundance as [N/Fe] [dex]",
+    "O_FE": "Oxygen abundance as [O/Fe] [dex]",
+    "NA_FE": "Sodium abundance as [Na/Fe] [dex]",
+    "MG_FE": "Magnesium abundance as [Mg/Fe] [dex]",
+    "AL_FE": "Aluminium abundance as [Al/Fe] [dex]",
+    "SI_FE": "Silicon abundance as [Si/Fe] [dex]",
+    "S_FE": "Sulfur abundance as [S/Fe] [dex]",
+    "K_FE": "Potassium abundance as [K/Fe] [dex]",
+    "CA_FE": "Calcium abundance as [Ca/Fe] [dex]",
+    "TI_FE": "Titanium abundance as [Ti/Fe] [dex]",
+    "V_FE": "Vanadium abundance as [V/Fe] [dex]",
+    "CR_FE": "Chromium abundance as [Cr/Fe] [dex]",
+    "MN_FE": "Manganese abundance as [Mn/Fe] [dex]",
+    "NI_FE": "Nickel abundance as [Ni/Fe] [dex]",
+
+    "IER": "Optimization integer flag ",
+    "NFEV": "Number of function evaluations",
+    "XO_INDEX": "Index of initial point",
+    "IN_CONVEX_HULL": "Result in approximate convex hull of training set",
+
     "V_MACRO": "Macro-turbulent velocity [km/s]",
     "C_H": "Carbon abundance as [C/H] [dex]",
     "N_H": "Nitrogen abundance as [N/H] [dex]",
@@ -285,6 +344,26 @@ GLOSSARY = {
     "E_FE_H": "Error in metallicity [dex]",
     "V_MICRO": "Microturbulent velocity [km/s]",
     "E_V_MICRO": "Error in microturbulent velocity [km/s]",
+    "BITMASK_V_MICRO": "Bitmask for microturbulent velocity",
+    "C_M_ATM": "Model atmosphere carbon abundance as [C/M] [dex]",
+    "E_C_M_ATM": "Error in model atmosphere carbon abundance as [C/M] [dex]",
+    "BITMASK_C_M_ATM": "Bitmask flag on C_M_ATM",
+    "N_M_ATM": "Model atmosphere nitrogen abundance as [N/M] [dex]",
+    "E_N_M_ATM": "Error in model atmosphere nitrogen abundance as [N/M] [dex]",
+    "BITMASK_N_M_ATM": "Bitmask flag on N_M_ATM",
+    "ALPHA_M_ATM": "Model atmosphere alpha abundance as [alpha/M] [dex]",
+    "E_ALPHA_M_ATM": "Error in model atmosphere alpha abundance as [alpha/M] [dex]",
+    "BITMASK_ALPHA_M_ATM": "Bitmask flag on ALPHA_M_ATM",
+    "C13_H": "Carbon-13 abundance as [C13/H] [dex]",
+    "E_C13_H": "Error in carbon-13 abundance as [C13/H] [dex]",
+    "BITMASK_C13_H": "Bitmask flag on C13_H",
+    "C1_H": "Carbon-1 abundance as [C1/H] [dex]",
+    "E_C1_H": "Error in carbon-1 abundance as [C1/H] [dex]",
+    "BITMASK_C1_H": "Bitmask flag on C1_H",
+    "TI2_H": "Titanium-2 abundance as [Ti2/H] [dex]",
+    "E_TI2_H": "Error in titanium-2 abundance as [Ti2/H] [dex]",
+    "BITMASK_TI2_H": "Bitmask flag on TI2_H",
+
     "VSINI": "Projected rotational velocity [km/s]",
     "E_VSINI": "Error in projected rotational velocity [km/s]",
     "THETA": "Continuum coefficients",
@@ -380,6 +459,10 @@ GLOSSARY = {
     "E_J_MAG": f"2MASS mean apparent J magnitude error [mag]",
     "E_H_MAG": f"2MASS mean apparent H magnitude error [mag]",
     "E_K_MAG": f"2MASS mean apparent K magnitude error [mag]",
+
+    "MOST_PROBABLE_CLASS": "Most probable class",
+    "NUM_APOGEE_CLASSIFICATIONS": "Number of APOGEE spectra with classifications",
+    "NUM_BOSS_CLASSIFICATIONS": "Number of BOSS spectra with classifications",
 
     "SPECTRAL_TYPE": "Stellar spectral type",
     "SUB_TYPE": "Stellar sub-type",
@@ -505,18 +588,18 @@ GLOSSARY = {
     "PROGRAMS": "SDSS-V programs",    
 
     "CLASS": "Most probable classification",
-    "P_CV": "Relative probability of being a cataclysmic variable",
-    "P_FGKM": "Relative probability of being a FGKM star",
-    "P_HOTSTAR": "Relative probability of being a hot star",
-    "P_WD": "Relative probability of being a white dwarf",
-    "P_SB2": "Relative probability of being a spectroscopic binary",
-    "P_YSO": "Relative probability of being a young stellar object",
-    "LP_CV": "Log probability of being a cataclysmic variable",
-    "LP_FGKM": "Log probability of being a FGKM star",
-    "LP_HOTSTAR": "Log probability of being a hot star",
-    "LP_WD": "Log probability of being a white dwarf",
-    "LP_SB2": "Log probability of being a spectroscopic binary",
-    "LP_YSO": "Log probability of being a young stellar object",
+    "P_CV": "Relative probability of a cataclysmic variable",
+    "P_FGKM": "Relative probability of a FGKM star",
+    "P_HOTSTAR": "Relative probability of a hot star",
+    "P_WD": "Relative probability of a white dwarf",
+    "P_SB2": "Relative probability of a spectroscopic binary",
+    "P_YSO": "Relative probability of a young stellar object",
+    "LP_CV": "Log probability of a cataclysmic variable",
+    "LP_FGKM": "Log probability of a FGKM star",
+    "LP_HOTSTAR": "Log probability of a hot star",
+    "LP_WD": "Log probability of a white dwarf",
+    "LP_SB2": "Log probability of a spectroscopic binary",
+    "LP_YSO": "Log probability of a young stellar object",
 
 
 
@@ -854,17 +937,21 @@ def get_auxiliary_source_data(source: Union[Source, int]):
 
 
 
-def create_empty_hdu(observatory: str, instrument: str) -> fits.BinTableHDU:
+def create_empty_hdu(observatory: str, instrument: str, is_data=True) -> fits.BinTableHDU:
     """
     Create an empty HDU to use as a filler.
     """
+
+    x = "data" if is_data else "results"
+    y = "source" if is_data else "pipeline"
+
     cards = metadata_cards(observatory, instrument)
     cards.extend(
         [
             BLANK_CARD,
             (
                 "COMMENT",
-                f"No {instrument} data available from {observatory} for this source.",
+                f"No {instrument} {x} available from {observatory} for this {y}.",
             ),
         ]
     )

@@ -9,10 +9,28 @@ from sklearn.linear_model import Lasso, LinearRegression
 from joblib import Parallel, delayed
 from time import time
 from tqdm import tqdm
+from scipy.spatial import Delaunay
+
+np.seterr(all='ignore')
 
 from sklearn.exceptions import ConvergenceWarning
 
 from astra.utils import expand_path
+
+
+def _initial_estimate(
+    A, B, linear_term_indices, offsets, scales, clip_sigma=None, normalize=False
+):
+    try:
+        X, residuals, rank, singular = np.linalg.lstsq(A, B, rcond=-1)
+    except np.linalg.LinAlgError:
+        warnings.warn("Unable to make initial label estimate.")
+        return np.zeros_like(offsets) if normalize else offsets
+    else:
+        x0 = X[linear_term_indices].T  # offset by 1 to skip missing bias term
+        if clip_sigma is not None:
+            x0 = np.clip(x0, -clip_sigma, +clip_sigma)
+        return x0 if normalize else _denormalize(x0, offsets, scales)
 
 
 class CannonModel:
@@ -69,6 +87,32 @@ class CannonModel:
     @cached_property
     def _design_matrix_indices(self):
         return _design_matrix_indices(len(self.label_names))
+
+
+    def in_convex_hull(self, labels):
+        """
+        Return whether the provided labels are inside a complex hull constructed
+        from the labelled set.
+        :param labels:
+            A `NxK` array of `N` sets of `K` labels, where `K` is the number of
+            labels that make up the vectorizer.
+        :returns:
+            A boolean array as to whether the points are in the complex hull of
+            the labelled set.
+        """
+
+        labels = np.atleast_2d(labels)
+        if labels.shape[1] != self.training_labels.shape[1]:
+            raise ValueError("expected {} labels; got {}".format(
+                self.training_labels.shape[1], labels.shape[1]))
+
+        try:
+            self._hull
+        except:
+            self._hull = Delaunay(self.training_labels)
+
+
+        return self._hull.find_simplex(labels) >= 0
 
     def train(
         self,
@@ -394,7 +438,7 @@ class CannonModel:
         else:
             A = self.theta[1:].T
 
-        return __initial_estimate(
+        return _initial_estimate(
             A, B, linear_term_indices, offsets, scales, clip_sigma, normalize=False
         )
 
@@ -414,22 +458,9 @@ def _initial_guess(flux, theta, idx, offsets, scales, **kwargs):
     B = (flux - theta[0]).T
     A = theta[1:].T
     linear_term_indices = np.where((idx[1] == 0)[1:])[0]
-    return __initial_estimate(A, B, linear_term_indices, offsets, scales, **kwargs)
+    return _initial_estimate(A, B, linear_term_indices, offsets, scales, **kwargs)
 
 
-def __initial_estimate(
-    A, B, linear_term_indices, offsets, scales, clip_sigma=None, normalize=False
-):
-    try:
-        X, residuals, rank, singular = np.linalg.lstsq(A, B, rcond=-1)
-    except np.linalg.LinAlgError:
-        warnings.warn("Unable to make initial label estimate.")
-        return np.zeros_like(offsets) if normalize else offsets
-    else:
-        x0 = X[linear_term_indices].T  # offset by 1 to skip missing bias term
-        if clip_sigma is not None:
-            x0 = np.clip(x0, -clip_sigma, +clip_sigma)
-        return x0 if normalize else _denormalize(x0, offsets, scales)
 
 
 def _get_continuum_x(F):
@@ -523,23 +554,28 @@ def _fit_spectrum(
         p0 = np.hstack([p0, np.zeros(1 + continuum_order)])
         p0[-1] = 1
 
+
     try:
-        p_opt_all, cov_norm = op.curve_fit(
-            lambda x, *parameters: _predict_flux(x, parameters, *args),
-            x,
-            flux,
-            p0=p0,
-            sigma=sigma,
-            absolute_sigma=True,
-            maxfev=10_000,
-        )
+        p_opt_all, cov_norm, infodict, message, ier = op.curve_fit(
+                lambda x, *parameters: _predict_flux(x, parameters, *args),
+                x,
+                flux,
+                p0=p0,
+                sigma=sigma,
+                absolute_sigma=True,
+                maxfev=10_000,
+                full_output=True,
+            )
         model_flux = _predict_flux(x, p_opt_all, *args)
     except:
         N, P = np.atleast_2d(flux).shape
         p_opt = np.nan * np.ones(L)
         cov = np.nan * np.ones((L, L))
         meta.update(
-            chi_sq=np.nan, reduced_chi_sq=np.nan, model_flux=np.nan * np.ones(P)
+            chi_sq=np.nan, reduced_chi_sq=np.nan, model_flux=np.nan * np.ones(P),
+            ier=ier,
+            message=message,
+            **infodict
         )
     else:
         if continuum_order >= 0:
@@ -568,6 +604,9 @@ def _fit_spectrum(
             p_opt_norm=p_opt_norm,
             p_opt_cont=p_opt_all[-K:],
             model_flux=model_flux,
+            ier=ier,
+            message=message,            
+            **infodict
         )
     finally:
         return (p_opt, cov, meta)

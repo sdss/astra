@@ -67,7 +67,7 @@ class MedianFilter(Continuum):
             fill_value=fill_value,
             **kwargs,
         )
-        self.upstream_task_id = upstream_task_id
+        self.upstream_task_id = int(upstream_task_id)
         self.median_filter_width = median_filter_width
         self.bad_minimum_flux = bad_minimum_flux
         self.non_finite_err_value = non_finite_err_value
@@ -75,14 +75,14 @@ class MedianFilter(Continuum):
         self.mode = mode
         return None
 
-    def _initialize(self, spectrum, task):
+    def _initialize(self, spectrum, header_path):
         try:
             self._initialized_args
         except AttributeError:
             if self.regions is None:
                 # Get the regions from the model wavelength segments.        
 
-                segment_headers = read_ferre_headers(expand_path(task.header_path))[1:]
+                segment_headers = read_ferre_headers(expand_path(header_path))[1:]
                 self.chip_wavelengths = tuple(map(wavelength_array, segment_headers))
 
                 regions = []
@@ -100,8 +100,25 @@ class MedianFilter(Continuum):
     def fit(self, spectrum: Spectrum1D, hdu=3):
 
         from astra.contrib.aspcap.models import ASPCAPInitial
-        task = ASPCAPInitial.get(self.upstream_task_id)
-        region_slices, region_masks = self._initialize(spectrum, task)
+        from astra.database.astradb import DataProduct
+        q = (
+            ASPCAPInitial
+            .select(
+                ASPCAPInitial.header_path,
+                DataProduct.kwargs,
+            )
+            .join(
+                DataProduct, on=(DataProduct.id == ASPCAPInitial.output_data_product_id.cast('integer'))
+            )
+            .where(ASPCAPInitial.task_id == self.upstream_task_id)
+            .tuples()
+        )
+
+        header_path, kwargs = q.first()
+        output_data_product_path = kwargs["full"]
+
+        #    get(self.upstream_task_id)
+        region_slices, region_masks = self._initialize(spectrum, header_path)
 
         #flux/continuum and model_flux
         # before:
@@ -111,9 +128,9 @@ class MedianFilter(Continuum):
         # ratio = continuum * (ferre_flux / model_flux)
 
         # This is an astraStar-FERRE product, but let's just use fits.open
-        output_data_product = DataProduct.get(task.output_data_product_id)
-        print(f"Loading upstream from {output_data_product.path}")
-        with open(output_data_product.path, "rb") as fp:
+        #output_data_product = DataProduct.get(task.output_data_product_id)
+        print(f"Loading upstream from {output_data_product_path}")
+        with open(output_data_product_path, "rb") as fp:
             rectified_model_flux_masked, continuum = pickle.load(fp)
 
         ferre_mask = _get_ferre_chip_mask(spectrum.wavelength.value, self.chip_wavelengths)
