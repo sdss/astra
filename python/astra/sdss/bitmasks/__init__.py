@@ -1,1 +1,0 @@
-"""SDSS bitmask flag definitions."""
