@@ -1,4 +1,4 @@
-import datetime
+
 import numpy as np
 
 
@@ -106,6 +106,12 @@ ABUNDANCE_CONTROLS = {
         "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],
     },
 }
+
+def get_apogee_pixel_mask():
+    """
+    Return a pixel mask for APOGEE spectra.
+    """
+    raise a
 
 
 def get_species_label_references():
@@ -261,68 +267,6 @@ def get_lsf_grid_name(fibre_number):
         return "b"
     if 300 >= fibre_number > 245:
         return "a"
-
-
-def parse_header_path(header_path):
-    """
-    Parse the path of a header file and return a dictionary of relevant parameters.
-
-    :param header_path:
-        The path of a grid header file.
-
-    :returns:
-        A dictionary of keywords that are relevant to running FERRE tasks.
-    """
-
-    (
-        *_,
-        radiative_transfer_code,
-        model_photospheres,
-        isotopes,
-        folder,
-        basename,
-    ) = header_path.split("/")
-
-    parts = basename.split("_")
-    # p_apst{gd}{spectral_type}_{date}_lsf{lsf}_{aspcap}_012_075
-    _ = 4
-    gd, spectral_type = (parts[1][_], parts[1][_ + 1 :])
-    # Special case for the BA grid with kurucz atmospheres. Sigh.
-    if gd == "B" and spectral_type == "A":
-        year, month, day = (2019, 11, 21)
-        lsf = "combo5"
-        lsf_telescope_model = "lco25m" if parts[2].endswith("s") else "apo25m"
-        is_giant_grid = False
-        gd = ""
-        spectral_type = "BA"
-
-    else:
-        date_str = parts[2]
-        year, month, day = (
-            2000 + int(date_str[:2]),
-            int(date_str[2:4]),
-            int(date_str[4:6]),
-        )
-        lsf = parts[3][3]
-        lsf_telescope_model = "lco25m" if parts[3][4:] == "s" else "apo25m"
-
-        is_giant_grid = gd == "g"
-
-    short_grid_name = f"{spectral_type}{gd}_{lsf}"
-
-    kwds = dict(
-        radiative_transfer_code=radiative_transfer_code,
-        model_photospheres=model_photospheres,
-        isotopes=isotopes,
-        gd=gd,
-        lsf_telescope_model=lsf_telescope_model,
-        spectral_type=spectral_type,
-        grid_creation_date=datetime.date(year, month, day),
-        lsf=lsf,
-        short_grid_name=short_grid_name
-    )
-
-    return kwds
 
 
 

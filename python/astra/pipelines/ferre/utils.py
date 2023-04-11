@@ -1,6 +1,7 @@
 """General FERRE utilities."""
 
 import os
+import datetime
 import numpy as np
 import re
 import subprocess
@@ -8,6 +9,7 @@ from typing import Optional
 from tqdm import tqdm
 from itertools import cycle
 from astra.utils import log, expand_path
+
 
 TRANSLATE_LABELS = { 
     "teff": "TEFF",
@@ -20,6 +22,15 @@ TRANSLATE_LABELS = {
     "n_m": "N",
 }
 
+def get_ferre_spectrum_name(index, source_id, spectrum_id, initial_flags):
+    return f"{index}_{source_id}_{spectrum_id}_{initial_flags}"
+
+def parse_ferre_spectrum_name(name):
+    #return dict(zip(("index", "source_id", "spectrum_id", "initial_flags"), map(int, name.split("_"))))
+    index, spectrum_id, initial_flags = map(int, name.split("_"))
+    return dict(index=index, source_id=None, spectrum_id=spectrum_id, initial_flags=initial_flags)
+
+
 def get_ferre_label_name(parameter_name, ferre_label_names, transforms=None):
     transforms = transforms or TRANSLATE_LABELS
 
@@ -30,6 +41,70 @@ def get_ferre_label_name(parameter_name, ferre_label_names, transforms=None):
             return parameter_name
         
     raise ValueError(f"Cannot match {parameter_name} among {ferre_label_names}")
+
+
+
+def parse_header_path(header_path):
+    """
+    Parse the path of a header file and return a dictionary of relevant parameters.
+
+    :param header_path:
+        The path of a grid header file.
+
+    :returns:
+        A dictionary of keywords that are relevant to running FERRE tasks.
+    """
+
+    (
+        *_,
+        radiative_transfer_code,
+        model_photospheres,
+        isotopes,
+        folder,
+        basename,
+    ) = header_path.split("/")
+
+    parts = basename.split("_")
+    # p_apst{gd}{spectral_type}_{date}_lsf{lsf}_{aspcap}_012_075
+    _ = 4
+    gd, spectral_type = (parts[1][_], parts[1][_ + 1 :])
+    # Special case for the BA grid with kurucz atmospheres. Sigh.
+    if gd == "B" and spectral_type == "A":
+        year, month, day = (2019, 11, 21)
+        lsf = "combo5"
+        lsf_telescope_model = "lco25m" if parts[2].endswith("s") else "apo25m"
+        is_giant_grid = False
+        gd = ""
+        spectral_type = "BA"
+
+    else:
+        date_str = parts[2]
+        year, month, day = (
+            2000 + int(date_str[:2]),
+            int(date_str[2:4]),
+            int(date_str[4:6]),
+        )
+        lsf = parts[3][3]
+        lsf_telescope_model = "lco25m" if parts[3][4:] == "s" else "apo25m"
+
+        is_giant_grid = gd == "g"
+
+    short_grid_name = f"{spectral_type}{gd}_{lsf}"
+
+    kwds = dict(
+        radiative_transfer_code=radiative_transfer_code,
+        model_photospheres=model_photospheres,
+        isotopes=isotopes,
+        gd=gd,
+        lsf_telescope_model=lsf_telescope_model,
+        spectral_type=spectral_type,
+        grid_creation_date=datetime.date(year, month, day),
+        lsf=lsf,
+        short_grid_name=short_grid_name
+    )
+
+    return kwds
+
 
 
 def validate_ferre_control_keywords(
@@ -139,7 +214,12 @@ def validate_ferre_control_keywords(
         If `None` is supplied then no continuum keywords will be given to FERRE.
 
         1. Polynomial fitting using an iterative sigma clipping algrithm (set by
-           `continuum_order` and `continuum_reject` keywords).
+           `continuum_order` and `continuum_reject` keywords). Note that even if this
+           option is selected, FERRE will perform continuum normalization on a per-segment
+           level, where the segment here refers to the model segments stored in the 
+           FERRE header file (e.g., one segment per chip). You can confirm this by
+           setting `continuum_flag=1`, `continuum_order=0` and you will see that
+           each chip has been continuum normalised separately.
         2. Segmented normalization, where the data are split into `continuum_segment`
            segments, and the values in each are divided by their mean values.
         3. The input data are divided by a running mean computed with a window of
@@ -789,6 +869,14 @@ def read_control_file(path):
         ("PFILE", "PFILE"),
         ("FILTERFILE", "FILTERFILE"),
         ("NDIM", "NDIM"),
+        ("INDV", "INDV"),
+        ("F_FORMAT", "F_FORMAT"),
+        ("F_ACCESS", "F_ACCESS"),
+        ("NCONT", "NCONT"),
+        ("INTER", "INTER"),
+        ("REJECTCONT", "REJECTCONT"),
+        ("NTHREADS", "NTHREADS"),
+        ("OBSCONT", "OBSCONT"),
         ("COVPRINT", "COVPRINT"),
         ("SYNTHFILE(1)", "SYNTHFILE(1)"),
     ]
@@ -876,19 +964,51 @@ def check_ferre_progress(
     return (stdout, stderr, total_done, total_errors, control_kwds)
 
 
-def read_output_parameter_file(path, n_dimensions, full_covariance, **kwargs):
-    """
-    Three more columns follow, giving the fraction of photometric data
-    points (useful when multiple grids combining spectroscopy and photometry are used),
-    the average log(S/N)2
-    for the spectrum, and the logarithm of the reduced χ^2 for the fit.
+def read_and_sort_output_data_file(path, input_names, n_data_columns=None, dtype=float):
+    names = np.atleast_1d(np.loadtxt(path, usecols=(0, ), dtype=str))
+    if n_data_columns is None:
+        with open(path, "r") as fp:
+            n_data_columns = len(fp.readline().strip().split()) - 1
 
-    Additional columns with the covariance matrix of the errors can be output setting to 1 the
-    keyword COVPRINT.
-    """
-    n_dimensions = int(n_dimensions)
-    full_covariance = bool(int(full_covariance))
+    data = np.atleast_2d(np.loadtxt(path, usecols=range(1, 1 + n_data_columns), dtype=dtype))
+    return sort_data_as_per_input_names(input_names, names, data)
 
+
+def read_file_with_name_and_data(path, input_names, n_data_columns=None, dtype=float):
+    names = np.atleast_1d(np.loadtxt(path, usecols=(0, ), dtype=str))
+    # Need the number of columns.
+    if n_data_columns is None:
+        with open(path, "r") as fp:
+            n_data_columns = len(fp.readline().strip().split()) - 1
+    
+    data = np.atleast_2d(np.loadtxt(path, usecols=range(1, 1 + n_data_columns), dtype=dtype))
+    if input_names is None:
+        return (names, data)
+
+    data = sort_data_as_per_input_names(input_names, names, data)
+    missing_names = set(input_names).difference(names)
+    return (data, missing_names)
+
+def read_input_parameter_file(pwd, control_kwds):
+    return read_file_with_name_and_data(os.path.join(pwd, control_kwds["PFILE"]), None)
+
+
+
+
+
+
+def read_output_parameter_file(pwd, control_kwds, input_names):
+
+    output_parameters_path = os.path.join(pwd, control_kwds["OPFILE"])
+
+    n_dimensions = int(control_kwds["NDIM"])
+    full_covariance = bool(int(control_kwds["COVPRINT"]))
+
+    return _read_output_parameter_file(output_parameters_path, n_dimensions, full_covariance, input_names)
+
+
+def _read_output_parameter_file(path, n_dimensions, full_covariance, input_names):
+    
     names = np.atleast_1d(np.loadtxt(path, usecols=(0,), dtype=str))
 
     N_cols = 2 * n_dimensions + 3
@@ -896,6 +1016,8 @@ def read_output_parameter_file(path, n_dimensions, full_covariance, **kwargs):
         N_cols += n_dimensions**2
 
     results = np.atleast_2d(np.loadtxt(path, usecols=1 + np.arange(N_cols)))
+    # sort here if we get given a set of input names
+    results, missing_names = sort_data_as_per_input_names(input_names, names, results)
 
     param = results[:, 0:n_dimensions]
     P, L = param.shape
@@ -917,7 +1039,26 @@ def read_output_parameter_file(path, n_dimensions, full_covariance, **kwargs):
         cov=cov,
     )
 
-    return (names, param, param_err, meta)
+    return (param, param_err, meta, missing_names)
+
+
+
+
+def sort_data_as_per_input_names(input_names, unsorted_names, unsorted_data):
+    _, D = unsorted_data.shape
+    N = len(input_names)
+
+    data = np.nan * np.ones((N, D), dtype=float)
+    intersect, input_index, output_index = np.intersect1d(
+        input_names, 
+        unsorted_names,
+        assume_unique=True, 
+        return_indices=True
+    )
+    data[input_index] = unsorted_data[output_index]
+    missing = set(input_names) - set(intersect)
+    return (data, missing)
+
 
 
 def get_processing_times(stdout):

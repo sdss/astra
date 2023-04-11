@@ -200,6 +200,9 @@ class Glossary(BaseGlossary):
     v_astra = "Version of Astra"
     component = "Spectrum component"
 
+    #: ASPCAP-specific keywords
+    coarse_id = "Database id of the coarse execution used for initialisation"
+
 
 if __name__ == "__main__":
 

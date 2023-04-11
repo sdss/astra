@@ -12,7 +12,7 @@ def task(
     function, 
     frequency=300,
     batch_size=1000,
-    re_raise_exceptions=False,
+    re_raise_exceptions=True, # TODO: figure out how tomake this logic false for SLURM jobs, or AIRFLOW tasks, but true for interactive sessions
     use_slurm=False,
     slurm_kwargs=None,
     slurm_default_profile=None,

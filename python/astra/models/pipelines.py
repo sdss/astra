@@ -178,94 +178,106 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
 
 class FerreCoarse(BaseModel, PipelineOutputMixin):
     
+    id = AutoField(primary_key=True)
     source = ForeignKeyField(Source, index=True)
     spectrum_id = ForeignKeyField(UniqueSpectrum, index=True, lazy_load=False)
 
-    pwd = TextField()
-    grid_name = TextField()
+    pwd = TextField(default="")
+    short_grid_name = TextField(default="")
+    header_path = TextField(default="")
     
-    initial_teff = FloatField()
-    initial_logg = FloatField()
-    initial_m_h = FloatField()
-    initial_v_sini = FloatField()
-    initial_v_micro = FloatField()
-    initial_alpha_m = FloatField()
-    initial_c_m = FloatField()
-    initial_n_m = FloatField()
+    initial_teff = FloatField(default=np.nan)
+    initial_logg = FloatField(default=np.nan)
+    initial_m_h = FloatField(default=np.nan)
+    initial_log10_v_sini = FloatField(default=np.nan)
+    initial_log10_v_micro = FloatField(default=np.nan)
+    initial_alpha_m = FloatField(default=np.nan)
+    initial_c_m = FloatField(default=np.nan)
+    initial_n_m = FloatField(default=np.nan)
 
-    initial_flags = BitField()
+    initial_flags = BitField(default=0)
     flag_initial_guess_from_apogeenet = initial_flags.flag(1)
     flag_initial_guess_from_doppler = initial_flags.flag(2)
     flag_initial_guess_from_user = initial_flags.flag(4)
     flag_initial_guess_from_gaia_xp_andrae23 = initial_flags.flag(8)
 
-    frozen_flags = BitField()
+    frozen_flags = BitField(default=0)
     flag_teff_frozen = frozen_flags.flag(1)
     flag_logg_frozen = frozen_flags.flag(2)
     flag_m_h_frozen = frozen_flags.flag(4)
-    flag_v_sini_frozen = frozen_flags.flag(8)
-    flag_v_micro_frozen = frozen_flags.flag(16)
+    flag_log10_v_sini_frozen = frozen_flags.flag(8)
+    flag_log10_v_micro_frozen = frozen_flags.flag(16)
     flag_alpha_m_frozen = frozen_flags.flag(32)
     flag_c_m_frozen = frozen_flags.flag(64)
     flag_n_m_frozen = frozen_flags.flag(128)
 
-
-    interpolation_order = IntegerField()
-    weight_path = TextField()
-
-    #continuum_flag
-    #continuum_order
-    #continuum_segment
-    #continuum_reject
-    #continuum_observations_flag
+    continuum_order = IntegerField(default=-1)
+    continuum_reject = FloatField(default=np.nan)
+    interpolation_order = IntegerField(default=-1)
+    weight_path = TextField(default="")
 
     # Now the outputs
-    teff = FloatField()
-    logg = FloatField()
-    m_h = FloatField()
-    v_sini = FloatField()
-    v_micro = FloatField()
-    alpha_m = FloatField()
-    c_m = FloatField()
-    n_m = FloatField()
+    teff = FloatField(default=np.nan)
+    logg = FloatField(default=np.nan)
+    m_h = FloatField(default=np.nan)
+    log10_v_sini = FloatField(default=np.nan)
+    log10_v_micro = FloatField(default=np.nan)
+    alpha_m = FloatField(default=np.nan)
+    c_m = FloatField(default=np.nan)
+    n_m = FloatField(default=np.nan)
 
-    e_teff = FloatField()
-    e_logg = FloatField()
-    e_m_h = FloatField()
-    e_v_sini = FloatField()
-    e_v_micro = FloatField()
-    e_alpha_m = FloatField()
-    e_c_m = FloatField()
-    e_n_m = FloatField()
+    e_teff = FloatField(default=np.nan)
+    e_logg = FloatField(default=np.nan)
+    e_m_h = FloatField(default=np.nan)
+    e_log10_v_sini = FloatField(default=np.nan)
+    e_log10_v_micro = FloatField(default=np.nan)
+    e_alpha_m = FloatField(default=np.nan)
+    e_c_m = FloatField(default=np.nan)
+    e_n_m = FloatField(default=np.nan)
 
-    teff_flags = BitField()
-    logg_flags = BitField()
-    m_h_flags = BitField()
-    v_sini_flags = BitField()
-    v_micro_flags = BitField()
-    alpha_m_flags = BitField()
-    c_m_flags = BitField()
-    n_m_flags = BitField()
+    teff_flags = BitField(default=0)
+    logg_flags = BitField(default=0)
+    m_h_flags = BitField(default=0)
+    log10_v_sini_flags = BitField(default=0)
+    log10_v_micro_flags = BitField(default=0)
+    alpha_m_flags = BitField(default=0)
+    c_m_flags = BitField(default=0)
+    n_m_flags = BitField(default=0)
+
+    # TODO: flag grid edge bad/warn
+    flag_teff_ferre_fail = teff_flags.flag(1)
+    flag_teff_grid_edge_bad = teff_flags.flag(2)
+    flag_teff_grid_edge_warn = teff_flags.flag(4)
+
+
+    chisq = FloatField(default=np.nan)
+    ferre_log_snr_sq = FloatField(default=np.nan)
+    ferre_log_chisq = FloatField(default=np.nan)
+    ferre_frac_phot_data_points = FloatField(default=0)
+    ferre_log_penalized_chisq = FloatField(default=np.nan)
     
-    chisq = FloatField()
-    ferre_chisq = FloatField()
-    ferre_penalized_chisq = FloatField()
-    
-    f_access = IntegerField()
-    f_format = IntegerField()
-    n_threads = IntegerField()
+    f_access = IntegerField(default=-1)
+    f_format = IntegerField(default=-1)
+    n_threads = IntegerField(default=-1)
 
-    ferre_n_obj = IntegerField()
-    ferre_load_grid_time = FloatField()
-    ferre_time_elapsed = FloatField()
-    ferre_flags = BitField()
-    flag_ferre_timeout = ferre_flags.flag(1)
+    ferre_name = TextField(default="")
+    ferre_index = IntegerField(default=-1)
+    ferre_n_obj = IntegerField(default=-1)
+    ferre_time_load_grid = FloatField(default=np.nan)
+    ferre_time_elapsed = FloatField(default=np.nan)
 
+    ferre_flags = BitField(default=0)
+    flag_ferre_fail = ferre_flags.flag(1)
+    flag_missing_model_flux = ferre_flags.flag(2)
+    flag_potential_ferre_timeout = ferre_flags.flag(4)
+    flag_no_suitable_initial_guess = ferre_flags.flag(8)
+
+    '''
     class Meta:
         indexes = (
             (
                 (
-                    "grid_name", 
+                    "short_grid_name", 
                     "spectrum_id", 
                     "initial_teff",
                     "initial_logg",
@@ -274,6 +286,196 @@ class FerreCoarse(BaseModel, PipelineOutputMixin):
                 True
             ),
         )
+    '''
+
+
+
+
+    # TODO: A helper function until I have implemented the PixelAccessor classes for FERRE outputs
+    def _get_pixel_array_from_file_with_name(self, basename, P=7514):
+        path = expand_path(f"{self.pwd}/{basename}")
+        names = np.loadtxt(path, usecols=(0, ), dtype=str)
+        index = np.where(names == self.ferre_name)[0][0]
+        skiprows = index if index > 0 else 0
+        assert np.atleast_1d(np.loadtxt(path, usecols=(0, ), dtype=str, skiprows=skiprows, max_rows=1))[0] == self.ferre_name
+        return np.loadtxt(
+            path, 
+            usecols=range(1, 1 + P), 
+            dtype=float, 
+            skiprows=skiprows,
+            max_rows=1
+        )
+        
+    def _get_input_pixel_array(self, basename):
+        path = expand_path(f"{self.pwd}/{basename}")
+        return np.loadtxt(path, dtype=float, skiprows=self.ferre_index, max_rows=1)
+
+
+
+def make_plot(item, mode="reflect"):
+    from scipy.ndimage.filters import median_filter
+    import matplotlib.pyplot as plt
+    fig, axes = plt.subplots(2, 1, figsize=(15, 4), sharex=True)
+
+    # the model flux is the best-fitting model flux that has been rectified by FERRE.
+    ferre_flux = item._get_input_pixel_array("flux.input")
+    model_flux = item._get_pixel_array_from_file_with_name("model_flux.output")
+
+    # the rectified flux is that rectification, applied to the observed flux
+    rectified_flux = item._get_pixel_array_from_file_with_name("rectified_flux.output")
+
+    continuum_applied_by_ferre = ferre_flux / rectified_flux
+
+    median_filtered = median_filter(rectified_flux / model_flux, [151], mode=mode, cval=0.0)
+
+    axes[0].plot(rectified_flux, c='k')
+    axes[0].plot(model_flux, c='tab:red')
+    axes[0].plot(median_filtered, c="tab:blue")
+
+    axes[1].plot(rectified_flux * continuum_applied_by_ferre, c='k')
+    axes[1].plot(model_flux * continuum_applied_by_ferre, c="tab:red")
+    axes[1].plot(ferre_flux / median_filtered, c="tab:blue")
+    #ax.plot(median_filtered, c="tab:orange")
+    #ax.plot(continuum_applied_by_ferre, c="tab:orange")
+    fig.savefig("tmp.png", dpi=600)
+    return fig, axes[0]
+
+
+
+
+class FerreStellarParameters(BaseModel, PipelineOutputMixin):
+    
+    #: Identifiers
+    id = AutoField(primary_key=True)
+    source = ForeignKeyField(Source, index=True)
+    spectrum_id = ForeignKeyField(UniqueSpectrum, index=True, lazy_load=False)
+    coarse = ForeignKeyField(
+        FerreCoarse,
+        index=True,
+        help_text=Glossary.coarse_id
+    )
+
+    pwd = TextField(default="")
+    short_grid_name = TextField(default="")
+    header_path = TextField(default="")
+
+    initial_teff = FloatField(default=np.nan)
+    initial_logg = FloatField(default=np.nan)
+    initial_m_h = FloatField(default=np.nan)
+    initial_log10_v_sini = FloatField(default=np.nan)
+    initial_log10_v_micro = FloatField(default=np.nan)
+    initial_alpha_m = FloatField(default=np.nan)
+    initial_c_m = FloatField(default=np.nan)
+    initial_n_m = FloatField(default=np.nan)
+    initial_flags = BitField(default=0)
+    flag_initial_guess_from_apogeenet = initial_flags.flag(1)
+    flag_initial_guess_from_doppler = initial_flags.flag(2)
+    flag_initial_guess_from_user = initial_flags.flag(4)
+    flag_initial_guess_from_gaia_xp_andrae23 = initial_flags.flag(8)
+
+    frozen_flags = BitField(default=0)
+    flag_teff_frozen = frozen_flags.flag(1)
+    flag_logg_frozen = frozen_flags.flag(2)
+    flag_m_h_frozen = frozen_flags.flag(4)
+    flag_log10_v_sini_frozen = frozen_flags.flag(8)
+    flag_log10_v_micro_frozen = frozen_flags.flag(16)
+    flag_alpha_m_frozen = frozen_flags.flag(32)
+    flag_c_m_frozen = frozen_flags.flag(64)
+    flag_n_m_frozen = frozen_flags.flag(128)
+
+    continuum_order = IntegerField(default=-1)
+    continuum_reject = FloatField(default=np.nan)
+    interpolation_order = IntegerField(default=-1)
+    weight_path = TextField(default="")
+
+    # Now the outputs
+    teff = FloatField(default=np.nan)
+    logg = FloatField(default=np.nan)
+    m_h = FloatField(default=np.nan)
+    log10_v_sini = FloatField(default=np.nan)
+    log10_v_micro = FloatField(default=np.nan)
+    alpha_m = FloatField(default=np.nan)
+    c_m = FloatField(default=np.nan)
+    n_m = FloatField(default=np.nan)
+
+    e_teff = FloatField(default=np.nan)
+    e_logg = FloatField(default=np.nan)
+    e_m_h = FloatField(default=np.nan)
+    e_log10_v_sini = FloatField(default=np.nan)
+    e_log10_v_micro = FloatField(default=np.nan)
+    e_alpha_m = FloatField(default=np.nan)
+    e_c_m = FloatField(default=np.nan)
+    e_n_m = FloatField(default=np.nan)
+
+    teff_flags = BitField(default=0)
+    logg_flags = BitField(default=0)
+    m_h_flags = BitField(default=0)
+    log10_v_sini_flags = BitField(default=0)
+    log10_v_micro_flags = BitField(default=0)
+    alpha_m_flags = BitField(default=0)
+    c_m_flags = BitField(default=0)
+    n_m_flags = BitField(default=0)
+
+    # TODO: flag grid edge bad/warn
+    flag_teff_ferre_fail = teff_flags.flag(1)
+    flag_teff_grid_edge_bad = teff_flags.flag(2)
+    flag_teff_grid_edge_warn = teff_flags.flag(4)
+
+
+    chisq = FloatField(default=np.nan)
+    ferre_log_snr_sq = FloatField(default=np.nan)
+    ferre_log_chisq = FloatField(default=np.nan)
+    ferre_frac_phot_data_points = FloatField(default=0)
+    ferre_log_penalized_chisq = FloatField(default=np.nan)
+    
+    f_access = IntegerField(default=-1)
+    f_format = IntegerField(default=-1)
+    n_threads = IntegerField(default=-1)
+
+    ferre_n_obj = IntegerField(default=-1)
+    ferre_time_load_grid = FloatField(default=np.nan)
+    ferre_time_elapsed = FloatField(default=np.nan)
+
+    ferre_name = TextField(default="")
+    ferre_flags = BitField(default=0)
+    flag_ferre_fail = ferre_flags.flag(1)
+    flag_missing_model_flux = ferre_flags.flag(2)
+    flag_potential_ferre_timeout = ferre_flags.flag(4)
+    flag_no_suitable_initial_guess = ferre_flags.flag(8)
+
+    '''
+    class Meta:
+        indexes = (
+            (
+                (
+                    "short_grid_name", 
+                    "spectrum_id", 
+                    "initial_teff",
+                    "initial_logg",
+                    "initial_m_h",
+                ), 
+                True
+            ),
+        )
+    '''
+
+    # TODO: A helper function until I have implemented the PixelAccessor classes for FERRE outputs
+    def _get_pixel_array_from_file_with_name(self, basename, P=7514):
+        path = expand_path(f"{self.pwd}/{basename}")
+        names = np.loadtxt(path, usecols=(0, ), dtype=str)
+        index = np.where(names == self.ferre_name)[0][0]
+        skiprows = index - 1 if index > 0 else 0
+        return np.loadtxt(
+            path, 
+            usecols=range(1, 1 + P), 
+            dtype=float, 
+            skiprows=skiprows,
+            max_rows=1
+        )
+        
+    
+
+
 
 
 
@@ -309,7 +511,7 @@ class FerreStellarParameters(BaseModel):
     spectrum = ForeignKeyField(Spectrum, index=True, lazy_load=False)
 
     pwd = TextField()
-    grid_name = TextField()
+    short_grid_name = TextField()
     
 
     initial_guess_source? = ForeignKeyField(FerreCoarse)
@@ -337,7 +539,7 @@ class FerreAbundances(BaseModel):
     spectrum = ForeignKeyField(Spectrum, index=True, lazy_load=False)
 
     pwd = TextField()
-    grid_name = TextField()
+    short_grid_name = TextField()
 
     element
 

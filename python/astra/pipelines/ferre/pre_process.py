@@ -10,7 +10,7 @@ from astra.utils import log, dict_to_list, expand_path
 
 # FERRE v4.8.8 src trunk : /uufs/chpc.utah.edu/common/home/sdss09/software/apogee/Linux/apogee/trunk/external/ferre/src
 
-def prepare_ferre(
+def pre_process_ferre(
     pwd: str,
     header_path: str,
     spectra: Iterable[Spectrum],
@@ -153,8 +153,8 @@ def prepare_ferre(
         batch_flux.append(flux[mask])
         batch_e_flux.append(e_flux[mask])
 
-        initial_flag = initial_parameters.pop("initial_flags")
-        batch_names.append(f"{i}_{spectrum.spectrum_id}_{initial_flag}")
+        initial_flags = initial_parameters.pop("initial_flags")
+        batch_names.append(utils.get_ferre_spectrum_name(i, spectrum.source_id, spectrum.spectrum_id, initial_flags))
         batch_initial_parameters.append(initial_parameters)
     
 
@@ -254,6 +254,3 @@ def _get_ferre_chip_mask(observed_wavelength, chip_wavelengths):
         e_index = s_index + model_wavelength.size
         mask[s_index:e_index] = True
     return mask                    
-
-
-
