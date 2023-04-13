@@ -2,10 +2,16 @@ import os
 from sdsstools.logger import get_logger
 from time import time
 
+
 logger_kwds = {}
 #if "logging" in config and "level" in config["logging"]:
 #    logger_kwds.update(log_level=config["logging"]["level"])
 log = get_logger("astra", **logger_kwds)
+
+
+def get_config_paths():
+    from sdsstools.configuration import DEFAULT_PATHS
+    return [f"{default_path.format(name='astra')}.yml" for default_path in DEFAULT_PATHS]
 
 
 class Timer(object):
@@ -66,13 +72,26 @@ class Timer(object):
 
     
 def expand_path(path):
+    """
+    Expand a given path to its full path, including environment variables and user home directory.
+    
+    :param path:
+        A short-hand path to expand.
+    """
     return os.path.expandvars(os.path.expanduser(path))
 
+
 def dict_to_list(DL):
+    """
+    Convert a dictionary with lists as values to a list of dictionaries.
+    """
     return [dict(zip(DL, t)) for t in zip(*DL.values())]
 
 
 def list_to_dict(LD):
+    """
+    Convert a list of dictionaries to a dictionary with lists as values.
+    """
     return {k: [dic[k] for dic in LD] for k in LD[0]}
 
 

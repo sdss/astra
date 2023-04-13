@@ -1,20 +1,5 @@
-import os
-import numpy as np
-
 from peewee import (
-    AutoField,
-    FloatField,
-    BooleanField,
-    DateTimeField,
-    BigIntegerField,
-    IntegerField,
-    TextField,
-    Model,
-    ForeignKeyField,
-    Node,
-    Field,
     BitField as _BitField,
-    BigBitField,
     VirtualField,
     ColumnBase
 )
@@ -138,7 +123,6 @@ class PixelArrayAccessorHDF(BasePixelArrayAccessor):
                 return instance.__pixel_data__[self.name]
 
         return self.field
-    
     
 
 

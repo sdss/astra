@@ -5,7 +5,8 @@ from sdsstools.configuration import get_config
 
 from astra.utils import log, Timer
 
-NAME, __version__ = ("astra", "0.4.0")
+NAME = "astra"
+__version__ = "0.4.0"
 
 @decorator
 def task(
@@ -97,7 +98,6 @@ def _bulk_create_results(results, batch_size):
         log.info(f"Saved {len(results)} results to database.")
                 
     return None
-
 
 try:
     config = get_config(NAME)

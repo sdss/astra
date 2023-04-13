@@ -1,47 +1,50 @@
-
-from typing import NamedTuple
-
-SPECIAL_CONTEXTS = {
-    "e_": "Error on",
-    "flag_": "Flag for",
-    "initial_": "Initial",
-}
+SPECIAL_CONTEXTS = (
+    ("e_", True, "Error on"),
+    ("_flags", False, "Flags for"),
+    ("initial_", True, "Initial"),
+)
 
 
 class GlossaryType(type):
     
     def __getattribute__(self, name):
-        if name.startswith("__"):
+        if __name__.startswith("__") or name == "context":
             return object.__getattribute__(self, name)
-            
         try:
             value = object.__getattribute__(self, name)
         except AttributeError:
-            name_lower = f"{name}".lower()
-            for prefix, context in SPECIAL_CONTEXTS.items():
-                if name_lower.startswith(prefix):
-                    value = object.__getattribute__(self, name_lower[len(prefix):])
-                    return " ".join([context.rstrip(), f"{value[0].lower()}{value[1:]}"])
-            raise AttributeError(f"Glossary has no attribte '{name}'")        
-        else:
-            if name == "context":
-                return value
-            else:
-                print(f"Here {name} {value}")
-                if hasattr(self, "context"):
-                    value = f"{self.context} {value[0].lower()}{value[1:]}"
-                return value
-
-class BaseGlossary(NamedTuple):
-
-    context: str = ""
+            value = resolve_special_contexts(self, name)
+        return warn_on_long_description(value)
 
 
+class BaseGlossary(object, metaclass=GlossaryType):
 
+    def __init__(self, context=None, *args):
+        self.context = context or ""
+        return None
+    
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+    
+    def __getattribute__(self, name: str):
+        if name.startswith("__") or name == "context":
+            return object.__getattribute__(self, name)    
+        value = object.__getattribute__(self, name)
+        description = f"{self.context} {lower_first_letter(value)}"
+        return warn_on_long_description(description)
+        
+    def __getattr__(self, name):
+        value = resolve_special_contexts(self, name)
+        description = f"{self.context} {lower_first_letter(value)}"
+        return warn_on_long_description(description)
+    
 
 class Glossary(BaseGlossary):
 
-    #: Identifiers
+    # Identifiers
     source_id = "Unique identifier for a source."
     healpix = "Healpix location (128 sides)"
     gaia_dr3_source_id = "Gaia (DR3) source identifier"
@@ -49,7 +52,7 @@ class Glossary(BaseGlossary):
     sdss4_dr17_apogee_id = "SDSS4 DR17 APOGEE identifier (not unique)"
     sdss4_dr17_field = "SDSS4 DR17 APOGEE field (not unique)"
     
-    #: Astrometry
+    # Astrometry
     ra = "SDSS-V catalog right ascension (J2000) [deg]"
     dec = "SDSS-V catalog declination (J2000) [deg]"
     plx = "Parallax [mas] (Gaia DR3)"
@@ -61,7 +64,7 @@ class Glossary(BaseGlossary):
     gaia_v_rad = "Radial velocity [km/s] (Gaia DR3)"
     gaia_e_v_rad = "Error on radial velocity [km/s] (Gaia DR3)"
 
-    #: Photometry
+    # Photometry
     g_mag = "Gaia (DR3) mean apparent G [mag]"
     bp_mag = "Gaia (DR3) mean apparent BP [mag]"
     rp_mag = "Gaia (DR3) mean apparent RP [mag]"
@@ -72,11 +75,23 @@ class Glossary(BaseGlossary):
     k_mag = "2MASS mean apparent K magnitude [mag]"
     e_k_mag = "Error on 2MASS mean apparent K magnitude [mag]"
 
-    #: Targeting
+    # Targeting
+    carton = "Carton name"
+    carton_id = "Simplified carton identifier, NOT the same as `targetdb.carton.pk`"
     carton_0 = "First carton for source (see documentation)"
     carton_flags = "Carton bit field."
 
-    #: Spectrum information
+    sdss4_apogee_target1_flags = "SDSS4 APOGEE1 targeting bitfield (1 of 2)"
+    sdss4_apogee_target2_flags = "SDSS4 APOGEE1 targeting bitfield (2 of 2)"
+    sdss4_apogee2_target1_flags = "SDSS4 APOGEE2 targeting bitfield (1 of 3)"
+    sdss4_apogee2_target2_flags = "SDSS4 APOGEE2 targeting bitfield (2 of 3)"
+    sdss4_apogee2_target3_flags = "SDSS4 APOGEE2 targeting bitfield (3 of 3)"
+
+    sdss4_apogee_member_flags = "SDSS4 flags to identify likely members of clusters/dwarf galaxies"
+    sdss4_extra_target_flags = "SDSS4 basic targeting information (formerly EXTRATARG)"
+
+
+    # Spectrum information
     spectrum_id = "Unique identifier for a spectrum."
     snr = "Signal-to-noise ratio"
 
@@ -89,6 +104,14 @@ class Glossary(BaseGlossary):
     fieldid = "Field identifier."
     catalogid = "Catalog identifier used to target the source."
 
+    # Pixel arrays
+    wavelength = "Wavelength in a vacuum [Angstrom]"
+    flux = "Flux [10^-17 erg/s/cm^2/Angstrom]"
+    ivar = "Inverse variance of flux [1/(10^-17 erg/s/cm^2/Angstrom)^2]"
+    pixel_flags = "Pixel-level bitfield flags (see documentation)."
+
+
+    spectrum_flags = "Data reduction pipeline flags for this spectrum."
 
 
 
@@ -96,7 +119,7 @@ class Glossary(BaseGlossary):
     alt = "Telescope altitude [deg]"
     az = "Telescope azimuth [deg]"
     exptime = "Total exposure time [s]"
-    nexp = "Number of exposures taken"
+    n_exp = "Number of exposures taken"
     airmass = "Mean airmass"
     airtemp = "Air temperature [C]"
     dewpoint = "Dew point temperature [C]"
@@ -105,13 +128,13 @@ class Glossary(BaseGlossary):
     moon_phase_mean = "Mean phase of the moon"
     moon_dist_mean = "Mean sky distance to the moon [deg]"
     seeing = "Median seeing conditions [arcsecond]"
-    gustd = "Wind gust direction [deg]"
-    gusts = "Wind gust speed [km/s]"
-    windd = "Wind direction [deg]"
-    winds = "Wind speed [km/s]"
+    gust_direction = "Wind gust direction [deg]"
+    gust_speed = "Wind gust speed [km/s]"
+    wind_direction = "Wind direction [deg]"
+    wind_speed = "Wind speed [km/s]"
     tai_beg = "MJD (TAI) at start of integrations [s]"
     tai_end = "MJD (TAI) at end of integrations [s]"
-    nguide = "Number of guider frames during integration"
+    n_guide = "Number of guider frames during integration"
     v_helio = "Heliocentric velocity correction [km/s]"
     v_shift = "Relative velocity shift used in stack [km/s]"
     in_stack = "Was this spectrum used in the stack?"
@@ -178,24 +201,18 @@ class Glossary(BaseGlossary):
     apvisit_pk = "Primary key of `apogee_drp.visit` database table"
 
 
-    initial_teff = "Initial stellar effective temperature [K]"
-    initial_logg = "Initial stellar surface gravity [dex]"
-    initial_fe_h = "Initial stellar metallicity [dex]"
+    rxc = "Cross-correlation R-value (1979AJ.....84.1511T)"
+
+
     teff = "Stellar effective temperature [K]"
     logg = "Surface gravity [log10(cm/s^2)]"
     fe_h = "Metallicity [dex]"
     metals = "Metallicity [dex]"
-    e_metals = "Error in metallicity [dex]"
     o_mg_si_s_ca_ti = "[alpha/Fe] abundance ratio [dex]"
-    e_o_mg_si_s_ca_ti = "Error in [alpha/Fe] abundance ratio [dex]"
     log10vdop = "Log10 of the doppler broadening [km/s]"
-    e_log10vdop = "Error in the log10 doppler broadening [km/s]"
     lgvsini = "Log of the projected rotational velocity [km/s]"
-    e_lgvsini = "Error in the log projected rotational velocity [km/s]"
     c_h_photosphere = "Photosphere carbon abundance [dex]"
-    e_c_h_photosphere = "Error on photosphere carbon abundance [dex]"
     n_h_photosphere = "Photosphere nitrogen abundance [dex]"
-    e_n_photosphere = "Error on photosphere nitrogen abundance [dex]"
 
     v_astra = "Version of Astra"
     component = "Spectrum component"
@@ -204,6 +221,23 @@ class Glossary(BaseGlossary):
     coarse_id = "Database id of the coarse execution used for initialisation"
 
 
-if __name__ == "__main__":
 
-    Glossary.e_plx
+
+
+def lower_first_letter(s):
+    return f"{s[0].lower()}{s[1:]}"
+
+def resolve_special_contexts(obj, name):
+    name_lower = f"{name}".lower()
+    for identifier, is_prefix, sub_context in SPECIAL_CONTEXTS:
+        if is_prefix and name_lower.startswith(identifier):
+            value = object.__getattribute__(obj, name_lower[len(identifier):])
+            return f"{sub_context} {lower_first_letter(value)}"
+        if not is_prefix and name_lower.endswith(identifier):
+            value = object.__getattribute__(obj, name_lower[:-len(identifier)])
+            return f"{sub_context} {lower_first_letter(value)}"        
+    raise AttributeError(f"Glossary has no attribute '{name}'")
+
+
+def warn_on_long_description(text, max_length=80):
+    return text
