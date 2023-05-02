@@ -17,21 +17,25 @@ from astra.models.glossary import Glossary
 class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
 
     """An APOGEE visit spectrum."""
-
-    source = ForeignKeyField(
+    
+    # Won't appear in a header group because it is first referenced in `Source`.
+    sdss_id = ForeignKeyField(
         Source, 
         index=True, 
         backref="apogee_visit_spectra",
-        help_text=Glossary.source_id
+        help_text=Glossary.sdss_id
     )
+
+    #> Spectrum Identifier
     spectrum_id = ForeignKeyField(
         UniqueSpectrum, 
         index=True, 
+        primary_key=True,
         lazy_load=False,
         help_text=Glossary.spectrum_id
     )
 
-    # Data Product Keywords
+    #> Data Product Keywords
     release = TextField(help_text=Glossary.release)
     apred = TextField(help_text=Glossary.apred)
     mjd = IntegerField(help_text=Glossary.mjd)
@@ -63,26 +67,27 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         help_text=Glossary.pixel_flags
     )
     
-    # Identifiers
+    #> APOGEE Identifiers
     apvisit_pk = BigIntegerField(help_text=Glossary.apvisit_pk, null=True)
     sdss4_dr17_apogee_id = TextField(help_text=Glossary.sdss4_dr17_apogee_id, null=True)
 
-    # Observing meta.
+    #> Observing Conditions
     date_obs = DateTimeField(help_text=Glossary.date_obs)
     jd = FloatField(help_text=Glossary.jd)
     exptime = FloatField(help_text=Glossary.exptime)
     dithered = BooleanField(help_text=Glossary.dithered)
-    # The following are null-able because they do not exist in DR17.
+
+    #> Telescope Pointing
     n_frames = IntegerField(help_text=Glossary.n_frames, null=True)
     assigned = IntegerField(help_text=Glossary.assigned, null=True)    
     on_target = IntegerField(help_text=Glossary.on_target, null=True)
     valid = IntegerField(help_text=Glossary.valid, null=True)
 
-    #: Statistics 
+    #> Statistics and Spectrum Quality 
     snr = FloatField(help_text=Glossary.snr)
+    spectrum_flags = BitField(help_text=Glossary.spectrum_flags)
 
     # From https://github.com/sdss/apogee_drp/blob/630d3d45ecff840d49cf75ac2e8a31e22b543838/python/apogee_drp/utils/bitmask.py#L110
-    spectrum_flags = BitField(help_text=Glossary.spectrum_flags)
     bad_pixels_flag = spectrum_flags.flag(1, help_text="Spectrum has many bad pixels (>20%).")
     commissioning_flag = spectrum_flags.flag(2, help_text="Commissioning data (MJD <55761); non-standard configuration; poor LSF.")
     bright_neighbor_flag = spectrum_flags.flag(4, help_text="Star has neighbor more than 10 times brighter.")

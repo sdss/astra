@@ -44,15 +44,16 @@ class BaseGlossary(object, metaclass=GlossaryType):
 
 class Glossary(BaseGlossary):
 
-    # Identifiers
-    source_id = "Unique identifier for a source."
+    #> Identifiers
+    source_id = "DEPRECATED REMOVE ME"
+    sdss_id = "SDSS unique source identifier"
     healpix = "Healpix location (128 sides)"
     gaia_dr3_source_id = "Gaia (DR3) source identifier"
     tic_v8_id = "TESS Input Catalog (v8) identifier"
     sdss4_dr17_apogee_id = "SDSS4 DR17 APOGEE identifier (not unique)"
     sdss4_dr17_field = "SDSS4 DR17 APOGEE field (not unique)"
     
-    # Astrometry
+    #> Astrometry
     ra = "SDSS-V catalog right ascension (J2000) [deg]"
     dec = "SDSS-V catalog declination (J2000) [deg]"
     plx = "Parallax [mas] (Gaia DR3)"
@@ -81,15 +82,17 @@ class Glossary(BaseGlossary):
     carton_0 = "First carton for source (see documentation)"
     carton_flags = "Carton bit field."
 
-    sdss4_apogee_target1_flags = "SDSS4 APOGEE1 targeting bitfield (1 of 2)"
-    sdss4_apogee_target2_flags = "SDSS4 APOGEE1 targeting bitfield (2 of 2)"
-    sdss4_apogee2_target1_flags = "SDSS4 APOGEE2 targeting bitfield (1 of 3)"
-    sdss4_apogee2_target2_flags = "SDSS4 APOGEE2 targeting bitfield (2 of 3)"
-    sdss4_apogee2_target3_flags = "SDSS4 APOGEE2 targeting bitfield (3 of 3)"
+    sdss4_apogee_target1_flags = "SDSS4 APOGEE1 targeting flags (1/2)"
+    sdss4_apogee_target2_flags = "SDSS4 APOGEE1 targeting flags (2/2)"
+    sdss4_apogee2_target1_flags = "SDSS4 APOGEE2 targeting flags (1/3)"
+    sdss4_apogee2_target2_flags = "SDSS4 APOGEE2 targeting flags (2/3)"
+    sdss4_apogee2_target3_flags = "SDSS4 APOGEE2 targeting flags (3/3)"
 
-    sdss4_apogee_member_flags = "SDSS4 flags to identify likely members of clusters/dwarf galaxies"
-    sdss4_extra_target_flags = "SDSS4 basic targeting information (formerly EXTRATARG)"
+    sdss4_apogee_member_flags = "SDSS4 likely cluster/galaxy member flags"
+    sdss4_apogee_extra_target_flags = "SDSS4 target info (aka EXTRATARG)"
 
+    t_elapsed = "Core-time elapsed on this analysis [s]"
+    tag = "Experiment tag for this result (see documentation)"
 
     # Spectrum information
     spectrum_id = "Unique identifier for a spectrum."
@@ -113,6 +116,10 @@ class Glossary(BaseGlossary):
 
     spectrum_flags = "Data reduction pipeline flags for this spectrum."
 
+    # ApogeeNet
+    teff_sample_median = "Median effective temperature from random draws"
+    logg_sample_median = "Median surface gravity from random draws"
+    fe_h_sample_median = "Median metallicity from random draws"
 
 
     # BOSS data reduction pipeline keywords

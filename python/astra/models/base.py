@@ -5,6 +5,7 @@ from peewee import (
     fn,
     AutoField,
     FloatField,
+    Field,
     DateTimeField,
     BigIntegerField,
     SmallIntegerField,
@@ -14,6 +15,8 @@ from peewee import (
     BigBitField,
     PostgresqlDatabase
 )
+import re
+from inspect import getsource
 from playhouse.hybrid import hybrid_method
 from playhouse.sqlite_ext import SqliteExtDatabase
 
@@ -120,25 +123,53 @@ def get_database_and_schema(config):
 database, schema = get_database_and_schema(config)
 
 class BaseModel(Model):
+    
     class Meta:
         database = database
         schema = schema
         legacy_table_names = False
+
+    @classmethod
+    @property
+    def field_category_headers(cls):
+        """
+        Return a tuple of category headers for the data model fields based on the source code.
+        Category headers are defined in the source code like this:
+
+        ```python
+        #> Category header
+        teff = FloatField(...)
+
+        #> New category header
+        """
+
+        pattern = '\s{4}#>\s*(.+)\n\s{4}([\w|\d|_]+)\s*='
+        source_code = getsource(cls)
+        category_headers = []
+        for header, field_name in re.findall(pattern, source_code):
+            if hasattr(cls, field_name) and isinstance(getattr(cls, field_name), Field):
+                category_headers.append((header, field_name))
+            else:
+                log.warning(
+                    f"Found category header '{header}', starting above '{field_name}' in {cls}, "
+                    f"but {cls}.{field_name} is not an attribute of type `peewee.Field`."
+                )
+        return tuple(category_headers)
 
 
 class Source(BaseModel):
 
     """ An astronomical source. """
 
-    # Identifiers
-    id = AutoField(help_text=Glossary.source_id)
+    #> Identifiers
+    sdss_id = AutoField(help_text=Glossary.sdss_id)
     healpix = IntegerField(help_text=Glossary.healpix, null=True)
     gaia_dr3_source_id = BigIntegerField(help_text=Glossary.gaia_dr3_source_id, null=True)
     tic_v8_id = BigIntegerField(help_text=Glossary.tic_v8_id, null=True)
     sdss4_dr17_apogee_id = TextField(help_text=Glossary.sdss4_dr17_apogee_id, null=True)
     sdss4_dr17_field = TextField(help_text=Glossary.sdss4_dr17_field, null=True)
 
-    # Astrometry
+    #> Astrometry
     ra = FloatField(help_text=Glossary.ra)
     dec = FloatField(help_text=Glossary.dec)
     plx = FloatField(help_text=Glossary.plx, null=True, verbose_name="parallax")
@@ -150,7 +181,7 @@ class Source(BaseModel):
     gaia_v_rad = FloatField(help_text=Glossary.gaia_v_rad, null=True)
     gaia_e_v_rad = FloatField(help_text=Glossary.gaia_e_v_rad, null=True)
 
-    # Photometry
+    #> Photometry
     g_mag = FloatField(help_text=Glossary.g_mag, null=True)
     bp_mag = FloatField(help_text=Glossary.bp_mag, null=True)
     rp_mag = FloatField(help_text=Glossary.rp_mag, null=True)
@@ -163,9 +194,12 @@ class Source(BaseModel):
 
     # TODO: Add requisite WISE photometry columns from Sayjederi
 
-    # Targeting
+    #> Targeting
     carton_0 = TextField(help_text=Glossary.carton_0, default="")
-    carton_flags = BigBitField(help_text=Glossary.carton_flags, null=True)
+
+    # Only do carton_flags if we have a postgresql database.
+    if isinstance(database, PostgresqlDatabase):
+        carton_flags = BigBitField(help_text=Glossary.carton_flags, null=True)
 
     sdss4_apogee_target1_flags = BitField(default=0, help_text=Glossary.sdss4_apogee_target1_flags)
     sdss4_apogee_target2_flags = BitField(default=0, help_text=Glossary.sdss4_apogee_target2_flags)
@@ -173,7 +207,7 @@ class Source(BaseModel):
     sdss4_apogee2_target2_flags = BitField(default=0, help_text=Glossary.sdss4_apogee2_target2_flags)
     sdss4_apogee2_target3_flags = BitField(default=0, help_text=Glossary.sdss4_apogee2_target3_flags)
     sdss4_apogee_member_flags = BitField(default=0, help_text=Glossary.sdss4_apogee_member_flags)
-    sdss4_apogee_extra_target_flags = BitField(default=0, help_text=Glossary.sdss4_extra_target_flags)
+    sdss4_apogee_extra_target_flags = BitField(default=0, help_text=Glossary.sdss4_apogee_extra_target_flags)
 
     # Define flags for all bit fields
     # TODO: Should we only bind these flags when asked? Do a speed time comparison of Source() and `import Source` with and without them.
@@ -467,9 +501,8 @@ class UniqueSpectrum(BaseModel):
 
     """ A one dimensional spectrum. """
 
-    id = AutoField(help_text=Glossary.spectrum_id)
-
-
+    spectrum_id = AutoField(help_text=Glossary.spectrum_id)
+    
 
 class SpectrumMixin:
 
@@ -826,7 +859,7 @@ if __name__ == "__main__":
     for carton_pk, expected_source_ids in tqdm(assignments.items(), desc="Checking.."):
         q = (
             Source
-            .select(Source.id)
+            .select(Source.sdss_id)
             .where(Source.in_carton(carton_pk))
             .tuples()
         )
