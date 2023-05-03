@@ -10,8 +10,9 @@ from peewee import (
 from playhouse.hybrid import hybrid_property
 
 from astra.models.fields import PixelArray, BitField
-from astra.models.base import BaseModel, SpectrumMixin, Source, UniqueSpectrum
-from astra.models.glossary import Glossary
+from astra.models.base import BaseModel
+from astra.models.spectrum import (Spectrum, SpectrumMixin)
+from astra.models.source import Source
 
 
 class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
@@ -23,104 +24,96 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         Source, 
         index=True, 
         backref="apogee_visit_spectra",
-        help_text=Glossary.sdss_id
     )
 
     #> Spectrum Identifier
     spectrum_id = ForeignKeyField(
-        UniqueSpectrum, 
+        Spectrum, 
         index=True, 
         primary_key=True,
         lazy_load=False,
-        help_text=Glossary.spectrum_id
     )
 
     #> Data Product Keywords
-    release = TextField(help_text=Glossary.release)
-    apred = TextField(help_text=Glossary.apred)
-    mjd = IntegerField(help_text=Glossary.mjd)
-    plate = IntegerField(help_text=Glossary.plate)
-    telescope = TextField(help_text=Glossary.telescope)
-    field = TextField(help_text=Glossary.field)
-    fiber = IntegerField(help_text=Glossary.fiber)
-    prefix = TextField(help_text=Glossary.prefix)
+    release = TextField()
+    apred = TextField()
+    mjd = IntegerField()
+    plate = IntegerField()
+    telescope = TextField()
+    field = TextField()
+    fiber = IntegerField()
+    prefix = TextField()
 
     # Pixel arrays
     wavelength = PixelArray(
         ext=4, 
         transform=lambda x: x[::-1, ::-1],
-        help_text=Glossary.wavelength
     )
     flux = PixelArray(
         ext=1,
         transform=lambda x: x[::-1, ::-1],
-        help_text=Glossary.flux
     )
     e_flux = PixelArray(
         ext=2,
         transform=lambda x: x[::-1, ::-1],
-        help_text=Glossary.e_flux
     )
     pixel_flags = PixelArray(
         ext=3,
         transform=lambda x: x[::-1, ::-1],
-        help_text=Glossary.pixel_flags
     )
     
     #> APOGEE Identifiers
-    apvisit_pk = BigIntegerField(help_text=Glossary.apvisit_pk, null=True)
-    sdss4_dr17_apogee_id = TextField(help_text=Glossary.sdss4_dr17_apogee_id, null=True)
+    apvisit_pk = BigIntegerField(null=True)
+    sdss4_dr17_apogee_id = TextField(null=True)
 
     #> Observing Conditions
-    date_obs = DateTimeField(help_text=Glossary.date_obs)
-    jd = FloatField(help_text=Glossary.jd)
-    exptime = FloatField(help_text=Glossary.exptime)
-    dithered = BooleanField(help_text=Glossary.dithered)
-
+    date_obs = DateTimeField()
+    jd = FloatField()
+    exptime = FloatField()
+    dithered = BooleanField()
+    
     #> Telescope Pointing
-    n_frames = IntegerField(help_text=Glossary.n_frames, null=True)
-    assigned = IntegerField(help_text=Glossary.assigned, null=True)    
-    on_target = IntegerField(help_text=Glossary.on_target, null=True)
-    valid = IntegerField(help_text=Glossary.valid, null=True)
-
+    n_frames = IntegerField()
+    assigned = IntegerField()
+    on_target = IntegerField()
+    valid = IntegerField()
+    
     #> Statistics and Spectrum Quality 
-    snr = FloatField(help_text=Glossary.snr)
-    spectrum_flags = BitField(help_text=Glossary.spectrum_flags)
-
+    snr = FloatField()
+    spectrum_flags = BitField()
+    
     # From https://github.com/sdss/apogee_drp/blob/630d3d45ecff840d49cf75ac2e8a31e22b543838/python/apogee_drp/utils/bitmask.py#L110
-    bad_pixels_flag = spectrum_flags.flag(1, help_text="Spectrum has many bad pixels (>20%).")
-    commissioning_flag = spectrum_flags.flag(2, help_text="Commissioning data (MJD <55761); non-standard configuration; poor LSF.")
-    bright_neighbor_flag = spectrum_flags.flag(4, help_text="Star has neighbor more than 10 times brighter.")
-    very_bright_neighbor_flag = spectrum_flags.flag(8, help_text="Star has neighbor more than 100 times brighter.")
-    low_snr_flag = spectrum_flags.flag(16, help_text="Spectrum has low S/N (<5).")
-
-    persist_high_flag = spectrum_flags.flag(32, help_text="Spectrum has at least 20% of pixels in high persistence region.")
-    persist_med_flag = spectrum_flags.flag(64, help_text="Spectrum has at least 20% of pixels in medium persistence region.")
-    persist_low_flag = spectrum_flags.flag(128, help_text="Spectrum has at least 20% of pixels in low persistence region.")
-    persist_jump_pos_flag = spectrum_flags.flag(256, help_text="Spectrum has obvious positive jump in blue chip.")
-    persist_jump_neg_flag = spectrum_flags.flag(512, help_text="Spectrum has obvious negative jump in blue chip.")
-
-    suspect_rv_combination_flag = spectrum_flags.flag(1024, help_text="RVs from synthetic template differ significantly (~2 km/s) from those from combined template.")
-    suspect_broad_lines_flag = spectrum_flags.flag(2048, help_text="Cross-correlation peak with template significantly broader than autocorrelation of template.")
-    bad_rv_combination_flag = spectrum_flags.flag(4096, help_text="RVs from synthetic template differ very significantly (~10 km/s) from those from combined template.")
-    rv_reject_flag = spectrum_flags.flag(8192, help_text="Rejected visit because cross-correlation RV differs significantly from least squares RV.")
-    rv_suspect_flag = spectrum_flags.flag(16384, help_text="Suspect visit (but used!) because cross-correlation RV differs slightly from least squares RV.")
-    multiple_suspect_flag = spectrum_flags.flag(32768, help_text="Suspect multiple components from Gaussian decomposition of cross-correlation.")
-    rv_failure_flag = spectrum_flags.flag(65536, help_text="RV failure.")
+    flag_bad_pixels = spectrum_flags.flag(2**0, help_text="Spectrum has many bad pixels (>20%).")
+    flag_commissioning = spectrum_flags.flag(2**1, help_text="Commissioning data (MJD <55761); non-standard configuration; poor LSF.")
+    flag_bright_neighbor = spectrum_flags.flag(2**2, help_text="Star has neighbor more than 10 times brighter.")
+    flag_very_bright_neighbor = spectrum_flags.flag(2**3, help_text="Star has neighbor more than 100 times brighter.")
+    flag_low_snr = spectrum_flags.flag(2**4, help_text="Spectrum has low S/N (<5).")
+    flag_persist_high = spectrum_flags.flag(2**5, help_text="Spectrum has at least 20% of pixels in high persistence region.")
+    flag_persist_med = spectrum_flags.flag(2**6, help_text="Spectrum has at least 20% of pixels in medium persistence region.")
+    flag_persist_low = spectrum_flags.flag(2**7, help_text="Spectrum has at least 20% of pixels in low persistence region.")
+    flag_persist_jump_pos = spectrum_flags.flag(2**8, help_text="Spectrum has obvious positive jump in blue chip.")
+    flag_persist_jump_neg = spectrum_flags.flag(2**9, help_text="Spectrum has obvious negative jump in blue chip.")
+    flag_suspect_rv_combination = spectrum_flags.flag(2**10, help_text="RVs from synthetic template differ significantly (~2 km/s) from those from combined template.")
+    flag_suspect_broad_lines = spectrum_flags.flag(2**11, help_text="Cross-correlation peak with template significantly broader than autocorrelation of template.")
+    flag_bad_rv_combination = spectrum_flags.flag(2**12, help_text="RVs from synthetic template differ very significantly (~10 km/s) from those from combined template.")
+    flag_rv_reject = spectrum_flags.flag(2**13, help_text="Rejected visit because cross-correlation RV differs significantly from least squares RV.")
+    flag_rv_suspect = spectrum_flags.flag(2**14, help_text="Suspect visit (but used!) because cross-correlation RV differs slightly from least squares RV.")
+    flag_multiple_suspect = spectrum_flags.flag(2**15, help_text="Suspect multiple components from Gaussian decomposition of cross-correlation.")
+    flag_rv_failure = spectrum_flags.flag(2**16, help_text="RV failure.")
 
 
     @hybrid_property
-    def bad_flag(self):
+    def flag_bad(self):
         return (
-            self.bad_pixels_flag
-        |   self.very_bright_neighbor_flag
-        |   self.bad_rv_combination_flag
-        |   self.rv_failure_flag
+            self.flag_bad_pixels
+        |   self.flag_very_bright_neighbor
+        |   self.flag_bad_rv_combination
+        |   self.flag_rv_failure
         )
     
 
     @hybrid_property
-    def warn_flag(self):
+    def flag_warn(self):
         return (self.spectrum_flags > 0)
 
 

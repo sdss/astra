@@ -1,11 +1,24 @@
+import numpy as np
+from peewee import (
+    ForeignKeyField,
+    IntegerField,
+    TextField
+)
 
-class ApogeeMADGICSSpectrum(BaseModel, Spectrum):
+from astra.models.base import BaseModel
+from astra.models.source import Source
+from astra.models.spectrum import (Spectrum, SpectrumMixin)
+from astra.models.fields import PixelArrayAccessorHDF, PixelArray
+
+
+class ApogeeMADGICSSpectrum(BaseModel, SpectrumMixin):
 
     """An APOGEE spectrum from the MADGICS pipeline."""
 
-    source = ForeignKeyField(Source, index=True, backref="apogee_visit_spectra")
-    spectrum_id = ForeignKeyField(UniqueSpectrum, index=True, lazy_load=False)
+    sdss_id = ForeignKeyField(Source, index=True, backref="apogee_madgics_spectra")
+    spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
 
+    
     # TODO: replace this with something that is recognised as a field?
     @property
     def wavelength(self):

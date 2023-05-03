@@ -42,7 +42,7 @@ class PipelineOutputMixin:
         """
 
         from astropy.io import fits
-        from astra.models.base import Source
+        from astra.models.source import Source
 
         fields = {}
         models = (Source, spectrum_model, cls)

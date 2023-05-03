@@ -66,15 +66,40 @@ class Glossary(BaseGlossary):
     gaia_e_v_rad = "Error on radial velocity [km/s] (Gaia DR3)"
 
     # Photometry
-    g_mag = "Gaia (DR3) mean apparent G [mag]"
-    bp_mag = "Gaia (DR3) mean apparent BP [mag]"
-    rp_mag = "Gaia (DR3) mean apparent RP [mag]"
-    j_mag = "2MASS mean apparent J magnitude [mag]"
-    e_j_mag = "Error on 2MASS mean apparent J magnitude [mag]"
-    h_mag = "2MASS mean apparent H magnitude [mag]"
-    e_h_mag = "Error on 2MASS mean apparent H magnitude [mag]"
-    k_mag = "2MASS mean apparent K magnitude [mag]"
-    e_k_mag = "Error on 2MASS mean apparent K magnitude [mag]"
+    ph = "Gaia (DR3) G-band magnitude [mag]"
+    bp_mag = "Gaia (DR3) BP-band magnitude [mag]"
+    rp_mag = "Gaia (DR3) RP-band magnitude [mag]"
+
+    # 2MASS
+    j_mag = "2MASS J-band magnitude magnitude [mag]"
+    e_j_mag = "Error on 2MASS J-band magnitude (j_msigcom) [mag]"
+    h_mag = "2MASS H-band magnitude magnitude [mag]"
+    e_h_mag = "Error on 2MASS H-band magnitude (h_msigcom) [mag]"
+    k_mag = "2MASS K-band magnitude magnitude [mag]"
+    e_k_mag = "Error on 2MASS K-band magnitude (k_msigcom) [mag]"
+    ph_qual = "2MASS Photometric quality flag (see documentation)"
+    bl_flg = "2MASS Blending flag (see documentation)"
+    cc_flg = "2MASS Contamination and confusion flag (see documentation)"
+
+    # unWISE
+    w1_flux = "unWISE W1-band flux [Vega nMgy]"
+    w2_flux = "unWISE W2-band flux [Vega nMgy]"
+    w1_dflux = "Statistical uncertainty in unWISE W1-band flux"
+    w2_dflux = "Statistical uncertainty in unWISE W2-band flux"
+    w1_frac = "unWISE W1-band flux fraction from this source (fracflux_w2)"
+    w2_frac = "unWISE W2-band flux fraction from this source (fracflux_w2)"
+    w1_uflags = "unWISE W1-band coadd flags (flags_unwise)"
+    w1_aflags = "Additional W1-band flags (flags_info)"
+    w2_uflags = "unWISE W2-band coadd flags (flags_unwise)"
+    w2_aflags = "Additional W2-band flags (flags_info)"
+
+    # GLIMPSE
+    mag4_5 = "GLIMPSE 4.5um IRAC (Band 2) magnitude [mJy]"
+    d4_5m = "GLIMPSE 4.5um IRAC (Band 2) 1 sigma error [mJy]"
+    rms_f4_5 = "RMS of detectionss for 4.5um IRAC (Band 2) [mJy]"
+    sqf_4_5 = "Source quality flg for 4.5um IRAC (Band 2)"
+    mf_4_5 = "Flux calculationi method flag 4.5um IRAC (Band 2)"
+    #csf # TODO
 
     # Targeting
     carton = "Carton name"
@@ -82,14 +107,7 @@ class Glossary(BaseGlossary):
     carton_0 = "First carton for source (see documentation)"
     carton_flags = "Carton bit field."
 
-    sdss4_apogee_target1_flags = "SDSS4 APOGEE1 targeting flags (1/2)"
-    sdss4_apogee_target2_flags = "SDSS4 APOGEE1 targeting flags (2/2)"
-    sdss4_apogee2_target1_flags = "SDSS4 APOGEE2 targeting flags (1/3)"
-    sdss4_apogee2_target2_flags = "SDSS4 APOGEE2 targeting flags (2/3)"
-    sdss4_apogee2_target3_flags = "SDSS4 APOGEE2 targeting flags (3/3)"
 
-    sdss4_apogee_member_flags = "SDSS4 likely cluster/galaxy member flags"
-    sdss4_apogee_extra_target_flags = "SDSS4 target info (aka EXTRATARG)"
 
     t_elapsed = "Core-time elapsed on this analysis [s]"
     tag = "Experiment tag for this result (see documentation)"
@@ -115,12 +133,8 @@ class Glossary(BaseGlossary):
 
 
     spectrum_flags = "Data reduction pipeline flags for this spectrum."
-
-    # ApogeeNet
-    teff_sample_median = "Median effective temperature from random draws"
-    logg_sample_median = "Median surface gravity from random draws"
-    fe_h_sample_median = "Median metallicity from random draws"
-
+    result_flags = "Bit flags for the analysis"
+    
 
     # BOSS data reduction pipeline keywords
     alt = "Telescope altitude [deg]"
@@ -207,8 +221,6 @@ class Glossary(BaseGlossary):
 
     apvisit_pk = "Primary key of `apogee_drp.visit` database table"
 
-
-    rxc = "Cross-correlation R-value (1979AJ.....84.1511T)"
 
 
     teff = "Stellar effective temperature [K]"
