@@ -15,9 +15,9 @@ class ApogeeMADGICSSpectrum(BaseModel, SpectrumMixin):
 
     """An APOGEE spectrum from the MADGICS pipeline."""
 
-    sdss_id = ForeignKeyField(Source, index=True, backref="apogee_madgics_spectra")
-    spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
-
+    # TODO: We set the referencing up like this so that we can do analysis without *requiring* the lazy loading to Source (and that source exists)
+    sdss_id = ForeignKeyField(Source.sdss_id, lazy_load=False, index=True, backref="apogee_madgics_spectra")
+    spectrum_id = ForeignKeyField(Spectrum.spectrum_id, lazy_load=False, index=True)
     
     # TODO: replace this with something that is recognised as a field?
     @property

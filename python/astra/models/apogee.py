@@ -1,4 +1,5 @@
 from peewee import (
+    AutoField,
     FloatField,
     BooleanField,
     DateTimeField,
@@ -6,6 +7,8 @@ from peewee import (
     IntegerField,
     TextField,
     ForeignKeyField,
+    DeferredForeignKey,
+    fn,
 )
 from playhouse.hybrid import hybrid_property
 
@@ -14,34 +17,61 @@ from astra.models.base import BaseModel
 from astra.models.spectrum import (Spectrum, SpectrumMixin)
 from astra.models.source import Source
 
-
 class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
 
     """An APOGEE visit spectrum."""
-    
+
     # Won't appear in a header group because it is first referenced in `Source`.
     sdss_id = ForeignKeyField(
         Source, 
-        index=True, 
+        # We want to allow for spectra to be unassociated with a source so that 
+        # we can test with fake spectra, etc, but any pipeline should run their
+        # own checks to make sure that spectra and sources are linked.
+        null=True, 
+        index=True,
+        lazy_load=False,
         backref="apogee_visit_spectra",
     )
 
+    # A decision was made here.
+
+    # I want the `spectrum_id` to be unique across tables. I don't want to run
+    # a single INSERT statement to create `spectrum_id` each time, because that
+    # is the limiting speed factor when we have bulk inserts of spectra. If I
+    # pre-allocate the `spectrum_id` values then ends up having big gaps, and I
+    # later have to remove and set the sequence value. If I allow `spectrum_id`
+    # to be null then that introduces risky behaviour for the user (since they
+    # would need to 'remember' to create a `spectrum_id` after), and it muddles
+    # the primary key, since we'd need an `AutoField()` for primary key, which
+    # is different from `spectrum_id`. And not all of these solutions are
+    # consistent between PostgreSQL and SQLite.
+
+    # I'm going to provide a default function of `Spectrum.create`, and then
+    # pre-assign all of these in bulk when we do bulk inserts. I wish there
+    # was a better way to avoid calling `Spectrum.create` every time, and still
+    # enforce a constraint so that the user doesn't have to handle this 
+    # themselves, but I think getting that constraint to work well on SQLite
+    # and PostgreSQL is hard. 
+    
+    # Note that this explicitly breaks one of the 'Lessons learned from IPL-2'!
+
     #> Spectrum Identifier
     spectrum_id = ForeignKeyField(
-        Spectrum, 
-        index=True, 
-        primary_key=True,
+        Spectrum,
+        index=True,
         lazy_load=False,
+        primary_key=True,
+        default=Spectrum.create
     )
 
     #> Data Product Keywords
     release = TextField()
     apred = TextField()
-    mjd = IntegerField()
     plate = IntegerField()
     telescope = TextField()
-    field = TextField()
     fiber = IntegerField()
+    mjd = IntegerField()
+    field = TextField()
     prefix = TextField()
 
     # Pixel arrays
@@ -67,20 +97,20 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     sdss4_dr17_apogee_id = TextField(null=True)
 
     #> Observing Conditions
-    date_obs = DateTimeField()
-    jd = FloatField()
-    exptime = FloatField()
-    dithered = BooleanField()
+    date_obs = DateTimeField(null=True)
+    jd = FloatField(null=True)
+    exptime = FloatField(null=True)
+    dithered = BooleanField(null=True)
     
     #> Telescope Pointing
-    n_frames = IntegerField()
-    assigned = IntegerField()
-    on_target = IntegerField()
-    valid = IntegerField()
+    n_frames = IntegerField(null=True)
+    assigned = IntegerField(null=True)
+    on_target = IntegerField(null=True)
+    valid = IntegerField(null=True)
     
     #> Statistics and Spectrum Quality 
-    snr = FloatField()
-    spectrum_flags = BitField()
+    snr = FloatField(null=True)
+    spectrum_flags = BitField(default=0)
     
     # From https://github.com/sdss/apogee_drp/blob/630d3d45ecff840d49cf75ac2e8a31e22b543838/python/apogee_drp/utils/bitmask.py#L110
     flag_bad_pixels = spectrum_flags.flag(2**0, help_text="Spectrum has many bad pixels (>20%).")
@@ -142,3 +172,4 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
                 True,
             ),
         )
+

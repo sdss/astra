@@ -41,7 +41,9 @@ class Timer(object):
         item = next(self._iterable)
         self.interval = time() - self._time_last - self._time_paused
         try:
-            item.t_elapsed = self.interval
+            # Note the time it took to analyse this object using the `time_elapsed` attribute, 
+            # but don't assume it exists.
+            item.time_elapsed = self.interval
         except:
             None
         self._time_paused = 0

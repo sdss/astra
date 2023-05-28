@@ -1,4 +1,4 @@
-from peewee import AutoField
+from peewee import AutoField, BitField
 from astra.models.base import BaseModel
 
 
@@ -7,7 +7,8 @@ class Spectrum(BaseModel):
     """ A one dimensional spectrum. """
 
     spectrum_id = AutoField()
-    
+    spectrum_type_flags = BitField(default=0)
+
 
 class SpectrumMixin:
 

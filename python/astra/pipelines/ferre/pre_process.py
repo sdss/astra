@@ -5,10 +5,12 @@ import numpy as np
 from itertools import cycle
 from typing import Optional, Iterable
 from astra.pipelines.ferre import utils
-from astra.models import Spectrum
+from astra.models.spectrum import Spectrum
 from astra.utils import log, dict_to_list, expand_path
+import warnings
 
 # FERRE v4.8.8 src trunk : /uufs/chpc.utah.edu/common/home/sdss09/software/apogee/Linux/apogee/trunk/external/ferre/src
+
 
 def pre_process_ferre(
     pwd: str,
@@ -23,6 +25,7 @@ def pre_process_ferre(
     initial_c_m: Iterable[float] = None,
     initial_n_m: Iterable[float] = None,
     initial_flags: Iterable[str] = None,
+    upstream_id: Iterable[int] = None,
     frozen_parameters: Optional[dict] = None,
     interpolation_order: int = 3,
     weight_path: Optional[str] = None,
@@ -43,13 +46,13 @@ def pre_process_ferre(
     f_format: int = 1,
     ferre_kwds: Optional[dict] = None,
     n_threads: int = 1,
-    continuum_method: Optional[str] = None,
-    continuum_kwargs: Optional[dict] = None,
     bad_pixel_flux_value: float = 1e-4,
     bad_pixel_error_value: float = 1e10,
     skyline_sigma_multiplier: float = 100,
     min_sigma_value: float = 0.05,
     spike_threshold_to_inflate_uncertainty: float = 3,
+    reference_pixel_arrays_for_abundance_run=False,
+    write_input_pixel_arrays=True
 ):
 
     # Validate the control file keywords.
@@ -83,6 +86,12 @@ def pre_process_ferre(
 
     # Include any explicitly set ferre kwds
     control_kwds.update(ferre_kwds or dict())
+
+    if reference_pixel_arrays_for_abundance_run:
+        prefix = os.path.basename(pwd.rstrip("/")) + "/"
+        for key in ("pfile", "opfile", "offile", "sffile"):
+            control_kwds[key] = prefix + control_kwds[key]
+    
     control_kwds_formatted = utils.format_ferre_control_keywords(control_kwds)
     log.info(f"FERRE control keywords:\n{control_kwds_formatted}")
 
@@ -90,7 +99,7 @@ def pre_process_ferre(
     os.makedirs(pwd, exist_ok=True)
     log.info(f"FERRE working directory: {pwd}")
 
-    # Write the control file
+    # Write the control file        
     with open(os.path.join(pwd, "input.nml"), "w") as fp:
         fp.write(control_kwds_formatted)       
 
@@ -108,55 +117,54 @@ def pre_process_ferre(
         c_m=values_or_cycle_none(initial_c_m),
         n_m=values_or_cycle_none(initial_n_m),
         initial_flags=values_or_cycle_none(initial_flags),
+        upstream_id=values_or_cycle_none(upstream_id)
     ))
 
     # Retrict to the pixels within the model wavelength grid.
     # TODO: Assuming all spectra are the same.
     mask = _get_ferre_chip_mask(spectra[0].wavelength, chip_wavelengths)
 
+    # TODO: use mask2
+    mask2 = utils.get_apogee_pixel_mask()
+    assert np.all(mask == mask2)
+
+
     batch_names, batch_initial_parameters, batch_flux, batch_e_flux = ([], [], [], [])
     for i, (spectrum, initial_parameters) in enumerate(zip(spectra, all_initial_parameters)):
 
-        flux = np.copy(spectrum.flux)
-        e_flux = np.copy(spectrum.ivar)**-0.5
-        try:
-            flag_pixels = spectrum.flag_pixels
-        except AttributeError:
-            log.warn(f"Spectrum {spectrum} has no flag_pixels attribute")
-
-        else:                
-            inflate_errors_at_bad_pixels(
-                flux,
-                e_flux,
-                flag_pixels,
-                skyline_sigma_multiplier=skyline_sigma_multiplier,
-                bad_pixel_flux_value=bad_pixel_flux_value,
-                bad_pixel_error_value=bad_pixel_error_value,
-                spike_threshold_to_inflate_uncertainty=spike_threshold_to_inflate_uncertainty,
-                min_sigma_value=min_sigma_value,
-            )
-
-        # Perform any continuum rectification pre-processing.
-        if continuum_method is not None:
-            kwds = continuum_kwargs.copy()
-            if continuum_method == "astra.contrib.aspcap.continuum.MedianFilter":
-                kwds.update(upstream_task_id=_initial_parameters["initial_flags"])
-            f_continuum = executable(continuum_method)(**kwds)
-
-            f_continuum.fit(spectrum)
-            continuum = f_continuum(spectrum)
-            flux /= continuum
-            e_flux /= continuum
-        else:
-            f_continuum = None     
-        
-        batch_flux.append(flux[mask])
-        batch_e_flux.append(e_flux[mask])
-
         initial_flags = initial_parameters.pop("initial_flags")
-        batch_names.append(utils.get_ferre_spectrum_name(i, spectrum.source_id, spectrum.spectrum_id, initial_flags))
+        upstream_id = initial_parameters.pop("upstream_id")
+
+        batch_names.append(utils.get_ferre_spectrum_name(i, spectrum.sdss_id, spectrum.spectrum_id, initial_flags, upstream_id))
         batch_initial_parameters.append(initial_parameters)
-    
+
+        if write_input_pixel_arrays:
+            # We usually will be writing input pixel arrays, but sometimes we won't
+            # (e.g., one other abundances execution has written the input pixel arrays
+            # and this one could just be referencing them)
+            flux = np.copy(spectrum.flux)
+            e_flux = np.copy(spectrum.ivar)**-0.5
+            try:
+                pixel_flags = spectrum.pixel_flags
+            except AttributeError:
+                warnings.warn(f"At least one spectrum has no pixel_flags attribute")
+
+            else:
+                # TODO: move this to the ASPCAP coarse/stellar parameter section (before continuum norm).
+                inflate_errors_at_bad_pixels(
+                    flux,
+                    e_flux,
+                    pixel_flags,
+                    skyline_sigma_multiplier=skyline_sigma_multiplier,
+                    bad_pixel_flux_value=bad_pixel_flux_value,
+                    bad_pixel_error_value=bad_pixel_error_value,
+                    spike_threshold_to_inflate_uncertainty=spike_threshold_to_inflate_uncertainty,
+                    min_sigma_value=min_sigma_value,
+                )
+            
+            batch_flux.append(flux[mask])
+            batch_e_flux.append(e_flux[mask])
+
 
     # Convert list of dicts of initial parameters to array.
     batch_initial_parameters_array = utils.validate_initial_and_frozen_parameters(
@@ -166,24 +174,41 @@ def pre_process_ferre(
         clip_initial_parameters_to_boundary_edges=True,
         clip_epsilon_percent=1,
     )
-
-    with open(os.path.join(pwd, control_kwds["pfile"]), "w") as fp:
+    # hack: we do basename here in case we wrote the prefix to PFILE for the abundances run
+    with open(os.path.join(pwd, os.path.basename(control_kwds["pfile"])), "w") as fp:
         for name, point in zip(batch_names, batch_initial_parameters_array):
             fp.write(utils.format_ferre_input_parameters(*point, name=name))
 
-    batch_flux = np.array(batch_flux)
-    batch_e_flux = np.array(batch_e_flux)
+    if write_input_pixel_arrays:
+        LARGE = 1e10
 
-    # Write data arrays.
-    savetxt_kwds = dict(fmt="%.4e", footer="\n")
-    np.savetxt(
-        os.path.join(pwd, control_kwds["ffile"]), batch_flux, **savetxt_kwds
-    )
-    np.savetxt(
-        os.path.join(pwd, control_kwds["erfile"]), batch_e_flux, **savetxt_kwds
-    )
+        batch_flux = np.array(batch_flux)
+        batch_e_flux = np.array(batch_e_flux)
 
-    n_obj = batch_flux.shape[0]
+        if reference_pixel_arrays_for_abundance_run:
+            flux_path = os.path.join(pwd, "../", control_kwds["ffile"])
+            e_flux_path = os.path.join(pwd, "../", control_kwds["erfile"])
+        else:
+            flux_path = os.path.join(pwd, control_kwds["ffile"])
+            e_flux_path = os.path.join(pwd, control_kwds["erfile"])
+
+        non_finite_flux = ~np.isfinite(batch_flux)
+        batch_flux[non_finite_flux] = 0.0
+        batch_e_flux[non_finite_flux] = LARGE
+        if np.any(non_finite_flux):
+            log.warning(f"Non-finite fluxes found. Setting them to zero and setting flux error to {LARGE:.1e}")
+
+        non_finite_e_flux = ~np.isfinite(batch_e_flux)
+        batch_e_flux[~non_finite_e_flux] = LARGE
+        if np.any(non_finite_e_flux):
+            log.warning(f"Non-finite flux errors found. Setting them to {LARGE:.1e}")
+
+        # Write data arrays.
+        savetxt_kwds = dict(fmt="%.4e")#footer="\n")
+        np.savetxt(flux_path, batch_flux, **savetxt_kwds)
+        np.savetxt(e_flux_path, batch_e_flux, **savetxt_kwds)
+        
+    n_obj = len(batch_names)
     return (pwd, n_obj)
 
 

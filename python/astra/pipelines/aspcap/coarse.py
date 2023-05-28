@@ -2,18 +2,20 @@ import os
 import numpy as np
 from glob import glob
 from astra import task
-from astra.models import Spectrum
-from astra.models.pipelines import FerreCoarse
+from astra.models.spectrum import Spectrum
+from astra.models.aspcap import FerreCoarse
 from astra.utils import log, expand_path, list_to_dict
-from astra.pipelines.ferre import execute
+from astra.pipelines.ferre.operator import FerreOperator
 from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
-from astra.pipelines.ferre.utils import (parse_header_path, read_ferre_headers, clip_initial_guess)
-from astra.pipelines.aspcap.utils import (approximate_log10_microturbulence, yield_suitable_grids)
+from astra.pipelines.ferre.utils import (execute_ferre, parse_header_path, read_ferre_headers, clip_initial_guess)
+from astra.pipelines.aspcap.utils import (approximate_log10_microturbulence, get_input_nml_paths, yield_suitable_grids)
+
 #from astra.tools.continuum import Continuum, Scalar
 
 from typing import Iterable, Union, List, Tuple, Optional, Callable
 
+STAGE = "coarse"
 
 @task
 def coarse_stellar_parameters(
@@ -22,6 +24,7 @@ def coarse_stellar_parameters(
     initial_guess_callable: Optional[Callable] = None,
     header_paths: Optional[Union[List[str], Tuple[str], str]] = "$MWM_ASTRA/pipelines/aspcap/synspec_dr17_marcs_header_paths.list",
     weight_path: Optional[str] = "$MWM_ASTRA/pipelines/aspcap/masks/global.mask",
+    operator_kwds: Optional[dict] = None,
     **kwargs
 ) -> Iterable[FerreCoarse]:
     """
@@ -46,7 +49,7 @@ def coarse_stellar_parameters(
         The path to the FERRE weight file.
     """
 
-    yield from pre_process_coarse_stellar_parameters(
+    yield from pre_coarse_stellar_parameters(
         spectra,
         parent_dir,
         initial_guess_callable,
@@ -56,15 +59,16 @@ def coarse_stellar_parameters(
     )
 
     # Execute ferre.
-    pwds = list(map(os.path.dirname, glob(os.path.join(expand_path(parent_dir), "*/input.nml"))))
-    for pwd in pwds:
-        execute(pwd)
+    FerreOperator(f"{parent_dir}/{STAGE}/", **(operator_kwds or {})).execute()
+
+    #for path in get_input_nml_paths(parent_dir):
+    #    execute_ferre(path)
     
-    yield from post_process_coarse_stellar_parameters(parent_dir, **kwargs)
+    yield from post_coarse_stellar_parameters(parent_dir, **kwargs)
 
 
 @task
-def pre_process_coarse_stellar_parameters(
+def pre_coarse_stellar_parameters(
     spectra: Iterable[Spectrum],
     parent_dir: str,
     initial_guess_callable: Optional[Callable] = None,
@@ -76,7 +80,7 @@ def pre_process_coarse_stellar_parameters(
     Prepare to run FERRE multiple times for the coarse stellar parameter determination step.
 
     This task will only create `FerreCoarse` database entries for spectra that had no suitable initial guess.
-    The `post_process_coarse_stellar_parameters` task will collect results from FERRE and create database entries.
+    The `post_coarse_stellar_parameters` task will collect results from FERRE and create database entries.
 
     :param spectra:
         The spectra to be processed.
@@ -94,7 +98,7 @@ def pre_process_coarse_stellar_parameters(
         The path to the FERRE weight file.
     """
     
-    ferre_kwds, spectra_with_no_initial_guess = plan_coarse_stellar_parameter_executions(
+    ferre_kwds, spectra_with_no_initial_guess = plan_coarse_stellar_parameters(
         spectra,
         parent_dir,
         header_paths,
@@ -110,14 +114,15 @@ def pre_process_coarse_stellar_parameters(
     # Create database entries for those with no initial guess.
     for spectrum in spectra_with_no_initial_guess:
         yield FerreCoarse(
-            spectrum_id=spectrum.id,
-            source_id=spectrum.source_id,
+            sdss_id=spectrum.sdss_id,
+            spectrum_id=spectrum.spectrum_id,
             flag_no_suitable_initial_guess=True,
         )
 
 
+
 @task
-def post_process_coarse_stellar_parameters(parent_dir, **kwargs) -> Iterable[FerreCoarse]:
+def post_coarse_stellar_parameters(parent_dir, **kwargs) -> Iterable[FerreCoarse]:
     """
     Collect the results from FERRE and create database entries for the coarse stellar parameter determination step.
 
@@ -125,8 +130,7 @@ def post_process_coarse_stellar_parameters(parent_dir, **kwargs) -> Iterable[Fer
         The parent directory where these FERRE executions were planned.
     """
 
-    pwds = list(map(os.path.dirname, glob(os.path.join(expand_path(parent_dir), "coarse/*/input.nml"))))
-    for pwd in pwds:
+    for pwd in map(os.path.dirname, get_input_nml_paths(parent_dir, STAGE)):
         log.info("Post-processing FERRE results in {0}".format(pwd))
         for kwds in post_process_ferre(pwd):
             result = FerreCoarse(**kwds)
@@ -153,14 +157,11 @@ def penalize_coarse_stellar_parameter_result(result: FerreCoarse):
     
     return None
 
-
         
-def plan_coarse_stellar_parameter_executions(
+def plan_coarse_stellar_parameters(
     spectra: Iterable[Spectrum],
     parent_dir: str,
     header_paths: Optional[Union[List[str], Tuple[str], str]] = "$MWM_ASTRA/pipelines/aspcap/synspec_dr17_marcs_header_paths.list",
-    #continuum_method: Optional[Union[Continuum, str]] = Scalar,
-    #continuum_kwargs: Optional[dict] = dict(method="median"),
     initial_guess_callable: Optional[Callable] = None,
     weight_path: Optional[str] = "$MWM_ASTRA/pipelines/aspcap/masks/global.mask",
     **kwargs,
@@ -207,8 +208,6 @@ def plan_coarse_stellar_parameter_executions(
                 initial_n_m=initial_guess["n_m"],
                 initial_flags=initial_guess.get("initial_flags", 0),
                 weight_path=weight_path,
-                #continuum_method=continuum_method,
-                #continuum_kwargs=continuum_kwargs,
             )
 
             all_kwds.append(kwds)
@@ -235,7 +234,7 @@ def plan_coarse_stellar_parameter_executions(
 
         short_grid_name = parse_header_path(header_path)["short_grid_name"]
 
-        pwd = os.path.join(parent_dir, "coarse", short_grid_name)
+        pwd = os.path.join(parent_dir, STAGE, short_grid_name)
 
         grouped_task_kwds[header_path].update(
             header_path=header_path,
@@ -250,8 +249,6 @@ def plan_coarse_stellar_parameter_executions(
     return (return_list_of_kwds, spectra_with_no_initial_guess)
 
 
-
-
 def read_ferre_header_paths(header_paths):
     if isinstance(header_paths, str):
         if header_paths.lower().endswith(".hdr"):
@@ -261,8 +258,6 @@ def read_ferre_header_paths(header_paths):
             with open(expand_path(header_paths), "r") as fp:
                 header_paths = [line.strip() for line in fp]
     return header_paths
-            
-
             
 
 def initial_guesses(spectrum: Spectrum) -> List[dict]:
@@ -279,4 +274,3 @@ def initial_guesses(spectrum: Spectrum) -> List[dict]:
     )
 
     raise NotImplementedError
-

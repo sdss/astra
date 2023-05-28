@@ -1,6 +1,9 @@
 
 import numpy as np
-
+import os
+from glob import glob
+from astra.utils import expand_path
+from astra.pipelines.ferre.utils import parse_header_path
 
 ABUNDANCE_CONTROLS = {
     "Al": {
@@ -107,11 +110,8 @@ ABUNDANCE_CONTROLS = {
     },
 }
 
-def get_apogee_pixel_mask():
-    """
-    Return a pixel mask for APOGEE spectra.
-    """
-    raise a
+def get_input_nml_paths(parent_dir, stage):
+    return glob(os.path.join(expand_path(parent_dir), stage, "*", "input.nml"))
 
 
 def get_species_label_references():

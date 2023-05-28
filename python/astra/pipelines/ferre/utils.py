@@ -22,13 +22,111 @@ TRANSLATE_LABELS = {
     "n_m": "N",
 }
 
-def get_ferre_spectrum_name(index, source_id, spectrum_id, initial_flags):
-    return f"{index}_{source_id}_{spectrum_id}_{initial_flags}"
+
+def execute_ferre(path, timeout=None):
+        
+    path = expand_path(path)
+    if path.lower().endswith(".nml"):
+        # A direct NML file was given.
+        input_nml_path = os.path.basename(path)
+        pwd = os.path.dirname(path)
+        stdout_path = os.path.join(pwd, f"{input_nml_path}.stdout")
+        stderr_path = os.path.join(pwd, f"{input_nml_path}.stderr")
+
+    else:
+        pwd = path
+        input_nml_path = "input.nml"
+        stdout_path = os.path.join(pwd, "stdout")
+        stderr_path = os.path.join(pwd, "stderr")
+
+    log.debug(f"Running FERRE on {pwd}/{input_nml_path} with timeout of {timeout}")
+    try:
+        with open(stdout_path, "w") as stdout:
+            with open(stderr_path, "w") as stderr:
+                process = subprocess.run(
+                    ["ferre.x", input_nml_path],
+                    cwd=pwd,
+                    stdout=stdout,
+                    stderr=stderr,
+                    check=False,
+                    timeout=timeout, 
+                )
+    except subprocess.TimeoutExpired:
+        log.exception(f"FERRE has timed out in {pwd}")
+    except:
+        log.exception(f"Exception when calling FERRE in {pwd}:")
+        raise
+
+    else:
+        log.debug(f"Ferre finished")
+
+    return None
+
+
+def get_apogee_segment_indices():
+    # TODO: put elsewhere
+    segment_log10_wl_start = np.array([4.180476e+00, 4.20051e+00, 4.217064e+00])
+    segment_pixels = np.array([3028, 2495, 1991])
+    start_indices = np.round((segment_log10_wl_start - 4.179) / 6e-6).astype(int)
+    return (start_indices, segment_pixels)
+
+def get_apogee_pixel_mask():
+    # TODO: put elsewhere?
+    mask = np.zeros(8575, dtype=bool)
+    for si, p in zip(*get_apogee_segment_indices()):
+        mask[si:si+p] = True
+    assert mask.sum() == 7514
+    return mask
+
+'''
+def mask_apogee_pixel_array(pixel_array):
+    pixel_array = np.atleast_2d(pixel_array)
+    N, P = pixel_array.shape
+    assert P == 8575, "Expected full array (8575 pixels) to mask"
+    mask = get_apogee_pixel_mask()
+
+    return pixel_array[mask]
+
+
+def de_mask_apogee_pixel_array(ferre_array, fill_value=np.nan):
+    ferre_array = np.atleast_2d(ferre_array)
+    N, P = ferre_array.shape
+    assert P == 7514, "Expected FERRE array (7514 pixels) to mask"
+
+    start_indices, segment_pixels = get_apogee_segment_indices()
+    pixel_array = fill_value * np.ones((N, 8575))
+
+    si = 0
+    for start_index, pixels in zip(start_indices, segment_pixels):
+        pixel_array[start_index:start_index + pixels] = ferre_array[si:si + pixels]
+        si += pixels
+    assert np.sum(pixel_array != fill_value) == 7514
+    return pixel_array
+'''              
+
+
+
+
+
+def get_ferre_spectrum_name(*args):
+    return "_".join(map(str, args))
+    
+def int_or_none(_):
+    try:
+        return int(_)
+    except:
+        return None
 
 def parse_ferre_spectrum_name(name):
-    #return dict(zip(("index", "source_id", "spectrum_id", "initial_flags"), map(int, name.split("_"))))
-    index, spectrum_id, initial_flags = map(int, name.split("_"))
-    return dict(index=index, source_id=None, spectrum_id=spectrum_id, initial_flags=initial_flags)
+    index, sdss_id, spectrum_id, initial_flags, upstream_id = map(int_or_none, name.split("_"))
+
+    return dict(
+        index=index,
+        sdss_id=sdss_id,
+        spectrum_id=spectrum_id,
+        initial_flags=initial_flags,
+        upstream_id=upstream_id
+    )
 
 
 def get_ferre_label_name(parameter_name, ferre_label_names, transforms=None):
@@ -104,6 +202,7 @@ def parse_header_path(header_path):
     )
 
     return kwds
+
 
 
 
@@ -291,7 +390,8 @@ def validate_ferre_control_keywords(
         "ffile": "flux.input",
         "erfile": "e_flux.input",
         "opfile": "parameter.output",
-        "offile": "model_flux.output",
+        # This is to distinguish it from when we do the interpolation run and get the (unaltered) model flux
+        "offile": "rectified_model_flux.output", 
         "sffile": "rectified_flux.output",
     }
     headers, *segment_headers = read_ferre_headers(header_path)
@@ -986,6 +1086,7 @@ def read_file_with_name_and_data(path, input_names, n_data_columns=None, dtype=f
         return (names, data)
 
     data = sort_data_as_per_input_names(input_names, names, data)
+    raise a # "check above"
     missing_names = set(input_names).difference(names)
     return (data, missing_names)
 
@@ -1017,7 +1118,7 @@ def _read_output_parameter_file(path, n_dimensions, full_covariance, input_names
 
     results = np.atleast_2d(np.loadtxt(path, usecols=1 + np.arange(N_cols)))
     # sort here if we get given a set of input names
-    results, missing_names = sort_data_as_per_input_names(input_names, names, results)
+    results, missing_names, output_indices = sort_data_as_per_input_names(input_names, names, results)
 
     param = results[:, 0:n_dimensions]
     P, L = param.shape
@@ -1057,7 +1158,9 @@ def sort_data_as_per_input_names(input_names, unsorted_names, unsorted_data):
     )
     data[input_index] = unsorted_data[output_index]
     missing = set(input_names) - set(intersect)
-    return (data, missing)
+    output_indices = -1 * np.ones(N)
+    output_indices[input_index] = output_index
+    return (data, missing, output_indices)
 
 
 

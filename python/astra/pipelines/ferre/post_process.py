@@ -42,14 +42,15 @@ def post_process_ferre(pwd) -> Iterable[dict]:
     flux = np.atleast_2d(np.loadtxt(os.path.join(pwd, control_kwds["FFILE"])))
     e_flux = np.atleast_2d(np.loadtxt(os.path.join(pwd, control_kwds["ERFILE"])))
 
-    model_flux, names_with_missing_model_flux = read_and_sort_output_data_file(
+    model_flux, names_with_missing_model_flux, output_model_flux_indices = read_and_sort_output_data_file(
         os.path.join(pwd, control_kwds["OFFILE"]), 
         input_names
     )
-    rectified_flux, names_with_missing_rectified_flux = read_and_sort_output_data_file(
+    rectified_flux, names_with_missing_rectified_flux, output_rectified_model_flux_indices = read_and_sort_output_data_file(
         os.path.join(pwd, control_kwds["SFFILE"]),
         input_names
     )
+    assert np.all(output_model_flux_indices == output_rectified_model_flux_indices)
     parameters, e_parameters, meta, names_with_missing_outputs = read_output_parameter_file(pwd, control_kwds, input_names)
 
     if names_with_missing_model_flux:
@@ -113,11 +114,13 @@ def post_process_ferre(pwd) -> Iterable[dict]:
 
         result = common.copy()
         result.update(
-            source_id=name_meta["source_id"],
+            sdss_id=name_meta["sdss_id"],
             spectrum_id=name_meta["spectrum_id"],
             initial_flags=name_meta["initial_flags"],
+            upstream_id=name_meta["upstream_id"],
             ferre_name=name,
-            ferre_index=name_meta["index"],
+            ferre_input_index=name_meta["index"],
+            ferre_output_index=output_model_flux_indices[i],
             ferre_log_chisq=log_chisq_fit[i], 
             ferre_log_snr_sq=log_snr_sq[i],
             ferre_log_penalized_chisq=log_chisq_fit[i],     

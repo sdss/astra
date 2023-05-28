@@ -1,6 +1,7 @@
 
 __all__ = ["BaseModel", "database"]
 
+import os
 import re
 from inspect import getsource
 from peewee import (Field, Model, PostgresqlDatabase)
@@ -53,7 +54,7 @@ def get_database_and_schema(config):
         "    path: <PATH_TO_DATABASE>\n\n"
     )
 
-    if config.get("DEBUG", False):
+    if config.get("DEBUG", False) or os.getenv("ASTRA_DEBUG"):
         log.warning("In DEBUG mode")
         database_path_key = "debug_mode_database_path"
         database_path = config.get(database_path_key, ":memory:")
@@ -78,7 +79,22 @@ def get_database_and_schema(config):
                 try:
                     keys = ("user", "host", "password", "port")
                     kwds = dict([(k, config["database"][k]) for k in keys if k in config["database"]])
-                    database = PostgresqlDatabase(config["database"]["dbname"], **kwds)
+                    kwds.setdefault("autorollback", True)
+
+                    '''
+                    print("TODO: ANDY COME BACK TO THIS")
+                    from sdssdb.connection import PeeweeDatabaseConnection
+                    class AstraDatabaseConnection(PeeweeDatabaseConnection):
+                        dbname = config["database"]["dbname"]
+                    
+                    database = AstraDatabaseConnection(autoconnect=True)
+                    database.set_profile("astra")
+                    '''
+                    database = PostgresqlDatabase(
+                        config["database"]["dbname"], 
+                        **kwds
+                    )
+
                     schema = config["database"].get("schema", None)
 
                 except:
@@ -104,8 +120,18 @@ def get_database_and_schema(config):
         return (database, None)
 
 
-database, schema = get_database_and_schema(config)
 
+database, schema = get_database_and_schema(config)
+'''
+from sdssdb.connection import PeeweeDatabaseConnection
+class AstraDatabaseConnection(PeeweeDatabaseConnection):
+    dbname = "sdss5db"
+
+database = AstraDatabaseConnection(autoconnect=True)
+database.set_profile("astra")
+
+schema = "astra_temp"
+'''
 
 class BaseModel(Model):
     

@@ -1,9 +1,8 @@
 import numpy as np
 from typing import Optional, Tuple, Union, List
 from astra.specutils.continuum.base import Continuum
-
-from scipy.ndimage.filters import median_filter
-
+from astra.pipelines.ferre.utils import get_apogee_pixel_mask
+from scipy.ndimage import median_filter
 
 
 class MedianFilter(Continuum):
@@ -14,7 +13,7 @@ class MedianFilter(Continuum):
         bad_minimum_flux: Optional[float] = 0.01,
         non_finite_err_value: Optional[float] = 1e10,
         valid_continuum_correction_range: Optional[Tuple[float]] = (0.1, 10.0),
-        mode: Optional[str] = "reflect",
+        mode: Optional[str] = "mirror",
         regions: Optional[Tuple[Tuple[float, float]]] = (
             (15152, 15800),
             (15867, 16424),
@@ -60,36 +59,32 @@ class MedianFilter(Continuum):
         :param coarse_result:
             The database entry for the coarse FERRE result (from `astra.models.pipelines.FerreCoarse`).
         """
+        
+        mask = get_apogee_pixel_mask()
+        flux = np.nan * np.ones(mask.shape, dtype=float)
+        model_flux = np.nan * np.ones(mask.shape, dtype=float)
 
-        # From the coarse result, load the rectified model flux.
-        model_flux = coarse_result._get_pixel_array_from_file_with_name("model_flux.output")
-        rectified_flux = coarse_result._get_pixel_array_from_file_with_name("rectified_flux.output")
-
-        ratio = rectified_flux / model_flux
-        # TODO: de-mask this from the FERRE grid to the spectrum dispersion.
-
-
+        # We will use FERRE-rectified fluxes here (model + data)
+        flux[mask] = coarse_result.rectified_flux
+        model_flux[mask] = coarse_result.rectified_model_flux
+        
         continuum = self.fill_value * np.ones_like(spectrum.flux)
         for si, ei in self._get_region_slices(spectrum):
             
-            rectified_flux_region = rectified_flux[si:ei].copy()
+            flux_region = flux[si:ei].copy()
+            ratio = flux_region / model_flux[si:ei]
+
             is_bad_pixel = (
-                (rectified_flux_region < self.bad_minimum_flux) | 
-                (rectified_flux_region > (np.nanmedian(rectified_flux_region) + 3 * np.nanstd(rectified_flux_region)))
-                (~np.isfinite(rectified_flux_region))
-            )
-            x = np.arange(rectified_flux_region.size)
-            rectified_flux_region[is_bad_pixel] = np.interp(
-                x[is_bad_pixel], x[~is_bad_pixel], rectified_flux_region[~is_bad_pixel]
+                (flux_region < self.bad_minimum_flux)
+            |   (flux_region > (np.nanmedian(flux_region) + 3 * np.nanstd(flux_region)))
+            |   (~np.isfinite(ratio))
+            |   (ratio < self.valid_continuum_correction_range[0])
+            |   (ratio > self.valid_continuum_correction_range[1])
             )
 
-            continuum[si:ei] = median_filter(
-                rectified_flux_region / model_flux[si:ei],
-                [self.median_filter_width],
-                mode=self.mode,
-                cval=self.fill_value,
-            )
+            if not np.all(is_bad_pixel):
+                x = np.arange(ratio.size)
+                ratio[is_bad_pixel] = np.interp(x[is_bad_pixel], x[~is_bad_pixel], ratio[~is_bad_pixel])            
+                continuum[si:ei] = median_filter(ratio, size=self.median_filter_width, mode=self.mode)
 
         return continuum
-
-        raise a
