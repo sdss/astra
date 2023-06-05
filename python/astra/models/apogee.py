@@ -10,16 +10,99 @@ from peewee import (
     DeferredForeignKey,
     fn,
 )
+import numpy as np
+import os
 from playhouse.hybrid import hybrid_property
-
 from astra.models.fields import PixelArray, BitField
 from astra.models.base import BaseModel
 from astra.models.spectrum import (Spectrum, SpectrumMixin)
 from astra.models.source import Source
 
+class ApogeeStarStackedSpectrum(BaseModel, SpectrumMixin):
+
+    """An APOGEE stacked spectrum, stored in an apStar data product."""
+
+    # Won't appear in a header group because it is first referenced in `Source`.
+    sdss_id = ForeignKeyField(
+        Source, 
+        # We want to allow for spectra to be unassociated with a source so that 
+        # we can test with fake spectra, etc, but any pipeline should run their
+        # own checks to make sure that spectra and sources are linked.
+        null=True, 
+        index=True,
+        lazy_load=False,
+        backref="apogee_star_stacked",
+    )
+
+    #> Spectrum Identifier
+    spectrum_id = ForeignKeyField(
+        Spectrum,
+        index=True,
+        lazy_load=False,
+        primary_key=True,
+        default=Spectrum.create
+    )
+
+    #> Data Product Keywords
+    release = TextField()
+    apred = TextField()
+    apstar = TextField()
+    obj = TextField()
+    telescope = TextField()
+    healpix = IntegerField(null=True) # only used in SDSS5
+    field = TextField(null=True) # not used in SDSS-V
+    prefix = TextField(null=True) # not used in SDSS-V
+
+    _transform = lambda x: np.atleast_2d(x)[0]
+    flux = PixelArray(
+        ext=1,
+        transform=_transform
+    )
+    e_flux = PixelArray(
+        ext=2,
+        transform=_transform
+    )
+    pixel_flags = PixelArray(
+        ext=3,
+        transform=_transform
+    )
+
+    @property
+    def wavelength(self):
+        # TODO: Do I need to store this as a PixelArray?
+        return 10**(4.179 + 6e-6 * np.arange(8575))
+
+    @property
+    def path(self):
+        templates = {
+            "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/@healpixgrp|/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
+            "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits"
+        }
+        return templates[self.release].format(**self.__data__)
+
+    
+    class Meta:
+        indexes = (
+            (
+                (
+                    "release",
+                    "apred",
+                    "apstar",
+                    "obj",
+                    "telescope",
+                    "healpix",
+                    "field",
+                    "prefix",
+                ),
+                True,
+            ),
+        )
+
+
+    
 class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
 
-    """An APOGEE visit spectrum."""
+    """An APOGEE visit spectrum, stored in an apVisit data product."""
 
     # Won't appear in a header group because it is first referenced in `Source`.
     sdss_id = ForeignKeyField(
@@ -92,6 +175,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         transform=lambda x: x[::-1, ::-1],
     )
     
+    # TODO: Should the sdss4_dr17_apogee_id go into `Source` only?
     #> APOGEE Identifiers
     apvisit_pk = BigIntegerField(null=True)
     sdss4_dr17_apogee_id = TextField(null=True)
@@ -154,7 +238,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
             "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/{prefix}Visit-{apred}-{plate}-{mjd}-{fiber:0>3}.fits"
         }
         return templates[self.release].format(**self.__data__)
-    
+
     
     class Meta:
         indexes = (
