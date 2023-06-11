@@ -1093,6 +1093,8 @@ def read_file_with_name_and_data(path, input_names, n_data_columns=None, dtype=f
 def read_input_parameter_file(pwd, control_kwds):
     return read_file_with_name_and_data(os.path.join(pwd, control_kwds["PFILE"]), None)
 
+def read_input_data_file(path):
+    return np.atleast_2d(np.loadtxt(path))
 
 
 

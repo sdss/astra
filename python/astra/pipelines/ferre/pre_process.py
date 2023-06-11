@@ -198,11 +198,11 @@ def pre_process_ferre(
         if np.any(non_finite_flux):
             log.warning(f"Non-finite fluxes found. Setting them to zero and setting flux error to {LARGE:.1e}")
 
-        non_finite_e_flux = ~np.isfinite(batch_e_flux)
-        batch_e_flux[~non_finite_e_flux] = LARGE
-        if np.any(non_finite_e_flux):
-            log.warning(f"Non-finite flux errors found. Setting them to {LARGE:.1e}")
-
+        finite_e_flux = np.isfinite(batch_e_flux)
+        batch_e_flux[~finite_e_flux] = LARGE
+        if not np.any(finite_e_flux):
+            log.warning(f"ALL flux errors are non-finite!")
+            
         # Write data arrays.
         savetxt_kwds = dict(fmt="%.4e")#footer="\n")
         np.savetxt(flux_path, batch_flux, **savetxt_kwds)
@@ -225,7 +225,7 @@ def inflate_errors_at_bad_pixels(
 ):
 
     # Inflate errors around skylines,
-    skyline_mask = (bitfield & pixel_mask.get_value("SIG_SKYLINE")) > 0
+    skyline_mask = (bitfield & 4096) > 0 # significant skyline
     e_flux[skyline_mask] *= skyline_sigma_multiplier
 
     # Sometimes FERRE will run forever.
@@ -259,7 +259,7 @@ def inflate_errors_at_bad_pixels(
             | ~np.isfinite(e_flux)
             | (flux < 0)
             | (e_flux < 0)
-            | ((bitfield & pixel_mask.get_level_value(1)) > 0)
+            | ((bitfield & 16639) > 0) # any bad value (level = 1)
         )
 
         flux[bad] = bad_pixel_flux_value

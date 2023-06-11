@@ -2,6 +2,7 @@ import os
 import re
 import numpy as np
 import warnings
+from subprocess import Popen
 from glob import glob
 from subprocess import check_output
 from time import sleep, time
@@ -137,12 +138,19 @@ class SlurmTask:
 
 class SlurmJob:
 
-    def __init__(self, tasks, job_name, account, partition, time, node_index=None):
+    def __init__(self, tasks, job_name, account, partition=None, time="24:00:00", ntasks=None, node_index=None):
         self.account = account
-        self.partition = partition
+        self.partition = partition or account
         self.time = time
         self.job_name = job_name
         self.tasks = tasks
+        if ntasks is None and account is not None:
+            ntasks = {
+                "sdss-kp": 16,
+                "sdss-np": 64
+            }.get(account.lower(), 16)
+                
+        self.ntasks = ntasks
         self.node_index = node_index
         for j, task in enumerate(self.tasks, start=1):
             task.set_meta(self.directory, self.node_index or 1, j)
@@ -165,7 +173,7 @@ class SlurmJob:
             f"#SBATCH --account={self.account}",
             f"#SBATCH --partition={self.partition}",
             f"#SBATCH --nodes=1",
-            f"#SBATCH --ntasks=64",
+            f"#SBATCH --ntasks={self.ntasks}",
             f"#SBATCH --time={self.time}",
             f"#SBATCH --job-name={self.job_name}{node_index_suffix}",
             f"# ------------------------------------------------------------------------------",
@@ -502,16 +510,25 @@ class FerreOperator:
 
 
         # Submit the slurm jobs.
+        use_slurm = self.slurm_kwds.get("account", None)
+        if use_slurm is None:
+            log.warning(f"Not using Slurm job submission system because no `account` given in `slurm_kwds`!")
+            log.warning(f"Waiting 5 seconds before starting,...")
+            sleep(5)
+
         log.info(f"Submitting jobs")
         job_ids = {}
-        for slurm_job in slurm_jobs:
+        for i, slurm_job in enumerate(slurm_jobs):
             slurm_path = slurm_job.write()
-            output = check_output(["sbatch", slurm_path]).decode("ascii")
-            job_id = int(output.split()[3])
-            job_ids[job_id] = slurm_path
-            log.info(f"Slurm job {job_id} for {slurm_path}")
+            if use_slurm:
+                output = check_output(["sbatch", slurm_path]).decode("ascii")
+                job_id = int(output.split()[3])
+                job_ids[job_id] = slurm_path
+                log.info(f"Slurm job {job_id} for {slurm_path}")
+            else:
+                job_ids[i] = Popen(["sh", slurm_path])
+                log.info(f"Started job {i} at {slurm_path}")
 
-            
         # Check progress.
         log.info(f"Monitoring progress..")
 
