@@ -54,16 +54,10 @@ def get_database_and_schema(config):
         "    path: <PATH_TO_DATABASE>\n\n"
     )
 
-    if config.get("DEBUG", False) or os.getenv("ASTRA_DEBUG"):
-        log.warning("In DEBUG mode")
-        database_path_key = "debug_mode_database_path"
-        database_path = config.get(database_path_key, ":memory:")
+    if os.getenv("ASTRA_DATABASE_PATH"):
+        database_path = os.getenv("ASTRA_DATABASE_PATH")
         log.info(f"Setting database path to {database_path}.")
-        log.info(f"You can change this using the `debug_mode_database_path` key in the Astra config file.")
-        log.info(f"These are the locations where Astra looks for a config file:\n")
-        for path in get_config_paths():
-            log.info(f"  - {path}")
-
+        log.info(f"You can change this using the `ASTRA_DATABASE_PATH` environment variable.")
         database = SqliteExtDatabase(database_path, **sqlite_kwargs)
         return (database, None)
         

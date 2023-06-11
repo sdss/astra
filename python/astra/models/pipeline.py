@@ -58,7 +58,7 @@ class PipelineOutputMixin:
         q = (
             spectrum_model
             .select(*tuple(fields.values()))
-            .join(Source)
+            .join(Source, on=(Source.sdss_id == spectrum_model.sdss_id))
             .switch(spectrum_model)
             .join(
                 cls, 
@@ -110,7 +110,7 @@ class PipelineOutputMixin:
         hdu.header.insert("CHECKSUM", (" ", "DATA INTEGRITY"))
         hdu.add_checksum()
 
-        raise NotImplementedError
+        return hdu
 
 
 
@@ -134,7 +134,7 @@ def add_category_headers(hdu, models, original_names, upper):
 def fits_column_kwargs(field, values, upper, warn_comment_length=47, warn_total_length=65):
     mappings = {
         # Require at least one character for text fields
-        TextField: lambda v: dict(format="A{}".format(max(1, max(len(_) for _ in v)))),
+        TextField: lambda v: dict(format="A{}".format(max(1, max(len(_) for _ in v)) if len(v) > 0 else 1)),
         BooleanField: lambda v: dict(format="L"),
         IntegerField: lambda v: dict(format="J"),
         FloatField: lambda v: dict(format="E"), # single precision

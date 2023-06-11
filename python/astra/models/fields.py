@@ -102,29 +102,6 @@ class PixelArrayAccessorFITS(BasePixelArrayAccessor):
         return self.field
     
 
-class PixelArrayAccessorHDF(BasePixelArrayAccessor):
-
-    def __get__(self, instance, instance_type=None):
-        if instance is not None:
-            try:
-                return instance.__pixel_data__[self.name]
-            except AttributeError:
-                # Load them all.
-                instance.__pixel_data__ = {}
-                import h5py
-                with h5py.File(instance.path, "r") as fp:
-                    for name, accessor in instance._meta.pixel_fields.items():
-                        value = fp[accessor.column_name][instance.row_index]
-                        if accessor.transform is not None:
-                            value = accessor.transform(value)
-                        
-                        instance.__pixel_data__.setdefault(name, value)
-                
-                return instance.__pixel_data__[self.name]
-
-        return self.field
-    
-
 
 class PixelArray(VirtualField):
 

@@ -18,6 +18,11 @@ from astra.models.base import BaseModel
 from astra.models.spectrum import (Spectrum, SpectrumMixin)
 from astra.models.source import Source
 
+def _transform_err_to_ivar(err):
+    ivar = np.atleast_2d(err)[0]**-2
+    ivar[~np.isfinite(ivar)] = 0
+    return ivar
+
 class ApogeeStarStackedSpectrum(BaseModel, SpectrumMixin):
 
     """An APOGEE stacked spectrum, stored in an apStar data product."""
@@ -53,14 +58,16 @@ class ApogeeStarStackedSpectrum(BaseModel, SpectrumMixin):
     field = TextField(null=True) # not used in SDSS-V
     prefix = TextField(null=True) # not used in SDSS-V
 
+
+    # TODO: put this somewhere else?
     _transform = lambda x: np.atleast_2d(x)[0]
     flux = PixelArray(
         ext=1,
         transform=_transform
     )
-    e_flux = PixelArray(
+    ivar = PixelArray(
         ext=2,
-        transform=_transform
+        transform=_transform_err_to_ivar
     )
     pixel_flags = PixelArray(
         ext=3,
@@ -175,10 +182,8 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         transform=lambda x: x[::-1, ::-1],
     )
     
-    # TODO: Should the sdss4_dr17_apogee_id go into `Source` only?
-    #> APOGEE Identifiers
+    #> Database Identifiers
     apvisit_pk = BigIntegerField(null=True)
-    sdss4_dr17_apogee_id = TextField(null=True)
 
     #> Observing Conditions
     date_obs = DateTimeField(null=True)

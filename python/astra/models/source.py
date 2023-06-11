@@ -4,11 +4,13 @@ from peewee import (
     IntegerField,
     FloatField,
     TextField,
+    ForeignKeyField,
     BigBitField,
     BigIntegerField,
     PostgresqlDatabase,
     SmallIntegerField,
     DateTimeField,
+    BooleanField,
     fn,
 )
 from playhouse.hybrid import hybrid_method
@@ -17,21 +19,28 @@ from astra.models.fields import BitField
 from astra.models.spectrum import Spectrum
 
 
+
 class Source(BaseModel):
 
     """ An astronomical source. """
 
     #> Identifiers
-    sdss_id = AutoField()
+    sdss_id = BigIntegerField(primary_key=True)
     healpix = IntegerField(null=True)
-    gaia_dr3_source_id = BigIntegerField(null=True)
-    tic_v8_id = BigIntegerField(null=True)
-    sdss4_dr17_apogee_id = TextField(null=True)
+    gaia_dr2_source_id = BigIntegerField(null=True)#, unique=True) # These should be unique, but I don't trust that sdss_id is done right yet
+    gaia_dr3_source_id = BigIntegerField(null=True)#, unique=True)
     sdss4_dr17_field = TextField(null=True)
+    sdss4_dr17_apogee_id = TextField(null=True)
+    tic_v8_id = BigIntegerField(null=True)#, unique=True)
+
+    #> Targeting provenance 
+    sdss5_catalogid_v1 = BigIntegerField(null=True)
+    version_id = IntegerField(null=True)
+    lead = TextField(null=True)
 
     #> Astrometry
-    ra = FloatField()
-    dec = FloatField()
+    ra = FloatField(null=True)
+    dec = FloatField(null=True)
     plx = FloatField(null=True)
     e_plx = FloatField(null=True)
     pmra = FloatField(null=True)
@@ -452,16 +461,7 @@ class Source(BaseModel):
 
 
 
+class SDSSCatalog(BaseModel):
 
-class Carton(BaseModel):
-
-    """A carton to which sources are assigned."""
-    
-    pk = AutoField()
-    mapper_pk = SmallIntegerField()
-    category_pk = SmallIntegerField()
-    version_pk = SmallIntegerField()
-
-    carton = TextField()
-    program = TextField()
-    run_on = DateTimeField(null=True)
+    catalogid = BigIntegerField(primary_key=True)
+    sdss_id = ForeignKeyField(Source, backref="catalogids")
