@@ -60,9 +60,6 @@ def coarse_stellar_parameters(
 
     # Execute ferre.
     FerreOperator(f"{parent_dir}/{STAGE}/", **(operator_kwds or {})).execute()
-
-    #for path in get_input_nml_paths(parent_dir):
-    #    execute_ferre(path)
     
     yield from post_coarse_stellar_parameters(parent_dir, **kwargs)
 
@@ -114,7 +111,7 @@ def pre_coarse_stellar_parameters(
     # Create database entries for those with no initial guess.
     for spectrum in spectra_with_no_initial_guess:
         yield FerreCoarse(
-            sdss_id=spectrum.sdss_id,
+            source_id=spectrum.source_id,
             spectrum_id=spectrum.spectrum_id,
             flag_no_suitable_initial_guess=True,
         )
@@ -144,17 +141,21 @@ def penalize_coarse_stellar_parameter_result(result: FerreCoarse):
     """
 
     # Penalize GK-esque things at cool temperatures.
-    result.ferre_log_penalized_chisq = 0 + result.ferre_log_chisq
+    result.ferre_penalized_log_chi_sq = 0 + result.ferre_log_chi_sq
     if result.teff < 3900 and "GK_200921" in result.header_path:
-        result.ferre_log_penalized_chisq += np.log10(10)
+        result.ferre_penalized_log_chi_sq += np.log10(10)
     
-    # TODO: check if this should be for warn or bad.
     if result.flag_logg_grid_edge_warn:
-        result.ferre_log_penalized_chisq += np.log10(5)
+        result.ferre_penalized_log_chi_sq += np.log10(5)
 
     if result.flag_teff_grid_edge_warn:
-        result.ferre_log_penalized_chisq += np.log10(5)
-    
+        result.ferre_penalized_log_chi_sq += np.log10(5)
+
+    if result.flag_logg_grid_edge_bad:
+        result.ferre_penalized_log_chi_sq += np.log10(5)
+
+    if result.flag_teff_grid_edge_bad:
+        result.ferre_penalized_log_chi_sq += np.log10(5)
     return None
 
         
@@ -178,45 +179,103 @@ def plan_coarse_stellar_parameters(
         headers, *segment_headers = read_ferre_headers(expand_path(header_path))
         all_headers[header_path] = headers
 
-    all_kwds = []
-    all_spectrum_ids_with_at_least_one_initial_guess = []
+    unique_grid_centers = np.unique(
+        [np.mean(np.vstack([h["LLIMITS"], h["ULIMITS"]]), axis=0)[-2:] for hp, h in all_headers.items()],
+        axis=0
+    )
 
+    all_kwds = []
+    spectrum_ids_with_at_least_one_initial_guess = set()
     for spectrum, input_initial_guess in initial_guess_callable(spectra):
 
-        for header_path, meta, headers in yield_suitable_grids(all_headers, **input_initial_guess):
-            all_spectrum_ids_with_at_least_one_initial_guess.append(spectrum.spectrum_id)
+        n_initial_guesses = 0
+        for strict in (True, False):
+            for header_path, meta, headers in yield_suitable_grids(all_headers, strict=strict, **input_initial_guess):
+                spectrum_ids_with_at_least_one_initial_guess.add(spectrum.spectrum_id)
 
-            initial_guess = clip_initial_guess(input_initial_guess, headers)
+                initial_guess = clip_initial_guess(input_initial_guess, headers)
 
-            frozen_parameters = dict()
-            if meta["spectral_type"] != "BA":
-                frozen_parameters.update(c_m=True, n_m=True)
-                if meta["gd"] == "d" and meta["spectral_type"] == "F":
-                    frozen_parameters.update(alpha_m=True)
+                frozen_parameters = dict()
+                if meta["spectral_type"] != "BA":
+                    frozen_parameters.update(c_m=True, n_m=True)
+                    if meta["gd"] == "d" and meta["spectral_type"] == "F":
+                        frozen_parameters.update(alpha_m=True)
 
-            kwds = dict(
-                spectra=spectrum,
-                header_path=header_path,
-                frozen_parameters=frozen_parameters,
-                initial_teff=initial_guess["teff"],
-                initial_logg=initial_guess["logg"], 
-                initial_log10_v_sini=initial_guess["log10_v_sini"],
-                initial_log10_v_micro=initial_guess["log10_v_micro"],
-                initial_m_h=initial_guess["m_h"],
-                initial_alpha_m=initial_guess["alpha_m"],
-                initial_c_m=initial_guess["c_m"],
-                initial_n_m=initial_guess["n_m"],
-                initial_flags=initial_guess.get("initial_flags", 0),
-                weight_path=weight_path,
-            )
+                kwds = dict(
+                    spectra=spectrum,
+                    header_path=header_path,
+                    frozen_parameters=frozen_parameters,
+                    initial_teff=initial_guess["teff"],
+                    initial_logg=initial_guess["logg"], 
+                    initial_log10_v_sini=initial_guess["log10_v_sini"],
+                    initial_log10_v_micro=initial_guess["log10_v_micro"],
+                    initial_m_h=initial_guess["m_h"],
+                    initial_alpha_m=initial_guess["alpha_m"],
+                    initial_c_m=initial_guess["c_m"],
+                    initial_n_m=initial_guess["n_m"],
+                    initial_flags=initial_guess.get("initial_flags", 0),
+                    weight_path=weight_path,
+                )
 
-            all_kwds.append(kwds)
+                all_kwds.append(kwds)
+                n_initial_guesses += 1
+            
+            if n_initial_guesses > 0:
+                break
+        
+        else:
+            # No suitable initial guess has been found.
+            # Send it to all grids, at the grid centers.
+            initial_flags = FerreCoarse(flag_initial_guess_at_grid_center=True).initial_flags 
+            assert initial_flags > 0, "Have the initial flag definitions changed for `astra.models.aspcap.FerreCoarse`?"
 
-    # Anything that has no initial guess?
+            log.warning(f"No suitable initial guess found for {spectrum} (from inputs {input_initial_guess}). Starting at all grid centers.")
+            for logg, teff in unique_grid_centers:
+                centered_initial_guess = input_initial_guess.copy()
+                centered_initial_guess.update(teff=teff, logg=logg)
+
+                for header_path, meta, headers in yield_suitable_grids(all_headers, strict=True, **centered_initial_guess):
+                    spectrum_ids_with_at_least_one_initial_guess.add(spectrum.spectrum_id)                    
+                    initial_guess = clip_initial_guess(centered_initial_guess, headers)
+
+                    frozen_parameters = dict()
+                    if meta["spectral_type"] != "BA":
+                        frozen_parameters.update(c_m=True, n_m=True)
+                        if meta["gd"] == "d" and meta["spectral_type"] == "F":
+                            frozen_parameters.update(alpha_m=True)
+
+                    kwds = dict(
+                        spectra=spectrum,
+                        header_path=header_path,
+                        frozen_parameters=frozen_parameters,
+                        initial_teff=initial_guess["teff"],
+                        initial_logg=initial_guess["logg"], 
+                        initial_log10_v_sini=initial_guess["log10_v_sini"],
+                        initial_log10_v_micro=initial_guess["log10_v_micro"],
+                        initial_m_h=initial_guess["m_h"],
+                        initial_alpha_m=initial_guess["alpha_m"],
+                        initial_c_m=initial_guess["c_m"],
+                        initial_n_m=initial_guess["n_m"],
+                        initial_flags=initial_flags,
+                        weight_path=weight_path,
+                    )
+
+                    all_kwds.append(kwds)
+    
+    # Anything that has no suitable initial guess?
     spectra_with_no_initial_guess = [
         s for s in spectra \
-            if s.spectrum_id not in all_spectrum_ids_with_at_least_one_initial_guess
+            if s.spectrum_id not in spectrum_ids_with_at_least_one_initial_guess
     ]
+    if spectra_with_no_initial_guess:
+        log.warning(
+            f"There were {len(spectra_with_no_initial_guess)} that were not dispatched to *any* FERRE grid. "
+            f"This can only happen if the `initial_guess_callable` function sent back a dictionary "
+            f"with no valid `telescope` keyword, or no valid `mean_fiber` keyword. Please check the"
+            f" initial guess function. The unmatched spectra are:"
+        )
+        for s in spectra_with_no_initial_guess:
+            log.warning(f"\s{s} ({s.path})")
 
     # Bundle them together into executables based on common header paths.
     header_paths = list(set([ea["header_path"] for ea in all_kwds]))
@@ -225,7 +284,6 @@ def plan_coarse_stellar_parameters(
     grouped_task_kwds = { header_path: [] for header_path in header_paths }
     for kwds in all_kwds:
         grouped_task_kwds[kwds.pop("header_path")].append(kwds)
-
 
     return_list_of_kwds = []
     for header_path, kwds in grouped_task_kwds.items():
@@ -242,8 +300,8 @@ def plan_coarse_stellar_parameters(
             weight_path=weight_path,
             # Frozen parameters are common to the header path, so just set as the first value.
             frozen_parameters=grouped_task_kwds[header_path]["frozen_parameters"][0],
-            **kwargs
         )
+        grouped_task_kwds[header_path].update(kwargs)
         return_list_of_kwds.append(grouped_task_kwds[header_path])
 
     return (return_list_of_kwds, spectra_with_no_initial_guess)

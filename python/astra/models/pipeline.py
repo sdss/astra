@@ -55,10 +55,11 @@ class PipelineOutputMixin:
         # Do left outer joins on spectrum_model so that we get every spectrum even if there
         # isn't a corresponding pipeline result.
         # If the user wants something different, they can use the `where` clause.
+
         q = (
             spectrum_model
             .select(*tuple(fields.values()))
-            .join(Source, on=(Source.sdss_id == spectrum_model.sdss_id))
+            .join(Source, on=(Source.id == spectrum_model.source_id))
             .switch(spectrum_model)
             .join(
                 cls, 

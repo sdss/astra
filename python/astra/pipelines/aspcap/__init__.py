@@ -2,7 +2,7 @@ from astra import task
 from astra.utils import log
 from astra.models.spectrum import Spectrum
 from astra.pipelines.aspcap.coarse import coarse_stellar_parameters
-from astra.pipelines.aspcap.stellar_parameters import stellar_parameters
+from astra.pipelines.aspcap.stellar_parameters import stellar_parameters, FerreStellarParameters
 from astra.pipelines.aspcap.abundances import abundances
 
 from typing import Optional, Iterable, List, Tuple, Callable, Union
@@ -58,7 +58,6 @@ def aspcap(
     """
 
     # Set up the tasks first, but they won't be executed until we start iterating over those task generators.
-
     coarse = coarse_stellar_parameters(
         spectra,
         parent_dir=parent_dir,
@@ -86,8 +85,8 @@ def aspcap(
     )
     
     log.info(f"Running ASPCAP coarse stage")
-    coarse_results = list(coarse)
-        
+    coarse = list(coarse)
+
     log.info(f"Running ASPCAP stellar parameter stage")
     param_results = list(param)
     

@@ -18,17 +18,19 @@ from astra.models.base import BaseModel
 from astra.models.spectrum import (Spectrum, SpectrumMixin)
 from astra.models.source import Source
 
-def _transform_err_to_ivar(err):
+def _transform_err_to_ivar(err, *args, **kwargs):
     ivar = np.atleast_2d(err)[0]**-2
     ivar[~np.isfinite(ivar)] = 0
     return ivar
 
-class ApogeeStarStackedSpectrum(BaseModel, SpectrumMixin):
+class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
 
-    """An APOGEE stacked spectrum, stored in an apStar data product."""
+    """
+    A co-added (stacked) APOGEE spectrum of a star, which is stored in an `apStar` data product.
+    """
 
     # Won't appear in a header group because it is first referenced in `Source`.
-    sdss_id = ForeignKeyField(
+    source_id = ForeignKeyField(
         Source, 
         # We want to allow for spectra to be unassociated with a source so that 
         # we can test with fake spectra, etc, but any pipeline should run their
@@ -36,7 +38,7 @@ class ApogeeStarStackedSpectrum(BaseModel, SpectrumMixin):
         null=True, 
         index=True,
         lazy_load=False,
-        backref="apogee_star_stacked",
+        backref="apogee_coadded_spectra_in_apstar",
     )
 
     #> Spectrum Identifier
@@ -47,6 +49,7 @@ class ApogeeStarStackedSpectrum(BaseModel, SpectrumMixin):
         primary_key=True,
         default=Spectrum.create
     )
+
 
     #> Data Product Keywords
     release = TextField()
@@ -60,7 +63,7 @@ class ApogeeStarStackedSpectrum(BaseModel, SpectrumMixin):
 
 
     # TODO: put this somewhere else?
-    _transform = lambda x: np.atleast_2d(x)[0]
+    _transform = lambda x, *_: np.atleast_2d(x)[0]
     flux = PixelArray(
         ext=1,
         transform=_transform
@@ -85,6 +88,8 @@ class ApogeeStarStackedSpectrum(BaseModel, SpectrumMixin):
             "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/@healpixgrp|/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
             "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits"
         }
+        if self.release == "sdss5":
+            raise NotImplementedError(f"Andy fix healpixgrp")
         return templates[self.release].format(**self.__data__)
 
     
@@ -106,13 +111,122 @@ class ApogeeStarStackedSpectrum(BaseModel, SpectrumMixin):
         )
 
 
+def transform(v, image, instance):
+    # Accessor class for the PixelArrays
+    v = np.atleast_2d(v)
+
+    # find the corresponding row
+    expected_path = f"{instance.prefix}Visit-{instance.apred}-{instance.plate}-{instance.mjd}-{instance.fiber:0>3.0f}.fits"
+    N, P = v.shape
+    for i in range(1, 1 + N):
+        try:
+            if (image[0].header[f"SFILE{i}"] == expected_path):
+                break
+        except:
+            None
+    else:
+        raise ValueError(f"Cannot find {expected_path} in {image}")
+    
+    i -= 1
+    # offset for stacks
+    if N > 2:
+        i += 2
+    return v[i]
+    
+
+class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
+
+    """An APOGEE stacked spectrum, stored in an apStar data product."""
+
+    # Won't appear in a header group because it is first referenced in `Source`.
+    source_id = ForeignKeyField(
+        Source, 
+        # We want to allow for spectra to be unassociated with a source so that 
+        # we can test with fake spectra, etc, but any pipeline should run their
+        # own checks to make sure that spectra and sources are linked.
+        null=True, 
+        index=True,
+        lazy_load=False,
+        backref="apogee_visit_spectra_in_apstar",
+    )
+
+    #> Spectrum Identifier
+    spectrum_id = ForeignKeyField(
+        Spectrum,
+        index=True,
+        lazy_load=False,
+        primary_key=True,
+        default=Spectrum.create
+    )
+
+    #> Data Product Keywords
+    release = TextField()
+    apred = TextField()
+    apstar = TextField()
+    obj = TextField()
+    telescope = TextField()
+    healpix = IntegerField(null=True) # only used in SDSS5
+    field = TextField(null=True) # not used in SDSS-V
+    prefix = TextField(null=True) # not used in SDSS-V
+    plate = TextField()
+    mjd = IntegerField()
+    fiber = IntegerField()
+
+    @property
+    def wavelength(self):
+        # TODO: Do I need to store this as a PixelArray?
+        return 10**(4.179 + 6e-6 * np.arange(8575))
+
+    @property
+    def path(self):
+        templates = {
+            "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/@healpixgrp|/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
+            "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits"
+        }
+        return templates[self.release].format(**self.__data__)
+
+
+    # TODO: put this somewhere else?
+    flux = PixelArray(
+        ext=1,
+        transform=transform
+    )
+    e_flux = PixelArray(
+        ext=2,
+        transform=transform
+    )
+    pixel_flags = PixelArray(
+        ext=3,
+        transform=transform
+    )
+
+    class Meta:
+        indexes = (
+            (
+                (
+                    "release",
+                    "apred",
+                    "apstar",
+                    "obj",
+                    "telescope",
+                    "healpix",
+                    "field",
+                    "prefix",
+                    "plate",
+                    "mjd",
+                    "fiber"
+                ),
+                True,
+            ),
+        )
+
     
 class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
 
     """An APOGEE visit spectrum, stored in an apVisit data product."""
 
     # Won't appear in a header group because it is first referenced in `Source`.
-    sdss_id = ForeignKeyField(
+    source_id = ForeignKeyField(
         Source, 
         # We want to allow for spectra to be unassociated with a source so that 
         # we can test with fake spectra, etc, but any pipeline should run their
@@ -145,7 +259,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     
     # Note that this explicitly breaks one of the 'Lessons learned from IPL-2'!
 
-    #> Spectrum Identifier
+    #> Spectrum Identifiers
     spectrum_id = ForeignKeyField(
         Spectrum,
         index=True,
@@ -153,38 +267,40 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         primary_key=True,
         default=Spectrum.create
     )
+    input_catalogid = BigIntegerField(null=True)
 
     #> Data Product Keywords
     release = TextField()
     apred = TextField()
-    plate = IntegerField()
+    plate = TextField() # most are integers, but not all!
     telescope = TextField()
     fiber = IntegerField()
     mjd = IntegerField()
     field = TextField()
     prefix = TextField()
+    reduction = TextField(default="") # only used for DR17 apo1m spectra
+    # Note that above I use `default=''` instead of `null=True` because SQLite
+    # seems to have some weird bug with using `null=True` on a key field. It
+    # meant that `reduction` was being set to null even when I gave it values.
 
     # Pixel arrays
     wavelength = PixelArray(
         ext=4, 
-        transform=lambda x: x[::-1, ::-1],
+        transform=lambda x, *_: x[::-1, ::-1],
     )
     flux = PixelArray(
         ext=1,
-        transform=lambda x: x[::-1, ::-1],
+        transform=lambda x, *_: x[::-1, ::-1],
     )
-    e_flux = PixelArray(
+    ivar = PixelArray(
         ext=2,
-        transform=lambda x: x[::-1, ::-1],
+        transform=lambda x, *_: x[::-1, ::-1]**-2,
     )
     pixel_flags = PixelArray(
         ext=3,
-        transform=lambda x: x[::-1, ::-1],
+        transform=lambda x, *_: x[::-1, ::-1],
     )
     
-    #> Database Identifiers
-    apvisit_pk = BigIntegerField(null=True)
-
     #> Observing Conditions
     date_obs = DateTimeField(null=True)
     jd = FloatField(null=True)
@@ -192,6 +308,8 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     dithered = BooleanField(null=True)
     
     #> Telescope Pointing
+    input_ra = FloatField(null=True)
+    input_dec = FloatField(null=True)
     n_frames = IntegerField(null=True)
     assigned = IntegerField(null=True)
     on_target = IntegerField(null=True)
@@ -220,6 +338,33 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     flag_multiple_suspect = spectrum_flags.flag(2**15, help_text="Suspect multiple components from Gaussian decomposition of cross-correlation.")
     flag_rv_failure = spectrum_flags.flag(2**16, help_text="RV failure.")
 
+    #> Radial Velocity (Doppler)
+    v_rad = FloatField(null=True)
+    v_rel = FloatField(null=True)
+    e_v_rel = FloatField(null=True)
+    bc = FloatField(null=True)
+    doppler_rchisq = FloatField(null=True)
+    
+    doppler_teff = FloatField(null=True)
+    doppler_e_teff = FloatField(null=True)
+    doppler_logg = FloatField(null=True)
+    doppler_e_logg = FloatField(null=True)
+    doppler_fe_h = FloatField(null=True)
+    doppler_e_fe_h = FloatField(null=True)
+    doppler_flags = BitField(default=0)
+
+    #> Radial Velocity (X-Correlation)
+    xcorr_v_rad = FloatField(null=True)
+    xcorr_v_rel = FloatField(null=True)
+    xcorr_e_v_rel = FloatField(null=True)
+    ccfwhm = FloatField(null=True)
+    autofwhm = FloatField(null=True)
+    n_components = IntegerField(null=True)
+
+    #> Database Identifiers
+    visit_pk = BigIntegerField(null=True, unique=True)
+    rv_visit_pk = BigIntegerField(null=True, unique=True)
+    
 
     @hybrid_property
     def flag_bad(self):
@@ -238,11 +383,15 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
 
     @property
     def path(self):
-        templates = {
-            "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/apVisit-{apred}-{telescope}-{plate}-{mjd}-{fiber:0>3}.fits",
-            "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/{prefix}Visit-{apred}-{plate}-{mjd}-{fiber:0>3}.fits"
-        }
-        return templates[self.release].format(**self.__data__)
+        if self.release == "sdss5":
+            template = "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/apVisit-{apred}-{telescope}-{plate}-{mjd}-{fiber:0>3}.fits"
+        else:
+            if self.telescope == "apo1m":
+                template = "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{mjd}/apVisit-{apred}-{mjd}-{reduction}.fits"
+            else:
+                template = "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/{prefix}Visit-{apred}-{plate}-{mjd}-{fiber:0>3}.fits"
+        
+        return template.format(**self.__data__)
 
     
     class Meta:
@@ -257,6 +406,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
                     "field",
                     "fiber",
                     "prefix",
+                    "reduction",
                 ),
                 True,
             ),

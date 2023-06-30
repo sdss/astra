@@ -25,14 +25,15 @@ class Source(BaseModel):
     """ An astronomical source. """
 
     #> Identifiers
-    sdss_id = BigIntegerField(primary_key=True)
+    id = AutoField(primary_key=True)
+    sdss_id = BigIntegerField(index=True, null=True)#primary_key=True)
     healpix = IntegerField(null=True)
-    gaia_dr2_source_id = BigIntegerField(null=True)#, unique=True) # These should be unique, but I don't trust that sdss_id is done right yet
-    gaia_dr3_source_id = BigIntegerField(null=True)#, unique=True)
-    sdss4_dr17_field = TextField(null=True)
-    sdss4_dr17_apogee_id = TextField(null=True)
-    tic_v8_id = BigIntegerField(null=True)#, unique=True)
-
+    # The following identifiers should be unique, but I'm not convinced it's implemented properly yet.
+    gaia_dr2_source_id = BigIntegerField(null=True)
+    gaia_dr3_source_id = BigIntegerField(null=True)
+    sdss4_dr17_apogee_id = TextField(index=True, null=True, unique=True)
+    tic_v8_id = BigIntegerField(null=True)
+    
     #> Targeting provenance 
     sdss5_catalogid_v1 = BigIntegerField(null=True)
     version_id = IntegerField(null=True)
@@ -91,10 +92,10 @@ class Source(BaseModel):
     w2_dflux =  FloatField(null=True)
     w1_frac = FloatField(null=True)
     w2_frac = FloatField(null=True)
-    w1uflags = BitField(default=0)
-    w2uflags = BitField(default=0)
-    w1aflags = BitField(default=0)
-    w2aflags = BitField(default=0)
+    w1uflags = BitField(default=0, null=True)
+    w2uflags = BitField(default=0, null=True)
+    w1aflags = BitField(default=0, null=True)
+    w2aflags = BitField(default=0, null=True)
     
     flag_unwise_w1_in_core_or_wings = w1uflags.flag(2**0, "In core or wings")
     flag_unwise_w1_in_diffraction_spike = w1uflags.flag(2**1, "In diffraction spike")
@@ -132,7 +133,7 @@ class Source(BaseModel):
     flag_unwise_w2_no_aggressive_deblend = w2aflags.flag(2**6, "Sources in this pixel will not be aggressively deblended")
     flag_unwise_w2_candidate_sources_must_be_sharp = w2aflags.flag(2**7, "Candidate sources in this pixel must be \"sharp\" to be optimized")
 
-    # GLIMPSE
+    # ALLGLIMPSE
     mag4_5 = FloatField(null=True)
     d4_5m = FloatField(null=True)
     rms_f4_5 = FloatField(null=True)
@@ -160,6 +161,22 @@ class Source(BaseModel):
     flag_glimpse_post_lumping_in_cross_band_merge = sqf_4_5.flag(2**21, "Post-lumping in cross-band merge")
     flag_glimpse_edge_of_frame = sqf_4_5.flag(2**29, "Edge of frame (within 3 pixels of edge)")
     flag_glimpse_truth_list = sqf_4_5.flag(2**30, "Truth list (for simulated data)")
+
+    #> Gaia XP Stellar Parameters (Zhang, Green & Rix 2023)
+    zgr_teff = FloatField(null=True)
+    zgr_e_teff = FloatField(null=True)
+    zgr_logg = FloatField(null=True)
+    zgr_e_logg = FloatField(null=True)
+    zgr_fe_h = FloatField(null=True)
+    zgr_e_fe_h = FloatField(null=True)
+    zgr_e = FloatField(null=True)
+    zgr_e_e = FloatField(null=True)
+    zgr_plx = FloatField(null=True)
+    zgr_e_plx = FloatField(null=True)
+    zgr_teff_confidence = FloatField(null=True)
+    zgr_logg_confidence = FloatField(null=True)
+    zgr_fe_h_confidence = FloatField(null=True)
+    zgr_quality_flags = BitField(default=0)
 
     #> Targeting
     carton_0 = TextField(default="")

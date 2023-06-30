@@ -44,6 +44,9 @@ def resample_apmadgics(spectrum, n_res):
     
     spectrum.flux = flux
     spectrum.ivar = e_flux**-2
+    bad = ~np.isfinite(spectrum.ivar)
+    spectrum.ivar[bad] = 0
+    
     return None
 
 

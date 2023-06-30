@@ -22,6 +22,20 @@ TRANSLATE_LABELS = {
     "n_m": "N",
 }
 
+def parse_control_kwds(input_nml_path):
+    with open(expand_path(input_nml_path), "r") as fp:
+        contents = fp.read()
+    matches = re.findall("(?P<key>[A-Z\(\)0-9]+)\s*=\s*['\"]?\s*(?P<value>.+)\s*['\"]?\s*$", contents, re.MULTILINE)
+    control_kwds = {}
+    for key, value in matches:
+        value = value.rstrip('"\'')
+        try:
+            value = int(value)
+        except:
+            None
+        finally:
+            control_kwds[key] = value
+    return control_kwds
 
 def execute_ferre(path, timeout=None):
         
@@ -118,11 +132,11 @@ def int_or_none(_):
         return None
 
 def parse_ferre_spectrum_name(name):
-    index, sdss_id, spectrum_id, initial_flags, upstream_id = map(int_or_none, name.split("_"))
+    index, source_id, spectrum_id, initial_flags, upstream_id = map(int_or_none, name.split("_"))
 
     return dict(
         index=index,
-        sdss_id=sdss_id,
+        source_id=source_id,
         spectrum_id=spectrum_id,
         initial_flags=initial_flags,
         upstream_id=upstream_id

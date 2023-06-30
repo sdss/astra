@@ -190,7 +190,14 @@ def task_id_parts(header_path):
 
 
 def yield_suitable_grids(
-    all_headers, mean_fiber, teff, logg, m_h, telescope, **kwargs
+    all_headers,
+    mean_fiber,
+    teff,
+    logg,
+    m_h,
+    telescope, 
+    strict=True,
+    **kwargs
 ):
     """
     Yield suitable FERRE grids given header information from an observation and a dictionary of grid limits.
@@ -218,8 +225,10 @@ def yield_suitable_grids(
     # Figure out which grids are suitable.
     lsf_grid = get_lsf_grid_name(int(np.round(mean_fiber)))
 
-    point = np.array([m_h, logg, teff])
+    #point = np.array([m_h, logg, teff])
+    point = np.array([logg, teff])
     P = point.size
+
 
     for header_path, headers in all_headers.items():
 
@@ -236,17 +245,13 @@ def yield_suitable_grids(
 
         # We will take the RV parameters as the initial parameters.
         # Check to see if they are within bounds of the grid.
-        try:
+        if strict:
             if np.all(point >= lower_limits[-P:]) and np.all(point <= upper_limits[-P:]):
                 yield (header_path, meta, headers)
-        except:
-            from astra.utils import log
-            log.exception(f"Exception when checking grid edges")
-            print(type(point), point)
-            print(type(lower_limits), lower_limits)
-            print(type(upper_limits), upper_limits)
-            print(P)
-            raise 
+        else:
+            # Only require temperature to be within the limits.
+            if (upper_limits[-1] >= teff >= lower_limits[-1]):
+                yield (header_path, meta, headers)
 
 
 def get_lsf_grid_name(fibre_number):

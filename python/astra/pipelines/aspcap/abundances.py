@@ -265,6 +265,8 @@ def plan_abundances(
                 # Only write the flux arrays to the parent folder on the first run of this header path
                 write_input_pixel_arrays=(i == 0)
             )
+            # Ignore additional keyword arguments?
+            log.warning(f"Ignoring additional keyword arguments at abundances stage.")
             kwds_list.append(kwds)
         
         spectra_with_no_stellar_parameters -= set(grid_kwds["spectra"])

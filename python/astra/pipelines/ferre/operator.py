@@ -8,26 +8,13 @@ from subprocess import check_output
 from time import sleep, time
 from tqdm import tqdm
 from astra.utils import log, expand_path, flatten
-from astra.pipelines.ferre.utils import wc, read_ferre_headers, format_ferre_input_parameters, execute_ferre
+from astra.pipelines.ferre.utils import parse_control_kwds, wc, read_ferre_headers, format_ferre_input_parameters, execute_ferre
 from shutil import copyfile
 from peewee import chunked
 
 DEFAULT_SLURM_KWDS = dict(account="sdss-np", partition="sdss-np", time="24:00:00")
 
-def parse_control_kwds(input_nml_path):
-    with open(expand_path(input_nml_path), "r") as fp:
-        contents = fp.read()
-    matches = re.findall("(?P<key>[A-Z\(\)0-9]+)\s*=\s*['\"]?\s*(?P<value>.+)\s*['\"]?\s*$", contents, re.MULTILINE)
-    control_kwds = {}
-    for key, value in matches:
-        value = value.rstrip('"\'')
-        try:
-            value = int(value)
-        except:
-            None
-        finally:
-            control_kwds[key] = value
-    return control_kwds
+
 
 
 def update_control_kwds(input_nml_path, key, value):
@@ -50,9 +37,9 @@ CORE_TIME_COEFFICIENTS = {
     'sdM': np.array([ 2.83218967,  0.76324445, -0.05566659])
 }
 
-def predict_ferre_core_time(grid, N, nov, conservatism=2):
+def predict_ferre_core_time(grid, N, nov, pre_factor=2):
     intercept, N_coef, nov_coef = CORE_TIME_COEFFICIENTS[grid]
-    return conservatism * 10**(N_coef * np.log10(N) + nov_coef * np.log10(nov) + intercept)
+    return pre_factor * 10**(N_coef * np.log10(N) + nov_coef * np.log10(nov) + intercept)
     
 
 
@@ -123,16 +110,18 @@ class SlurmTask:
         return None
 
     def write(self):
+        '''
         contents = []
         for command in self.commands:
             if isinstance(command, (list, tuple)):
                 command, pwd = command
                 contents.append(f"cd {pwd}")
             contents.append(f"{command} > stdout 2> stderr")
+        '''
 
         path = expand_path(f"{self.directory}/node{self.node_index:0>2.0f}_task{self.task_index:0>2.0f}.slurm")
         with open(path, "w") as fp:
-            fp.write("\n".join(contents))
+            fp.write("\n".join(self.commands))
         return path
     
 
@@ -241,20 +230,19 @@ def post_execution_interpolation(pwd, n_threads=128, f_access=1, epsilon=0.001):
 
 
 class FerreOperator:
-
-
     def __init__(
         self,
         stage_dir,
         input_nml_wildmask="*/input*.nml",
         job_name="ferre",
         slurm_kwds=None,
+        slurm_scratch_parent_dir=None,
         post_interpolate_model_flux=True,
-        overwrite=False,
+        overwrite=True,
         max_nodes=10,
         max_tasks_per_node=4,
         cpus_per_node=128,
-        refresh_interval=1,
+        refresh_interval=10,
         show_progress=True,
     ):
         """
@@ -262,6 +250,8 @@ class FerreOperator:
             The stage directory for this operator to execute within. For example, if the stage directory
             is `~/ferre/coarse`, then this operator will look for FERRE-executable folders following the
             mask `~/ferre/coarse/*/input.nml`
+
+
 
         :param post_interpolate_model_flux:
             Perform a second FERRE step to post-interpolate the model fluxes without any FERRE-applied continuum.
@@ -286,16 +276,25 @@ class FerreOperator:
         self.job_name = job_name
         self.stage_dir = stage_dir
         self.max_nodes = int(max_nodes)
-        if self.max_nodes <= 0:
-            raise NotImplementedError("must use slurm nodes for now")
         self.max_tasks_per_node = int(max_tasks_per_node)
         self.cpus_per_node = int(cpus_per_node)
         self.post_interpolate_model_flux = post_interpolate_model_flux
         self.overwrite = overwrite
         self.slurm_kwds = slurm_kwds or DEFAULT_SLURM_KWDS
+        if slurm_scratch_parent_dir is not None:
+            self.slurm_scratch_stage_dir = os.path.join(
+                slurm_scratch_parent_dir,
+                os.path.basename(stage_dir.rstrip("/"))
+            )
+        else:
+            self.slurm_scratch_stage_dir = None
+
         self.refresh_interval = refresh_interval
         self.show_progress = show_progress
         self.input_nml_wildmask = input_nml_wildmask
+        if self.max_nodes == 0 and self.slurm_scratch_parent_dir is not None:
+            log.warning(f"Ignoring `slurm_scratch_parent_dir` because we will not use Slurm (`max_nodes` is 0).")
+            self.slurm_scratch_parent_dir = None
         return None
 
 
@@ -312,6 +311,7 @@ class FerreOperator:
             self.input_nml_wildmask
             )
         )
+        nodes = self.max_nodes if self.max_nodes > 0 else 1
 
         is_input_list = lambda p: os.path.basename(p).lower() == "input_list.nml"
 
@@ -344,12 +344,12 @@ class FerreOperator:
                 partial_results, partial_result_paths = has_partial_results(pwd, control_kwds)
                 if partial_results:
                     if self.overwrite:
-                        log.info(f"Partial results exist in {pwd}. Moving existing result files:")
+                        log.warning(f"Partial results exist in {pwd}. Moving existing result files:")
                         for path in partial_result_paths:
                             os.rename(path, f"{path}.backup")
                             log.info(f"\t{path} -> {path}.backup")
                     else:
-                        log.info(f"Skipping over {pwd} because partial results exist in: {', '.join(partial_result_paths)}")
+                        log.warning(f"Skipping over {pwd} because partial results exist in: {', '.join(partial_result_paths)}")
                         continue
                 
                 N = wc(f"{pwd}/{control_kwds['PFILE']}")
@@ -363,7 +363,7 @@ class FerreOperator:
 
         # Spread the approximate core-seconds over N nodes
         core_seconds = np.array(core_seconds)
-        core_seconds_per_task = int(np.sum(core_seconds) / (self.max_nodes * self.max_tasks_per_node))
+        core_seconds_per_task = int(np.sum(core_seconds) / (nodes * self.max_tasks_per_node))
 
         # Limit nodes to the number of spectra
         tasks_needed = np.clip(np.round(core_seconds / core_seconds_per_task), 1, spectra).astype(int)
@@ -375,7 +375,7 @@ class FerreOperator:
             log.info(f"Operator out.")
             return None
 
-        log.info(f"Found {total_spectra} spectra total for {self.max_nodes} nodes ({core_seconds_per_task/60:.0f} min/task)")
+        log.info(f"Found {total_spectra} spectra total for {nodes} nodes ({core_seconds_per_task/60:.0f} min/task)")
 
         parent_partitions, partitioned_input_paths, partitioned_core_seconds = ({}, [], [])
         for n_tasks, input_path, n_spectra, n_core_seconds in zip(tasks_needed, input_paths, spectra, core_seconds):
@@ -398,7 +398,7 @@ class FerreOperator:
                 for basename in basenames:
                     check_output(["split", "-l", f"{spectra_per_task}", "-d", f"{pwd}/{basename}", f"{pwd}/{basename}"])
                 
-                actual_n_tasks = int(n_spectra / spectra_per_task)
+                actual_n_tasks = int(np.ceil(n_spectra / spectra_per_task))
                 for k in range(actual_n_tasks):
                     partitioned_pwd = os.path.join(f"{pwd}/partition_{k:0>2.0f}")
                     os.makedirs(partitioned_pwd, exist_ok=True)
@@ -427,12 +427,12 @@ class FerreOperator:
         chunks = chunked(
             partition(
                 partitioned_core_seconds, 
-                self.max_nodes * self.max_tasks_per_node, 
+                nodes * self.max_tasks_per_node, 
                 return_indices=True,
             ),
             self.max_tasks_per_node
         )
-
+    
         slurm_jobs, executions, t_longest = ([], [], 0)
         for i, node_indices in enumerate(chunks, start=1):
             
@@ -455,15 +455,26 @@ class FerreOperator:
 
                 task_commands = []
                 for k, index in enumerate(task_indices, start=1):
+                    
+                    execution_commands = []
                     input_path = partitioned_input_paths[index]
-                    pwd = os.path.dirname(input_path)
-
+                    final_dir = os.path.dirname(input_path)
+                    
+                    if self.slurm_scratch_stage_dir is not None:
+                        # Need to copy the files to the scratch directory
+                        relative_dir = final_dir[len(self.stage_dir):]
+                        scratch_dir = f"{self.slurm_scratch_stage_dir}/{relative_dir}/"
+                        execution_commands.append(f"mkdir -p {scratch_dir}")
+                        execution_commands.append(f"cp -rv {final_dir}/* {scratch_dir}/")
+                    else:
+                        scratch_dir = final_dir
+                        
                     if is_input_list(input_path):
                         flags = "-l "
-                        N = wc(f"{pwd}/flux.input")
+                        N = wc(f"{final_dir}/flux.input")
                         with open(input_path, "r") as fp:
                             for rel_input_path in fp.readlines():
-                                rel_pwd = os.path.dirname(f"{pwd}/{rel_input_path}")
+                                rel_pwd = os.path.dirname(f"{final_dir}/{rel_input_path}")
                                 executions.append([
                                     f"{rel_pwd}/parameter.output",
                                     N, 
@@ -472,18 +483,30 @@ class FerreOperator:
                     else:
                         flags = ""
                         executions.append([
-                            f"{pwd}/parameter.output",
-                            wc(f"{pwd}/parameter.input"),
+                            f"{scratch_dir}/parameter.output",
+                            wc(f"{final_dir}/parameter.input"),
                             0
                         ])
                         # Be sure to update the NTHREADS, just in case it was set at some dumb value (eg 1)
-                        update_control_kwds(f"{pwd}/input.nml", "NTHREADS", n_threads)
+                        update_control_kwds(f"{final_dir}/input.nml", "NTHREADS", n_threads)
                     
                     command = f"ferre.x {flags}{os.path.basename(input_path)}"
-                    task_commands.append((command, pwd))
-            
-                    log.info(f"    {i}.{j}.{k}: cd {pwd} | {command}")
+                    execution_commands.append(f"cd {scratch_dir}")
+                    execution_commands.append(f"{command} > stdout 2> stderr")
+                    if self.post_interpolate_model_flux:
+                        execution_commands.append(f"ferre_interpolate_unnormalized_model_flux {scratch_dir} > post_execute_stdout 2> post_execute_stderr")
                     
+                    if self.slurm_scratch_stage_dir is not None:
+                        # Copy the output files back to the final directory
+                        execution_commands.append(f"cp -rv {scratch_dir}/*.output* {final_dir}/")
+                        execution_commands.append(f"cp -rv {scratch_dir}/stdout {final_dir}/")
+                        execution_commands.append(f"cp -rv {scratch_dir}/stderr {final_dir}/")
+
+                    for command in execution_commands:
+                        log.info(f"    {i}.{j}.{k}: {command}")
+                    task_commands.extend(execution_commands)
+
+                
                 slurm_tasks.append(SlurmTask(task_commands))
                 est_times.append(est_time)
 
@@ -508,26 +531,32 @@ class FerreOperator:
         log.info(f"Estimated time without load balancing: {t_longest_no_balance/60:.0f} min")
         log.info(f"Estimated time for all jobs to complete: {t_longest/60:.0f} min (speedup {speedup:.0f}x), excluding wait time for jobs to start")
 
-
         # Submit the slurm jobs.
-        use_slurm = self.slurm_kwds.get("account", None)
-        if use_slurm is None:
-            log.warning(f"Not using Slurm job submission system because no `account` given in `slurm_kwds`!")
+        if self.max_nodes == 0:
+            log.warning(f"Not using Slurm job submission system because `max_nodes` is 0!")
             log.warning(f"Waiting 5 seconds before starting,...")
             sleep(5)
+
 
         log.info(f"Submitting jobs")
         job_ids = {}
         for i, slurm_job in enumerate(slurm_jobs):
             slurm_path = slurm_job.write()
-            if use_slurm:
+            if self.max_nodes == 0:
+                job_ids[i] = Popen(["sh", slurm_path])
+                log.info(f"Started job {i} at {slurm_path}")
+            else:
                 output = check_output(["sbatch", slurm_path]).decode("ascii")
                 job_id = int(output.split()[3])
                 job_ids[job_id] = slurm_path
                 log.info(f"Slurm job {job_id} for {slurm_path}")
-            else:
-                job_ids[i] = Popen(["sh", slurm_path])
-                log.info(f"Started job {i} at {slurm_path}")
+
+
+        if self.slurm_scratch_stage_dir is not None:
+            log.warning(
+                f"If you're using a scratch space which is not accessible to outside nodes, you may only "
+                f"see progress when a FERRE execution finishes. We will fix that.."
+            )
 
         # Check progress.
         log.info(f"Monitoring progress..")
@@ -551,8 +580,9 @@ class FerreOperator:
                     if n_done >= n_input or output_path in segmentation_fault_detected:
                         continue
                     
-                    if os.path.exists(output_path):
-                        n_now_done = wc(output_path)
+                    absolute_path = expand_path(output_path)
+                    if os.path.exists(absolute_path):
+                        n_now_done = wc(absolute_path)
                     else:
                         n_now_done = 0
                     n_new = n_now_done - n_done
@@ -566,7 +596,7 @@ class FerreOperator:
                     
                     else:
                         # Check for stderr.
-                        stderr_path = os.path.join(os.path.basename(output_path), "stderr")
+                        stderr_path = os.path.join(os.path.dirname(absolute_path), "stderr")
                         try:
                             with open(stderr_path, "r") as fp:
                                 stderr = fp.read()
@@ -579,16 +609,11 @@ class FerreOperator:
                                 last_updated = time()
                                 pb.set_description(desc(n_executions_done, n_executions, last_updated))
                                 pb.refresh()
-                                if self.post_interpolate_model_flux:
-                                    post_execution_interpolation(os.path.dirname(output_path))
-
                     if n_now_done >= n_input:
                         last_updated = time()
                         n_executions_done += 1
                         pb.set_description(desc(n_executions_done, n_executions, last_updated))
                         pb.refresh()
-                        if self.post_interpolate_model_flux:
-                            post_execution_interpolation(os.path.dirname(output_path))
                                     
                 if n_executions_done == n_executions:
                     pb.refresh()
@@ -599,18 +624,41 @@ class FerreOperator:
         if segmentation_fault_detected:
             log.warning(f"Segmentation faults detected in following executions:")
             for output_path in segmentation_fault_detected:
-                log.warning(f"\t{os.path.dirname(output_path)}")
-
-        # Bring back the partitions into the parent folder
+                log.warning(f"\t{os.path.dirname(output_path)}")            
+            
         basenames = ["stdout", "stderr", "rectified_model_flux.output", "parameter.output", "rectified_flux.output"]
         if self.post_interpolate_model_flux:
             basenames.append("model_flux.output")
 
+        # Give the jobs a chance to finish the post-execution step.        
+        log.info("FERRE executions have finished. Waiting for the post-execution steps to finish.")
+        check_basename = "model_flux.output" if self.post_interpolate_model_flux else "parameter.output"
+        while True:
+            n = 0
+            for input_path in partitioned_input_paths:
+                try:
+                    n += wc(os.path.join(os.path.dirname(input_path), check_basename))
+                except:
+                    log.warning(f"Input path {input_path} does not exist yet. Waiting 5 seconds..")
+                    break
+            log.info(f"Currently have {n}/{pb.n} in {check_basename} files")
+            if n == pb.n:
+                break
+            sleep(1)
+
+        log.info(f"All outputs ready.")
+
+        # Bring back the partitions into the parent folder
         for parent_dir, partitioned_dirs in parent_partitions.items():
             log.info(f"Merging partitions under {parent_dir}")
             for basename in basenames:
                 content = ""
-                for path in sorted([f"{pd}/{basename}" for pd in partitioned_dirs]):
+                paths = []
+                for pd in partitioned_dirs:
+                    paths.append(f"{pd}/{basename}")
+
+                #[f"{pd}/{basename}" for pd in partitioned_dirs]
+                for path in sorted(paths):
                     with open(path, "r") as fp:
                         content += fp.read()
                 with open(f"{parent_dir}/{basename}", "w") as fp:

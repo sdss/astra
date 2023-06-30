@@ -52,8 +52,12 @@ def pre_process_ferre(
     min_sigma_value: float = 0.05,
     spike_threshold_to_inflate_uncertainty: float = 3,
     reference_pixel_arrays_for_abundance_run=False,
-    write_input_pixel_arrays=True
+    write_input_pixel_arrays=True,
+    **kwargs
 ):
+
+    if kwargs:
+        log.warning(f"astra.pipelines.ferre.pre_process.pre_process ignoring kwargs: {kwargs}")
 
     # Validate the control file keywords.
     (
@@ -135,7 +139,7 @@ def pre_process_ferre(
         initial_flags = initial_parameters.pop("initial_flags")
         upstream_id = initial_parameters.pop("upstream_id")
 
-        batch_names.append(utils.get_ferre_spectrum_name(i, spectrum.sdss_id, spectrum.spectrum_id, initial_flags, upstream_id))
+        batch_names.append(utils.get_ferre_spectrum_name(i, spectrum.source_id, spectrum.spectrum_id, initial_flags, upstream_id))
         batch_initial_parameters.append(initial_parameters)
 
         if write_input_pixel_arrays:

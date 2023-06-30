@@ -14,6 +14,15 @@ from astra.pipelines.ferre.utils import (
     TRANSLATE_LABELS
 )
 
+def write_pixel_array_with_names(path, names, data):
+    os.system(f"mv {path} {path}.original")
+    np.savetxt(
+        path,
+        np.hstack([np.atleast_2d(names).reshape((-1, 1)), data]).astype(str),
+        fmt="%s"
+    )
+
+LARGE = 1e10 # TODO: This is also defined in pre_process, move it common
 
 def post_process_ferre(pwd) -> Iterable[dict]:
     """
@@ -42,19 +51,28 @@ def post_process_ferre(pwd) -> Iterable[dict]:
     flux = np.atleast_2d(np.loadtxt(os.path.join(pwd, control_kwds["FFILE"])))
     e_flux = np.atleast_2d(np.loadtxt(os.path.join(pwd, control_kwds["ERFILE"])))
 
-    model_flux, names_with_missing_model_flux, output_model_flux_indices = read_and_sort_output_data_file(
+    rectified_model_flux, names_with_missing_rectified_model_flux, output_rectified_model_flux_indices = read_and_sort_output_data_file(
         os.path.join(pwd, control_kwds["OFFILE"]), 
         input_names
     )
-    rectified_flux, names_with_missing_rectified_flux, output_rectified_model_flux_indices = read_and_sort_output_data_file(
+    rectified_flux, names_with_missing_rectified_flux, output_rectified_flux_indices = read_and_sort_output_data_file(
         os.path.join(pwd, control_kwds["SFFILE"]),
         input_names
     )
-    assert np.all(output_model_flux_indices == output_rectified_model_flux_indices)
-    parameters, e_parameters, meta, names_with_missing_outputs = read_output_parameter_file(pwd, control_kwds, input_names)
+    # Re-write the model flux file with the correct names.
+    write_pixel_array_with_names(os.path.join(pwd, control_kwds["OFFILE"]), input_names, rectified_model_flux)
+    write_pixel_array_with_names(os.path.join(pwd, control_kwds["SFFILE"]), input_names, rectified_flux)
+    if os.path.exists(os.path.join(pwd, "model_flux.output")):
+        model_flux, *_ = read_and_sort_output_data_file(
+            os.path.join(pwd, "model_flux.output"),
+            input_names
+        )            
+        write_pixel_array_with_names(os.path.join(pwd, "model_flux.output"), input_names, model_flux)
 
-    if names_with_missing_model_flux:
-        log.warn(f"The following {len(names_with_missing_model_flux)} are missing model fluxes: {names_with_missing_model_flux}")
+    parameters, e_parameters, meta, names_with_missing_outputs = read_output_parameter_file(pwd, control_kwds, input_names)
+    
+    if names_with_missing_rectified_model_flux:
+        log.warn(f"The following {len(names_with_missing_rectified_model_flux)} are missing model fluxes: {names_with_missing_rectified_model_flux}")
     if names_with_missing_rectified_flux:
         log.warn(f"The following {len(names_with_missing_rectified_flux)} are missing rectified fluxes: {names_with_missing_rectified_flux}")
     if names_with_missing_outputs:
@@ -109,18 +127,19 @@ def post_process_ferre(pwd) -> Iterable[dict]:
     for index in frozen_indices:
         common[f"flag_{parameter_names[index - 1]}_frozen"] = True
 
+    ndim = int(control_kwds["NDIM"])
     for i, name in enumerate(input_names):
         name_meta = parse_ferre_spectrum_name(name)
 
         result = common.copy()
         result.update(
-            sdss_id=name_meta["sdss_id"],
+            source_id=name_meta["source_id"],
             spectrum_id=name_meta["spectrum_id"],
             initial_flags=name_meta["initial_flags"],
             upstream_id=name_meta["upstream_id"],
             ferre_name=name,
             ferre_input_index=name_meta["index"],
-            ferre_output_index=output_model_flux_indices[i],
+            ferre_output_index=i,
             ferre_log_chisq=log_chisq_fit[i], 
             ferre_log_snr_sq=log_snr_sq[i],
             ferre_log_penalized_chisq=log_chisq_fit[i],     
@@ -129,12 +148,26 @@ def post_process_ferre(pwd) -> Iterable[dict]:
             flag_potential_ferre_timeout=flag_potential_ferre_timeout[i],
             flag_missing_model_flux=flag_missing_model_flux[i],
         )
+        # Summary statistics.
+        snr = np.nanmedian(flux[i]/e_flux[i])
+        
+        # TODO: fix this, fark it's bad
+        scaled_e_flux = e_flux[i] / (flux[i]/rectified_flux[i])
+        r_chi_sqs = ((rectified_flux[i] - rectified_model_flux[i])/scaled_e_flux)**2
+        used = (e_flux[i] < LARGE) * np.isfinite(r_chi_sqs)
+        dof = (np.sum(used) - ndim - 1)
+        r_chi_sq = np.sum(r_chi_sqs[used]) / dof
+        result.update(
+            snr=snr,
+            r_chi_sq=r_chi_sq
+        )
 
         result.update(
             flux=flux[i],
             e_flux=e_flux[i],
             model_flux=model_flux[i],
             rectified_flux=rectified_flux[i],
+            rectified_model_flux=rectified_model_flux[i],
         )
 
         for j, parameter in enumerate(parameter_names):

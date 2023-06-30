@@ -39,6 +39,11 @@ class FerreOutputMixin(PipelineOutputMixin):
     def rectified_flux(self):
         return self._get_output_pixel_array("rectified_flux.output")
 
+    @cached_property
+    def e_rectified_flux(self):
+        continuum = self.ferre_flux / self.rectified_flux
+        return self.ferre_e_flux / continuum
+
     def unmask(self, array, fill_value=np.nan):
         from astra.pipelines.ferre.utils import get_apogee_pixel_mask
         mask = get_apogee_pixel_mask()
@@ -56,22 +61,49 @@ class FerreOutputMixin(PipelineOutputMixin):
 
 
     def _get_output_pixel_array(self, basename, P=7514):
-        from astra.pipelines.ferre.utils import parse_ferre_spectrum_name
+        from astra.pipelines.ferre.utils import parse_ferre_spectrum_name, get_ferre_spectrum_name
         
-
-        assert self.ferre_output_index >= 0
+        #assert self.ferre_input_index >= 0
 
         kwds = dict(
             fname=f"{self.pwd}/{basename}",
-            skiprows=int(self.ferre_output_index), 
+            skiprows=int(self.ferre_input_index), 
             max_rows=1,
         )
+        '''
+        try:
+            name, = np.atleast_1d(np.loadtxt(usecols=(0, ), dtype=str, **kwds))
+            array = np.loadtxt(usecols=range(1, 1+P), **kwds)
 
+            meta = parse_ferre_spectrum_name(name)
+            if (
+                (int(meta["source_id"]) != self.source_id)
+            or (int(meta["spectrum_id"]) != self.spectrum_id)
+            or (int(meta["index"]) != self.ferre_input_index)
+            ):
+                raise a
+        except:
+            del kwds["skiprows"]
+            del kwds["max_rows"]
+
+            name = get_ferre_spectrum_name(self.ferre_input_index, self.source_id, self.spectrum_id, self.initial_flags, self.upstream_id)
+
+            index = list(np.loadtxt(usecols=(0, ), dtype=str, **kwds)).index(name)
+            self.ferre_output_index = index
+            self.save()
+            print("saved!")
+            kwds["skiprows"] = index
+            kwds["max_rows"] = 1
+
+            name, = np.atleast_1d(np.loadtxt(usecols=(0, ), dtype=str, **kwds))
+            array = np.loadtxt(usecols=range(1, 1+P), **kwds)
+
+        '''
         name, = np.atleast_1d(np.loadtxt(usecols=(0, ), dtype=str, **kwds))
         array = np.loadtxt(usecols=range(1, 1+P), **kwds)
 
         meta = parse_ferre_spectrum_name(name)
-        assert int(meta["sdss_id"]) == self.sdss_id
+        assert int(meta["source_id"]) == self.source_id
         assert int(meta["spectrum_id"]) == self.spectrum_id
         assert int(meta["index"]) == self.ferre_input_index
         return array
@@ -79,7 +111,7 @@ class FerreOutputMixin(PipelineOutputMixin):
 
 class FerreCoarse(BaseModel, FerreOutputMixin):
 
-    sdss_id = ForeignKeyField(Source, index=True, lazy_load=False)
+    source_id = ForeignKeyField(Source, index=True, lazy_load=False)
     spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     
     #> Astra Metadata
@@ -109,6 +141,7 @@ class FerreCoarse(BaseModel, FerreOutputMixin):
     flag_initial_guess_from_doppler_sdss4 = initial_flags.flag(2**1, help_text="Initial guess from Doppler (SDSS-IV)")
     flag_initial_guess_from_gaia_xp_andrae23 = initial_flags.flag(2**3, help_text="Initial guess from Andrae et al. (2023)")
     flag_initial_guess_from_user = initial_flags.flag(2**2, help_text="Initial guess specified by user")
+    flag_initial_guess_at_grid_center = initial_flags.flag(2**3, help_text="Initial guess from grid center")
 
     #> FERRE Settings
     continuum_order = IntegerField(default=-1)
@@ -156,7 +189,32 @@ class FerreCoarse(BaseModel, FerreOutputMixin):
     c_m_flags = BitField(default=0)
     n_m_flags = BitField(default=0)
 
-    # TODO: flag definitions for each dimension (DRY)
+    # TODO: Is there a way to inherit these or assign these dynamically so we don't repeat ourselves?
+    flag_teff_ferre_fail = teff_flags.flag(2**0)
+    flag_teff_grid_edge_warn = teff_flags.flag(2**1)
+    flag_teff_grid_edge_bad = teff_flags.flag(2**2)
+    flag_logg_ferre_fail = logg_flags.flag(2**0)
+    flag_logg_grid_edge_warn = logg_flags.flag(2**1)
+    flag_logg_grid_edge_bad = logg_flags.flag(2**2)
+    flag_m_h_ferre_fail = m_h_flags.flag(2**0)
+    flag_m_h_grid_edge_warn = m_h_flags.flag(2**1)
+    flag_m_h_grid_edge_bad = m_h_flags.flag(2**2)
+    flag_log10_v_sini_ferre_fail = log10_v_sini_flags.flag(2**0)
+    flag_log10_v_sini_grid_edge_warn = log10_v_sini_flags.flag(2**1)
+    flag_log10_v_sini_grid_edge_bad = log10_v_sini_flags.flag(2**2)
+    flag_log10_v_micro_ferre_fail = log10_v_micro_flags.flag(2**0)
+    flag_log10_v_micro_grid_edge_warn = log10_v_micro_flags.flag(2**1)
+    flag_log10_v_micro_grid_edge_bad = log10_v_micro_flags.flag(2**2)
+    flag_alpha_m_ferre_fail = alpha_m_flags.flag(2**0)
+    flag_alpha_m_grid_edge_warn = alpha_m_flags.flag(2**1)
+    flag_alpha_m_grid_edge_bad = alpha_m_flags.flag(2**2)
+    flag_c_m_ferre_fail = c_m_flags.flag(2**0)
+    flag_c_m_grid_edge_warn = c_m_flags.flag(2**1)
+    flag_c_m_grid_edge_bad = c_m_flags.flag(2**2)
+    flag_n_m_ferre_fail = n_m_flags.flag(2**0)
+    flag_n_m_grid_edge_warn = n_m_flags.flag(2**1)
+    flag_n_m_grid_edge_bad = n_m_flags.flag(2**2)    
+
     #> FERRE Access Fields
     ferre_name = TextField(default="")
     ferre_input_index = IntegerField(default=-1)
@@ -164,11 +222,12 @@ class FerreCoarse(BaseModel, FerreOutputMixin):
     ferre_n_obj = IntegerField(default=-1)
 
     #> Summary Statistics
-    chisq = FloatField(null=True)
+    snr = FloatField(null=True)
+    r_chi_sq = FloatField(null=True)
     ferre_log_snr_sq = FloatField(null=True)
-    ferre_log_chisq = FloatField(null=True)
+    ferre_log_chi_sq = FloatField(default=np.inf) # TODO: chi_sq?
     ferre_frac_phot_data_points = FloatField(default=0)
-    ferre_log_penalized_chisq = FloatField(null=True)
+    ferre_penalized_log_chi_sq = FloatField(default=np.inf) #  # TODO: penalized_log_chi_sq?
     ferre_time_load_grid = FloatField(null=True)
     ferre_time_elapsed = FloatField(null=True)
     ferre_flags = BitField(default=0)
@@ -182,7 +241,7 @@ class FerreCoarse(BaseModel, FerreOutputMixin):
 
 class FerreStellarParameters(BaseModel, FerreOutputMixin):
 
-    sdss_id = ForeignKeyField(Source, index=True, lazy_load=False)
+    source_id = ForeignKeyField(Source, index=True, lazy_load=False)
     spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     upstream = ForeignKeyField(FerreCoarse, index=True)
 
@@ -260,6 +319,33 @@ class FerreStellarParameters(BaseModel, FerreOutputMixin):
     c_m_flags = BitField(default=0)
     n_m_flags = BitField(default=0)
 
+    # Define flags.
+    flag_teff_ferre_fail = teff_flags.flag(2**0)
+    flag_teff_grid_edge_warn = teff_flags.flag(2**1)
+    flag_teff_grid_edge_bad = teff_flags.flag(2**2)
+    flag_logg_ferre_fail = logg_flags.flag(2**0)
+    flag_logg_grid_edge_warn = logg_flags.flag(2**1)
+    flag_logg_grid_edge_bad = logg_flags.flag(2**2)
+    flag_m_h_ferre_fail = m_h_flags.flag(2**0)
+    flag_m_h_grid_edge_warn = m_h_flags.flag(2**1)
+    flag_m_h_grid_edge_bad = m_h_flags.flag(2**2)
+    flag_log10_v_sini_ferre_fail = log10_v_sini_flags.flag(2**0)
+    flag_log10_v_sini_grid_edge_warn = log10_v_sini_flags.flag(2**1)
+    flag_log10_v_sini_grid_edge_bad = log10_v_sini_flags.flag(2**2)
+    flag_log10_v_micro_ferre_fail = log10_v_micro_flags.flag(2**0)
+    flag_log10_v_micro_grid_edge_warn = log10_v_micro_flags.flag(2**1)
+    flag_log10_v_micro_grid_edge_bad = log10_v_micro_flags.flag(2**2)
+    flag_alpha_m_ferre_fail = alpha_m_flags.flag(2**0)
+    flag_alpha_m_grid_edge_warn = alpha_m_flags.flag(2**1)
+    flag_alpha_m_grid_edge_bad = alpha_m_flags.flag(2**2)
+    flag_c_m_ferre_fail = c_m_flags.flag(2**0)
+    flag_c_m_grid_edge_warn = c_m_flags.flag(2**1)
+    flag_c_m_grid_edge_bad = c_m_flags.flag(2**2)
+    flag_n_m_ferre_fail = n_m_flags.flag(2**0)
+    flag_n_m_grid_edge_warn = n_m_flags.flag(2**1)
+    flag_n_m_grid_edge_bad = n_m_flags.flag(2**2)
+
+
     # TODO: flag definitions for each dimension (DRY)
     #> FERRE Access Fields
     ferre_name = TextField(default="")
@@ -268,11 +354,12 @@ class FerreStellarParameters(BaseModel, FerreOutputMixin):
     ferre_n_obj = IntegerField(default=-1)
 
     #> Summary Statistics
-    chisq = FloatField(null=True)
+    snr = FloatField(null=True)
+    r_chi_sq = FloatField(null=True)
     ferre_log_snr_sq = FloatField(null=True)
-    ferre_log_chisq = FloatField(null=True)
+    ferre_log_chi_sq = FloatField(null=True)
+    ferre_penalized_log_chi_sq = FloatField(null=True)
     ferre_frac_phot_data_points = FloatField(default=0)
-    ferre_log_penalized_chisq = FloatField(null=True)
     ferre_time_load_grid = FloatField(null=True)
     ferre_time_elapsed = FloatField(null=True)
     ferre_flags = BitField(default=0)
@@ -288,7 +375,7 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
 
     # TODO: Review this, it's a nearly direct copy from stellar parameters
 
-    sdss_id = ForeignKeyField(Source, index=True, lazy_load=False)
+    source_id = ForeignKeyField(Source, index=True, lazy_load=False)
     spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     upstream = ForeignKeyField(FerreStellarParameters, index=True)
 
@@ -367,11 +454,11 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
     ferre_n_obj = IntegerField(default=-1)
 
     #> Summary Statistics
-    chisq = FloatField(null=True)
+    r_chi_sq = FloatField(null=True)
     ferre_log_snr_sq = FloatField(null=True)
-    ferre_log_chisq = FloatField(null=True)
+    ferre_log_chi_sq = FloatField(null=True)
     ferre_frac_phot_data_points = FloatField(default=0)
-    ferre_log_penalized_chisq = FloatField(null=True)
+    ferre_penalized_log_chi_sq = FloatField(null=True)
     ferre_time_load_grid = FloatField(null=True)
     ferre_time_elapsed = FloatField(null=True)
     ferre_flags = BitField(default=0)
@@ -385,7 +472,7 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
 
 class ASPCAP(BaseModel, PipelineOutputMixin):
 
-    sdss_id = ForeignKeyField(Source, index=True, lazy_load=False)
+    source_id = ForeignKeyField(Source, index=True, lazy_load=False)
     spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     ferre_stellar_parameters_id = ForeignKeyField(FerreStellarParameters, index=True, lazy_load=False)
 

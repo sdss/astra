@@ -104,6 +104,8 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     zwarning = BitField(default=0) # TODO: rename to _flags?
 
     #> XCSAO
+    #v_rad = FloatField()
+    #e_v_rad = FloatField()
     xcsao_teff = FloatField(null=True, help_text=xcsao_glossary.teff)
     xcsao_e_teff = FloatField(null=True, help_text=xcsao_glossary.e_teff)
     xcsao_logg = FloatField(null=True, help_text=xcsao_glossary.logg)

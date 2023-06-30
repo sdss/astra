@@ -161,3 +161,9 @@ class BaseModel(Model):
                     f"but {cls}.{field_name} is not an attribute of type `peewee.Field`."
                 )
         return tuple(category_headers)
+
+
+    @property
+    def absolute_path(self):
+        """Absolute path of `self.path`."""
+        return expand_path(self.path)

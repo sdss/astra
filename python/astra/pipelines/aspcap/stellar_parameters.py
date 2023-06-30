@@ -2,7 +2,7 @@ import os
 import numpy as np
 from typing import Iterable, Optional
 from peewee import fn
-
+from tqdm import tqdm
 from astra import task
 from astra.utils import log, list_to_dict
 from astra.models.spectrum import Spectrum
@@ -73,22 +73,23 @@ def pre_stellar_parameters(
         The path to the FERRE weight file.
     """
     
-    ferre_kwds, spectra_with_no_coarse_result = plan_stellar_parameters(spectra, parent_dir, weight_path, **kwargs)
+    ferre_kwds, upstream_failed = plan_stellar_parameters(spectra, parent_dir, weight_path, **kwargs)
 
     # Create the FERRE files for each execution.
     for kwd in ferre_kwds:
         pre_process_ferre(**kwd)
 
-    # Create database entries for those with no initial guess?
-    for spectrum in spectra_with_no_coarse_result:
-        log.warning(f"Spectrum {spectrum} had no coarse result")
-    #    yield FerreStellarParameters(
-    #        sdss_id=spectrum.sdss_id,
-    #        spectrum_id=spectrum.spectrum_id,
-    #        flag_no_suitable_initial_guess=True,
-    #    )
-    yield from []
-    
+    # Create database entries for those with upstream failures.
+    for upstream in upstream_failed:
+        yield FerreStellarParameters(
+            source_id=upstream.source_id,
+            spectrum_id=upstream.spectrum_id,
+            upstream=upstream,
+            ferre_flags=upstream.ferre_flags,
+            initial_flags=upstream.initial_flags,
+        )
+
+
 
 @task
 def post_stellar_parameters(parent_dir, **kwargs) -> Iterable[FerreStellarParameters]:
@@ -109,6 +110,7 @@ def plan_stellar_parameters(
     spectra: Iterable[Spectrum],
     parent_dir: str,
     weight_path: Optional[str] = "$MWM_ASTRA/pipelines/aspcap/masks/global.mask",
+    stellar_parameters_pre_continuum=MedianFilter,
     **kwargs,
 ):
     """
@@ -122,7 +124,7 @@ def plan_stellar_parameters(
         Alias
         .select(
             Alias.spectrum_id,
-            fn.MIN(Alias.ferre_log_penalized_chisq).alias("min_ferre_log_penalized_chisq"),
+            fn.MIN(Alias.ferre_penalized_log_chi_sq).alias("min_ferre_penalized_log_chi_sq"),
         )
         .where(Alias.spectrum_id << [s.spectrum_id for s in spectra])
         .group_by(Alias.spectrum_id)
@@ -132,35 +134,61 @@ def plan_stellar_parameters(
     q = (
         FerreCoarse
         .select()
+        # Some times the same star is analysed by two grids and has the same \chi^2 (to the precision that FERRE reports)
         .join(
             sq, 
             on=(
                 (FerreCoarse.spectrum_id == sq.c.spectrum_id) &
-                (FerreCoarse.ferre_log_penalized_chisq == sq.c.min_ferre_log_penalized_chisq)
+                (FerreCoarse.ferre_penalized_log_chi_sq == sq.c.min_ferre_penalized_log_chi_sq)
             )
         )
     )
     
     lookup_spectrum_by_id = { s.spectrum_id: s for s in spectra }
 
+    log.info(f"Preparing stellar parameters")
+
     # We apply a pre-continuum rectification step, based on the best-fitting result from upstream.
-    pre_continuum = MedianFilter()
+    if stellar_parameters_pre_continuum:
+        pre_continuum = stellar_parameters_pre_continuum()
+    else:
+        pre_continuum = None
 
-    group_task_kwds = {}
-    for coarse_result in q:
-        group_task_kwds.setdefault(coarse_result.header_path, [])
-
-        try:
-            # Apply continuum normalization.
-            spectrum = lookup_spectrum_by_id[coarse_result.spectrum_id]
-            continuum = pre_continuum.fit(spectrum, coarse_result)
-        except:
-            log.exception(f"Exception for spectrum {spectrum} from coarse result {coarse_result}:")
+    # Ensure only one result per spectrum ID first.
+    upstream_failed, coarse_results_dict = ([], {})
+    for r in q:
+        # TODO: Should we do it based on other things?
+        if r.flag_no_suitable_initial_guess:
+            upstream_failed.append(r)
             continue
 
-        # This doesn't change the spectrum on disk, it just changes it in memory so it can be written out for FERRE.
-        spectrum.flux /= continuum
-        spectrum.ivar *= continuum**2
+        coarse_results_dict.setdefault(r.spectrum_id, [])
+        coarse_results_dict[r.spectrum_id].append(r)
+    
+    for spectrum_id, coarse_results in coarse_results_dict.items():
+        if len(coarse_results) > 1:
+            log.warning(f"Multiple coarse results for spectrum {spectrum_id}: {coarse_results}")
+
+        index = np.argmin([r.r_chi_sq for r in coarse_results])
+        coarse_results_dict[spectrum_id] = coarse_results[index]
+
+    group_task_kwds = {}
+    for coarse_result in tqdm(coarse_results_dict.values(), total=0):
+
+        group_task_kwds.setdefault(coarse_result.header_path, [])
+        spectrum = lookup_spectrum_by_id[coarse_result.spectrum_id]
+
+        if pre_continuum is not None:
+            try:
+                # Apply continuum normalization.
+                continuum = pre_continuum.fit(spectrum, coarse_result)
+            except:
+                log.exception(f"Exception for spectrum {spectrum} from coarse result {coarse_result}:")
+                continue
+
+            # This doesn't change the spectrum on disk, it just changes it in memory so it can be written out for FERRE.
+            spectrum.flux /= continuum
+            spectrum.ivar *= continuum**2
 
         group_task_kwds[coarse_result.header_path].append(
             dict(
@@ -178,9 +206,10 @@ def plan_stellar_parameters(
             )
         )
 
+    log.info(f"Grouping spectra..")
 
     kwds_list = []
-    spectra_with_no_coarse_result = set(spectra)
+    #spectra_with_no_coarse_result = set(spectra)
     for header_path in group_task_kwds.keys():
 
         short_grid_name = parse_header_path(header_path)["short_grid_name"]
@@ -195,7 +224,7 @@ def plan_stellar_parameters(
             **kwargs
         )
         kwds_list.append(group_task_kwds[header_path])
-        spectra_with_no_coarse_result -= set(group_task_kwds[header_path]["spectra"])
+        #spectra_with_no_coarse_result -= set(group_task_kwds[header_path]["spectra"])
 
-    spectra_with_no_coarse_result = tuple(spectra_with_no_coarse_result)
-    return (kwds_list, spectra_with_no_coarse_result)
+    #spectra_with_no_coarse_result = tuple(spectra_with_no_coarse_result)
+    return (kwds_list, upstream_failed)

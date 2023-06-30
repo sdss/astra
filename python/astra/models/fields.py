@@ -7,6 +7,9 @@ from astropy.io import fits
 from astra.utils import expand_path
 
 class BitField(_BitField):
+
+    """A binary bitfield field that allows for `help_text` to be specified in each `FlagDescriptor`."""
+    
     def __init__(self, *args, **kwargs):
         kwargs.setdefault('default', 0)
         super(_BitField, self).__init__(*args, **kwargs)
@@ -49,6 +52,9 @@ class BitField(_BitField):
 
 
 class BasePixelArrayAccessor(object):
+    
+    """A base pixel array accessor."""
+
     def __init__(self, model, field, name, ext, column_name, transform=None):
         self.model = model
         self.field = field
@@ -68,12 +74,14 @@ class BasePixelArrayAccessor(object):
 
 
 class PixelArrayAccessorFITS(BasePixelArrayAccessor):
+    
+    """A class to access pixel arrays stored in a FITS file."""
 
     def __get__(self, instance, instance_type=None):
         if instance is not None:
             try:
                 return instance.__pixel_data__[self.name]
-            except AttributeError:
+            except (AttributeError, KeyError):
                 # Load them all.
                 instance.__pixel_data__ = {}
                 with fits.open(expand_path(instance.path)) as image:
@@ -93,7 +101,7 @@ class PixelArrayAccessorFITS(BasePixelArrayAccessor):
                         
                         
                         if accessor.transform is not None:
-                            value = accessor.transform(value)
+                            value = accessor.transform(value, image, instance)
                         
                         instance.__pixel_data__.setdefault(name, value)
                 
@@ -101,6 +109,30 @@ class PixelArrayAccessorFITS(BasePixelArrayAccessor):
 
         return self.field
     
+
+class PixelArrayAccessorHDF(BasePixelArrayAccessor):
+
+    """A class to access pixel arrays stored in a HDF-5 file."""
+
+    def __get__(self, instance, instance_type=None):
+        if instance is not None:
+            try:
+                return instance.__pixel_data__[self.name]
+            except (AttributeError, KeyError):
+                # Load them all.
+                instance.__pixel_data__ = {}
+                import h5py
+                with h5py.File(instance.path, "r") as fp:
+                    for name, accessor in instance._meta.pixel_fields.items():
+                        value = fp[accessor.column_name][instance.row_index]
+                        if accessor.transform is not None:
+                            value = accessor.transform(value)
+                        
+                        instance.__pixel_data__.setdefault(name, value)
+                
+                return instance.__pixel_data__[self.name]
+
+        return self.field
 
 
 class PixelArray(VirtualField):
