@@ -6,7 +6,7 @@ import multiprocessing as mp
 
 from astra.utils import log, flatten
 from astra.models import Spectrum
-from astra.models.pipelines import ApogeeNet as ApogeeNetOutput
+from astra.models.pipelines import ApogeeNet 
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -104,7 +104,7 @@ def _inference(network, batch, num_uncertainty_draws):
     logg, teff, fe_h = predictions
 
     for i, spectrum_id in enumerate(spectrum_ids):
-        output = ApogeeNetOutput(
+        output = ApogeeNet(
             spectrum_id=spectrum_id,
             teff=teff[i],
             logg=logg[i],

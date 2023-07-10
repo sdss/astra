@@ -17,9 +17,35 @@ def cli(context, verbose):
 @click.option("--drop-tables", is_flag=True)
 def initdb(drop_tables):
     """Initialize the database."""
-    from astra.database.astradb import create_tables
-
-    create_tables(drop_existing_tables=drop_tables, reuse_if_open=True)
+    from time import sleep
+    from astra.utils import log
+    from astra.models import (
+        base,
+        apogee,
+        #apogeenet,
+        aspcap,
+        #boss,
+        #classifier,
+        #lineforest,
+        madgics,
+        #mdwarftype,
+        #slam,
+        #snow_white,
+        source,
+        spectrum,
+        #the_payne
+    )
+    
+    models = base.BaseModel.__subclasses__()
+    with base.database.atomic():
+        if drop_tables:
+            log.warning(f"Dropping database tables in 10 seconds..")
+            sleep(10)
+            base.database.drop_tables(models)
+        
+        base.database.create_tables(models)
+    log.info(f"Created {len(models)} database tables: {models}")
+    
     return None
 
 

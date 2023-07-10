@@ -66,6 +66,44 @@ class SpectrumMixin:
         return fig
 
 
+    def resample(self, wavelength, n_res, v_shift=0):
+        """
+        Re-sample the spectrum at the given wavelengths.
+
+        :param wavelength:
+            A new wavelength array to sample the spectrum on.
+        
+        :param n_res:
+            The number of resolution elements to use. This can be a float or a list-like
+            of floats where the length i
+
+        :param v_shift: [optional]
+            A velocity shift to apply when sampling the new spectrum.
+        """
+
+        x = np.arange(self.flux.size)
+        pixel = wave_to_pixel(x + spectrum.v_rad_pixel, x)
+        (finite, ) = np.where(np.isfinite(pixel))
+
+        ((finite_flux, finite_e_flux), ) = sincint(
+            pixel[finite], n_res, [
+                [spectrum.flux, 1/spectrum.ivar]
+            ]
+        )
+
+        flux = np.nan * np.ones(spectrum.wavelength.size)
+        e_flux = np.nan * np.ones(spectrum.wavelength.size)
+        flux[finite] = finite_flux
+        e_flux[finite] = finite_e_flux
+        
+        spectrum.flux = flux
+        spectrum.ivar = e_flux**-2
+        bad = ~np.isfinite(spectrum.ivar)
+        spectrum.ivar[bad] = 0        
+        raise a
+
+        
+
     @classmethod
     def to_hdu(cls, where=None, header=None, fill_values=None, upper=True):
         """

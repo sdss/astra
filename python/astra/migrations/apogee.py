@@ -209,25 +209,33 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
 
 
 def migrate_apvisit_from_sdss5_apogee_drpdb(
-    only_new=True,
+    apred: Optional[str] = None,
+    restrict_to_new_visits: Optional[bool] = True,
     batch_size: Optional[int] = 100, 
-    limit: Optional[int] = None
+    limit: Optional[int] = None,
+    full_output=False
 ):
     """
     Migrate all new APOGEE visit information (`apVisit` files) stored in the SDSS-V database, which is reported
     by the SDSS-V APOGEE data reduction pipeline.
+
+    :param apred: [optional]
+        Limit the ingestion to spectra with a specified `apred` version.
     
+    :param restrict_to_new_visits: [optional]
+        If `True`, limit the ingestion to visits with primary keys higher than the maximum existing APOGEE
+        visit primary key in the Astradatabase
+            
     :param batch_size: [optional]
         The batch size to use when upserting data.
     
+    :param limit: [optional]
+        Limit the ingestion to `limit` spectra.
+
     :returns:
         A tuple of new spectrum identifiers (`astra.models.apogee.ApogeeVisitSpectrum.spectrum_id`)
         that were inserted.
     """
-    if only_new:
-        where = (Visit.pk > (ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.visit_pk)).scalar() or 0))
-    else:
-        where = None
 
     from astra.migrations.sdss5db.apogee_drpdb import Visit, RvVisit
     from astra.migrations.sdss5db.catalogdb import (
@@ -236,17 +244,25 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
         CatalogToGaia_DR2
     )
 
+    min_rv_visit_pk = 0
+    if restrict_to_new_visits:
+        try:
+            min_rv_visit_pk = ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.rv_visit_pk)).scalar()
+        except:
+            None
+
     sq = (
         RvVisit
         .select(
             RvVisit.visit_pk, 
             fn.MAX(RvVisit.starver).alias('max')
         )
-        .group_by(
-            RvVisit.visit_pk,
-        )
-        .alias('rv_visit')
+        .where(RvVisit.pk > min_rv_visit_pk)
     )
+    if apred is not None:
+        sq = sq.where(RvVisit.apred_vers == apred)
+    
+    sq = sq.group_by(RvVisit.visit_pk).alias("rv_visit")
 
     cte = (
         RvVisit
@@ -334,13 +350,15 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
         .join(CatalogToGaia_DR2, JOIN.LEFT_OUTER, on=(Visit.gaiadr2_sourceid == CatalogToGaia_DR2.target_id))
         .join(Catalog, JOIN.LEFT_OUTER, on=(Catalog.catalogid == CatalogToGaia_DR2.catalogid))
         .join(CatalogToGaia_DR3, JOIN.LEFT_OUTER, on=(Catalog.catalogid == CatalogToGaia_DR3.catalogid))
-        .where(where)
-        .limit(limit)
-        .dicts()
-        .iterator()
+        .where(cte.c.pk > min_rv_visit_pk)
     )
 
-    N = limit or Visit.select().where(where).count()
+    if apred is not None:
+        q = q.where(Visit.apred_vers == apred)        
+    
+    q = q.limit(limit).dicts()
+
+    N = limit or q.count()
     
     log.info(f"Bulk assigning {N} unique spectra")
 
@@ -373,7 +391,7 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
         "dec",
     )
     source_data, spectrum_data, sdss5_catalogid_v1s = ({}, [], [])
-    for spectrum_id, row in zip(spectrum_ids, tqdm(q, total=N)):
+    for spectrum_id, row in zip(spectrum_ids, tqdm(q.iterator(), total=N)):
         sdss5_catalogid_v1 = row["sdss5_catalogid_v1"]
         source_data[sdss5_catalogid_v1] = dict(zip(
             source_only_keys, 
@@ -385,7 +403,7 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
             **row
         })
         sdss5_catalogid_v1s.append(sdss5_catalogid_v1)
-
+    
     log.info(f"Ingesting sources")
     with database.atomic():
         with tqdm(desc="Upserting", total=len(source_data)) as pb:
@@ -427,7 +445,10 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
         spectrum_data,
         batch_size
     )
-    return len(spectrum_ids)
+    if full_output:
+        return (len(spectrum_ids), spectrum_ids)
+    else:
+        return len(spectrum_ids)
     
 
 def _migrate_apvisit_metadata(apVisits, raise_exceptions=False):

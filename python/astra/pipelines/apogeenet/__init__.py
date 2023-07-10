@@ -1,4 +1,5 @@
 from typing import Iterable, Optional
+from astra import task
 from astra.models import Spectrum
 from astra.models.pipelines import ApogeeNet
 from astra.pipelines.apogeenet.network import read_network
@@ -6,7 +7,7 @@ from astra.pipelines.apogeenet.base import _worker, parallel_batch_read, _infere
 
 __all__ = ["apogee_net"]
 
-
+@task
 def apogee_net(
     spectra: Iterable[Spectrum],
     network_path: str = "$MWM_ASTRA/pipelines/APOGEENet/model.pt",

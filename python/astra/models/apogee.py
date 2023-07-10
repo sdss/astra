@@ -37,7 +37,7 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
         # own checks to make sure that spectra and sources are linked.
         null=True, 
         index=True,
-        lazy_load=False,
+        #lazy_load=False,
         backref="apogee_coadded_spectra_in_apstar",
     )
 
@@ -146,7 +146,7 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         # own checks to make sure that spectra and sources are linked.
         null=True, 
         index=True,
-        lazy_load=False,
+        #lazy_load=False,
         backref="apogee_visit_spectra_in_apstar",
     )
 
@@ -226,14 +226,13 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     """An APOGEE visit spectrum, stored in an apVisit data product."""
 
     # Won't appear in a header group because it is first referenced in `Source`.
-    source_id = ForeignKeyField(
+    source = ForeignKeyField(
         Source, 
         # We want to allow for spectra to be unassociated with a source so that 
         # we can test with fake spectra, etc, but any pipeline should run their
         # own checks to make sure that spectra and sources are linked.
         null=True, 
         index=True,
-        lazy_load=False,
         backref="apogee_visit_spectra",
     )
 
@@ -267,16 +266,16 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         primary_key=True,
         default=Spectrum.create
     )
-    input_catalogid = BigIntegerField(null=True)
+    input_catalogid = BigIntegerField(index=True, null=True)
 
     #> Data Product Keywords
-    release = TextField()
-    apred = TextField()
-    plate = TextField() # most are integers, but not all!
-    telescope = TextField()
-    fiber = IntegerField()
-    mjd = IntegerField()
-    field = TextField()
+    release = TextField(index=True)
+    apred = TextField(index=True)
+    plate = TextField(index=True) # most are integers, but not all!
+    telescope = TextField(index=True)
+    fiber = IntegerField(index=True)
+    mjd = IntegerField(index=True)
+    field = TextField(index=True)
     prefix = TextField()
     reduction = TextField(default="") # only used for DR17 apo1m spectra
     # Note that above I use `default=''` instead of `null=True` because SQLite
@@ -393,7 +392,6 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         
         return template.format(**self.__data__)
 
-    
     class Meta:
         indexes = (
             (
@@ -411,4 +409,17 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
                 True,
             ),
         )
+
+
+    def sample_at_rest_frame(self, wavelength=None):
+        """
+        Re-samples this spectrum to rest-frame at the specified wavelengths using the measured radial velocity. 
+
+        :param wavelength: [optional]
+            An array of rest-frame wavelengths to sample at. If `None` is given, the default APOGEE sampling will be used.
+        """
+
+        if wavelength is None:
+            wavelength = 10**(4.179 + 6e-6 * np.arange(8575))
+        
 
