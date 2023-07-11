@@ -5,8 +5,7 @@ from itertools import cycle
 import multiprocessing as mp
 
 from astra.utils import log, flatten
-from astra.models import Spectrum
-from astra.models.pipelines import ApogeeNet 
+from astra.models.apogeenet import ApogeeNet 
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -121,8 +120,8 @@ def _inference(network, batch, num_uncertainty_draws):
 
 
 
-def parallel_batch_read(target, data_product, args, batch_size, N=None):
-    N = N or mp.cpu_count()
+def parallel_batch_read(target, data_product, args, batch_size, cpu_count=None):
+    N = cpu_count or mp.cpu_count()
     q_output = mp.Queue()
     qps = []
     for i in range(N):
@@ -160,7 +159,7 @@ def parallel_batch_read(target, data_product, args, batch_size, N=None):
 
 
 
-def get_metadata(spectrum: Spectrum):
+def get_metadata(spectrum):
     """
     Get requisite photometry and astrometry from a given spectrum for APOGEENet.
 
@@ -173,20 +172,6 @@ def get_metadata(spectrum: Spectrum):
         and the last value contains the normalized, clipped values of the metadata, for use with the
         APOGEENet model.
     """
-
-    metadata = [
-        spectrum.source.plx,
-        spectrum.source.g_mag,
-        spectrum.source.bp_mag,
-        spectrum.source.rp_mag,
-        spectrum.source.j_mag,
-        spectrum.source.h_mag,
-        spectrum.source.k_mag
-    ]
-    de_nanify = lambda x: x if (x != "NaN" and x != -999999 and x is not None) else np.nan
-    
-    metadata = np.array(list(map(de_nanify, metadata)))
-
     mdata_replacements = np.array(
         [-84.82700, 21.40844, 24.53892, 20.26276, 18.43900, 24.00000, 17.02500]
     )
@@ -211,11 +196,30 @@ def get_metadata(spectrum: Spectrum):
             10.858717523536697,
             10.702106344460235,
         ]
-    )
+    )    
+    try:
+        metadata = [
+            spectrum.source.plx,
+            spectrum.source.g_mag,
+            spectrum.source.bp_mag,
+            spectrum.source.rp_mag,
+            spectrum.source.j_mag,
+            spectrum.source.h_mag,
+            spectrum.source.k_mag
+        ]
+    except:
+        metadata = mdata_means
+        metadata_norm = ((metadata - mdata_means) / mdata_stddevs).astype(np.float32)
+    
+    else:            
+        de_nanify = lambda x: x if (x != "NaN" and x != -999999 and x is not None) else np.nan
+        
+        metadata = np.array(list(map(de_nanify, metadata)))
 
-    metadata = np.where(metadata < 98, metadata, mdata_replacements)
-    metadata = np.where(np.isfinite(metadata), metadata, mdata_replacements)
-    metadata = np.where(metadata > -1, metadata, mdata_replacements)
-    metadata_norm = ((metadata - mdata_means) / mdata_stddevs).astype(np.float32)
+        metadata = np.where(metadata < 98, metadata, mdata_replacements)
+        metadata = np.where(np.isfinite(metadata), metadata, mdata_replacements)
+        metadata = np.where(metadata > -1, metadata, mdata_replacements)
+        metadata_norm = ((metadata - mdata_means) / mdata_stddevs).astype(np.float32)
 
-    return (metadata, metadata_norm)
+    finally:
+        return (metadata, metadata_norm)

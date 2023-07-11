@@ -20,7 +20,7 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
 
     """A result from the APOGEENet pipeline."""
 
-    sdss_id = ForeignKeyField(Source, index=True)
+    source_id = ForeignKeyField(Source, null=True, index=True)
     spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     
     #> Astra Metadata

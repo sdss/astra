@@ -26,6 +26,7 @@ class Source(BaseModel):
 
     #> Identifiers
     id = AutoField(primary_key=True)
+    
     sdss_id = BigIntegerField(index=True, null=True)#primary_key=True)
     healpix = IntegerField(null=True)
     # The following identifiers should be unique, but I'm not convinced it's implemented properly yet.

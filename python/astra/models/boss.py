@@ -77,6 +77,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     rdnoise0 = FloatField(null=True)    
 
     #> Observing Conditions
+    telescope = TextField(null=True) # This is not a data product keyword, it is only stored in the headers.
     alt = FloatField(null=True)    
     az = FloatField(null=True)    
     seeing = FloatField(null=True)    

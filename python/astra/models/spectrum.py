@@ -17,6 +17,7 @@ from peewee import (
 )
 from astra.utils import log
 from astra.models.fields import BitField
+from astra.specutils.resampling import resample as _resample
 
 LARGE = 1e10
 
@@ -66,7 +67,7 @@ class SpectrumMixin:
         return fig
 
 
-    def resample(self, wavelength, n_res, v_shift=0):
+    def resample(self, wavelength, n_res, **kwargs):
         """
         Re-sample the spectrum at the given wavelengths.
 
@@ -76,33 +77,16 @@ class SpectrumMixin:
         :param n_res:
             The number of resolution elements to use. This can be a float or a list-like
             of floats where the length i
-
-        :param v_shift: [optional]
-            A velocity shift to apply when sampling the new spectrum.
         """
-
-        x = np.arange(self.flux.size)
-        pixel = wave_to_pixel(x + spectrum.v_rad_pixel, x)
-        (finite, ) = np.where(np.isfinite(pixel))
-
-        ((finite_flux, finite_e_flux), ) = sincint(
-            pixel[finite], n_res, [
-                [spectrum.flux, 1/spectrum.ivar]
-            ]
+        return _resample(
+            self.wavelength,
+            wavelength,
+            self.flux,
+            self.ivar,
+            n_res,
+            pixel_flags=self.pixel_flags,
+            **kwargs
         )
-
-        flux = np.nan * np.ones(spectrum.wavelength.size)
-        e_flux = np.nan * np.ones(spectrum.wavelength.size)
-        flux[finite] = finite_flux
-        e_flux[finite] = finite_e_flux
-        
-        spectrum.flux = flux
-        spectrum.ivar = e_flux**-2
-        bad = ~np.isfinite(spectrum.ivar)
-        spectrum.ivar[bad] = 0        
-        raise a
-
-        
 
     @classmethod
     def to_hdu(cls, where=None, header=None, fill_values=None, upper=True):

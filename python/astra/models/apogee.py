@@ -18,6 +18,13 @@ from astra.models.base import BaseModel
 from astra.models.spectrum import (Spectrum, SpectrumMixin)
 from astra.models.source import Source
 
+from astropy.constants import c
+from astropy import units as u
+
+C_KM_S = c.to(u.km / u.s).value
+
+
+
 def _transform_err_to_ivar(err, *args, **kwargs):
     ivar = np.atleast_2d(err)[0]**-2
     ivar[~np.isfinite(ivar)] = 0
@@ -272,8 +279,8 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     release = TextField(index=True)
     apred = TextField(index=True)
     plate = TextField(index=True) # most are integers, but not all!
-    telescope = TextField(index=True)
-    fiber = IntegerField(index=True)
+    telescope = TextField(index=True, help_text="Short telescope name")
+    fiber = IntegerField(index=True, help_text="Fiber number")
     mjd = IntegerField(index=True)
     field = TextField(index=True)
     prefix = TextField()
@@ -282,7 +289,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     # seems to have some weird bug with using `null=True` on a key field. It
     # meant that `reduction` was being set to null even when I gave it values.
 
-    # Pixel arrays
+    #> Pixel arrays
     wavelength = PixelArray(
         ext=4, 
         transform=lambda x, *_: x[::-1, ::-1],
@@ -290,6 +297,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     flux = PixelArray(
         ext=1,
         transform=lambda x, *_: x[::-1, ::-1],
+        help_text="Flux [10^-17 ergs/s/cm^2/A]"
     )
     ivar = PixelArray(
         ext=2,
@@ -313,6 +321,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     assigned = IntegerField(null=True)
     on_target = IntegerField(null=True)
     valid = IntegerField(null=True)
+    # TODO: add fps
     
     #> Statistics and Spectrum Quality 
     snr = FloatField(null=True)
@@ -379,7 +388,6 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     def flag_warn(self):
         return (self.spectrum_flags > 0)
 
-
     @property
     def path(self):
         if self.release == "sdss5":
@@ -409,17 +417,3 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
                 True,
             ),
         )
-
-
-    def sample_at_rest_frame(self, wavelength=None):
-        """
-        Re-samples this spectrum to rest-frame at the specified wavelengths using the measured radial velocity. 
-
-        :param wavelength: [optional]
-            An array of rest-frame wavelengths to sample at. If `None` is given, the default APOGEE sampling will be used.
-        """
-
-        if wavelength is None:
-            wavelength = 10**(4.179 + 6e-6 * np.arange(8575))
-        
-
