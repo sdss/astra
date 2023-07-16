@@ -42,6 +42,8 @@ class MwmApogeeVisitSpectrum(ApogeeVisitSpectrum):
         default=Spectrum.create
     )
     upstream_spectrum = ForeignKeyField(ApogeeVisitSpectrum, field=ApogeeVisitSpectrum.spectrum_id)    
+    #TODO: rename to drp_spectrum_id
+
 
 
     wavelength = PixelArray(ext=1)

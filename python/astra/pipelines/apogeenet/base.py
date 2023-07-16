@@ -1,8 +1,9 @@
 
 import torch
 import numpy as np
-from itertools import cycle
 import multiprocessing as mp
+from itertools import cycle
+from time import time
 
 from astra.utils import log, flatten
 from astra.models.apogeenet import ApogeeNet 
@@ -54,6 +55,11 @@ def _worker(q_input, q_output, large_error):
 
 
 def _inference(network, batch, num_uncertainty_draws):
+    # Astra does record the time taken by each task, but this is a naive estimate which does not account for cases
+    # where inferences are done in batches, which leads to one spectrum in the batch having the estimated time for
+    # the whole batch, and all others having some small value (1e-5), so we will calculate the average time here
+
+    t_init = time()
     spectrum_ids, flux, e_flux, meta, meta_dict = ([], [], [], [], [])
     for spectrum_id, f, ef, m, md in batch:
         spectrum_ids.append(spectrum_id)
@@ -102,6 +108,7 @@ def _inference(network, batch, num_uncertainty_draws):
     logg_std, teff_std, fe_h_std = std_draw_predictions
     logg, teff, fe_h = predictions
 
+    mean_t_elapsed = (time() - t_init) / len(spectrum_ids)
     for i, spectrum_id in enumerate(spectrum_ids):
         output = ApogeeNet(
             spectrum_id=spectrum_id,
@@ -114,13 +121,14 @@ def _inference(network, batch, num_uncertainty_draws):
             teff_sample_median=teff_median[i],
             logg_sample_median=logg_median[i],
             fe_h_sample_median=fe_h_median[i],
+            t_elapsed=mean_t_elapsed
         )
         output.apply_flags(meta[i])
         yield output
 
 
 
-def parallel_batch_read(target, data_product, args, batch_size, cpu_count=None):
+def parallel_batch_read(target, spectra, args, batch_size, cpu_count=None):
     N = cpu_count or mp.cpu_count()
     q_output = mp.Queue()
     qps = []
@@ -131,8 +139,8 @@ def parallel_batch_read(target, data_product, args, batch_size, cpu_count=None):
         qps.append((q, p))
 
     B, batch = (0, [])
-    for i, ((q, p), data_product) in enumerate(zip(cycle(qps), flatten(data_product))):
-        q.put(data_product)
+    for i, ((q, p), spectrum) in enumerate(zip(cycle(qps), flatten(spectra))):
+        q.put(spectrum)
 
     for (q, p) in qps:
         q.put(None)

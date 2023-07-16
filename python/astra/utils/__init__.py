@@ -1,7 +1,8 @@
 import os
 from sdsstools.logger import get_logger
+import warnings
+from importlib import import_module
 from time import time
-
 
 logger_kwds = {}
 #if "logging" in config and "level" in config["logging"]:
@@ -16,7 +17,22 @@ def get_config_paths():
 
 class Timer(object):
 
-    def __init__(self, iterable, frequency=None, callback=None):
+    def __init__(self, iterable, frequency=None, callback=None, attribute_name=None):
+        """
+
+        :param iterable:
+            An iterable to record performance time across.
+        
+        :param frequency: [optional]
+            The frequency (in seconds) between database check points.
+        
+        :param callback: [optional]
+            A callback function to execute when the timer is complete.
+        
+        :param attribute_name: [optional]
+            The attribute name to use to store the elapsed time per object. If `None`
+            is given then this will not be stored.
+        """
         self._iterable = iter(iterable)
         self._time_paused = 0
         self._start = time()
@@ -24,6 +40,7 @@ class Timer(object):
         self._last_check_point = time()
         self._frequency = frequency
         self._callback = callback
+        self._attribute_name = attribute_name
 
     def __enter__(self):
         self._time_last = time()
@@ -40,12 +57,15 @@ class Timer(object):
     def __next__(self):
         item = next(self._iterable)
         self.interval = time() - self._time_last - self._time_paused
-        try:
-            # Note the time it took to analyse this object using the `time_elapsed` attribute, 
-            # but don't assume it exists.
-            item.time_elapsed = self.interval
-        except:
-            None
+        # If the pipeline has set their own t_elapsed, do not overwrite it.
+        if self._attribute_name is not None and getattr(item, self._attribute_name, None) is None:
+            try:
+                # Note the time it took to analyse this object using the named attribute, 
+                # but don't assume it exists.
+                setattr(item, self._attribute_name, self.interval)
+            except:
+                warnings.warn(f"Could not store elapsed time on attribute name `{self._attribute_name}`")
+
         self._time_paused = 0
         self._time_last = time()
         return item
@@ -71,6 +91,21 @@ class Timer(object):
             self._time_paused += time_paused
         return self.__class__([], None, callback=callback)
     
+
+def callable(input_callable):
+    if isinstance(input_callable, str):
+        try_prefixes = ("", "astra.")
+        for prefix in try_prefixes:
+            try:                
+                module_name, func_name = (prefix + input_callable).rsplit(".", 1)
+                module = import_module(module_name)
+                return getattr(module, func_name)
+            except:
+                continue        
+        raise ImportError(f"Cannot resolve input callable `{input_callable}`")
+    else:
+        return input_callable
+
 
     
 def expand_path(path):

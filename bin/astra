@@ -50,6 +50,66 @@ def initdb(drop_tables):
 
 
 @cli.command()
+@click.argument("task")
+@click.argument("spectra", nargs=-1)
+@click.option("--kwargs-path")
+def execute(task, spectra, kwargs_path=None):
+    import pickle
+    from astra.utils import log, callable
+    from tqdm import tqdm
+
+    f = callable(task)
+    kwargs = {}
+    if kwargs_path is not None:
+        with open(kwargs_path, "rb") as fp:
+            kwargs = pickle.load(fp)
+
+    spectrum_ids = list(map(int, spectra))
+    if not spectrum_ids:
+        spectrum_ids = kwargs.pop("spectra", [])
+    else:
+        if "spectra" in kwargs:
+            raise ValueError("`spectra` given in `kwargs_path` and in command line")
+        
+    if spectrum_ids:
+        # Figure out which model it is
+        from astra.models import apogee, boss
+        from astra.models.spectrum import Spectrum, SpectrumMixin
+        example = Spectrum.get(spectrum_ids[0])
+        model = None
+        for expr, field in example.dependencies():
+            if SpectrumMixin not in field.model.__mro__:
+                continue
+            try:
+                q = list(field.model.select().where(expr))
+            except:
+                continue
+            else:
+                if q:
+                    model = field.model
+                    log.info(f"Identified input spectra as type `{model}`")
+                    break
+        else:
+            raise ValueError(f"Cannot find model type for spectrum {example}")
+    
+        spectra = (
+            model
+            .select()
+            .where(model.spectrum_id.in_(spectrum_ids))
+        )
+
+            
+        kwargs["spectra"] = spectra
+        log.warning(f"All given spectrum identifiers should come from the same model type")
+
+    for item in tqdm(f(**kwargs), total=None):
+        None
+    
+    return None
+
+
+
+@cli.command()
 @click.argument("paths", nargs=-1)
 def run(paths, **kwargs):
     """Execute one or many tasks."""
