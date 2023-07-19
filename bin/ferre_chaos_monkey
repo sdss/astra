@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+import os
+from subprocess import check_output
+from time import time, sleep
+
+def wc(path):
+    return int(check_output(["wc", "-l", path]).split()[0])
+
+def ferre_chaos_monkey(
+    ferre_executable="ferre.x", 
+    output_path="rectified_flux.output", 
+    minimum_time_before_killing_process=300, 
+    factor=3,
+    sleep_time=1,
+    verbose=False
+):
+    # Get PIDs 
+    while True:
+        try:
+            pids = check_output(["pidof", ferre_executable]).decode("ascii").split()
+        except:
+            None
+        else:            
+            for pid in map(int, pids):
+                if verbose:
+                    print(f"Checking pid {pid}")
+
+                try:
+                    _, pwd = check_output(["pwdx", f"{pid}"]).decode("ascii").strip().split()
+
+                    n_spectra_in = wc(f"{pwd}/parameter.input")
+                    abs_output_path = f"{pwd}/{output_path}"
+                    if os.path.exists(abs_output_path):
+                        try:
+                            n_spectra_out = wc(f"{pwd}/{output_path}")
+                        except:
+                            n_spectra_out = 0
+                    else:
+                        n_spectra_out = 0
+
+                    if n_spectra_out >= n_spectra_in:
+                        continue
+
+                    if n_spectra_out == 0:
+                        if verbose:
+                            print(f"\tno spectra yet on {pwd}")
+                        continue
+                        
+                    header, row = (
+                        check_output(
+                            f"ps -p {pid} -o etimes,%mem,%cpu,cmd".split()
+                        )
+                        .decode("ascii")
+                        .strip()
+                        .split("\n")
+                    )
+                    t_elapsed, mem, cpu, executable, *process_args = row.split()
+                    if len(process_args) > 0 and process_args[0] != "input.nml":
+                        if verbose:
+                            print(f"\tignoring because {process_args}")
+                        continue
+
+                    t_elapsed = int(t_elapsed)
+
+                    # todo: replace with a 'started' touch file
+                    updated = os.path.getmtime(f"{pwd}/{output_path}")
+                    started = time() - t_elapsed
+
+                    if updated < started:
+                        # The output file must be from a previous run.
+                        if verbose:
+                            print("\toutput file looks to be from a previous run")
+                        continue
+
+                    t_processing = updated - started
+                    t_since_last_updated = time() - updated
+
+                    seconds_per_spectrum = t_processing / n_spectra_out
+                    if verbose:
+                        print(f"\t{pid} {n_spectra_out: >4.0f}/{n_spectra_in: <4.0f} t_elapsed={t_elapsed: >5.0f} t_proc={t_processing: >5.0f} sec_since_update={t_since_last_updated:0>2.2f} sec/spec={seconds_per_spectrum:0>2.2f} {'[WARN]' if t_since_last_updated > seconds_per_spectrum else ''}")
+                    if (
+                        (t_since_last_updated > (factor * seconds_per_spectrum))
+                    and (t_since_last_updated > minimum_time_before_killing_process)
+                    ):
+                        print(f"\tkilling process {pid}")
+                        check_output(["kill", "-9", f"{pid}"])
+                        check_output(["touch", f"{pwd}/killed"])
+                except:
+                    continue
+
+        finally:
+            sleep(sleep_time)
+
+
+
+if __name__ == "__main__":
+    ferre_chaos_monkey()

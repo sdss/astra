@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+import click
+
+# Common options.
+@click.group()
+@click.option("-v", "verbose", default=False, is_flag=True, help="verbose mode")
+@click.pass_context
+def cli(context, verbose):
+    context.ensure_object(dict)
+    context.obj["verbose"] = verbose
+
+
+
+@cli.command()
+@click.argument("directory")
+def setup_new_partial_execution(directory):
+    import os
+    import numpy as np
+
+    print(f"Setting up new FERRE execution from existing partial execution in {directory}")
+
+    new_directory = os.path.join(directory, "resume")
+
+    print(f"New FERRE execution will be in {new_directory}")
+
+    # Get all the input parameters
+    input_names = list(np.loadtxt(f"{directory}/parameter.input", usecols=(0, ), dtype=str))
+    output_parameter_names = np.loadtxt(f"{directory}/parameter.output", usecols=(0, ), dtype=str)
+
+    print(f"There are {len(input_names)} spectra in the original execution, with {len(output_parameter_names)} complete")
+
+    # Get things that are missing
+    missing = set(input_names).difference(output_parameter_names)
+    missing_indices = np.array([input_names.index(name) for name in missing])
+
+    os.makedirs(f"{directory}/resume", exist_ok=True)
+    os.system(f"cp {directory}/input.nml {directory}/resume/input.nml")
+
+    with open(f"{directory}/parameter.input", "r") as fp:
+        lines = fp.readlines()
+        content = "".join([lines[i] for i in missing_indices])
+        with open(f"{new_directory}/parameter.input", "w") as fp:
+            fp.write(content)
+
+    flux = np.atleast_2d(np.loadtxt(f"{directory}/flux.input", dtype=float))
+    e_flux = np.atleast_2d(np.loadtxt(f"{directory}/e_flux.input", dtype=float))
+
+    savetxt_kwds = dict(fmt="%.4e", footer="\n")
+    np.savetxt(
+        os.path.join(new_directory, "flux.input"), 
+        flux[missing_indices], 
+        **savetxt_kwds
+    )
+    np.savetxt(
+        os.path.join(new_directory, "e_flux.input"), 
+        e_flux[missing_indices], 
+        **savetxt_kwds
+    )
+    print(f"Created new directory {new_directory} with {len(missing_indices)} spectra to execute")
+    
+    return None
+
+
+
+if __name__ == "__main__":
+    cli(obj=dict())
