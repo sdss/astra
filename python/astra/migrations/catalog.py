@@ -1,7 +1,7 @@
 
 from typing import Optional
 from tqdm import tqdm
-from peewee import chunked
+from peewee import chunked, IntegerField
 from astra.models.source import Source
 from astra.migrations.sdss5db.utils import get_approximate_rows
 from astra.utils import log
@@ -36,7 +36,6 @@ def migrate_healpix(
     """
     from healpy import ang2pix
     
-    
     log.info(f"Migrating healpix")
     q = (
         Source
@@ -47,12 +46,11 @@ def migrate_healpix(
         )
         .where(where)
         .limit(limit)
-        .iterator()
     )    
     
-    updated, total = (0, limit or Source.select().count())
+    updated, total = (0, limit or q.count())
     with tqdm(total=total) as pb:
-        for batch in chunked(q, batch_size):
+        for batch in chunked(q.iterator(), batch_size):
             for record in batch:
                 record.healpix = ang2pix(nside, record.ra, record.dec, lonlat=lonlat)
             updated += (

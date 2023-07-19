@@ -68,34 +68,39 @@ def migrate_tic_v8_identifier(batch_size: Optional[int] = 500, limit: Optional[i
     return updated    
 
 
-def migrate_twomass_photometry(batch_size: Optional[int] = 500, limit: Optional[int] = None):
+def migrate_twomass_photometry(
+    where=(
+        (
+            Source.j_mag.is_null()
+        |   Source.h_mag.is_null()
+        |   Source.k_mag.is_null()
+        )
+        &   Source.sdss5_catalogid_v1.is_null(False)
+    ),
+    limit: Optional[int] = None,
+    batch_size: Optional[int] = 500, 
+):
 
     from astra.migrations.sdss5db.catalogdb import TwoMassPSC, CatalogToTwoMassPSC
 
     log.info(f"Migrating 2MASS photometry")
     q = (
         Source
-        .select(
-            Source.id,
-            Source.sdss5_catalogid_v1
-        )
-        .where(
-            (
-                Source.j_mag.is_null()
-            |   Source.h_mag.is_null()
-            |   Source.k_mag.is_null()
-            )
-            &   Source.sdss5_catalogid_v1.is_null(False)
-        )
+        .select(Source.sdss5_catalogid_v1)
+        .distinct()
+        .where(where)
         .order_by(
             Source.sdss5_catalogid_v1.asc()
         )
+        .tuples()
         .limit(limit)
-        .iterator()
     )    
 
-    updated = 0
-    with tqdm(total=limit) as pb:
+    limit = limit or q.count()
+
+    twomass_data = {}
+
+    with tqdm(total=limit, desc="Retrieving photometry") as pb:
         for batch in chunked(q, batch_size):
             q_twomass = (
                 TwoMassPSC
@@ -113,25 +118,46 @@ def migrate_twomass_photometry(batch_size: Optional[int] = 500, limit: Optional[
                 )
                 .join(CatalogToTwoMassPSC)
                 .where(
-                    CatalogToTwoMassPSC.catalogid.in_([r.sdss5_catalogid_v1 for r in batch])
+                    CatalogToTwoMassPSC.catalogid.in_(flatten(batch))
                 )
                 .order_by(CatalogToTwoMassPSC.catalogid.asc())
                 .dicts()
-                .iterator()
             )
-
-            sources = { source.sdss5_catalogid_v1: source for source in batch }
-            update = []
             for r in q_twomass:
-                source = sources[r["catalogid"]]
-                for key, value in r.items():
-                    setattr(source, key, value)
-                update.append(source)
-            
+                twomass_data[r.pop("catalogid")] = r
+            pb.update(min(batch_size, len(batch)))
+
+    q = (
+        Source
+        .select(
+            Source.id,
+            Source.sdss5_catalogid_v1
+        )
+        .where(where)
+        .order_by(
+            Source.sdss5_catalogid_v1.asc()
+        )
+        .limit(limit)
+    )    
+
+    updated_sources = []
+    for source in q:
+        try:
+            d = twomass_data[source.sdss5_catalogid_v1]
+        except KeyError:
+            continue
+
+        for key, value in d.items():
+            setattr(source, key, value or np.nan)
+        updated_sources.append(source)
+
+    updated = 0
+    with tqdm(total=len(updated_sources), desc="Updating sources") as pb:
+        for chunk in chunked(updated_sources, batch_size):
             updated += (
                 Source
                 .bulk_update(
-                    update,
+                    chunk,
                     fields=[
                         Source.j_mag,
                         Source.e_j_mag,
@@ -145,8 +171,7 @@ def migrate_twomass_photometry(batch_size: Optional[int] = 500, limit: Optional[
                     ]
                 )
             )
-
-            pb.update(batch_size)
+            pb.update(min(batch_size, len(chunk)))
 
     log.info(f"Updated {updated} records")
     return updated
@@ -240,7 +265,7 @@ def migrate_unwise_photometry(batch_size: Optional[int] = 500, limit: Optional[i
 
 
 
-def migrate_gaia_dr3_astrometry_and_photometry(batch_size: Optional[int] = 500, limit: Optional[int] = None):
+def migrate_gaia_dr3_astrometry_and_photometry(limit: Optional[int] = None, batch_size: Optional[int] = 500):
     """
     Migrate Gaia DR3 astrometry and photometry from the SDSS-V database for any sources (`astra.models.Source`)
     that have a Gaia DR3 source identifier (`astra.models.Source.gaia_dr3_source_id`) but are missing Gaia
@@ -260,10 +285,8 @@ def migrate_gaia_dr3_astrometry_and_photometry(batch_size: Optional[int] = 500, 
     # Retrieve sources which have gaia identifiers but not astrometry
     q = (
         Source
-        .select(
-            Source.id,
-            Source.gaia_dr3_source_id
-        )
+        .select(Source.gaia_dr3_source_id)
+        .distinct()
         .where(
             (
                 Source.g_mag.is_null()
@@ -276,12 +299,15 @@ def migrate_gaia_dr3_astrometry_and_photometry(batch_size: Optional[int] = 500, 
             Source.gaia_dr3_source_id.asc()
         )
         .limit(limit)
-        .iterator()
+        .tuples()
     )
 
-    updated = 0
-    with tqdm(total=limit) as pb:
-        for batch in chunked(q, batch_size):
+    total = limit or q.count()
+
+    gaia_data = {}
+
+    with tqdm(total=total) as pb:
+        for batch in chunked(q.iterator(), batch_size):
             q_gaia = (
                 Gaia_DR3
                 .select(
@@ -299,16 +325,64 @@ def migrate_gaia_dr3_astrometry_and_photometry(batch_size: Optional[int] = 500, 
                     Gaia_DR3.radial_velocity_error.alias("gaia_e_v_rad"),
                 )
                 .where(
-                    Gaia_DR3.source_id.in_([r.gaia_dr3_source_id for r in batch])
+                    Gaia_DR3.source_id.in_(flatten(batch))
                 )
-                .order_by(Gaia_DR3.source_id.asc())
                 .dicts()
                 .iterator()
             )
-            sources = { s.gaia_dr3_source_id: s for s in batch }
-            update = []
-            for gaia_source in q_gaia:
-                source = sources[gaia_source["gaia_dr3_source_id"]]
+
+            for source in q_gaia:
+                gaia_data[source["gaia_dr3_source_id"]] = source
+            pb.update(min(batch_size, len(batch)))
+    
+    q = (
+        Source
+        .select(
+            Source.id,
+            Source.gaia_dr3_source_id
+        )
+        .where(
+            (
+                Source.g_mag.is_null()
+            |   Source.bp_mag.is_null()
+            |   Source.rp_mag.is_null()
+            )
+            &   Source.gaia_dr3_source_id.is_null(False)
+        )        
+    )
+
+    updated_sources = []
+    for source in q:
+        for k, v in gaia_data[source.gaia_dr3_source_id].items():
+            setattr(source, k, v or np.nan)
+        updated_sources.append(source)
+
+    updated = 0
+    for chunk in chunked(updated_sources, batch_size):
+        updated += (
+            Source
+            .bulk_update(
+                chunk,
+                fields=[
+                    Source.g_mag,
+                    Source.bp_mag,
+                    Source.rp_mag,
+                    Source.plx,
+                    Source.e_plx,
+                    Source.pmra,
+                    Source.e_pmra,
+                    Source.pmde,
+                    Source.e_pmde,
+                    Source.gaia_v_rad,
+                    Source.gaia_e_v_rad
+                ]        
+            )
+        )
+
+    log.info(f"Updated {updated} records ({len(gaia_data)} gaia sources)")
+    return updated
+    '''
+                source = sources[]
                 for key, value in gaia_source.items():
                     setattr(source, key, value or np.nan)
                 update.append(source)
@@ -338,45 +412,5 @@ def migrate_gaia_dr3_astrometry_and_photometry(batch_size: Optional[int] = 500, 
 
     log.info(f"Updated {updated} records")
     return updated
+    '''
 
-
-
-if __name__ == "__main__":
-    from astra.models.source import Source
-    from astra.models.spectrum import Spectrum
-    from astra.models.apogee import ApogeeVisitSpectrum
-    models = [Spectrum, ApogeeVisitSpectrum, Source]
-    #database.drop_tables(models)
-    if models[0].table_exists():
-        database.drop_tables(models)
-    database.create_tables(models)
-
-    from astra.migrations.apogee import migrate_apvisit_from_sdss5_apogee_drpdb, migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb
-    foo = migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(limit=1000)
-    
-    bar = migrate_apvisit_from_sdss5_apogee_drpdb(limit=1000)
-
-    # ingest from SDSS DR17
-    # ingest from SDSS5 apogee drp
-    # link catalog identifiers
-
-    # add dithered information and any other metadata (needs to open file to do that)
-    # -> flag any corrupt files
-    # link TIC versions
-    # add healpix numbers
-    # add glimpse photometry
-    # add carton information
-
-
-    # DONE:
-    # add astrometry
-    # add 2mass photometry
-    # add unwise photometry
-    
-    migrate_gaia_dr3_astrometry_and_photometry(batch_size=10)
-    migrate_twomass_photometry()
-    migrate_unwise_photometry()
-
-    from astra.migrations.catalog import migrate_healpix
-
-    migrate_healpix()
