@@ -95,13 +95,14 @@ def pre_process_ferre(
         prefix = os.path.basename(pwd.rstrip("/")) + "/"
         for key in ("pfile", "opfile", "offile", "sffile"):
             control_kwds[key] = prefix + control_kwds[key]
-    
-    control_kwds_formatted = utils.format_ferre_control_keywords(control_kwds)
-    log.info(f"FERRE control keywords:\n{control_kwds_formatted}")
 
     pwd = expand_path(pwd)
     os.makedirs(pwd, exist_ok=True)
     log.info(f"FERRE working directory: {pwd}")
+
+    control_kwds_formatted = utils.format_ferre_control_keywords(control_kwds)
+    log.info(f"FERRE control keywords:\n{control_kwds_formatted}")
+
 
     # Write the control file        
     with open(os.path.join(pwd, "input.nml"), "w") as fp:
@@ -155,7 +156,7 @@ def pre_process_ferre(
 
             else:
                 # TODO: move this to the ASPCAP coarse/stellar parameter section (before continuum norm).
-                inflate_errors_at_bad_pixels(
+                flux, e_flux = inflate_errors_at_bad_pixels(
                     flux,
                     e_flux,
                     pixel_flags,
@@ -227,7 +228,6 @@ def inflate_errors_at_bad_pixels(
     spike_threshold_to_inflate_uncertainty,
     min_sigma_value,
 ):
-
     # Inflate errors around skylines,
     skyline_mask = (bitfield & 4096) > 0 # significant skyline
     e_flux[skyline_mask] *= skyline_sigma_multiplier
@@ -272,7 +272,7 @@ def inflate_errors_at_bad_pixels(
     if min_sigma_value is not None:
         e_flux = np.clip(e_flux, min_sigma_value, np.inf)
 
-    return None
+    return (flux, e_flux)
 
 
 def _get_ferre_chip_mask(observed_wavelength, chip_wavelengths):

@@ -113,7 +113,7 @@ class AstraTaskOperator(BaseOperator):
         )
         mkstemp_kwds.update(self.mkstemp_kwargs)
 
-        _, path = mkstemp(**self.mkstemp_kwds)
+        _, path = mkstemp(**mkstemp_kwds)
         with open(path, "wb") as fp:
             pickle.dump(task_kwds, fp)
             
@@ -139,7 +139,7 @@ class AstraTaskOperator(BaseOperator):
 
 
 
-
+'''
 if __name__ == "__main__":
 
     def spectra_callable(context):
@@ -161,7 +161,8 @@ if __name__ == "__main__":
         spectra_callable=spectra_callable,
         use_slurm_gpu=True,
         slurm_kwargs=dict(
-            job_name="apogeenet/2023-07-16",
+            job_name="apogeenet/2023-07-16-100k",
             walltime="00:05:00"
         )
     ) 
+'''

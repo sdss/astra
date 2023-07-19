@@ -5,7 +5,7 @@ from astra import task
 from astra.models.spectrum import Spectrum
 from astra.models.aspcap import FerreCoarse
 from astra.utils import log, expand_path, list_to_dict
-from astra.pipelines.ferre.operator import FerreOperator
+from astra.pipelines.ferre.operator import FerreOperator, FerreMonitoringOperator, FerreChaosMonkeyOperator
 from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
 from astra.pipelines.ferre.utils import (execute_ferre, parse_header_path, read_ferre_headers, clip_initial_guess)
@@ -59,7 +59,15 @@ def coarse_stellar_parameters(
     )
 
     # Execute ferre.
-    FerreOperator(f"{parent_dir}/{STAGE}/", **(operator_kwds or {})).execute()
+    job_ids, executions = (
+        FerreOperator(
+            f"{parent_dir}/{STAGE}/", 
+            **(operator_kwds or {})
+        )
+        .execute()
+    )
+    FerreChaosMonkeyOperator(job_ids).feed() # feed to start processes, we don't care when they finish
+    FerreMonitoringOperator(executions).execute()
     
     yield from post_coarse_stellar_parameters(parent_dir, **kwargs)
 

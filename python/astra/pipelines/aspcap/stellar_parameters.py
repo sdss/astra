@@ -7,7 +7,7 @@ from astra import task
 from astra.utils import log, list_to_dict
 from astra.models.spectrum import Spectrum
 from astra.models.aspcap import FerreCoarse, FerreStellarParameters
-from astra.pipelines.ferre.operator import FerreOperator
+from astra.pipelines.ferre.operator import FerreOperator, FerreChaosMonkeyOperator, FerreMonitoringOperator
 from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
 from astra.pipelines.ferre.utils import (
@@ -46,8 +46,16 @@ def stellar_parameters(
     yield from pre_stellar_parameters(spectra, parent_dir, weight_path, **kwargs)
 
     # Execute ferre.
-    FerreOperator(f"{parent_dir}/{STAGE}/", **(operator_kwds or {})).execute()    
-
+    job_ids, executions = (
+        FerreOperator(
+            f"{parent_dir}/{STAGE}/", 
+            **(operator_kwds or {})
+        )
+        .execute()
+    )
+    FerreChaosMonkeyOperator(job_ids).feed() # feed to start processes, we don't care when they finish
+    FerreMonitoringOperator(executions).execute()
+    
     yield from post_stellar_parameters(parent_dir)
 
 
@@ -126,7 +134,12 @@ def plan_stellar_parameters(
             Alias.spectrum_id,
             fn.MIN(Alias.ferre_penalized_log_chi_sq).alias("min_ferre_penalized_log_chi_sq"),
         )
-        .where(Alias.spectrum_id << [s.spectrum_id for s in spectra])
+        .where(
+            (Alias.spectrum_id << [s.spectrum_id for s in spectra])
+        &   (Alias.teff.is_null(False))
+        &   (Alias.logg.is_null(False))
+        &   (Alias.m_h.is_null(False))
+        )
         .group_by(Alias.spectrum_id)
         .alias("sq")
     )

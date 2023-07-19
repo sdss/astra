@@ -229,7 +229,6 @@ def yield_suitable_grids(
     point = np.array([logg, teff])
     P = point.size
 
-
     for header_path, headers in all_headers.items():
 
         meta = parse_header_path(header_path)
@@ -238,20 +237,27 @@ def yield_suitable_grids(
         # Match star to LSF fiber number model (a, b, c, d) and telescope model (apo25m/lco25m).
         # TODO: This is a very APOGEE-specific thing and perhaps should be moved elsewhere.
         # Special case to deal with Kurucz photospheres.
-        if (
-            meta["lsf"] != lsf_grid and not meta["lsf"].startswith("combo")
-        ) or telescope != meta["lsf_telescope_model"]:
-            continue
 
-        # We will take the RV parameters as the initial parameters.
-        # Check to see if they are within bounds of the grid.
-        if strict:
-            if np.all(point >= lower_limits[-P:]) and np.all(point <= upper_limits[-P:]):
-                yield (header_path, meta, headers)
-        else:
-            # Only require temperature to be within the limits.
-            if (upper_limits[-1] >= teff >= lower_limits[-1]):
-                yield (header_path, meta, headers)
+
+        #if (
+        #    meta["lsf"] != lsf_grid and not meta["lsf"].startswith("combo")
+        #) or telescope != meta["lsf_telescope_model"]:
+        #    continue
+
+        if (
+            # If it's the BA combo grid, don't worry about matching fiber and telescope LSF
+            meta["lsf"].startswith("combo") \
+            or (meta["lsf"] == lsf_grid and telescope == meta["lsf_telescope_model"])
+        ):                
+            # We will take the RV parameters as the initial parameters.
+            # Check to see if they are within bounds of the grid.
+            if strict:
+                if np.all(point >= lower_limits[-P:]) and np.all(point <= upper_limits[-P:]):
+                    yield (header_path, meta, headers)
+            else:
+                # Only require temperature to be within the limits.
+                if (upper_limits[-1] >= teff >= lower_limits[-1]):
+                    yield (header_path, meta, headers)
 
 
 def get_lsf_grid_name(fibre_number):
