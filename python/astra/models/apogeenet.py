@@ -30,12 +30,12 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
     tag = TextField(default="", index=True)
     
     #> Stellar Parameters
-    teff = FloatField()
-    e_teff = FloatField()
-    logg = FloatField()
-    e_logg = FloatField()
-    fe_h = FloatField()
-    e_fe_h = FloatField()
+    teff = FloatField(null=True)
+    e_teff = FloatField(null=True)
+    logg = FloatField(null=True)
+    e_logg = FloatField(null=True)
+    fe_h = FloatField(null=True)
+    e_fe_h = FloatField(null=True)
 
     teff_sample_median = FloatField(help_text="Median effective temperature from random draws")
     logg_sample_median = FloatField(help_text="Median surface gravity from random draws")

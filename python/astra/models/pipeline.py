@@ -40,7 +40,7 @@ class PipelineOutputMixin:
         :param upper: [optional]
             If `True` (default), then all column names will be converted to upper case.
         """
-
+    
         from astropy.io import fits
         from astra.models.source import Source
 
@@ -113,6 +113,80 @@ class PipelineOutputMixin:
 
         return hdu
 
+
+def to_hdu(spectrum_model, where=None, header=None, fill_values=None, upper=True):
+
+    from astropy.io import fits
+    from astra.models.source import Source
+
+    fields = {}
+    models = (Source, spectrum_model, cls)
+    for model in models:
+        for name, field in model._meta.fields.items():
+            if name not in fields: # Don't duplicate fields
+                fields[name] = field
+            warn_on_long_name_or_comment(field)
+
+    # Do left outer joins on spectrum_model so that we get every spectrum even if there
+    # isn't a corresponding pipeline result.
+    # If the user wants something different, they can use the `where` clause.
+
+    q = (
+        spectrum_model
+        .select(*tuple(fields.values()))
+        .join(Source, on=(Source.id == spectrum_model.source_id))
+        .switch(spectrum_model)
+        .join(
+            cls, 
+            JOIN.LEFT_OUTER,
+            on=(cls.spectrum_id == spectrum_model.spectrum_id),
+        )
+        .dicts()
+    )
+
+    if where is not None:   
+        q = q.where(where)
+
+    column_fill_values = { 
+        field.name: get_fill_value(field, fill_values) \
+            for field in fields.values() 
+    }
+
+    data = { name: [] for name in fields.keys() }
+    for result in q:
+        for name, value in result.items():
+            if value is None:
+                value = column_fill_values[name]                    
+            data[name].append(value)
+    
+    # Create the columns.
+    original_names, columns = ({}, [])
+    for name, field in fields.items():
+        kwds = fits_column_kwargs(field, data[name], upper=upper)
+        # Keep track of field-to-HDU names so that we can add help text.
+        original_names[kwds['name']] = name
+        columns.append(fits.Column(**kwds))
+
+    # Create the HDU.
+    hdu = fits.BinTableHDU.from_columns(columns, header=header)
+
+    # Add comments for 
+    for i, name in enumerate(hdu.data.dtype.names, start=1):
+        field = fields[original_names[name]]
+        hdu.header.comments[f"TTYPE{i}"] = field.help_text
+
+    # Add category groupings.
+    add_category_headers(hdu, models, original_names, upper)
+
+    # TODO: Add comments for flag definitions?
+    
+    # Add checksums.
+    hdu.add_checksum()
+    hdu.header.insert("CHECKSUM", BLANK_CARD)
+    hdu.header.insert("CHECKSUM", (" ", "DATA INTEGRITY"))
+    hdu.add_checksum()
+
+    return hdu
 
 
 def add_category_headers(hdu, models, original_names, upper):
