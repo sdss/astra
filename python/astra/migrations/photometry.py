@@ -293,7 +293,10 @@ def migrate_gaia_dr3_astrometry_and_photometry(limit: Optional[int] = None, batc
             |   Source.bp_mag.is_null()
             |   Source.rp_mag.is_null()
             )
-            &   Source.gaia_dr3_source_id.is_null(False)
+            &   (
+                Source.gaia_dr3_source_id.is_null(False)
+            &   (Source.gaia_dr3_source_id > 0)
+            )
         )
         .order_by(
             Source.gaia_dr3_source_id.asc()
@@ -347,7 +350,10 @@ def migrate_gaia_dr3_astrometry_and_photometry(limit: Optional[int] = None, batc
             |   Source.bp_mag.is_null()
             |   Source.rp_mag.is_null()
             )
-            &   Source.gaia_dr3_source_id.is_null(False)
+            &   (
+                Source.gaia_dr3_source_id.is_null(False)
+            &   (Source.gaia_dr3_source_id > 0)
+            )
         )        
     )
 

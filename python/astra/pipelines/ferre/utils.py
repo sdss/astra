@@ -196,8 +196,12 @@ def parse_header_path(header_path):
             int(date_str[2:4]),
             int(date_str[4:6]),
         )
-        lsf = parts[3][3]
-        lsf_telescope_model = "lco25m" if parts[3][4:] == "s" else "apo25m"
+        if radiative_transfer_code == "turbospec":        
+            lsf = parts[-3].rstrip("s")[-1]
+            lsf_telescope_model = "lco25m" if parts[-3].endswith("s") else "apo25m"
+        else:
+            lsf = parts[3][3]
+            lsf_telescope_model = "lco25m" if parts[3][4:] == "s" else "apo25m"
 
         is_giant_grid = gd == "g"
 
@@ -1169,7 +1173,7 @@ def sort_data_as_per_input_names(input_names, unsorted_names, unsorted_data):
     intersect, input_index, output_index = np.intersect1d(
         input_names, 
         unsorted_names,
-        assume_unique=True, 
+        assume_unique=False, 
         return_indices=True
     )
     data[input_index] = unsorted_data[output_index]
@@ -1191,22 +1195,132 @@ def get_processing_times(stdout):
     if stdout is None or stdout == "":
         return None
 
-    header = re.findall("-{65}\s+f e r r e", stdout)
-    i = stdout[::-1].index(header[0][::-1])
-    use_stdout = stdout[-(i + len(header)) :]
+    headers = re.finditer("-{65}\s+f e r r e", stdout)
+    start = next(headers)
+    try:
+        end = next(headers)
+    except:
+        None
+    else:
+        stdout = stdout[start.span()[1]:end.span()[0]]
+    
 
-    n_threads = int(re.findall("nthreads = \s+[0-9]+", use_stdout)[0].split()[-1])
-    n_obj = int(re.findall("nobj = \s+[0-9]+", use_stdout)[0].split()[-1])
+    #i = stdout[::-1].index(header[0][::-1])
+    #use_stdout = stdout[-(i + len(header)) :]
+
+    n_threads = int(re.findall("nthreads = \s+[0-9]+", stdout)[0].split()[-1])
+    n_obj = int(re.findall("nobj = \s+[0-9]+", stdout)[0].split()[-1])
+
+    n_per_thread = n_obj // n_threads
+    n_mod = n_obj - n_per_thread * n_threads
+
+    si = 0
+    expected_indices = -1 * np.ones((n_threads, n_per_thread + 1), dtype=int)
+    for i in range(n_threads):
+        ei = n_per_thread + (1 if n_mod > i else 0)
+        expected_indices[i, :ei] = range(si, si + ei)
+        si += ei        
 
     # Find the obvious examples first.
-    elapsed_time_pattern = "ellapsed time:\s+(?P<time>[{0-9}|.]+)"
+    elapsed_time_pattern = "ellapsed time:\s+(?P<time>[{0-9}|.]+)\s*s?\s*"
     next_object_pattern = "next object #\s+(?P<index_plus_one>[0-9]+)"
-    time_load, *time_elapsed_unordered = re.findall(elapsed_time_pattern, stdout)
-    time_elapsed_unordered = np.array(time_elapsed_unordered, dtype=float)
-    time_load = float(time_load)
 
-    # object_indices is zero-indexed
-    object_indices = np.array(re.findall(next_object_pattern, stdout), dtype=int) - 1
+    elapsed_times = np.nan * np.ones(expected_indices.shape)
+
+    matcher = re.finditer(elapsed_time_pattern, stdout)
+    time_load, = next(matcher).groups()
+    elapsed_times[:, 0] = float(time_load)
+
+    for match in matcher:
+        elapsed_time, = match.groups()
+        si, ei = match.span()
+        try:
+            oi = stdout[ei:].index("\n")
+        except ValueError:
+            continue
+        next_object_match = re.match(next_object_pattern, stdout[ei:ei+oi])
+        if next_object_match:
+            next_object, = next_object_match.groups()
+            i, j = np.where(expected_indices == (int(next_object) - 1 - 1)) # -1 for zero indexing, -1 to reference the object that was analysed
+            elapsed_times[i, j] = float(elapsed_time)
+        else:
+            log.warning(f"Unassigned elapsed time: {elapsed_time}")
+
+            raise a
+
+    '''
+    
+In [74]: !grep None stdout | head -n 30 | grep None | awk '{print $1}' | sort
+1
+104
+109
+114
+119
+124
+129
+13
+139
+144
+149
+154
+159
+164
+19
+25
+31
+37
+43
+49
+59
+64
+69
+7
+74
+79
+84
+89
+94
+99
+
+In [75]: !grep next stdout | head -n 30 | awk '{print $4}' | sort
+1
+104
+109
+114
+119
+124
+129
+13
+134
+139
+144
+149
+154
+159
+164
+19
+25
+31
+37
+43
+49
+54
+59
+64
+69
+7
+74
+79
+89
+94
+
+In [76]: !pwd
+/scratch/general/nfs1/u6020307/pbs/20230716_ipl3_1.1/ASPCAP-100/coarse/GKd_b
+
+    '''
+
+    raise a
+
 
     # There are many ways to match up the elapsed time per object. Some are more explicit
     # than others, but to require a more explicit matching means always depending on less
@@ -1233,8 +1347,8 @@ def get_processing_times(stdout):
         )
 
     return dict(
-        time_load=time_load,
-        time_per_spectrum=time_per_spectrum,
+        ferre_time_load_grid=time_load,
+        ferre_time_elapsed=time_per_spectrum,
         object_indices=object_indices,
         time_elapsed_unordered=time_elapsed_unordered,
         n_threads=n_threads,

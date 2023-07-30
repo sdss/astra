@@ -35,13 +35,20 @@ def _transform_err_to_ivar(err, *args, **kwargs):
 
 def transform(v, image, instance):
     # Accessor class for the PixelArrays
-    v = np.atleast_2d(v)
 
-    # find the corresponding row.
-    if instance.release == "sdss5":
-        expected_path = f"{instance.prefix}Visit-{instance.apred}-{instance.telescope}-{instance.plate}-{instance.mjd}-{instance.fiber:0>3.0f}.fits"
-    else:
-        expected_path = f"{instance.prefix}Visit-{instance.apred}-{instance.plate}-{instance.mjd}-{instance.fiber:0>3.0f}.fits"
+    path_template = ApogeeVisitSpectrum.get_path_template(instance.release, instance.telescope)
+
+    kwds = instance.__data__.copy()
+    # TODO: Evaluate whether we still need this.
+    # If `reduction` is defined and filled in the derivative ApogeeVisit* products, then we don't need this any more.
+    try:
+        kwds.setdefault("reduction", instance.obj)
+    except:
+        None
+
+    expected_path = os.path.basename(path_template).format(**kwds)
+
+    v = np.atleast_2d(v)
     N, P = v.shape
     for i in range(1, 1 + N):
         try:
@@ -233,17 +240,20 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     def flag_warn(self):
         return (self.spectrum_flags > 0)
 
+    @classmethod
+    def get_path_template(cls, release, telescope):
+        if release == "sdss5":
+            return "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/apVisit-{apred}-{telescope}-{plate}-{mjd}-{fiber:0>3}.fits"
+        else:
+            if telescope == "apo1m":
+                return "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{mjd}/apVisit-{apred}-{mjd}-{reduction}.fits"
+            else:
+                return "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/{prefix}Visit-{apred}-{plate}-{mjd}-{fiber:0>3}.fits"
+        
+
     @property
     def path(self):
-        if self.release == "sdss5":
-            template = "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/apVisit-{apred}-{telescope}-{plate}-{mjd}-{fiber:0>3}.fits"
-        else:
-            if self.telescope == "apo1m":
-                template = "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{mjd}/apVisit-{apred}-{mjd}-{reduction}.fits"
-            else:
-                template = "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/{prefix}Visit-{apred}-{plate}-{mjd}-{fiber:0>3}.fits"
-        
-        return template.format(**self.__data__)
+        return self.get_path_template(self.release, self.telescope).format(**self.__data__)
 
     class Meta:
         indexes = (
@@ -307,6 +317,7 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
     plate = TextField()
     mjd = IntegerField()
     fiber = IntegerField()
+    #reduction = TextField(default="") # only used for DR17 apo1m spectra
 
     @property
     def wavelength(self):
@@ -315,13 +326,18 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
 
     @property
     def path(self):
-        templates = {
+        template = {
             "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
             "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits"
-        }
-        return templates[self.release].format(
-            healpix_group="{:d}".format(int(self.healpix) // 1000),
-            **self.__data__
+        }[self.release]
+
+        kwds = {}
+        if self.release == "sdss5":
+            kwds["healpix_group"] = "{:d}".format(int(self.healpix) // 1000)
+        
+        return template.format(
+            **self.__data__,
+            **kwds
         )
 
 
@@ -361,6 +377,17 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
 
             
 
+_transform = lambda x, *_: np.atleast_2d(x)[0]
+
+def _transform_coadded_spectrum(v, image, instance):
+    # Accessor class for the PixelArrays
+    v = np.atleast_2d(v)
+    if image[0].header["NVISITS"] == 1:
+        raise ValueError("No coadded spectrum")
+    else:
+        return v[0]
+
+    
 class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
 
     """
@@ -375,11 +402,10 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
         # own checks to make sure that spectra and sources are linked.
         null=True, 
         index=True,
-        #lazy_load=False,
         backref="apogee_coadded_spectra_in_apstar",
     )
 
-    #> Spectrum Identifier
+    #> Spectrum Identifiers
     spectrum_id = ForeignKeyField(
         Spectrum,
         index=True,
@@ -387,32 +413,33 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
         primary_key=True,
         default=Spectrum.create
     )
-
+    drp_spectrum_id = ForeignKeyField(
+        ApogeeVisitSpectrum,
+        lazy_load=False,
+        field=ApogeeVisitSpectrum.spectrum_id,
+    )
 
     #> Data Product Keywords
     release = TextField()
     apred = TextField()
-    apstar = TextField()
+    apstar = TextField(default="stars")
     obj = TextField()
     telescope = TextField()
     healpix = IntegerField(null=True) # only used in SDSS5
     field = TextField(null=True) # not used in SDSS-V
     prefix = TextField(null=True) # not used in SDSS-V
 
-
-    # TODO: put this somewhere else?
-    _transform = lambda x, *_: np.atleast_2d(x)[0]
     flux = PixelArray(
         ext=1,
-        transform=_transform
+        transform=_transform_coadded_spectrum
     )
     ivar = PixelArray(
         ext=2,
-        transform=_transform_err_to_ivar
+        transform=lambda *a, **k: _transform_err_to_ivar(_transform_coadded_spectrum(*a, **k))
     )
     pixel_flags = PixelArray(
         ext=3,
-        transform=_transform
+        transform=_transform_coadded_spectrum
     )
 
     @property
@@ -423,13 +450,13 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     @property
     def path(self):
         templates = {
-            "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/@healpixgrp|/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
+            "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
             "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits"
         }
-        if self.release == "sdss5":
-            raise NotImplementedError(f"Andy fix healpixgrp")
-        return templates[self.release].format(**self.__data__)
-
+        return templates[self.release].format(
+            healpix_group="{:d}".format(int(self.healpix) // 1000),
+            **self.__data__
+        )
     
     class Meta:
         indexes = (

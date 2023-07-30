@@ -56,6 +56,93 @@ class ApogeeMADGICSSpectrum(BaseModel, SpectrumMixin):
     def path(self):
         return "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6039752/working/2023_03_24/outdir_wu/apMADGICS_out.h5"
 
+class ApogeeMADGICSRestFrameSpectrum20230721Konventional(BaseModel, SpectrumMixin):
+
+    """A rest-frame resampled APOGEE MADGICS spectrum."""
+
+    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
+    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
+
+    #release = TextField()
+    #telescope = TextField()
+    #field = TextField()
+    #plate = IntegerField()
+    #mjd = IntegerField()
+    #fiber = IntegerField()
+    index = IntegerField(index=True)
+
+    @property
+    def wavelength(self):
+        return 10**(4.179 + 6e-6 * np.arange(8575))
+
+    flux = PixelArray(ext=1)
+    ivar = PixelArray(ext=1)
+
+
+    @property
+    def path(self):
+        return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230721_Konventional/apMADGICS-20230721-{self.index}.fits"
+
+
+
+class ApogeeMADGICSRestFrameSpectrum20230721(BaseModel, SpectrumMixin):
+
+    """A rest-frame resampled APOGEE MADGICS spectrum."""
+
+    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
+    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
+
+    #release = TextField()
+    #telescope = TextField()
+    #field = TextField()
+    #plate = IntegerField()
+    #mjd = IntegerField()
+    #fiber = IntegerField()
+    index = IntegerField(index=True)
+
+    @property
+    def wavelength(self):
+        return 10**(4.179 + 6e-6 * np.arange(8575))
+
+    flux = PixelArray(ext=1)
+    ivar = PixelArray(ext=1)
+
+
+    @property
+    def path(self):
+        return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230721/apMADGICS-20230721-{self.index}.fits"
+
+
+
+
+class ApogeeMADGICSRestFrameSpectrum20230720(BaseModel, SpectrumMixin):
+
+    """A rest-frame resampled APOGEE MADGICS spectrum."""
+
+    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
+    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
+
+    #release = TextField()
+    #telescope = TextField()
+    #field = TextField()
+    #plate = IntegerField()
+    #mjd = IntegerField()
+    #fiber = IntegerField()
+    index = IntegerField(index=True)
+
+    @property
+    def wavelength(self):
+        return 10**(4.179 + 6e-6 * np.arange(8575))
+
+    flux = PixelArray(ext=1)
+    ivar = PixelArray(ext=1)
+
+
+    @property
+    def path(self):
+        return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230720/apMADGICS-20230720-{self.index}.fits"
+
+
 
 class ApogeeMADGICSRestFrameSpectrum20230713(BaseModel, SpectrumMixin):
 
@@ -444,6 +531,77 @@ if __name__ == "__main__":
     from tqdm import tqdm
 
     resampled_flux, resampled_ivar = shift_and_resample_to_rest_frame(
+        "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2023_07_21/outdir_wu_K/apMADGICS_out_x_starLines_v0.h5",
+        "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2023_07_21/outdir_wu_K/apMADGICS_out_x_starLines_err_v0.h5",
+        "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2023_07_21/outdir_wu_K/apMADGICS_out_RV_pixoff_final.h5"
+    )    
+
+    # Clip off the first 125 pixels in order to match the apStar/FERRE sampling
+    si = 125
+    import os
+    resampled_flux = resampled_flux[:, si:]
+    resampled_ivar = resampled_ivar[:, si:]
+    from astropy.io import fits
+    output_dir = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230721_Konventional/"
+    os.makedirs(output_dir, exist_ok=True)
+
+    N, P = resampled_flux.shape
+    for i in range(N):
+        Table(data=dict(flux=resampled_flux[i], ivar=resampled_ivar[i])).write(f"{output_dir}/apMADGICS-20230721-{i}.fits", overwrite=True)
+
+    '''
+    from astropy.table import Table
+    from tqdm import tqdm
+
+    resampled_flux, resampled_ivar = shift_and_resample_to_rest_frame(
+        "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2023_07_21/outdir_wu/apMADGICS_out_x_starLines_v0.h5",
+        "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2023_07_21/outdir_wu/apMADGICS_out_x_starLines_err_v0.h5",
+        "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2023_07_21/outdir_wu/apMADGICS_out_RV_pixoff_final.h5"
+    )    
+
+    # Clip off the first 125 pixels in order to match the apStar/FERRE sampling
+    si = 125
+    import os
+    resampled_flux = resampled_flux[:, si:]
+    resampled_ivar = resampled_ivar[:, si:]
+    from astropy.io import fits
+    output_dir = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230721/"
+    os.makedirs(output_dir, exist_ok=True)
+
+    N, P = resampled_flux.shape
+    for i in range(N):
+        Table(data=dict(flux=resampled_flux[i], ivar=resampled_ivar[i])).write(f"{output_dir}/apMADGICS-20230721-{i}.fits", overwrite=True)
+    '''
+
+    '''
+    from astropy.table import Table
+    from tqdm import tqdm
+
+    resampled_flux, resampled_ivar = shift_and_resample_to_rest_frame(
+        "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2023_07_20/outdir_wu_injectStellarParams/apMADGICS_out_x_starLines_v0.h5",
+        "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2023_07_20/outdir_wu_injectStellarParams/apMADGICS_out_x_starLines_err_v0.h5",
+        "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2023_07_20/outdir_wu_injectStellarParams/apMADGICS_out_RV_pixoff_final.h5"
+    )    
+
+    # Clip off the first 125 pixels in order to match the apStar/FERRE sampling
+    si = 125
+    import os
+    resampled_flux = resampled_flux[:, si:]
+    resampled_ivar = resampled_ivar[:, si:]
+    from astropy.io import fits
+    output_dir = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230720/"
+    os.makedirs(output_dir, exist_ok=True)
+
+    N, P = resampled_flux.shape
+    for i in range(N):
+        Table(data=dict(flux=resampled_flux[i], ivar=resampled_ivar[i])).write(f"{output_dir}/apMADGICS-20230720-{i}.fits", overwrite=True)
+    '''
+
+    '''
+    from astropy.table import Table
+    from tqdm import tqdm
+
+    resampled_flux, resampled_ivar = shift_and_resample_to_rest_frame(
         "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2023_07_13/outdir_wu/apMADGICS_out_x_starLines_v0.h5",
         "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2023_07_13/outdir_wu/apMADGICS_out_x_starLines_err_v0.h5",
         "/uufs/chpc.utah.edu/common/home/u6039752/scratch1/working/2023_07_13/outdir_wu/apMADGICS_out_RV_pixoff_final.h5"
@@ -461,7 +619,7 @@ if __name__ == "__main__":
     N, P = resampled_flux.shape
     for i in range(N):
         Table(data=dict(flux=resampled_flux[i], ivar=resampled_ivar[i])).write(f"{output_dir}/apMADGICS-20230713-{i}.fits", overwrite=True)
-
+    '''
     '''
 
     from astropy.table import Table

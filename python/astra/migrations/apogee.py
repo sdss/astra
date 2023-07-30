@@ -3,10 +3,50 @@ import subprocess
 from peewee import chunked, fn, JOIN
 from typing import Optional
 from tqdm import tqdm
-from astra.models.apogee import ApogeeVisitSpectrum, Spectrum, ApogeeVisitSpectrumInApStar
+from astra.models.apogee import ApogeeVisitSpectrum, Spectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar
 from astra.models.source import Source
 from astra.models.base import database
 from astra.utils import expand_path, flatten, log
+
+def migrate_apogee_obj_from_source(batch_size: Optional[int] = 100, limit: Optional[int] = None):
+
+    q = (
+        ApogeeVisitSpectrum
+        .select(
+            ApogeeVisitSpectrum.spectrum_id,
+            Source.sdss4_dr17_apogee_id
+        )
+        .join(Source, on=(ApogeeVisitSpectrum.source_id == Source.id))
+        .where(
+            ApogeeVisitSpectrum.obj.is_null()
+        &   Source.sdss4_dr17_apogee_id.is_null(False)
+        )
+        .tuples()
+    )
+
+    total = limit or q.count()
+    with tqdm(total=total, desc="Updating", unit="spectra") as pb:        
+        for chunk in chunked(q.iterator(), batch_size):
+            objs = { spectrum_id: obj for spectrum_id, obj in chunk }
+            q = (
+                ApogeeVisitSpectrum
+                .select()
+                .where(ApogeeVisitSpectrum.spectrum_id.in_(list(objs.keys())))
+            )
+            batch = list(q)
+            for spectrum in batch:
+                spectrum.obj = objs[spectrum.spectrum_id]
+            
+            pb.update(
+                ApogeeVisitSpectrum
+                .bulk_update(
+                    batch,
+                    fields=[ApogeeVisitSpectrum.obj]
+                )
+            )
+
+    return pb.n
+                  
 
 def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 100, limit: Optional[int] = None):
     """
@@ -35,6 +75,7 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
             Visit.plate,
             Visit.telescope,
             Visit.field,
+            Visit.apogee_id.alias("obj"), # see notes in astra.models.apogee.ApogeeVisitSpectrum about this
             Visit.fiberid.alias("fiber"),
             Visit.jd,
             Visit.dateobs.alias("date_obs"),
@@ -53,7 +94,7 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
             Catalog.dec,
             Catalog.version_id.alias("version_id"),
             Catalog.lead,
-            Visit.apogee_id.alias("sdss4_dr17_apogee_id"),
+            Star.apogee_id.alias("sdss4_dr17_apogee_id"),
             Visit.apogee_target1.alias("sdss4_apogee_target1_flags"),
             Visit.apogee_target2.alias("sdss4_apogee_target2_flags"),
             Visit.apogee2_target1.alias("sdss4_apogee2_target1_flags"),
@@ -706,6 +747,66 @@ def migrate_apvisit_metadata_from_image_headers(
     return pb.n
 
 
+def migrate_coadd_in_apstar_from_existing_apvisits(limit=None, batch_size=100):
+
+    q = (
+        ApogeeVisitSpectrum
+        .select(
+            ApogeeVisitSpectrum.source_id,
+            ApogeeVisitSpectrum.release,
+            ApogeeVisitSpectrum.apred,
+            ApogeeVisitSpectrum.apstar,
+            ApogeeVisitSpectrum.obj,
+            ApogeeVisitSpectrum.telescope,
+            Source.healpix,
+            ApogeeVisitSpectrum.field,
+            ApogeeVisitSpectrum.prefix,
+        )
+        .distinct()
+        .join(ApogeeCoaddedSpectrumInApStar, JOIN.LEFT_OUTER, on=(ApogeeVisitSpectrum.source_id == ApogeeCoaddedSpectrumInApStar.source_id))
+        .switch(ApogeeVisitSpectrum)
+        .join(Source)
+        .where(
+            (ApogeeCoaddedSpectrumInApStar.source_id.is_null())
+        &   (Source.healpix.is_null(False))
+        )
+        .dicts()
+        .limit(limit)
+    )
+
+    N = limit or q.count()
+    
+    log.info(f"Bulk assigning {N} unique spectra")
+
+    spectrum_ids = []
+    with database.atomic():
+        # Need to chunk this to avoid SQLite limits.
+        with tqdm(desc="Assigning", unit="spectra", total=N) as pb:
+            for chunk in chunked([{"spectrum_type_flags": 0}] * N, batch_size):                
+                spectrum_ids.extend(
+                    flatten(
+                        Spectrum
+                        .insert_many(chunk)
+                        .returning(Spectrum.spectrum_id)
+                        .tuples()
+                        .execute()
+                    )
+                )
+                pb.update(min(batch_size, len(chunk)))
+                pb.refresh()    
+
+    data = []
+    for spectrum_id, result in zip(spectrum_ids, q):
+        result.update(spectrum_id=spectrum_id)
+        data.append(result)
+    
+    return _upsert_many(
+        ApogeeCoaddedSpectrumInApStar,
+        ApogeeCoaddedSpectrumInApStar.spectrum_id,
+        data,
+        batch_size
+    )
+
 
 
 def migrate_apvisit_in_apstar_from_existing_apvisits(limit=None, batch_size=100):
@@ -729,6 +830,7 @@ def migrate_apvisit_in_apstar_from_existing_apvisits(limit=None, batch_size=100)
             ApogeeVisitSpectrum.obj,
             ApogeeVisitSpectrum.telescope,
             Source.healpix,
+            Source.sdss4_dr17_apogee_id.alias("obj"),
             ApogeeVisitSpectrum.field,
             ApogeeVisitSpectrum.prefix,
             ApogeeVisitSpectrum.plate,
@@ -739,8 +841,16 @@ def migrate_apvisit_in_apstar_from_existing_apvisits(limit=None, batch_size=100)
         .switch(ApogeeVisitSpectrum)
         .join(Source)
         .where(
-            (ApogeeVisitSpectrumInApStar.drp_spectrum_id.is_null())
-        &   (Source.healpix.is_null(False))
+            ApogeeVisitSpectrumInApStar.drp_spectrum_id.is_null()
+            &   
+            (            
+                (
+                    # healpix is only needed for SDSS-V, not SDSS-4!
+                    (ApogeeVisitSpectrum.release == "sdss5") 
+                &   Source.healpix.is_null(False)
+                )
+            |   (ApogeeVisitSpectrum.release == "dr17")                
+            )  
         )
         .dicts()
         .limit(limit)
@@ -775,7 +885,7 @@ def migrate_apvisit_in_apstar_from_existing_apvisits(limit=None, batch_size=100)
     return _upsert_many(
         ApogeeVisitSpectrumInApStar,
         ApogeeVisitSpectrumInApStar.spectrum_id,
-        q,
+        data,
         batch_size
     )
 

@@ -5,6 +5,41 @@ from glob import glob
 from astra.utils import expand_path
 from astra.pipelines.ferre.utils import parse_header_path
 
+# This is a DERIVATIVE product of ABUNDANCE_CONTROLS, but I put it here because it doesn't change
+# often, and because it's hard to decipher all this TTIES crap. If you change ABUNDANCE_CONTROLS,
+# you should check your ABUNDANCE_RELATIVE_TO_H
+ABUNDANCE_RELATIVE_TO_H = {
+    'C': False,
+    'C_1': False,
+    'N': False,
+    'O': False,
+    'Na': True,
+    'Mg': False,
+    'Al': True,
+    'Si': False,
+    'P': True,
+    'S': False,
+    'K': True,
+    'Ca': False,
+    'Ti': False,
+    'Ti_2': False,
+    'V': True,
+    'Cr': True,
+    'Mn': True,
+    'Fe': True,
+    'Co': True,
+    'Ni': True,
+    'Cu': True,
+    'Ge': True,
+    'Rb': True,
+    'Ce': True,
+    'Nd': True,
+    'Yb': True,
+    'C_12_13': False,
+    # These are duplicates from when we had testing results with different species names.
+    'C13': False,
+    }
+
 ABUNDANCE_CONTROLS = {
     "Al": {
         "INDV_LABEL": ("METALS",),
@@ -16,13 +51,14 @@ ABUNDANCE_CONTROLS = {
     "Ce": {
         "INDV_LABEL": ("METALS",),
     },
-    "CI": {
+    #CI
+    "C_1": {
         "INDV_LABEL": ("C",),
     },
     "C": {
         "INDV_LABEL": ("C",),
     },
-    "C13": {
+    "C_12_13": {
         "INDV_LABEL": ("METALS", ),
     }, 
     "CN": {
@@ -94,7 +130,7 @@ ABUNDANCE_CONTROLS = {
     "S": {
         "INDV_LABEL": ("O Mg Si S Ca Ti",),
     },
-    "TiII": {
+    "Ti_2": {
         "INDV_LABEL": ("O Mg Si S Ca Ti",),
     },
     "Ti": {
@@ -247,7 +283,16 @@ def yield_suitable_grids(
         if (
             # If it's the BA combo grid, don't worry about matching fiber and telescope LSF
             meta["lsf"].startswith("combo") \
-            or (meta["lsf"] == lsf_grid and telescope == meta["lsf_telescope_model"])
+            or (
+                (meta["lsf"] == lsf_grid)
+            and (
+                (telescope == meta["lsf_telescope_model"])
+                |   (
+                        (telescope == "apo1m") 
+                    &   (meta["lsf_telescope_model"] == "apo25m")
+                    )
+                )
+            )
         ):                
             # We will take the RV parameters as the initial parameters.
             # Check to see if they are within bounds of the grid.

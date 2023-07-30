@@ -5,7 +5,7 @@ from astra import task
 from astra.models.spectrum import Spectrum
 from astra.models.aspcap import FerreCoarse
 from astra.utils import log, expand_path, list_to_dict
-from astra.pipelines.ferre.operator import FerreOperator, FerreMonitoringOperator, FerreChaosMonkeyOperator
+from astra.pipelines.ferre.operator import FerreOperator, FerreMonitoringOperator
 from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
 from astra.pipelines.ferre.utils import (execute_ferre, parse_header_path, read_ferre_headers, clip_initial_guess)
@@ -66,8 +66,7 @@ def coarse_stellar_parameters(
         )
         .execute()
     )
-    FerreChaosMonkeyOperator(job_ids).feed() # feed to start processes, we don't care when they finish
-    FerreMonitoringOperator(executions).execute()
+    FerreMonitoringOperator(job_ids, executions).execute()
     
     yield from post_coarse_stellar_parameters(parent_dir, **kwargs)
 
@@ -114,7 +113,13 @@ def pre_coarse_stellar_parameters(
 
     # Create the FERRE files for each execution.
     for kwd in ferre_kwds:
-        pre_process_ferre(**kwd)
+        pwd, n_obj, skipped = pre_process_ferre(**kwd)
+        for spectrum in skipped:
+            yield FerreCoarse(
+                source_id=spectrum.source_id,
+                spectrum_id=spectrum.spectrum_id,
+                flag_spectrum_io_error=True
+            )
 
     # Create database entries for those with no initial guess.
     for spectrum in spectra_with_no_initial_guess:
@@ -149,21 +154,21 @@ def penalize_coarse_stellar_parameter_result(result: FerreCoarse):
     """
 
     # Penalize GK-esque things at cool temperatures.
-    result.ferre_penalized_log_chi_sq = 0 + result.ferre_log_chi_sq
+    result.penalized_r_chi_sq = 0 + result.r_chi_sq
     if result.teff < 3900 and "GK_200921" in result.header_path:
-        result.ferre_penalized_log_chi_sq += np.log10(10)
+        result.penalized_r_chi_sq += np.log10(10)
     
     if result.flag_logg_grid_edge_warn:
-        result.ferre_penalized_log_chi_sq += np.log10(5)
+        result.penalized_r_chi_sq += np.log10(5)
 
     if result.flag_teff_grid_edge_warn:
-        result.ferre_penalized_log_chi_sq += np.log10(5)
+        result.penalized_r_chi_sq += np.log10(5)
 
     if result.flag_logg_grid_edge_bad:
-        result.ferre_penalized_log_chi_sq += np.log10(5)
+        result.penalized_r_chi_sq += np.log10(5)
 
     if result.flag_teff_grid_edge_bad:
-        result.ferre_penalized_log_chi_sq += np.log10(5)
+        result.penalized_r_chi_sq += np.log10(5)
     return None
 
         

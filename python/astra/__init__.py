@@ -1,10 +1,10 @@
-from inspect import isgeneratorfunction
+from inspect import isgeneratorfunction, getfullargspec
 from decorator import decorator
 from peewee import chunked, IntegrityError, SqliteDatabase
 from playhouse.sqlite_ext import SqliteExtDatabase
 from sdsstools.configuration import get_config
 
-from astra.utils import log, Timer
+from astra.utils import log, Timer, flatten
 
 NAME = "astra"
 __version__ = "0.4.0"
@@ -42,7 +42,7 @@ def task(function, *args, **kwargs):
     f = function(*args, **kwargs)
 
     results = []
-    with Timer(f, frequency) as timer:
+    with Timer(f, frequency=frequency, attribute_name="t_elapsed") as timer:
         while True:
             try:
                 result = next(timer)

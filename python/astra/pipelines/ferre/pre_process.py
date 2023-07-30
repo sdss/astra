@@ -34,6 +34,7 @@ def pre_process_ferre(
     error_algorithm_flag: int = 1,
     wavelength_interpolation_flag: int = 0,
     optimization_algorithm_flag: int = 3,
+    pre_computed_continuum: Optional[Iterable[float]] = None,
     continuum_flag: int = 1,
     continuum_order: int = 4,
     continuum_segment: Optional[int] = None,
@@ -45,7 +46,7 @@ def pre_process_ferre(
     f_access: int = 0,
     f_format: int = 1,
     ferre_kwds: Optional[dict] = None,
-    n_threads: int = 1,
+    n_threads: int = 32,
     bad_pixel_flux_value: float = 1e-4,
     bad_pixel_error_value: float = 1e10,
     skyline_sigma_multiplier: float = 100,
@@ -133,22 +134,26 @@ def pre_process_ferre(
     mask2 = utils.get_apogee_pixel_mask()
     assert np.all(mask == mask2)
 
+    index, skipped, batch_names, batch_initial_parameters, batch_flux, batch_e_flux = (0, [], [], [], [], [])
+    for (spectrum, initial_parameters) in zip(spectra, all_initial_parameters):
 
-    batch_names, batch_initial_parameters, batch_flux, batch_e_flux = ([], [], [], [])
-    for i, (spectrum, initial_parameters) in enumerate(zip(spectra, all_initial_parameters)):
-
-        initial_flags = initial_parameters.pop("initial_flags")
-        upstream_id = initial_parameters.pop("upstream_id")
-
-        batch_names.append(utils.get_ferre_spectrum_name(i, spectrum.source_id, spectrum.spectrum_id, initial_flags, upstream_id))
-        batch_initial_parameters.append(initial_parameters)
+        if spectrum in skipped:
+            continue
 
         if write_input_pixel_arrays:
             # We usually will be writing input pixel arrays, but sometimes we won't
             # (e.g., one other abundances execution has written the input pixel arrays
             # and this one could just be referencing them)
-            flux = np.copy(spectrum.flux)
-            e_flux = np.copy(spectrum.ivar)**-0.5
+
+            # If this part fails, the spectrum doesn't exist and we should just continue
+            try:
+                flux = np.copy(spectrum.flux)
+                e_flux = np.copy(spectrum.ivar)**-0.5
+            except (ValueError, FileNotFoundError):
+                log.warning(f"Exception accessing pixel arrays for spectrum {spectrum}")
+                skipped.append(spectrum)
+                continue            
+
             try:
                 pixel_flags = spectrum.pixel_flags
             except AttributeError:
@@ -166,10 +171,20 @@ def pre_process_ferre(
                     spike_threshold_to_inflate_uncertainty=spike_threshold_to_inflate_uncertainty,
                     min_sigma_value=min_sigma_value,
                 )
+
+            if pre_computed_continuum is not None:
+                flux /= pre_computed_continuum[index]
+                e_flux /= pre_computed_continuum[index]
             
             batch_flux.append(flux[mask])
             batch_e_flux.append(e_flux[mask])
 
+        initial_flags = initial_parameters.pop("initial_flags")
+        upstream_id = initial_parameters.pop("upstream_id")
+
+        batch_names.append(utils.get_ferre_spectrum_name(index, spectrum.source_id, spectrum.spectrum_id, initial_flags, upstream_id))
+        batch_initial_parameters.append(initial_parameters)
+        index += 1
 
     # Convert list of dicts of initial parameters to array.
     batch_initial_parameters_array = utils.validate_initial_and_frozen_parameters(
@@ -214,7 +229,7 @@ def pre_process_ferre(
         np.savetxt(e_flux_path, batch_e_flux, **savetxt_kwds)
         
     n_obj = len(batch_names)
-    return (pwd, n_obj)
+    return (pwd, n_obj, skipped)
 
 
 

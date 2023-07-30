@@ -23,7 +23,8 @@ def interpolate(
     inter=3,
     n_threads=32,
     read_in_memory=False,
-    epsilon=1e-3
+    epsilon=1e-3,
+    clip=True
 ):
 
     with TemporaryDirectory() as dir:
@@ -45,12 +46,16 @@ def interpolate(
             "TEFF": teff
         }
 
-        parameters = np.clip(
-            np.atleast_2d([translate.get(ln) for ln in label_names]).T, 
-            headers["LLIMITS"] + epsilon,
-            headers["ULIMITS"] - epsilon
-        )
-
+        parameters = np.atleast_2d([translate.get(ln) for ln in label_names]).T
+        if clip:
+            parameters = np.clip(
+                parameters,
+                headers["LLIMITS"] + epsilon,
+                headers["ULIMITS"] - epsilon
+            )
+        else:
+            raise a
+            
         N = len(parameters)
         names = list(map(str, range(N)))
         input_parameter_path = f"parameter.input"

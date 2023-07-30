@@ -1,13 +1,20 @@
 import os
-from sdsstools.logger import get_logger
+from sdsstools.logger import get_logger as _get_logger, StreamFormatter
 import warnings
 from importlib import import_module
 from time import time
 
-logger_kwds = {}
-#if "logging" in config and "level" in config["logging"]:
-#    logger_kwds.update(log_level=config["logging"]["level"])
-log = get_logger("astra", **logger_kwds)
+def get_logger(kwargs=None):
+    logger = _get_logger("astra", **(kwargs or {}))
+    # https://stackoverflow.com/questions/6729268/log-messages-appearing-twice-with-python-logging
+    logger.propagate = False
+    handler, *_ = logger.handlers
+    handler.setFormatter(
+        StreamFormatter("%(asctime)s %(message)s")
+    )
+    return logger
+
+log = get_logger()
 
 
 def get_config_paths():

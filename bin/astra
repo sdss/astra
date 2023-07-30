@@ -22,12 +22,12 @@ def initdb(drop_tables):
     from astra.models import (
         base,
         apogee,
-        #apogeenet,
+        apogeenet,
         aspcap,
         #boss,
         #classifier,
         #lineforest,
-        madgics,
+        #madgics,
         #mdwarftype,
         #slam,
         #snow_white,
@@ -41,7 +41,7 @@ def initdb(drop_tables):
         if drop_tables:
             log.warning(f"Dropping database tables in 10 seconds..")
             sleep(10)
-            base.database.drop_tables(models)
+            base.database.drop_tables(models, cascade=True)
         
         base.database.create_tables(models)
     log.info(f"Created {len(models)} database tables: {models}")
@@ -66,13 +66,15 @@ def execute(task, spectra, kwargs_path=None):
 
     spectrum_ids = list(map(int, spectra))
     if not spectrum_ids:
-        spectrum_ids = kwargs.pop("spectra", [])
+        spectrum_ids.extend(kwargs.pop("spectra", []))
     else:
         if "spectra" in kwargs:
             raise ValueError("`spectra` given in `kwargs_path` and in command line")
-        
+    
+
     if spectrum_ids:
         # Figure out which model it is
+        from peewee import chunked
         from astra.models import apogee, boss
         from astra.models.spectrum import Spectrum, SpectrumMixin
         example = Spectrum.get(spectrum_ids[0])
@@ -92,18 +94,26 @@ def execute(task, spectra, kwargs_path=None):
         else:
             raise ValueError(f"Cannot find model type for spectrum {example}")
     
-        spectra = (
-            model
-            .select()
-            .where(model.spectrum_id.in_(spectrum_ids))
-        )
-
-            
-        kwargs["spectra"] = spectra
+        # SQLite has a limit on how many SQL variables can be used in a transaction.
+        # transaction.
         log.warning(f"All given spectrum identifiers should come from the same model type")
 
-    for item in tqdm(f(**kwargs), total=None):
-        None
+        with tqdm(total=len(spectrum_ids), unit="spectra") as pb:                
+            for chunk in chunked(spectrum_ids, 10_000):                
+                spectra = (
+                    model
+                    .select()
+                    .where(model.spectrum_id.in_(chunk))
+                )
+
+                for item in f(spectra=spectra, **kwargs):
+                    None
+
+                pb.update(len(chunk))
+
+    else:
+        for item in tqdm(f(**kwargs), total=None):
+            None
     
     return None
 

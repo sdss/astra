@@ -231,6 +231,7 @@ class Source(BaseModel):
     flag_sdss4_apogee_segue_overlap = sdss4_apogee_target1_flags.flag(2**30, help_text="SEGUE overlap")
 
     # sdss4_apogee_target2_flags
+    # TODO: Check flag definitions, because it seems off-by-one for apogee_1m_targets!
     flag_sdss4_apogee_light_trap = sdss4_apogee_target2_flags.flag(2**0, help_text="Light trap")
     flag_sdss4_apogee_flux_standard = sdss4_apogee_target2_flags.flag(2**1, help_text="Flux standard")
     flag_sdss4_apogee_standard_star = sdss4_apogee_target2_flags.flag(2**2, help_text="Stellar abundance/parameters standard")

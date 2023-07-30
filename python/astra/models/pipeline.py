@@ -20,7 +20,17 @@ FILLER_CARD = (FILLER_CARD_KEY, *_) = ("TTYPE0", "Water cuggle", None)
 class PipelineOutputMixin:
 
     @classmethod
-    def to_hdu(cls, spectrum_model, where=None, header=None, fill_values=None, upper=True):
+    def to_hdu(
+        cls, 
+        spectrum_model, 
+        drp_spectrum_model=None, 
+        where=None, 
+        header=None, 
+        fill_values=None, 
+        upper=True,
+        join_type=JOIN.LEFT_OUTER,
+        ignore=("carton_flags", )
+    ):
         """
         Create a FITS binary HDU of pipeline results for the given spectrum model.
 
@@ -45,10 +55,14 @@ class PipelineOutputMixin:
         from astra.models.source import Source
 
         fields = {}
-        models = (Source, spectrum_model, cls)
+        models = [Source, spectrum_model]
+        if drp_spectrum_model is not None:
+            models.append(drp_spectrum_model)
+        models.append(cls)
+
         for model in models:
             for name, field in model._meta.fields.items():
-                if name not in fields: # Don't duplicate fields
+                if name not in fields and (ignore is None or name not in ignore): # Don't duplicate fields
                     fields[name] = field
                 warn_on_long_name_or_comment(field)
 
@@ -61,9 +75,22 @@ class PipelineOutputMixin:
             .select(*tuple(fields.values()))
             .join(Source, on=(Source.id == spectrum_model.source_id))
             .switch(spectrum_model)
+        )
+        if drp_spectrum_model is not None:
+            q = (
+                q
+                .join(
+                    drp_spectrum_model, 
+                    on=(drp_spectrum_model.spectrum_id == spectrum_model.drp_spectrum_id)
+                )
+                .switch(spectrum_model)
+            )
+        
+        q = (
+            q
             .join(
                 cls, 
-                JOIN.LEFT_OUTER,
+                join_type,
                 on=(cls.spectrum_id == spectrum_model.spectrum_id),
             )
             .dicts()
@@ -196,7 +223,10 @@ def add_category_headers(hdu, models, original_names, upper):
         for header, field_name in model.field_category_headers:
             if field_name in category_headers_added:
                 continue
-            index = 1 + list_original_names.index(field_name)
+            try:
+                index = 1 + list_original_names.index(field_name)
+            except:
+                continue
             key = f"TTYPE{index}"
             hdu.header.insert(key, BLANK_CARD)
             hdu.header.insert(key, (" ", header.upper() if upper else header))

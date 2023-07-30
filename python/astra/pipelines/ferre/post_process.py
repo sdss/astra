@@ -9,6 +9,7 @@ from astra.pipelines.ferre.utils import (
     read_input_parameter_file,
     read_output_parameter_file,
     read_and_sort_output_data_file,
+    get_processing_times,
     parse_ferre_spectrum_name,
     parse_header_path,
     TRANSLATE_LABELS
@@ -24,53 +25,87 @@ def write_pixel_array_with_names(path, names, data):
 
 LARGE = 1e10 # TODO: This is also defined in pre_process, move it common
 
-def post_process_ferre(pwd) -> Iterable[dict]:
+def post_process_ferre(dir, pwd=None) -> Iterable[dict]:
     """
     Post-process results from a FERRE execution.
 
-    :param pwd:
+    :param dir:
         The working directory of the FERRE execution.
+    
+    :param pwd: [optional]
+        The directory where FERRE was actually executed from. Normally `pwd` and `dir` will always be
+        the same, so this keyword argument is optional. However, if FERRE is run in abundance mode
+        with the `-l` flag, it might be executed from a path like `analysis/abundances/GKg_b/` but
+        the individual FERRE executions exist in places like:
+
+        `abundances/GKg_b/Al`
+        `abundances/GKg_b/Mg`
+
+        In these cases, the thing you want is `post_process_ferre('abundances/GKg_b/Al', 'abundances/GKg_b')`.
     """
 
-    pwd = expand_path(pwd)
+    dir = expand_path(dir)
+    ref_dir = pwd or dir 
+    # When finding paths, if the path is in the input.nml file, we should use `ref_dir`, otherwise `dir`.
+    
     # TODO: Put this somewhere common?
-    stdout_path = os.path.join(pwd, "stdout")
-
-    if os.path.exists(stdout_path):
+    stdout_path = os.path.join(dir, "stdout")
+    try:
         with open(stdout_path, "r") as fp:
             stdout = fp.read()
-        # Parse timing
-    else:
-        log.warning(f"No stdout file found at {stdout_path}. No timing information available.")
+        # Parse timing information
+        timing = get_processing_times(stdout)
+    
+    except:
+        log.warning(f"No timing information available (tried stdout: {stdout_path})")
         timing = {}
 
-    control_kwds = read_control_file(os.path.join(pwd, "input.nml"))
+    control_kwds = read_control_file(os.path.join(dir, "input.nml"))
+
 
     # Load input files.
-    input_names, input_parameters = read_input_parameter_file(pwd, control_kwds)   
-    flux = np.atleast_2d(np.loadtxt(os.path.join(pwd, control_kwds["FFILE"])))
-    e_flux = np.atleast_2d(np.loadtxt(os.path.join(pwd, control_kwds["ERFILE"])))
+    input_names, input_parameters = read_input_parameter_file(ref_dir, control_kwds)   
+    flux = np.atleast_2d(np.loadtxt(os.path.join(ref_dir, control_kwds["FFILE"])))
+    e_flux = np.atleast_2d(np.loadtxt(os.path.join(ref_dir, control_kwds["ERFILE"])))
 
-    rectified_model_flux, names_with_missing_rectified_model_flux, output_rectified_model_flux_indices = read_and_sort_output_data_file(
-        os.path.join(pwd, control_kwds["OFFILE"]), 
-        input_names
-    )
-    rectified_flux, names_with_missing_rectified_flux, output_rectified_flux_indices = read_and_sort_output_data_file(
-        os.path.join(pwd, control_kwds["SFFILE"]),
-        input_names
-    )
-    # Re-write the model flux file with the correct names.
-    write_pixel_array_with_names(os.path.join(pwd, control_kwds["OFFILE"]), input_names, rectified_model_flux)
-    write_pixel_array_with_names(os.path.join(pwd, control_kwds["SFFILE"]), input_names, rectified_flux)
-    if os.path.exists(os.path.join(pwd, "model_flux.output")):
+    offile_path = os.path.join(ref_dir, control_kwds["OFFILE"])
+    try:
+        rectified_model_flux, names_with_missing_rectified_model_flux, output_rectified_model_flux_indices = read_and_sort_output_data_file(
+            offile_path, 
+            input_names
+        )
+        write_pixel_array_with_names(offile_path, input_names, rectified_model_flux)
+    except:
+        log.exception(f"Exception when trying to read and sort {offile_path}")
+        names_with_missing_rectified_model_flux = input_names
+        rectified_model_flux = np.nan * np.ones_like(flux)
+    
+    sffile_path = os.path.join(ref_dir, control_kwds["SFFILE"])
+    try:
+        rectified_flux, names_with_missing_rectified_flux, output_rectified_flux_indices = read_and_sort_output_data_file(
+            sffile_path,
+            input_names
+        )
+        # Re-write the model flux file with the correct names.
+        write_pixel_array_with_names(sffile_path, input_names, rectified_flux)
+    except:
+        log.exception(f"Exception when trying to read and sort {sffile_path}")
+        names_with_missing_rectified_flux = input_names
+        rectified_flux = np.nan * np.ones_like(flux)
+
+
+    parameters, e_parameters, meta, names_with_missing_outputs = read_output_parameter_file(ref_dir, control_kwds, input_names)
+    model_flux_output_path = os.path.join(dir, "model_flux.output")
+    if os.path.exists(model_flux_output_path):
         model_flux, *_ = read_and_sort_output_data_file(
-            os.path.join(pwd, "model_flux.output"),
+            model_flux_output_path,
             input_names
         )            
-        write_pixel_array_with_names(os.path.join(pwd, "model_flux.output"), input_names, model_flux)
-
-    parameters, e_parameters, meta, names_with_missing_outputs = read_output_parameter_file(pwd, control_kwds, input_names)
-    
+        write_pixel_array_with_names(model_flux_output_path, input_names, model_flux)
+    else:
+        log.warn(f"Cannot find model_flux output in {dir} ({model_flux_output_path})")
+        model_flux = np.nan * np.ones_like(flux)
+                    
     if names_with_missing_rectified_model_flux:
         log.warn(f"The following {len(names_with_missing_rectified_model_flux)} are missing model fluxes: {names_with_missing_rectified_model_flux}")
     if names_with_missing_rectified_flux:
@@ -78,10 +113,8 @@ def post_process_ferre(pwd) -> Iterable[dict]:
     if names_with_missing_outputs:
         log.warn(f"The following {len(names_with_missing_outputs)} are missing outputs: {names_with_missing_outputs}")
     
-    log_chisq_fit = meta["log_chisq_fit"]
-    log_snr_sq = meta["log_snr_sq"]
-    frac_phot_data_points = meta["frac_phot_data_points"]
-    
+    ferre_log_chi_sq = meta["log_chisq_fit"]
+    ferre_log_snr_sq = meta["log_snr_sq"]
     
     is_missing_parameters = ~np.all(np.isfinite(parameters), axis=1)
     is_missing_model_flux = ~np.all(np.isfinite(model_flux), axis=1)
@@ -112,7 +145,7 @@ def post_process_ferre(pwd) -> Iterable[dict]:
     common = dict(
         header_path=header_path, 
         short_grid_name=short_grid_name,
-        pwd=pwd,
+        pwd=dir, # TODO: Consider renaming
         ferre_n_obj=len(input_names),
         n_threads=control_kwds["NTHREADS"],
         interpolation_order=control_kwds["INTER"],
@@ -135,34 +168,37 @@ def post_process_ferre(pwd) -> Iterable[dict]:
         result.update(
             source_id=name_meta["source_id"],
             spectrum_id=name_meta["spectrum_id"],
-            initial_flags=name_meta["initial_flags"],
+            initial_flags=name_meta["initial_flags"] or 0,
             upstream_id=name_meta["upstream_id"],
             ferre_name=name,
             ferre_input_index=name_meta["index"],
             ferre_output_index=i,
-            ferre_log_chisq=log_chisq_fit[i], 
-            ferre_log_snr_sq=log_snr_sq[i],
-            ferre_log_penalized_chisq=log_chisq_fit[i],     
-            frac_phot_data_points=frac_phot_data_points[i],      
+            r_chi_sq=10**ferre_log_chi_sq[i], 
+            penalized_r_chi_sq=10**ferre_log_chi_sq[i],     
+            ferre_log_snr_sq=ferre_log_snr_sq[i],
             flag_ferre_fail=flag_any_ferre_fail[i],
             flag_potential_ferre_timeout=flag_potential_ferre_timeout[i],
             flag_missing_model_flux=flag_missing_model_flux[i],
         )
+
+        # Add correlation coefficients.
+        #meta["cov"]
+        #raise a
+
+        # Add timing information, if we can.
+        try:
+            result.update(
+                ferre_time_load_grid=timing["ferre_time_load_grid"][i],
+                ferre_time_elapsed=timing["ferre_time_elapsed"][i],
+            )
+            result["t_elapsed"] = result["ferre_time_elapsed"] + result["ferre_time_load_grid"]/len(input_names)
+        except:
+            None
+
         # Summary statistics.
         snr = np.nanmedian(flux[i]/e_flux[i])
-        
-        # TODO: fix this, fark it's bad
-        scaled_e_flux = e_flux[i] / (flux[i]/rectified_flux[i])
-        r_chi_sqs = ((rectified_flux[i] - rectified_model_flux[i])/scaled_e_flux)**2
-        used = (e_flux[i] < LARGE) * np.isfinite(r_chi_sqs)
-        dof = (np.sum(used) - ndim - 1)
-        r_chi_sq = np.sum(r_chi_sqs[used]) / dof
         result.update(
             snr=snr,
-            r_chi_sq=r_chi_sq
-        )
-
-        result.update(
             flux=flux[i],
             e_flux=e_flux[i],
             model_flux=model_flux[i],
@@ -180,8 +216,7 @@ def post_process_ferre(pwd) -> Iterable[dict]:
                 f"flag_{parameter}_grid_edge_warn": flag_grid_edge_warn[i, j],
             })
 
-        # TODO: Load metadata from pwd/meta.json (e.g., pre-continuum steps)
+        # TODO: Load metadata from dir/meta.json (e.g., pre-continuum steps)
         # TODO: Include correlation coefficients?
-        # TODO: Include timing from ferre
         yield result
         

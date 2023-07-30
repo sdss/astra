@@ -4,7 +4,7 @@ from tqdm import tqdm
 from peewee import chunked, IntegerField
 from astra.models.source import Source
 from astra.migrations.sdss5db.utils import get_approximate_rows
-from astra.utils import log
+from astra.utils import log, flatten
 
 
 
@@ -263,26 +263,29 @@ def migrate_sources_from_sdss5_catalogdb(batch_size: Optional[int] = 500, limit:
 
 
 
-def migrate_catalog_metadata(batch_size=1000):
+def migrate_catalog_sky_positions(batch_size=1000):
 
     from astra.migrations.sdss5db.catalogdb import Catalog
 
     log.info(f"Querying for sources without basic metadata")
+    where_source = (
+            Source.ra.is_null()
+        &   (Source.sdss5_catalogid_v1.is_null(False))        
+    )
     q = (
         Source
         .select(
             Source.sdss5_catalogid_v1
         )
-        .where(
-            Source.ra.is_null()
-        )
+        .where(where_source)
         .tuples()
         .iterator()
     )
 
     log.info(f"Querying catalogdb.catalog for basic catalog metadata")
-    for batch in tqdm(chunked(q, batch_size), total=1):
-            
+    catalog_data = {}
+    n_q = 0
+    for batch in tqdm(chunked(q, batch_size), total=1):        
         q_catalog = (
             Catalog
             .select(
@@ -298,18 +301,49 @@ def migrate_catalog_metadata(batch_size=1000):
         )
 
         for sdss5_catalogid_v1, ra, dec, lead, version_id in q_catalog:
-            sdss_id = lookup_sdss_id_from_catalog_id[sdss5_catalogid_v1]
-            source_data[sdss_id].update(
+            catalog_data[sdss5_catalogid_v1] = dict(
                 ra=ra,
                 dec=dec,
                 version_id=version_id,
                 lead=lead
             )
+        n_q += len(batch)
+
+    q = (
+        Source
+        .select()
+        .where(where_source)
+    )
+
+    updated = 0
+    with tqdm(total=n_q) as pb:
+        for batch in chunked(q.iterator(), batch_size):
+            for source in batch:
+                try:
+                    for key, value in catalog_data[source.sdss5_catalogid_v1].items():
+                        setattr(source, key, value)
+                except:
+                    continue
+            updated += (
+                Source
+                .bulk_update(
+                    batch,
+                    fields=[
+                        Source.ra,
+                        Source.dec,
+                        Source.version_id,
+                        Source.lead
+                    ],
+                )
+            )
+            pb.update(len(batch))            
+            
 
     # You might think that we should only do subsequent photometry/astrometry queries for things that were 
     # actually targeted, but you'd be wrong. We need to include everything from SDSS-IV / DR17 too, which
     # was not assigned to any SDSS-V carton.
-    
+
+    '''    
     # Only do the carton/target cleverness if we are using a postgresql database.
     if isinstance(database, PostgresqlDatabase):
         log.info(f"Querying cartons and target assignments")    
@@ -337,7 +371,7 @@ def migrate_catalog_metadata(batch_size=1000):
     
     else:
         log.warning(f"Not including carton and target assignments right now")
-
+    '''
     log.info(f"Inserting sources")
 
         

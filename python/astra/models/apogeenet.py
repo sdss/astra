@@ -20,7 +20,7 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
 
     """A result from the APOGEENet pipeline."""
 
-    source_id = ForeignKeyField(Source, null=True, index=True)
+    source_id = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
     spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     
     #> Astra Metadata
@@ -100,7 +100,7 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
         )
     
 
-    def apply_flags(self, meta=None):
+    def apply_flags(self, meta=None, missing_photometry=False):
         """
         Set flags for the pipeline outputs, given the metadata used.
 
@@ -140,7 +140,7 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
         if np.log10(self.e_teff) > 2.7:
             self.flag_e_teff_large = True
 
-        if meta is None or not np.all(np.isfinite(meta)):
+        if meta is None or not np.all(np.isfinite(meta)) or missing_photometry:
             self.flag_missing_photometry = True
 
         if meta is not None:

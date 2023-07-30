@@ -8,7 +8,7 @@ from astra import task
 from astra.utils import expand_path, log, list_to_dict
 from astra.models.spectrum import Spectrum
 from astra.models.aspcap import FerreStellarParameters, FerreChemicalAbundances
-from astra.pipelines.ferre.operator import FerreOperator
+from astra.pipelines.ferre.operator import FerreOperator, FerreMonitoringOperator
 from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
 from astra.pipelines.ferre.utils import (read_ferre_headers, parse_header_path)
@@ -44,18 +44,14 @@ def abundances(
         **kwargs
     )
 
-    # Execute ferre.
-    FerreOperator(
-        f"{parent_dir}/{STAGE}/", 
-        **(operator_kwds or {})
-    ).execute()    
-
-
-    raise NotImplementedError("need the ferre.x -l switch")
-    # Execute ferre.
-    print("Switch to using the FerreOperator here, which will use the ferre.x -l thing")
-    for path in get_input_nml_paths(parent_dir):
-        execute(path)
+    job_ids, executions = (
+        FerreOperator(
+            f"{parent_dir}/{STAGE}/", 
+            **(operator_kwds or {})
+        )
+        .execute()
+    )
+    FerreMonitoringOperator(job_ids, executions).execute()
     
     yield from post_abundances(parent_dir)
 
@@ -85,7 +81,14 @@ def pre_abundances(
         element_weight_paths,
         **kwargs
     )
-    assert not spectra_with_no_stellar_parameters
+    # In other stages we would yield back a database result with a flag indicating that
+    # there was nothing that could be done, but here we won't. That's because the final
+    # ASPCAP table is built by using the `FerreStellarParameters` as a reference table,
+    # not the `FerreChemicalAbundances` table. The chemical abundances are a bonus.
+    if spectra_with_no_stellar_parameters:
+        log.warning(
+            f"There were {len(spectra_with_no_stellar_parameters)} spectra with no suitable stellar parameters."
+        )
 
     # Create the FERRE files for each execution.
     group = {}
@@ -96,16 +99,13 @@ def pre_abundances(
         group_dir = "/".join(pwd.split("/")[:-1])
         group.setdefault(group_dir, [])
         group[group_dir].append(pwd[1 + len(group_dir):] + "/input.nml")
-
         
-    # Create a parent input_list.nml file to use with the -l flag.
+    # Create a parent input_list.nml file to use with the ferre.x -l flag.
     for pwd, items in group.items():
         input_list_path = f"{pwd}/input_list.nml"
         log.info(f"Created grouped FERRE input file with {len(items)} dirs: {input_list_path}")
         with open(input_list_path, "w") as fp:
             fp.write("\n".join(items))
-    
-    
     
     yield from []
 
@@ -117,11 +117,14 @@ def post_abundances(parent_dir, **kwargs) -> Iterable[FerreChemicalAbundances]:
 
     :param parent_dir:
         The parent directory where these FERRE executions were planned.
-    """
-    
-    for pwd in map(os.path.dirname, get_input_nml_paths(parent_dir, STAGE)):
-        log.info("Post-processing FERRE results in {0}".format(pwd))
-        for kwds in post_process_ferre(pwd):
+    """    
+
+    # Note the "/*" after STAGE because of the way folders are structured for abundances
+    # And we use the `ref_dir` because it was executed from the parent folder.
+    for dir in map(os.path.dirname, get_input_nml_paths(parent_dir, f"{STAGE}/*")):
+        log.info(f"Post-processing FERRE results in {dir}")
+        ref_dir = os.path.dirname(dir)
+        for kwds in post_process_ferre(dir, ref_dir):
             yield FerreChemicalAbundances(**kwds)    
 
 
@@ -129,12 +132,16 @@ def plan_abundances(
     spectra: Iterable[Spectrum],
     parent_dir: str,
     element_weight_paths: str,
+    continuum_order: Optional[int] = -1,
+    continuum_flag: Optional[int] = 0,
+    continuum_observations_flag: Optional[int] = 0,
     **kwargs,
 ):
     """
-    Plan abundance executions with FERRE for some given spectra.
+    Plan abundance executions with FERRE for some given spectra, which are assumed to already have `FerreStellarParameter` results.
 
-    Those spectra are assumed to already have `FerreStellarParameter` results.
+    In the abundances stage we keep the continuum fixed to what was found from the stellar parameter stage. That's why the
+    defaults are set for `continuum_order`, `continuum_flag`, and `continuum_observations_flag`.
 
     :param spectra:
         The spectra to be processed.
@@ -154,7 +161,7 @@ def plan_abundances(
         Alias
         .select(
             Alias.spectrum_id,
-            fn.MIN(Alias.ferre_log_chisq).alias("min_ferre_log_chisq"),
+            fn.MIN(Alias.penalized_r_chi_sq).alias("min_penalized_r_chi_sq"),
         )
         .where(Alias.spectrum_id << [s.spectrum_id for s in spectra])
         .group_by(Alias.spectrum_id)
@@ -164,28 +171,37 @@ def plan_abundances(
     q = (
         FerreStellarParameters
         .select()
+        # Only get one result per spectrum.
         .where(
-            FerreStellarParameters.ferre_log_chisq.is_null(False)
+            FerreStellarParameters.penalized_r_chi_sq.is_null(False)
         &   (~FerreStellarParameters.flag_ferre_fail)
         &   (~FerreStellarParameters.flag_no_suitable_initial_guess)
         &   (~FerreStellarParameters.flag_missing_model_flux)
+            # Don't calculate abundances for stellar parameters that are on the grid edge of TEFF/LOGG/METALS
+        &   (~FerreStellarParameters.flag_teff_grid_edge_bad)
+        &   (~FerreStellarParameters.flag_logg_grid_edge_bad)
+        &   (~FerreStellarParameters.flag_m_h_grid_edge_bad)
         )
         .join(
             sq, 
             on=(
                 (FerreStellarParameters.spectrum_id == sq.c.spectrum_id) &
-                (FerreStellarParameters.ferre_log_chisq == sq.c.min_ferre_log_chisq)
+                (FerreStellarParameters.penalized_r_chi_sq == sq.c.min_penalized_r_chi_sq)
             )
         )
+        # We will only get one result per spectrum, but we'll do it by recency.
+        .order_by(FerreStellarParameters.task_id.desc())
     )
-    
+
     # Load abundance keywords on demand.
-    ferre_headers = {}
-    abundance_keywords = {}
+    ferre_headers, abundance_keywords = ({}, {})
     lookup_spectrum_by_id = { s.spectrum_id: s for s in spectra }
 
-    group_task_kwds = {}
+    done, group_task_kwds, pre_computed_continuum = ([], {}, {})
     for result in q:
+        if result.spectrum_id in done:
+            continue
+        done.append(result.spectrum_id)
         group_task_kwds.setdefault(result.header_path, [])
 
         if result.header_path not in abundance_keywords:
@@ -193,7 +209,6 @@ def plan_abundances(
             headers, *segment_headers = ferre_headers[result.header_path] = read_ferre_headers(result.header_path)
             for weight_path in weight_paths:
                 species = get_species(weight_path)
-                print(f"{species} from {os.path.basename(weight_path)}")                
                 frozen_parameters, ferre_kwds = get_abundance_keywords(species, headers["LABEL"])
                 abundance_keywords[result.header_path][species] = (weight_path, frozen_parameters, ferre_kwds)
                 
@@ -201,18 +216,18 @@ def plan_abundances(
 
         # Apply continuum normalization, where we are just going to fix the observed
         # spectrum to the best-fitting model spectrum from the upstream task.
-        continuum = result.unmask(
-            (result.rectified_model_flux/result.model_flux)
-        /   (result.rectified_flux/result.ferre_flux)
-        )
+        try:
+            pre_computed_continuum[result.spectrum_id]
+        except KeyError:
+            pre_computed_continuum[result.spectrum_id] = result.unmask(
+                (result.rectified_model_flux/result.model_flux)
+            /   (result.rectified_flux/result.ferre_flux)
+            )
         
-        # This doesn't change the spectrum on disk, it just changes it in memory so it can be written out for FERRE.
-        spectrum.flux /= continuum
-        spectrum.ivar *= continuum**2
-
         group_task_kwds[result.header_path].append(
             dict(
                 spectra=spectrum,
+                pre_computed_continuum=pre_computed_continuum[result.spectrum_id],
                 initial_teff=result.teff,
                 initial_logg=result.logg,
                 initial_m_h=result.m_h,
@@ -242,6 +257,12 @@ def plan_abundances(
     PARENT/abundances/Mg_d/Al/rectified_model_flux.output
     
     """
+    extra_kwds = dict(
+        continuum_order=continuum_order,
+        continuum_flag=continuum_flag,
+        continuum_observations_flag=continuum_observations_flag,
+    )
+    extra_kwds.update(kwargs)
 
     kwds_list = []
     spectra_with_no_stellar_parameters = set(spectra)
@@ -265,8 +286,11 @@ def plan_abundances(
                 # Only write the flux arrays to the parent folder on the first run of this header path
                 write_input_pixel_arrays=(i == 0)
             )
-            # Ignore additional keyword arguments?
-            log.warning(f"Ignoring additional keyword arguments at abundances stage.")
+            kwds.update(extra_kwds)
+            
+            if all(frozen_parameters.get(ln, False) for ln in ferre_headers[kwds["header_path"]][0]["LABEL"]):
+                log.warning(f"Ignoring {species} species on grid {short_grid_name} because all parameters are frozen")
+                continue
             kwds_list.append(kwds)
         
         spectra_with_no_stellar_parameters -= set(grid_kwds["spectra"])

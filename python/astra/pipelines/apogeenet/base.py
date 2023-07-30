@@ -17,7 +17,7 @@ def _prepare_data(spectrum, large_error):
     flux = np.nan_to_num(spectrum.flux).astype(np.float32).reshape((N, P))
     e_flux = np.nan_to_num(spectrum.ivar**-0.5).astype(np.float32).reshape((N, P))
     
-    meta_dict, metadata_norm = get_metadata(spectrum)
+    meta_dict, metadata_norm, missing_photometry = get_metadata(spectrum)
     meta = np.tile(metadata_norm, N).reshape((N, -1))
 
     N, P = flux.shape
@@ -28,7 +28,7 @@ def _prepare_data(spectrum, large_error):
         bad_pixel = (e_flux[j] == large_error) | (e_flux[j] >= value)
         e_flux[j][bad_pixel] = value
 
-    return (spectrum.spectrum_id, flux, e_flux, meta, meta_dict)
+    return (spectrum.spectrum_id, spectrum.source_id, flux, e_flux, meta, meta_dict, missing_photometry)
 
 
 
@@ -60,13 +60,15 @@ def _inference(network, batch, num_uncertainty_draws):
     # the whole batch, and all others having some small value (1e-5), so we will calculate the average time here
 
     t_init = time()
-    spectrum_ids, flux, e_flux, meta, meta_dict = ([], [], [], [], [])
-    for spectrum_id, f, ef, m, md in batch:
+    spectrum_ids, source_ids, flux, e_flux, meta, meta_dict, missing_photometrys = ([], [], [], [], [], [], [])
+    for spectrum_id, source_id, f, ef, m, md, mp in batch:
         spectrum_ids.append(spectrum_id)
+        source_ids.append(source_id)
         flux.append(f)
         e_flux.append(ef)
         meta.append(m)
         meta_dict.append(md)
+        missing_photometrys.append(mp)
 
     shape = (-1, 1, 8575)
     flux = torch.from_numpy(np.array(flux).reshape(shape)).to(DEVICE)
@@ -109,9 +111,10 @@ def _inference(network, batch, num_uncertainty_draws):
     logg, teff, fe_h = predictions
 
     mean_t_elapsed = (time() - t_init) / len(spectrum_ids)
-    for i, spectrum_id in enumerate(spectrum_ids):
+    for i, (spectrum_id, source_id, missing_photometry) in enumerate(zip(spectrum_ids, source_ids, missing_photometrys)):
         output = ApogeeNet(
             spectrum_id=spectrum_id,
+            source_id=source_id,
             teff=teff[i],
             logg=logg[i],
             fe_h=fe_h[i],
@@ -123,7 +126,7 @@ def _inference(network, batch, num_uncertainty_draws):
             fe_h_sample_median=fe_h_median[i],
             t_elapsed=mean_t_elapsed
         )
-        output.apply_flags(meta[i])
+        output.apply_flags(meta[i], missing_photometry=missing_photometry)
         yield output
 
 
@@ -175,7 +178,7 @@ def get_metadata(spectrum):
         An `astra.tools.spectrum.Spectrum1D` spectrum.
 
     :returns:
-        A three-length tuple containing relevant metadata for the given spectrum. The first entry in
+        A a-length tuple containing relevant metadata for the given spectrum. The first entry in
         the tuple contains the header keys, the second entry contains the values of the metadata,
         and the last value contains the normalized, clipped values of the metadata, for use with the
         APOGEENet model.
@@ -216,6 +219,7 @@ def get_metadata(spectrum):
             spectrum.source.k_mag
         ]
     except:
+        missing_photometry = True
         metadata = mdata_means
         metadata_norm = ((metadata - mdata_means) / mdata_stddevs).astype(np.float32)
     
@@ -223,6 +227,11 @@ def get_metadata(spectrum):
         de_nanify = lambda x: x if (x != "NaN" and x != -999999 and x is not None) else np.nan
         
         metadata = np.array(list(map(de_nanify, metadata)))
+        missing_photometry = np.any(
+            ~np.isfinite(metadata)
+        |   (metadata >= 98)
+        |   (metadata <= -1)
+        )
 
         metadata = np.where(metadata < 98, metadata, mdata_replacements)
         metadata = np.where(np.isfinite(metadata), metadata, mdata_replacements)
@@ -230,4 +239,5 @@ def get_metadata(spectrum):
         metadata_norm = ((metadata - mdata_means) / mdata_stddevs).astype(np.float32)
 
     finally:
-        return (metadata, metadata_norm)
+        return (metadata, metadata_norm, missing_photometry)
+    

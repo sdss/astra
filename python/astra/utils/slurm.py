@@ -1,7 +1,44 @@
 
+import re
 import os
+from getpass import getuser
+from subprocess import check_output, call, Popen, PIPE
+
 from astra.utils import expand_path
-from subprocess import check_output
+
+
+
+def get_queue():
+    """Get a list of jobs currently in the Slurm queue."""
+
+    pattern = (
+        "(?P<job_id>\d+)+\s+(?P<name>[-\w\d_\.]+)\s+(?P<user>[\w\d]+)\s+(?P<group>\w+)"
+        "\s+(?P<account>[-\w]+)\s+(?P<partition>[-\w]+)\s+(?P<time_limit>[-\d\:]+)\s+"
+        "(?P<time_left>[-\d\:]+)\s+(?P<status>\w*)\s+(?P<nodelist>[\w\d\(\)]+)"
+    )
+    process = Popen(
+        [
+            "/uufs/notchpeak.peaks/sys/installdir/slurm/std/bin/squeue",
+            "--account=sdss-np,sdss-kp,notchpeak-gpu,sdss-np-fast",
+            '--format="%14i %50j %10u %10g %13a %13P %11l %11L %2t %R"',
+        ],
+        stdin=PIPE,
+        stdout=PIPE,
+        stderr=PIPE,
+        universal_newlines=True,
+    )
+    output, error = process.communicate()
+
+    # Parse the output.
+    queue = dict()
+    for job in [match.groupdict() for match in re.finditer(pattern, output)]:
+        queue[int(job.get("job_id"))] = job
+    return queue
+
+
+
+
+
 
 class SlurmTask:
 
@@ -24,7 +61,7 @@ class SlurmTask:
 
 class SlurmJob:
 
-    def __init__(self, tasks, job_name, account, partition=None, walltime="24:00:00", mem=None, ppn=None, gres=None, ntasks=None, nodes=1, node_index=None):
+    def __init__(self, tasks, job_name, account, partition=None, walltime="24:00:00", mem=None, ppn=None, gres=None, ntasks=None, nodes=1, node_index=None, dir=None):
         self.account = account
         self.partition = partition or account
         self.walltime = walltime
@@ -34,6 +71,7 @@ class SlurmJob:
         self.gres = gres
         self.mem = mem
         self.ppn = ppn
+        self.dir = dir or expand_path(f"$PBS/{self.job_name}")
         if ntasks is None and account is not None:
             ntasks = {
                 "sdss-kp": 16,
@@ -43,14 +81,11 @@ class SlurmJob:
         self.ntasks = ntasks
         self.node_index = node_index
         for j, task in enumerate(self.tasks, start=1):
-            task.set_meta(self.directory, self.node_index or 1, j)
-        os.makedirs(self.directory, exist_ok=True)
+            task.set_meta(self.dir, self.node_index or 1, j)
+        os.makedirs(self.dir, exist_ok=True)
         return None
 
-    @property
-    def directory(self):
-        return expand_path(f"$PBS/{self.job_name}")
-    
+
     def write(self):
         if self.node_index is None:
             node_index = 1
@@ -76,17 +111,17 @@ class SlurmJob:
         contents.extend([
             f"#SBATCH --time={self.walltime}",
             f"#SBATCH --job-name={self.job_name}{node_index_suffix}",
-            f"#SBATCH --output={self.directory}/slurm_%A.out",
-            f"#SBATCH --err={self.directory}/slurm_%A.err",
+            f"#SBATCH --output={self.dir}/slurm_%A.out",
+            f"#SBATCH --err={self.dir}/slurm_%A.err",
             f"# ------------------------------------------------------------------------------",
             "export CLUSTER=1"
         ])
         for task in self.tasks:
-            #log_prefix = f"{self.directory}/node{node_index:0>2.0f}_task{task_index:0>2.0f}"
-            contents.append(f"source {task.write()}")
+            #log_prefix = f"{self.dir}/node{node_index:0>2.0f}_task{task_index:0>2.0f}"
+            contents.append(f"source {task.write()} &")
         contents.extend(["wait", "echo \"Done\""])
 
-        node_path = expand_path(f"{self.directory}/node{node_index:0>2.0f}.slurm")
+        node_path = expand_path(f"{self.dir}/node{node_index:0>2.0f}.slurm")
         with open(node_path, "w") as fp:
             fp.write("\n".join(contents))
 

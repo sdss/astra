@@ -7,7 +7,7 @@ from astra import task
 from astra.utils import log, list_to_dict
 from astra.models.spectrum import Spectrum
 from astra.models.aspcap import FerreCoarse, FerreStellarParameters
-from astra.pipelines.ferre.operator import FerreOperator, FerreChaosMonkeyOperator, FerreMonitoringOperator
+from astra.pipelines.ferre.operator import FerreOperator, FerreMonitoringOperator
 from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
 from astra.pipelines.ferre.utils import (
@@ -43,7 +43,9 @@ def stellar_parameters(
         The path to the FERRE weight file.
     """
 
+    print(f"A {FerreStellarParameters.select().count()}")
     yield from pre_stellar_parameters(spectra, parent_dir, weight_path, **kwargs)
+    print(f"B {FerreStellarParameters.select().count()}")
 
     # Execute ferre.
     job_ids, executions = (
@@ -53,11 +55,11 @@ def stellar_parameters(
         )
         .execute()
     )
-    FerreChaosMonkeyOperator(job_ids).feed() # feed to start processes, we don't care when they finish
-    FerreMonitoringOperator(executions).execute()
+    FerreMonitoringOperator(job_ids, executions).execute()
+    print(f"C {FerreStellarParameters.select().count()}")
     
     yield from post_stellar_parameters(parent_dir)
-
+    print(f"D {FerreStellarParameters.select().count()}")
 
 @task
 def pre_stellar_parameters(
@@ -109,9 +111,13 @@ def post_stellar_parameters(parent_dir, **kwargs) -> Iterable[FerreStellarParame
     """
     
     for pwd in map(os.path.dirname, get_input_nml_paths(parent_dir, STAGE)):
+        print(f"E {FerreStellarParameters.select().count()}")
+
         log.info("Post-processing FERRE results in {0}".format(pwd))
-        for kwds in post_process_ferre(pwd):
+        for i, kwds in enumerate(post_process_ferre(pwd)):
+            print(f"F {i} {FerreStellarParameters.select().count()}")
             yield FerreStellarParameters(**kwds)
+            print(f"G {i} {FerreStellarParameters.select().count()}")
 
  
 def plan_stellar_parameters(
@@ -132,7 +138,7 @@ def plan_stellar_parameters(
         Alias
         .select(
             Alias.spectrum_id,
-            fn.MIN(Alias.ferre_penalized_log_chi_sq).alias("min_ferre_penalized_log_chi_sq"),
+            fn.MIN(Alias.penalized_r_chi_sq).alias("min_penalized_r_chi_sq"),
         )
         .where(
             (Alias.spectrum_id << [s.spectrum_id for s in spectra])
@@ -152,7 +158,7 @@ def plan_stellar_parameters(
             sq, 
             on=(
                 (FerreCoarse.spectrum_id == sq.c.spectrum_id) &
-                (FerreCoarse.ferre_penalized_log_chi_sq == sq.c.min_ferre_penalized_log_chi_sq)
+                (FerreCoarse.penalized_r_chi_sq == sq.c.min_penalized_r_chi_sq)
             )
         )
     )
@@ -171,7 +177,7 @@ def plan_stellar_parameters(
     upstream_failed, coarse_results_dict = ([], {})
     for r in q:
         # TODO: Should we do it based on other things?
-        if r.flag_no_suitable_initial_guess:
+        if r.flag_no_suitable_initial_guess or r.flag_spectrum_io_error:
             upstream_failed.append(r)
             continue
 
@@ -185,7 +191,7 @@ def plan_stellar_parameters(
         index = np.argmin([r.r_chi_sq for r in coarse_results])
         coarse_results_dict[spectrum_id] = coarse_results[index]
 
-    group_task_kwds = {}
+    group_task_kwds, pre_computed_continuum = ({}, {})
     for coarse_result in tqdm(coarse_results_dict.values(), total=0):
 
         group_task_kwds.setdefault(coarse_result.header_path, [])
@@ -199,13 +205,12 @@ def plan_stellar_parameters(
                 log.exception(f"Exception for spectrum {spectrum} from coarse result {coarse_result}:")
                 continue
 
-            # This doesn't change the spectrum on disk, it just changes it in memory so it can be written out for FERRE.
-            spectrum.flux /= continuum
-            spectrum.ivar *= continuum**2
+            pre_computed_continuum[spectrum.spectrum_id] = continuum
 
         group_task_kwds[coarse_result.header_path].append(
             dict(
                 spectra=spectrum,
+                pre_computed_continuum=pre_computed_continuum.get(spectrum.spectrum_id, None),
                 initial_teff=coarse_result.teff,
                 initial_logg=coarse_result.logg,
                 initial_m_h=coarse_result.m_h,

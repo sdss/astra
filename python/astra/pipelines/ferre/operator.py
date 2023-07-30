@@ -37,10 +37,50 @@ CORE_TIME_COEFFICIENTS = {
     'sgM': np.array([ 2.07628319,  0.83709908, -0.00974312]),
     'sdF': np.array([ 2.36062644e+00,  7.88815732e-01, -1.47683420e-03]),
     'sdGK': np.array([ 2.84815701,  0.88390584, -0.05891258]),
-    'sdM': np.array([ 2.83218967,  0.76324445, -0.05566659])
+    'sdM': np.array([ 2.83218967,  0.76324445, -0.05566659]),
+    # copied for turbospectrum #TODO
+    'tBA': np.array([-0.11225854,  0.91822257,  0.        ]),
+    'tgGK': np.array([2.11366749, 0.94762965, 0.0215653 ]),
+    'tgM': np.array([ 2.07628319,  0.83709908, -0.00974312]),
+    'tdF': np.array([ 2.36062644e+00,  7.88815732e-01, -1.47683420e-03]),
+    'tdGK': np.array([ 2.84815701,  0.88390584, -0.05891258]),
+    'tdM': np.array([ 2.83218967,  0.76324445, -0.05566659])    
 }
 
-def predict_ferre_core_time(grid, N, nov, pre_factor=1):
+
+def predict_ferre_core_time(grid, N, nov, pre_factor=2):
+    """
+    Predict the core-seconds required to analyze $N$ spectra with FERRE using the given grid.
+
+    Note that these predictions do not include the grid load time (1-5 minutes).
+
+    :param grid:
+        The short-hand grid name (e.g., `sBA`, `sdF`, `sdM`).
+    
+    :param N:
+        The number of spectra to analyze.
+    
+    :param nov:
+        The number of free parameters at fitting time. In ASPCAP this value depends on the
+        grid, and on which stage of analysis (e.g., coarse, parameter, or abundance stage).
+
+        Below is a guide on what numbers you might want to use, depending on the grid and/or
+        analysis stage.
+
+        In the coarse stage, most grids use `nov=4`. No dimensions are frozen in the stellar
+        parameter stage, so `nov` would be set to the number of dimensions in the grid. You
+        can check this yourself, but as a guide you might expect:
+
+        - `sBA`: 4 dimensions
+        - `sgGK`: 6 dimensions
+        - `sgM`: 6 dimensions
+        - `sdF`: 7 dimensions
+        - `sdGK`: 7 dimensions
+        - `sdM`: 7 dimensions
+    
+    :returns:
+        The estimated core-seconds needed to analyze the spectra.
+    """
     intercept, N_coef, nov_coef = CORE_TIME_COEFFICIENTS[grid]
     return pre_factor * 10**(N_coef * np.log10(N) + nov_coef * np.log10(nov) + intercept)
     
@@ -201,15 +241,6 @@ class FerreChaosMonkeyOperator:
         return None
 
 
-def chaos_monkey(job_ids, executable="ferre_chaos_monkey"):
-
-
-    # Wait until they are done.
-
-    
-    return outputs
-    
-
 
 class FerreOperator:
     def __init__(
@@ -220,7 +251,8 @@ class FerreOperator:
         slurm_kwds=None,
         post_interpolate_model_flux=True,
         overwrite=True,
-        max_nodes=10,
+        n_threads=32,
+        max_nodes=0,
         max_tasks_per_node=4,
         cpus_per_node=128,
     ):
@@ -252,6 +284,7 @@ class FerreOperator:
             other 9 nodes, where the number of threads requested will be adjusted to 32 * 4.
         """
 
+        self.n_threads = int(n_threads)
         self.job_name = job_name
         self.stage_dir = stage_dir
         self.max_nodes = int(max_nodes)
@@ -417,14 +450,13 @@ class FerreOperator:
             slurm_tasks, est_times = ([], [])
             for j, task_indices in enumerate(node_indices, start=1):
 
-                n_threads = 32 # TODO
                 #int(max(
                 #    1,
                 #    (self.cpus_per_node * np.sum(partitioned_core_seconds[st_indices]) / denominator)
                 #))
-                est_time = np.sum(partitioned_core_seconds[task_indices]) / n_threads + t_load_estimate
+                est_time = np.sum(partitioned_core_seconds[task_indices]) / self.n_threads + t_load_estimate
 
-                log.info(f"  {i}.{j}: {len(task_indices)} executions with {n_threads} threads. Estimated time is {est_time/60:.0f} min")
+                log.info(f"  {i}.{j}: {len(task_indices)} executions with {self.n_threads} threads. Estimated time is {est_time/60:.0f} min")
 
                 task_commands = []
                 for k, index in enumerate(task_indices, start=1):
@@ -453,7 +485,7 @@ class FerreOperator:
                             0
                         ])
                         # Be sure to update the NTHREADS, just in case it was set at some dumb value (eg 1)
-                        update_control_kwds(f"{cwd}/input.nml", "NTHREADS", n_threads)
+                        update_control_kwds(f"{cwd}/input.nml", "NTHREADS", self.n_threads)
                     
                     command = f"ferre.x {flags}{os.path.basename(input_path)}"
                     execution_commands.append(f"cd {cwd}")
@@ -492,11 +524,11 @@ class FerreOperator:
             if t_node > t_longest:
                 t_longest = t_node
 
-
             slurm_job = SlurmJob(
                 slurm_tasks,
                 self.job_name,
                 node_index=i,
+                dir=self.stage_dir,
                 **self.slurm_kwds
             )                
             slurm_job.write()
@@ -537,14 +569,18 @@ class FerreMonitoringOperator:
 
     def __init__(
         self,
+        job_ids,
         executions,
         show_progress=True,
         refresh_interval=10,
+        chaos_monkey=True,
         **kwargs
     ):
+        self.job_ids = job_ids
         self.executions = executions
         self.refresh_interval = refresh_interval
         self.show_progress = show_progress
+        self.chaos_monkey = chaos_monkey
         return None
 
     def execute(self, context=None):
@@ -570,9 +606,25 @@ class FerreMonitoringOperator:
         if not self.show_progress:
             tqdm_kwds.update(disable=True)
 
-        dead_processes = []
+        dead_processes, chaos_monkey_processes = ([], {})
         with tqdm(**tqdm_kwds) as pb:
             while True:
+                
+                # FLY MY PRETTIES!!!1
+                if self.chaos_monkey and len(chaos_monkey_processes) < len(self.job_ids):
+                    queue = get_queue()
+                    for job_id in set(self.job_ids).difference(chaos_monkey_processes):
+                        job = queue[job_id]                        
+                        if job["status"] == "R":
+                            log.info(f"Slurm job {job_id} has started. Launching FERRE chaos monkey on job {job_id}")
+                            chaos_monkey_processes[job_id] = Popen(
+                                ["srun", f"--jobid={job_id}", "ferre_chaos_monkey"],
+                                stdin=PIPE,
+                                stdout=PIPE,
+                                stderr=PIPE
+                            )                        
+                
+                n_done_this_iteration = 0
                 for i, (output_path, n_input, n_done) in enumerate(executions):
                     if n_done >= n_input or output_path in dead_processes:
                         continue
@@ -583,6 +635,7 @@ class FerreMonitoringOperator:
                     else:
                         n_now_done = 0
                     n_new = n_now_done - n_done
+                    n_done_this_iteration += n_new
                     
                     if n_new > 0:
                         last_updated = time()
@@ -624,7 +677,15 @@ class FerreMonitoringOperator:
                 if n_executions_done == n_executions:
                     pb.refresh()
                     break
-                
+
+                # If FERRE is being executed by Slurm jobs, then they should already be in the queue before we start.
+                if n_done_this_iteration == 0 and self.job_ids:
+                    queue = get_queue()
+                    n_jobs_in_queue = [job_id in queue for job_id in self.job_ids]
+                    if n_jobs_in_queue == 0:
+                        log.warning(f"No Slurm jobs left in queue ({self.job_ids}). Finishing.")
+                        break                
+
                 sleep(self.refresh_interval)
 
         if dead_processes:
@@ -632,6 +693,20 @@ class FerreMonitoringOperator:
             for output_path in dead_processes:
                 log.warning(f"\t{os.path.dirname(output_path)}")
 
+        if self.job_ids and pb.n >= n_spectra:
+            log.info(f"Checking that all Slurm jobs are complete")
+            while True:
+                queue = get_queue()
+                for job_id in self.job_ids:
+                    if job_id in queue:
+                        log.info(f"Job {job_id} has status {queue[job_id]['status']}")
+                        break
+                else:
+                    log.info("All Slurm jobs complete.")
+                    break
+
+                sleep(5)
+            
         log.info(f"Operator out.")
         return None
     

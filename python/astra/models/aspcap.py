@@ -5,6 +5,7 @@ from peewee import (
     ForeignKeyField,
     IntegerField,
     BitField,
+    BooleanField,
 )
 
 import numpy as np
@@ -224,10 +225,8 @@ class FerreCoarse(BaseModel, FerreOutputMixin):
     #> Summary Statistics
     snr = FloatField(null=True)
     r_chi_sq = FloatField(null=True)
+    penalized_r_chi_sq = FloatField(null=True) 
     ferre_log_snr_sq = FloatField(null=True)
-    ferre_log_chi_sq = FloatField(default=np.inf) # TODO: chi_sq?
-    ferre_frac_phot_data_points = FloatField(default=0)
-    ferre_penalized_log_chi_sq = FloatField(default=np.inf) #  # TODO: penalized_log_chi_sq?
     ferre_time_load_grid = FloatField(null=True)
     ferre_time_elapsed = FloatField(null=True)
     ferre_flags = BitField(default=0)
@@ -236,6 +235,7 @@ class FerreCoarse(BaseModel, FerreOutputMixin):
     flag_missing_model_flux = ferre_flags.flag(2**1, "Missing model fluxes from FERRE")
     flag_potential_ferre_timeout = ferre_flags.flag(2**2, "Potentially impacted by FERRE timeout")
     flag_no_suitable_initial_guess = ferre_flags.flag(2**3, help_text="FERRE not executed because there's no suitable initial guess")
+    flag_spectrum_io_error = ferre_flags.flag(2**4, help_text="Error accessing spectrum pixel data")
 
 
 
@@ -356,10 +356,8 @@ class FerreStellarParameters(BaseModel, FerreOutputMixin):
     #> Summary Statistics
     snr = FloatField(null=True)
     r_chi_sq = FloatField(null=True)
+    penalized_r_chi_sq = FloatField(null=True)
     ferre_log_snr_sq = FloatField(null=True)
-    ferre_log_chi_sq = FloatField(null=True)
-    ferre_penalized_log_chi_sq = FloatField(null=True)
-    ferre_frac_phot_data_points = FloatField(default=0)
     ferre_time_load_grid = FloatField(null=True)
     ferre_time_elapsed = FloatField(null=True)
     ferre_flags = BitField(default=0)
@@ -372,8 +370,6 @@ class FerreStellarParameters(BaseModel, FerreOutputMixin):
 
 
 class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
-
-    # TODO: Review this, it's a nearly direct copy from stellar parameters
 
     source_id = ForeignKeyField(Source, index=True, lazy_load=False)
     spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
@@ -399,6 +395,9 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
     initial_alpha_m = FloatField(null=True)
     initial_c_m = FloatField(null=True)
     initial_n_m = FloatField(null=True)
+
+    initial_flags = BitField(default=0)
+    # TODO: Not sure what flag definitions are needed for initial guess.
 
     #> FERRE Settings
     continuum_order = IntegerField(default=-1)
@@ -446,6 +445,33 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
     c_m_flags = BitField(default=0)
     n_m_flags = BitField(default=0)
 
+    # Define flags.
+    flag_teff_ferre_fail = teff_flags.flag(2**0)
+    flag_teff_grid_edge_warn = teff_flags.flag(2**1)
+    flag_teff_grid_edge_bad = teff_flags.flag(2**2)
+    flag_logg_ferre_fail = logg_flags.flag(2**0)
+    flag_logg_grid_edge_warn = logg_flags.flag(2**1)
+    flag_logg_grid_edge_bad = logg_flags.flag(2**2)
+    flag_m_h_ferre_fail = m_h_flags.flag(2**0)
+    flag_m_h_grid_edge_warn = m_h_flags.flag(2**1)
+    flag_m_h_grid_edge_bad = m_h_flags.flag(2**2)
+    flag_log10_v_sini_ferre_fail = log10_v_sini_flags.flag(2**0)
+    flag_log10_v_sini_grid_edge_warn = log10_v_sini_flags.flag(2**1)
+    flag_log10_v_sini_grid_edge_bad = log10_v_sini_flags.flag(2**2)
+    flag_log10_v_micro_ferre_fail = log10_v_micro_flags.flag(2**0)
+    flag_log10_v_micro_grid_edge_warn = log10_v_micro_flags.flag(2**1)
+    flag_log10_v_micro_grid_edge_bad = log10_v_micro_flags.flag(2**2)
+    flag_alpha_m_ferre_fail = alpha_m_flags.flag(2**0)
+    flag_alpha_m_grid_edge_warn = alpha_m_flags.flag(2**1)
+    flag_alpha_m_grid_edge_bad = alpha_m_flags.flag(2**2)
+    flag_c_m_ferre_fail = c_m_flags.flag(2**0)
+    flag_c_m_grid_edge_warn = c_m_flags.flag(2**1)
+    flag_c_m_grid_edge_bad = c_m_flags.flag(2**2)
+    flag_n_m_ferre_fail = n_m_flags.flag(2**0)
+    flag_n_m_grid_edge_warn = n_m_flags.flag(2**1)
+    flag_n_m_grid_edge_bad = n_m_flags.flag(2**2)
+
+
     # TODO: flag definitions for each dimension (DRY)
     #> FERRE Access Fields
     ferre_name = TextField(default="")
@@ -454,11 +480,10 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
     ferre_n_obj = IntegerField(default=-1)
 
     #> Summary Statistics
+    snr = FloatField(null=True)
     r_chi_sq = FloatField(null=True)
+    penalized_r_chi_sq = FloatField(null=True)
     ferre_log_snr_sq = FloatField(null=True)
-    ferre_log_chi_sq = FloatField(null=True)
-    ferre_frac_phot_data_points = FloatField(default=0)
-    ferre_penalized_log_chi_sq = FloatField(null=True)
     ferre_time_load_grid = FloatField(null=True)
     ferre_time_elapsed = FloatField(null=True)
     ferre_flags = BitField(default=0)
@@ -470,21 +495,19 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
 
 
 
+
 class ASPCAP(BaseModel, PipelineOutputMixin):
 
     source_id = ForeignKeyField(Source, index=True, lazy_load=False)
     spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
-    ferre_stellar_parameters_id = ForeignKeyField(FerreStellarParameters, index=True, lazy_load=False)
 
     #> Astra Metadata
     task_id = AutoField()
     v_astra = TextField(default=__version__)
     t_elapsed = FloatField(null=True)
     tag = TextField(default="", index=True)
-
     short_grid_name = TextField(default="")
     
-
     #> Stellar Parameters
     teff = FloatField(null=True)
     e_teff = FloatField(null=True)
@@ -503,15 +526,263 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     n_m_atm = FloatField(null=True)
     e_n_m_atm = FloatField(null=True)
 
+    #> Abundances
+    al_h = FloatField(null=True)
+    e_al_h = FloatField(null=True)
+    al_h_flags = BitField(default=0)
+    al_h_r_chi_sq = FloatField(null=True)
+
+    c_12_13 = FloatField(null=True)
+    e_c_12_13 = FloatField(null=True)
+    c_12_13_flags = BitField(default=0)
+    c_12_13_r_chi_sq = FloatField(null=True)
+
+    ca_h = FloatField(null=True)
+    e_ca_h = FloatField(null=True)
+    ca_h_flags = BitField(default=0)
+    ca_h_r_chi_sq = FloatField(null=True)
+    
+    ce_h = FloatField(null=True)
+    e_ce_h = FloatField(null=True)
+    ce_h_flags = BitField(default=0)
+    ce_h_r_chi_sq = FloatField(null=True)
+    
+    c_1_h = FloatField(null=True)
+    e_c_1_h = FloatField(null=True)
+    c_1_h_flags = BitField(default=0)
+    c_1_h_r_chi_sq = FloatField(null=True)
+    
+    c_h = FloatField(null=True)
+    e_c_h = FloatField(null=True)
+    c_h_flags = BitField(default=0)
+    c_h_r_chi_sq = FloatField(null=True)
+    
+    co_h = FloatField(null=True)
+    e_co_h = FloatField(null=True)
+    co_h_flags = BitField(default=0)
+    co_h_r_chi_sq = FloatField(null=True)
+    
+    cr_h = FloatField(null=True)
+    e_cr_h = FloatField(null=True)
+    cr_h_flags = BitField(default=0)
+    cr_h_r_chi_sq = FloatField(null=True)
+    
+    cu_h = FloatField(null=True)
+    e_cu_h = FloatField(null=True)
+    cu_h_flags = BitField(default=0)
+    cu_h_r_chi_sq = FloatField(null=True)
+    
+    fe_h = FloatField(null=True)
+    e_fe_h = FloatField(null=True)
+    fe_h_flags = BitField(default=0)
+    fe_h_r_chi_sq = FloatField(null=True)
+
+    k_h = FloatField(null=True)
+    e_k_h = FloatField(null=True)
+    k_h_flags = BitField(default=0)
+    k_h_r_chi_sq = FloatField(null=True)
+
+    mg_h = FloatField(null=True)
+    e_mg_h = FloatField(null=True)
+    mg_h_flags = BitField(default=0)
+    mg_h_r_chi_sq = FloatField(null=True)
+
+    mn_h = FloatField(null=True)
+    e_mn_h = FloatField(null=True)
+    mn_h_flags = BitField(default=0)
+    mn_h_r_chi_sq = FloatField(null=True)
+
+    na_h = FloatField(null=True)
+    e_na_h = FloatField(null=True)
+    na_h_flags = BitField(default=0)
+    na_h_r_chi_sq = FloatField(null=True)
+
+    nd_h = FloatField(null=True)
+    e_nd_h = FloatField(null=True)
+    nd_h_flags = BitField(default=0)
+    nd_h_r_chi_sq = FloatField(null=True)
+
+    ni_h = FloatField(null=True)
+    e_ni_h = FloatField(null=True)
+    ni_h_flags = BitField(default=0)
+    ni_h_r_chi_sq = FloatField(null=True)
+
+    n_h = FloatField(null=True)
+    e_n_h = FloatField(null=True)
+    n_h_flags = BitField(default=0)
+    n_h_r_chi_sq = FloatField(null=True)
+
+    o_h = FloatField(null=True)
+    e_o_h = FloatField(null=True)
+    o_h_flags = BitField(default=0)
+    o_h_r_chi_sq = FloatField(null=True)
+
+    p_h = FloatField(null=True)
+    e_p_h = FloatField(null=True)
+    p_h_flags = BitField(default=0)
+    p_h_r_chi_sq = FloatField(null=True)
+
+    si_h = FloatField(null=True)
+    e_si_h = FloatField(null=True)
+    si_h_flags = BitField(default=0)
+    si_h_r_chi_sq = FloatField(null=True)
+
+    s_h = FloatField(null=True)
+    e_s_h = FloatField(null=True)
+    s_h_flags = BitField(default=0)
+    s_h_r_chi_sq = FloatField(null=True)
+
+    ti_h = FloatField(null=True)
+    e_ti_h = FloatField(null=True)
+    ti_h_flags = BitField(default=0)
+    ti_h_r_chi_sq = FloatField(null=True)
+
+    ti_2_h = FloatField(null=True)
+    e_ti_2_h = FloatField(null=True)
+    ti_2_h_flags = BitField(default=0)
+    ti_2_h_r_chi_sq = FloatField(null=True)
+
+    v_h = FloatField(null=True)
+    e_v_h = FloatField(null=True)
+    v_h_flags = BitField(default=0)
+    v_h_r_chi_sq = FloatField(null=True)
+
+    # TODO: include the initial parameters from the stellar parameter run? Or the COARSE run?
+
+    #> Sheldon's Fun With Flags
+    initial_flags = BitField(default=0)
+    flag_initial_guess_from_apogeenet = initial_flags.flag(2**0, help_text="Initial guess from APOGEENet")
+    flag_initial_guess_from_doppler = initial_flags.flag(2**1, help_text="Initial guess from Doppler (SDSS-V)")
+    flag_initial_guess_from_doppler_sdss4 = initial_flags.flag(2**1, help_text="Initial guess from Doppler (SDSS-IV)")
+    flag_initial_guess_from_gaia_xp_andrae23 = initial_flags.flag(2**3, help_text="Initial guess from Andrae et al. (2023)")
+    flag_initial_guess_from_user = initial_flags.flag(2**2, help_text="Initial guess specified by user")
+
     #> FERRE Settings
     continuum_order = IntegerField(default=-1)
     continuum_reject = FloatField(null=True)
     interpolation_order = IntegerField(default=-1)
-    frozen_flags = BitField(default=0)
-    f_access = IntegerField(default=-1)
-    f_format = IntegerField(default=-1)
-    n_threads = IntegerField(default=-1)
 
-    #
-    #initial_flags 
+    #> Summary Statistics
+    snr = FloatField(null=True)
+    r_chi_sq = FloatField(null=True)
+    ferre_log_snr_sq = FloatField(null=True)
+    ferre_flags = BitField(default=0)
+    
+    flag_ferre_fail = ferre_flags.flag(2**0, "FERRE failed")
+    flag_missing_model_flux = ferre_flags.flag(2**1, "Missing model fluxes from FERRE")
+    flag_potential_ferre_timeout = ferre_flags.flag(2**2, "Potentially impacted by FERRE timeout")
+    flag_no_suitable_initial_guess = ferre_flags.flag(2**3, help_text="FERRE not executed because there's no suitable initial guess")
+    flag_teff_grid_edge_warn = ferre_flags.flag(2**4)
+    flag_teff_grid_edge_bad = ferre_flags.flag(2**5)
+    flag_logg_grid_edge_warn = ferre_flags.flag(2**6)
+    flag_logg_grid_edge_bad = ferre_flags.flag(2**7)
+    flag_v_micro_grid_edge_warn = ferre_flags.flag(2**8)
+    flag_v_micro_grid_edge_bad = ferre_flags.flag(2**9)
+    flag_v_sini_grid_edge_warn = ferre_flags.flag(2**10)
+    flag_v_sini_grid_edge_bad = ferre_flags.flag(2**11)
+    flag_m_h_atm_grid_edge_warn = ferre_flags.flag(2**12)
+    flag_m_h_atm_grid_edge_bad = ferre_flags.flag(2**13)
+    flag_alpha_m_grid_edge_warn = ferre_flags.flag(2**14)
+    flag_alpha_m_grid_edge_bad = ferre_flags.flag(2**15)
+    flag_c_m_atm_grid_edge_warn = ferre_flags.flag(2**16)
+    flag_c_m_atm_grid_edge_bad = ferre_flags.flag(2**17)
+    flag_n_m_atm_grid_edge_warn = ferre_flags.flag(2**18)
+    flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**19)
+    
+    # TODO: Should we store these here like this, or some othe way?
 
+    #> Task Identifiers
+    stellar_parameters_task_id = ForeignKeyField(FerreStellarParameters, null=True, lazy_load=False)
+    al_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    c_12_13_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    ca_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    ce_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    c_1_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    c_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    co_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    cr_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    cu_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    fe_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    k_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    mg_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    mn_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    na_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    nd_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    ni_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    n_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    o_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    p_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    si_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    s_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    ti_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    ti_2_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+    v_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False)
+
+
+    #> Raw (Uncalibrated) Quantities
+    calibrated = BooleanField(default=False)
+    raw_teff = FloatField(null=True)
+    raw_e_teff = FloatField(null=True)
+    raw_logg = FloatField(null=True)
+    raw_e_logg = FloatField(null=True)
+    raw_v_micro = FloatField(null=True)
+    raw_e_v_micro = FloatField(null=True)
+    raw_v_sini = FloatField(null=True)
+    raw_e_v_sini = FloatField(null=True)
+    raw_m_h_atm = FloatField(null=True)
+    raw_e_m_h_atm = FloatField(null=True)
+    raw_alpha_m_atm = FloatField(null=True)
+    raw_e_alpha_m_atm = FloatField(null=True)
+    raw_c_m_atm = FloatField(null=True)
+    raw_e_c_m_atm = FloatField(null=True)
+    raw_n_m_atm = FloatField(null=True)
+    raw_e_n_m_atm = FloatField(null=True)
+    raw_al_h = FloatField(null=True)
+    raw_e_al_h = FloatField(null=True)
+    raw_c_12_13 = FloatField(null=True)
+    raw_e_c_12_13 = FloatField(null=True)
+    raw_ca_h = FloatField(null=True)
+    raw_e_ca_h = FloatField(null=True)    
+    raw_ce_h = FloatField(null=True)
+    raw_e_ce_h = FloatField(null=True)    
+    raw_c_1_h = FloatField(null=True)
+    raw_e_c_1_h = FloatField(null=True)    
+    raw_c_h = FloatField(null=True)
+    raw_e_c_h = FloatField(null=True)    
+    raw_co_h = FloatField(null=True)
+    raw_e_co_h = FloatField(null=True)    
+    raw_cr_h = FloatField(null=True)
+    raw_e_cr_h = FloatField(null=True)    
+    raw_cu_h = FloatField(null=True)
+    raw_e_cu_h = FloatField(null=True)    
+    raw_fe_h = FloatField(null=True)
+    raw_e_fe_h = FloatField(null=True)
+    raw_k_h = FloatField(null=True)
+    raw_e_k_h = FloatField(null=True)
+    raw_mg_h = FloatField(null=True)
+    raw_e_mg_h = FloatField(null=True)
+    raw_mn_h = FloatField(null=True)
+    raw_e_mn_h = FloatField(null=True)
+    raw_na_h = FloatField(null=True)
+    raw_e_na_h = FloatField(null=True)
+    raw_nd_h = FloatField(null=True)
+    raw_e_nd_h = FloatField(null=True)
+    raw_ni_h = FloatField(null=True)
+    raw_e_ni_h = FloatField(null=True)
+    raw_n_h = FloatField(null=True)
+    raw_e_n_h = FloatField(null=True)
+    raw_o_h = FloatField(null=True)
+    raw_e_o_h = FloatField(null=True)
+    raw_p_h = FloatField(null=True)
+    raw_e_p_h = FloatField(null=True)
+    raw_si_h = FloatField(null=True)
+    raw_e_si_h = FloatField(null=True)
+    raw_s_h = FloatField(null=True)
+    raw_e_s_h = FloatField(null=True)
+    raw_ti_h = FloatField(null=True)
+    raw_e_ti_h = FloatField(null=True)
+    raw_ti_2_h = FloatField(null=True)
+    raw_e_ti_2_h = FloatField(null=True)
+    raw_v_h = FloatField(null=True)
+    raw_e_v_h = FloatField(null=True)
+    

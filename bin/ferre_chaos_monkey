@@ -2,13 +2,14 @@
 import os
 from subprocess import check_output
 from time import time, sleep
+from glob import glob
 
 def wc(path):
     return int(check_output(["wc", "-l", path]).split()[0])
 
 def ferre_chaos_monkey(
     ferre_executable="ferre.x", 
-    output_path="rectified_flux.output", 
+    output_basename="rectified_flux.output", 
     minimum_time_before_killing_process=300, 
     factor=3,
     sleep_time=1,
@@ -26,26 +27,6 @@ def ferre_chaos_monkey(
                     print(f"Checking pid {pid}")
 
                 try:
-                    _, pwd = check_output(["pwdx", f"{pid}"]).decode("ascii").strip().split()
-
-                    n_spectra_in = wc(f"{pwd}/parameter.input")
-                    abs_output_path = f"{pwd}/{output_path}"
-                    if os.path.exists(abs_output_path):
-                        try:
-                            n_spectra_out = wc(f"{pwd}/{output_path}")
-                        except:
-                            n_spectra_out = 0
-                    else:
-                        n_spectra_out = 0
-
-                    if n_spectra_out >= n_spectra_in:
-                        continue
-
-                    if n_spectra_out == 0:
-                        if verbose:
-                            print(f"\tno spectra yet on {pwd}")
-                        continue
-                        
                     header, row = (
                         check_output(
                             f"ps -p {pid} -o etimes,%mem,%cpu,cmd".split()
@@ -55,29 +36,88 @@ def ferre_chaos_monkey(
                         .split("\n")
                     )
                     t_elapsed, mem, cpu, executable, *process_args = row.split()
-                    if len(process_args) > 0 and process_args[0] != "input.nml":
-                        if verbose:
-                            print(f"\tignoring because {process_args}")
-                        continue
 
                     t_elapsed = int(t_elapsed)
 
                     # todo: replace with a 'started' touch file
-                    updated = os.path.getmtime(f"{pwd}/{output_path}")
                     started = time() - t_elapsed
 
-                    if updated < started:
-                        # The output file must be from a previous run.
+                    _, pwd = check_output(["pwdx", f"{pid}"]).decode("ascii").strip().split()
+
+                    # Check if we are using the ferre.x -l mode.
+                    if len(process_args) == 2 and process_args[0] == "-l":
+                        # We are using the -l flag.
+                        n_input_files = wc(f"{pwd}/{process_args[-1]}")
+                        n_spectra_per_input_file = wc(f"{pwd}/flux.input")
+                        n_spectra_in = n_input_files * n_spectra_per_input_file
+
+                        updated, n_spectra_out = (None, 0)
+                        for output_path in glob(f"{pwd}/*/{output_basename}"):
+                            try:
+                                this_n_spectra_out = wc(output_path)
+                            except:
+                                continue
+                            else:
+                                mtime = os.path.getmtime(output_path)
+                                if mtime < started:
+                                    # Output file must be from a previous run, don't count it.
+                                    if verbose:
+                                        print(f"\toutput file {output_path} from previous run, ignoring it")
+                                    continue
+
+                                n_spectra_out += this_n_spectra_out
+                                if updated is None:
+                                    updated = mtime
+                                else:
+                                    updated = min(updated, mtime)
+
+                    elif len(process_args) == 1 and process_args[0] == "input.nml":
+                        # We are not using the -l flag
+                        n_spectra_in = wc(f"{pwd}/parameter.input")
+                        abs_output_path = f"{pwd}/{output_basename}"
+                        if os.path.exists(abs_output_path):
+                            try:
+                                n_spectra_out = wc(abs_output_path)
+                            except:
+                                n_spectra_out = 0                        
+                            updated = os.path.getmtime(abs_output_path)
+                        else:
+                            updated, n_spectra_out = (None, 0)
+
+                        if updated < started:
+                            # The output file must be from a previous run.
+                            if verbose:
+                                print(f"\toutput file {abs_output_path} looks to be from a previous run")
+                            continue
+                    else:
                         if verbose:
-                            print("\toutput file looks to be from a previous run")
+                            print(f"\tignoring because {process_args}")
                         continue
+    
+                    if n_spectra_out >= n_spectra_in:
+                        continue
+
+                    if n_spectra_out == 0:
+                        if verbose:
+                            print(f"\tno spectra yet on {pwd}")
+                        continue
+                        
 
                     t_processing = updated - started
                     t_since_last_updated = time() - updated
 
                     seconds_per_spectrum = t_processing / n_spectra_out
                     if verbose:
-                        print(f"\t{pid} {n_spectra_out: >4.0f}/{n_spectra_in: <4.0f} t_elapsed={t_elapsed: >5.0f} t_proc={t_processing: >5.0f} sec_since_update={t_since_last_updated:0>2.2f} sec/spec={seconds_per_spectrum:0>2.2f} {'[WARN]' if t_since_last_updated > seconds_per_spectrum else ''}")
+                        t_until_kill = max(
+                            minimum_time_before_killing_process - t_since_last_updated,
+                            (factor * seconds_per_spectrum) - t_since_last_updated
+                        )
+                        if t_since_last_updated > seconds_per_spectrum:
+                            warn_text = f'[WARN]: t_until_kill={t_until_kill:.0f} s'
+                        else:
+                            warn_text = ""
+                        print(f"\t{pid} {n_spectra_out: >4.0f}/{n_spectra_in: <4.0f} t_elapsed={t_elapsed: >5.0f} t_proc={t_processing: >5.0f} sec_since_update={t_since_last_updated:0>2.2f} sec/spec={seconds_per_spectrum:0>2.2f} {warn_text}")
+
                     if (
                         (t_since_last_updated > (factor * seconds_per_spectrum))
                     and (t_since_last_updated > minimum_time_before_killing_process)
@@ -85,7 +125,12 @@ def ferre_chaos_monkey(
                         print(f"\tkilling process {pid}")
                         check_output(["kill", "-9", f"{pid}"])
                         check_output(["touch", f"{pwd}/killed"])
+                        # If it's a -l situation, put them in all sub-directories?
+                        if len(process_args) == 2 and process_args[0] == "-l":
+                            for dir in glob(f"{pwd}/*/"):
+                                check_output(["touch", f"{dir}/killed"])
                 except:
+                    raise 
                     continue
 
         finally:
