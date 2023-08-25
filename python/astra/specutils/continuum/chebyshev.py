@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 import numpy as np
-from astra.tools.spectrum import SpectralAxis, Spectrum1D
+from astra.specutils.spectrum import SpectralAxis, Spectrum1D
 from typing import Optional, Union, Tuple, List
 from astropy.nddata import StdDevUncertainty
-from astra.tools.continuum.base import Continuum
+from astra.specutils.continuum.base import Continuum
 
 
 class Chebyshev(Continuum):

@@ -18,7 +18,7 @@ class ThePayne(BaseModel, PipelineOutputMixin):
 
     """A result from The Payne."""
     
-    sdss_id = ForeignKeyField(Source, index=True)
+    source_id = ForeignKeyField(Source, index=True)
     spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     
     #> Astra Metadata
