@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from glob import glob
+from tqdm import tqdm
 from astra import task
 from astra.models.spectrum import Spectrum
 from astra.models.aspcap import FerreCoarse
@@ -10,6 +11,7 @@ from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
 from astra.pipelines.ferre.utils import (execute_ferre, parse_header_path, read_ferre_headers, clip_initial_guess)
 from astra.pipelines.aspcap.utils import (approximate_log10_microturbulence, get_input_nml_paths, yield_suitable_grids)
+from astra.pipelines.aspcap.initial import get_initial_guesses
 
 #from astra.tools.continuum import Continuum, Scalar
 
@@ -112,14 +114,18 @@ def pre_coarse_stellar_parameters(
     )
 
     # Create the FERRE files for each execution.
+    skipped_spectra = []
     for kwd in ferre_kwds:
         pwd, n_obj, skipped = pre_process_ferre(**kwd)
-        for spectrum in skipped:
-            yield FerreCoarse(
-                source_id=spectrum.source_id,
-                spectrum_id=spectrum.spectrum_id,
-                flag_spectrum_io_error=True
-            )
+        skipped_spectra.extend(skipped)
+    
+    yield ... # tell Astra that all the work up until now has been in overheads
+    for spectrum in skipped_spectra:
+        yield FerreCoarse(
+            source_id=spectrum.source_id,
+            spectrum_id=spectrum.spectrum_id,
+            flag_spectrum_io_error=True
+        )
 
     # Create database entries for those with no initial guess.
     for spectrum in spectra_with_no_initial_guess:
@@ -185,7 +191,7 @@ def plan_coarse_stellar_parameters(
     """
 
     if initial_guess_callable is None:
-        initial_guess_callable = initial_guesses
+        initial_guess_callable = get_initial_guesses
 
     all_headers = {}
     for header_path in read_ferre_header_paths(header_paths):
@@ -199,7 +205,7 @@ def plan_coarse_stellar_parameters(
 
     all_kwds = []
     spectrum_ids_with_at_least_one_initial_guess = set()
-    for spectrum, input_initial_guess in initial_guess_callable(spectra):
+    for spectrum, input_initial_guess in tqdm(initial_guess_callable(spectra), total=0, desc="Initial guesses"):
 
         n_initial_guesses = 0
         for strict in (True, False):
@@ -331,17 +337,3 @@ def read_ferre_header_paths(header_paths):
     return header_paths
             
 
-def initial_guesses(spectrum: Spectrum) -> List[dict]:
-    """
-    Return a list of initial guesses for a spectrum.
-    """
-
-    defaults = dict(
-        log10_v_sini=1.0,
-        c_m=0,
-        n_m=0,
-        alpha_m=0,
-        log10_v_micro=lambda logg, **_: 10**approximate_log10_microturbulence(logg)
-    )
-
-    raise NotImplementedError

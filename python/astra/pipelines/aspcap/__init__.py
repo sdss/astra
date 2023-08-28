@@ -7,7 +7,7 @@ from typing import Optional, Iterable, List, Tuple, Callable, Union
 from astra import __version__, task
 from astra.utils import log, expand_path
 from astra.models.aspcap import ASPCAP, FerreStellarParameters, FerreChemicalAbundances
-from astra.models.spectrum import Spectrum
+from astra.models.spectrum import Spectrum, SpectrumMixin
 from astra.pipelines.aspcap.initial import get_initial_guesses
 from astra.pipelines.aspcap.coarse import coarse_stellar_parameters
 from astra.pipelines.aspcap.stellar_parameters import stellar_parameters
@@ -25,7 +25,7 @@ def aspcap(
     element_weight_paths: str = "$MWM_ASTRA/pipelines/aspcap/masks/elements.list",
     operator_kwds: Optional[dict] = None,
     **kwargs
-):
+) -> Iterable[ASPCAP]:
     """
     Run the ASPCAP pipeline on some spectra.
     
@@ -74,6 +74,10 @@ def aspcap(
     if initial_guess_callable is None:
         initial_guess_callable = get_initial_guesses
 
+    # Convenience without accidentally `flatten()`ing a `ModelSelect`
+    if isinstance(spectra, SpectrumMixin):
+        spectra = [spectra]
+
     # Use the list() to make sure this is executed before other stages.
     coarse_stellar_parameter_results = list(
         coarse_stellar_parameters(
@@ -97,9 +101,6 @@ def aspcap(
         operator_kwds=operator_kwds,
         **kwargs
     ))
-    print(f"THERE ARE {len(stellar_parameter_results)}")
-    for q in FerreStellarParameters.select():
-        print(q)
 
     chemical_abundance_results = list(abundances(
         spectra,
@@ -108,13 +109,12 @@ def aspcap(
         operator_kwds=operator_kwds,
         **kwargs
     ))
-        
     yield from create_aspcap_results(stellar_parameter_results, chemical_abundance_results)
 
 
 def create_aspcap_results(
-    stellar_parameter_results: Iterable[FerreStellarParameters],
-    chemical_abundance_results: Iterable[FerreChemicalAbundances]
+    stellar_parameter_results: Iterable[FerreStellarParameters] = FerreStellarParameters.select(),
+    chemical_abundance_results: Iterable[FerreChemicalAbundances] = FerreChemicalAbundances.select()
 ) -> Iterable[ASPCAP]:
     """
     Create ASPCAP results based on the results from the stellar parameter stage, and the chemical abundances stage.
@@ -124,9 +124,11 @@ def create_aspcap_results(
     even if there are no abundances available for that stellar parameter result.
 
     :param stellar_parameter_results:
-        An iterable of `FerreStellarPar
+        An iterable of `FerreStellarParameters`.
+    
+    :param chemical_abundance_results:
+        An iterable of `FerreChemicalAbundances`
     """
-
 
     data, t_elapsed = ({}, {})    
 
@@ -218,9 +220,9 @@ def create_aspcap_results(
         value = getattr(result, key)
         e_value = getattr(result, f"e_{key}")
 
-        if not ABUNDANCE_RELATIVE_TO_H[species]:
+        if not ABUNDANCE_RELATIVE_TO_H[species] and value is not None:
             # [X/M] = [X/H] - [M/H]
-            # [X/H] = [X/M] + [M/H]
+            # [X/H] = [X/M] + [M/H]                
             value += data[result.upstream_id]["m_h_atm"]
             e_value = np.sqrt(e_value**2 + data[result.upstream_id]["e_m_h_atm"]**2)
             

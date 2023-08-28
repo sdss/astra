@@ -105,13 +105,15 @@ def pre_abundances(
         input_list_path = f"{pwd}/input_list.nml"
         log.info(f"Created grouped FERRE input file with {len(items)} dirs: {input_list_path}")
         with open(input_list_path, "w") as fp:
-            fp.write("\n".join(items))
+            # Sometimes `wc` would not give the right amount of lines in a file, so we add a \n to the end
+            # https://unix.stackexchange.com/questions/314256/wc-l-not-returning-correct-value
+            fp.write("\n".join(items) + "\n")
     
     yield from []
 
 
 @task
-def post_abundances(parent_dir, **kwargs) -> Iterable[FerreChemicalAbundances]:
+def post_abundances(parent_dir, skip_pixel_arrays=True, **kwargs) -> Iterable[FerreChemicalAbundances]:
     """
     Collect the results from FERRE and create database entries for the abundance step.
 
@@ -124,7 +126,7 @@ def post_abundances(parent_dir, **kwargs) -> Iterable[FerreChemicalAbundances]:
     for dir in map(os.path.dirname, get_input_nml_paths(parent_dir, f"{STAGE}/*")):
         log.info(f"Post-processing FERRE results in {dir}")
         ref_dir = os.path.dirname(dir)
-        for kwds in post_process_ferre(dir, ref_dir):
+        for kwds in post_process_ferre(dir, ref_dir, skip_pixel_arrays=skip_pixel_arrays, **kwargs):
             yield FerreChemicalAbundances(**kwds)    
 
 

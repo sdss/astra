@@ -3,20 +3,22 @@ import os
 from subprocess import check_output
 from time import time, sleep
 from glob import glob
+from itertools import count
 
 def wc(path):
     return int(check_output(["wc", "-l", path]).split()[0])
 
 def ferre_chaos_monkey(
     ferre_executable="ferre.x", 
-    output_basename="rectified_flux.output", 
+    output_basename="parameter.output", 
     minimum_time_before_killing_process=300, 
     factor=3,
     sleep_time=1,
+    minimum_iter_before_killing_process=10,
     verbose=False
 ):
     # Get PIDs 
-    while True:
+    for iteration in count(start=1):
         try:
             pids = check_output(["pidof", ferre_executable]).decode("ascii").split()
         except:
@@ -43,6 +45,8 @@ def ferre_chaos_monkey(
                     started = time() - t_elapsed
 
                     _, pwd = check_output(["pwdx", f"{pid}"]).decode("ascii").strip().split()
+                    if verbose:
+                        print(f"\t:pwd: {pwd}, {process_args}")
 
                     # Check if we are using the ferre.x -l mode.
                     if len(process_args) == 2 and process_args[0] == "-l":
@@ -69,7 +73,7 @@ def ferre_chaos_monkey(
                                 if updated is None:
                                     updated = mtime
                                 else:
-                                    updated = min(updated, mtime)
+                                    updated = max(updated, mtime)
 
                     elif len(process_args) == 1 and process_args[0] == "input.nml":
                         # We are not using the -l flag
@@ -84,7 +88,7 @@ def ferre_chaos_monkey(
                         else:
                             updated, n_spectra_out = (None, 0)
 
-                        if updated < started:
+                        if updated is not None and updated < started:
                             # The output file must be from a previous run.
                             if verbose:
                                 print(f"\toutput file {abs_output_path} looks to be from a previous run")
@@ -95,6 +99,7 @@ def ferre_chaos_monkey(
                         continue
     
                     if n_spectra_out >= n_spectra_in:
+                        print(f"\t skipping because {n_spectra_out} >= {n_spectra_in}")
                         continue
 
                     if n_spectra_out == 0:
@@ -121,22 +126,27 @@ def ferre_chaos_monkey(
                     if (
                         (t_since_last_updated > (factor * seconds_per_spectrum))
                     and (t_since_last_updated > minimum_time_before_killing_process)
+                    and (
+                        (minimum_iter_before_killing_process is None)
+                    or  (iteration > minimum_iter_before_killing_process)
+                    )
                     ):
                         print(f"\tkilling process {pid}")
-                        check_output(["kill", "-9", f"{pid}"])
                         check_output(["touch", f"{pwd}/killed"])
-                        # If it's a -l situation, put them in all sub-directories?
+                        ## If it's a -l situation, put them in all sub-directories?
                         if len(process_args) == 2 and process_args[0] == "-l":
                             for dir in glob(f"{pwd}/*/"):
                                 check_output(["touch", f"{dir}/killed"])
+                        check_output(["kill", "-9", f"{pid}"])
+                        
                 except:
-                    raise 
                     continue
 
         finally:
             sleep(sleep_time)
 
 
-
 if __name__ == "__main__":
-    ferre_chaos_monkey()
+    import sys
+    verbose = "-v" in sys.argv
+    ferre_chaos_monkey(verbose=verbose)

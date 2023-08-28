@@ -43,9 +43,7 @@ def stellar_parameters(
         The path to the FERRE weight file.
     """
 
-    print(f"A {FerreStellarParameters.select().count()}")
     yield from pre_stellar_parameters(spectra, parent_dir, weight_path, **kwargs)
-    print(f"B {FerreStellarParameters.select().count()}")
 
     # Execute ferre.
     job_ids, executions = (
@@ -56,10 +54,8 @@ def stellar_parameters(
         .execute()
     )
     FerreMonitoringOperator(job_ids, executions).execute()
-    print(f"C {FerreStellarParameters.select().count()}")
     
     yield from post_stellar_parameters(parent_dir)
-    print(f"D {FerreStellarParameters.select().count()}")
 
 @task
 def pre_stellar_parameters(
@@ -111,13 +107,9 @@ def post_stellar_parameters(parent_dir, **kwargs) -> Iterable[FerreStellarParame
     """
     
     for pwd in map(os.path.dirname, get_input_nml_paths(parent_dir, STAGE)):
-        print(f"E {FerreStellarParameters.select().count()}")
-
         log.info("Post-processing FERRE results in {0}".format(pwd))
         for i, kwds in enumerate(post_process_ferre(pwd)):
-            print(f"F {i} {FerreStellarParameters.select().count()}")
             yield FerreStellarParameters(**kwds)
-            print(f"G {i} {FerreStellarParameters.select().count()}")
 
  
 def plan_stellar_parameters(

@@ -25,32 +25,32 @@ class Source(BaseModel):
     """ An astronomical source. """
 
     #> Identifiers
-    id = AutoField(primary_key=True)
+    id = AutoField(primary_key=True, help_text="Astra source identifier")
     
-    sdss_id = BigIntegerField(index=True, null=True)#primary_key=True)
-    healpix = IntegerField(null=True)
+    sdss_id = BigIntegerField(index=True, null=True, help_text="SDSS unique identifier")
+    healpix = IntegerField(null=True, help_text="HEALPix (128 side)")
     # The following identifiers should be unique, but I'm not convinced it's implemented properly yet.
-    gaia_dr2_source_id = BigIntegerField(null=True)
-    gaia_dr3_source_id = BigIntegerField(null=True)
-    sdss4_dr17_apogee_id = TextField(index=True, null=True, unique=True)
-    tic_v8_id = BigIntegerField(null=True)
+    gaia_dr2_source_id = BigIntegerField(null=True, help_text="Gaia DR2 source identifier")
+    gaia_dr3_source_id = BigIntegerField(null=True, help_text="Gaia DR3 source identifier")
+    sdss4_dr17_apogee_id = TextField(index=True, null=True, unique=True, help_text="SDSS-4 DR17 APOGEE identifier")
+    tic_v8_id = BigIntegerField(null=True, help_text="TESS Input Catalog (v8) identifier")
     
     #> Targeting provenance 
-    sdss5_catalogid_v1 = BigIntegerField(null=True)
-    version_id = IntegerField(null=True)
-    lead = TextField(null=True)
+    sdss5_catalogid_v1 = BigIntegerField(null=True, help_text="SDSS catalog identifier")
+    version_id = IntegerField(null=True, help_text="SDSS catalog version for targeting")
+    lead = TextField(null=True, help_text="Lead catalog used for cross-match")
 
     #> Astrometry
-    ra = FloatField(null=True)
-    dec = FloatField(null=True)
-    plx = FloatField(null=True)
-    e_plx = FloatField(null=True)
-    pmra = FloatField(null=True)
-    e_pmra = FloatField(null=True)
-    pmde = FloatField(null=True)
-    e_pmde = FloatField(null=True)
-    gaia_v_rad = FloatField(null=True)
-    gaia_e_v_rad = FloatField(null=True)
+    ra = FloatField(null=True, help_text="Right ascension [deg]")
+    dec = FloatField(null=True, help_text="Declination [deg]")
+    plx = FloatField(null=True, help_text="Parallax [mas]")
+    e_plx = FloatField(null=True, help_text="Error on parallax [mas]")
+    pmra = FloatField(null=True, help_text="Proper motion in RA [mas/yr]")
+    e_pmra = FloatField(null=True, help_text="Error on proper motion in RA [mas/yr]")
+    pmde = FloatField(null=True, help_text="Proper motion in DEC [mas/yr]")
+    e_pmde = FloatField(null=True, help_text="Error on proper motion in DEC [mas/yr]")
+    gaia_v_rad = FloatField(null=True, help_text="Gaia radial velocity [km/s]")
+    gaia_e_v_rad = FloatField(null=True, help_text="Error on Gaia radial velocity [km/s]")
 
     # A decision was made here.
     # It would be nice to keep the original field names from each photometric survey so that
@@ -70,33 +70,35 @@ class Source(BaseModel):
     # For unWISE they report fluxes, so we keep their naming convention where it fits within 
     # 8 characters, and document when the name differs from the original catalog.
 
-    #> Photometry
-    g_mag = FloatField(null=True)
-    bp_mag = FloatField(null=True)
-    rp_mag = FloatField(null=True)
+    #> Gaia Photometry
+    g_mag = FloatField(null=True, help_text="Gaia DR3 mean G band magnitude [mag]")
+    bp_mag = FloatField(null=True, help_text="Gaia DR3 mean BP band magnitude [mag]")
+    rp_mag = FloatField(null=True, help_text="Gaia DR3 mean RP band magnitude [mag]")
 
-    # 2MASS
-    j_mag = FloatField(null=True)
-    e_j_mag = FloatField(null=True)
-    h_mag = FloatField(null=True)
-    e_h_mag = FloatField(null=True)
-    k_mag = FloatField(null=True)
-    e_k_mag = FloatField(null=True)
-    ph_qual = TextField(null=True)
-    bl_flg = TextField(null=True)
-    cc_flg = TextField(null=True)
+    #> 2MASS Photometry
+    j_mag = FloatField(null=True, help_text="2MASS J band magnitude [mag]")
+    e_j_mag = FloatField(null=True, help_text="Error on 2MASS J band magnitude [mag]")
+    h_mag = FloatField(null=True, help_text="2MASS H band magnitude [mag]")
+    e_h_mag = FloatField(null=True, help_text="Error on 2MASS H band magnitude [mag]")
+    k_mag = FloatField(null=True, help_text="2MASS K band magnitude [mag]")
+    e_k_mag = FloatField(null=True, help_text="Error on 2MASS K band magnitude [mag]")
+    ph_qual = TextField(null=True, help_text="2MASS photometric quality flag")
+    bl_flg = TextField(null=True, help_text="Number of components fit per band (JHK)")
+    cc_flg = TextField(null=True, help_text="Contamination and confusion flag")
+    #< See https://www.ipac.caltech.edu/2mass/releases/allsky/doc/sec2_2a.html 
 
-    # unWISE
-    w1_flux = FloatField(null=True)
-    w1_dflux = FloatField(null=True)
-    w2_flux = FloatField(null=True)
-    w2_dflux =  FloatField(null=True)
-    w1_frac = FloatField(null=True)
-    w2_frac = FloatField(null=True)
-    w1uflags = BitField(default=0, null=True)
-    w2uflags = BitField(default=0, null=True)
-    w1aflags = BitField(default=0, null=True)
-    w2aflags = BitField(default=0, null=True)
+    #> unWISE Photometry
+    w1_flux = FloatField(null=True, help_text="W1 flux [Vega nMgy]")
+    w1_dflux = FloatField(null=True, help_text="Error on W1 flux [Vega nMgy]")
+    w2_flux = FloatField(null=True, help_text="W2 flux [Vega nMgy]")
+    w2_dflux = FloatField(null=True, help_text="Error on W2 flux [Vega nMgy]")
+    w1_frac = FloatField(null=True, help_text="Fraction of W1 flux from this object")
+    w2_frac = FloatField(null=True, help_text="Fraction of W2 flux from this object")
+    w1uflags = BitField(default=0, null=True, help_text="unWISE flags for W1")
+    w2uflags = BitField(default=0, null=True, help_text="unWISE flags for W2")
+    w1aflags = BitField(default=0, null=True, help_text="Additional flags for W1")
+    w2aflags = BitField(default=0, null=True, help_text="Additional flags for W2")
+    #< See https://catalog.unwise.me/catalogs.html
     
     flag_unwise_w1_in_core_or_wings = w1uflags.flag(2**0, "In core or wings")
     flag_unwise_w1_in_diffraction_spike = w1uflags.flag(2**1, "In diffraction spike")
@@ -134,7 +136,7 @@ class Source(BaseModel):
     flag_unwise_w2_no_aggressive_deblend = w2aflags.flag(2**6, "Sources in this pixel will not be aggressively deblended")
     flag_unwise_w2_candidate_sources_must_be_sharp = w2aflags.flag(2**7, "Candidate sources in this pixel must be \"sharp\" to be optimized")
 
-    # ALLGLIMPSE
+    #> ALLGLIMPSE Photometry
     mag4_5 = FloatField(null=True)
     d4_5m = FloatField(null=True)
     rms_f4_5 = FloatField(null=True)
@@ -164,20 +166,21 @@ class Source(BaseModel):
     flag_glimpse_truth_list = sqf_4_5.flag(2**30, "Truth list (for simulated data)")
 
     #> Gaia XP Stellar Parameters (Zhang, Green & Rix 2023)
-    zgr_teff = FloatField(null=True)
-    zgr_e_teff = FloatField(null=True)
-    zgr_logg = FloatField(null=True)
-    zgr_e_logg = FloatField(null=True)
-    zgr_fe_h = FloatField(null=True)
-    zgr_e_fe_h = FloatField(null=True)
-    zgr_e = FloatField(null=True)
-    zgr_e_e = FloatField(null=True)
-    zgr_plx = FloatField(null=True)
-    zgr_e_plx = FloatField(null=True)
-    zgr_teff_confidence = FloatField(null=True)
-    zgr_logg_confidence = FloatField(null=True)
-    zgr_fe_h_confidence = FloatField(null=True)
-    zgr_quality_flags = BitField(default=0)
+    zgr_teff = FloatField(null=True, help_text="Effective temperature [K]")
+    zgr_e_teff = FloatField(null=True, help_text="Error on effective temperature [K]")
+    zgr_logg = FloatField(null=True, help_text="Surface gravity [cgs]")
+    zgr_e_logg = FloatField(null=True, help_text="Error on surface gravity [cgs]")
+    zgr_fe_h = FloatField(null=True, help_text="Metallicity [dex]")
+    zgr_e_fe_h = FloatField(null=True, help_text="Error on metallicity [dex]")
+    zgr_e = FloatField(null=True, help_text="Extinction")
+    zgr_e_e = FloatField(null=True, help_text="")
+    zgr_plx = FloatField(null=True, help_text="Parallax [mas]")
+    zgr_e_plx = FloatField(null=True, help_text="Error on parallax [mas]")
+    zgr_teff_confidence = FloatField(null=True, help_text="Confidence estimate in TEFF")
+    zgr_logg_confidence = FloatField(null=True, help_text="Confidence estimate in LOGG")
+    zgr_fe_h_confidence = FloatField(null=True, help_text="Confidence estimate in FE_H")
+    zgr_quality_flags = BitField(default=0, help_text="Quality flags")
+    #< See https://zenodo.org/record/7811871
 
     #> Targeting
     carton_0 = TextField(default="")

@@ -3,6 +3,7 @@ import subprocess
 from peewee import chunked, fn, JOIN
 from typing import Optional
 from tqdm import tqdm
+from astropy.table import Table
 from astra.models.apogee import ApogeeVisitSpectrum, Spectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar
 from astra.models.source import Source
 from astra.models.base import database
@@ -47,6 +48,35 @@ def migrate_apogee_obj_from_source(batch_size: Optional[int] = 100, limit: Optio
 
     return pb.n
                   
+
+def migrate_sdss4_dr17_member_flags():
+    """
+    Migrate cluster membership information from the DR17 AllStar FITS table, because it is not stored in the database.
+    """
+    allStar = Table.read(expand_path("$SAS_BASE_DIR/dr17/apogee/spectro/aspcap/dr17/synspec_rev1/allStar-dr17-synspec_rev1.fits"))
+
+    mask = (allStar["MEMBERFLAG"] > 0)
+
+    memberships = dict(zip(allStar["APOGEE_ID"][mask], allStar["MEMBERFLAG"][mask]))
+
+    sources = list(
+        Source
+        .select()
+        .where(
+            (Source.sdss4_dr17_apogee_id.in_(list(memberships.keys())))
+        )
+    )
+    for source in sources:
+        source.sdss4_apogee_member_flags = memberships[source.sdss4_dr17_apogee_id]
+    
+    return (
+        Source
+        .bulk_update(
+            sources,
+            fields=[Source.sdss4_apogee_member_flags]
+        )
+    )
+    
 
 def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 100, limit: Optional[int] = None):
     """
@@ -755,7 +785,7 @@ def migrate_coadd_in_apstar_from_existing_apvisits(limit=None, batch_size=100):
             ApogeeVisitSpectrum.source_id,
             ApogeeVisitSpectrum.release,
             ApogeeVisitSpectrum.apred,
-            ApogeeVisitSpectrum.apstar,
+            #ApogeeVisitSpectrum.apstar,
             ApogeeVisitSpectrum.obj,
             ApogeeVisitSpectrum.telescope,
             Source.healpix,
@@ -797,7 +827,10 @@ def migrate_coadd_in_apstar_from_existing_apvisits(limit=None, batch_size=100):
 
     data = []
     for spectrum_id, result in zip(spectrum_ids, q):
-        result.update(spectrum_id=spectrum_id)
+        result.update(
+            apstar="stars",
+            spectrum_id=spectrum_id
+        )
         data.append(result)
     
     return _upsert_many(

@@ -56,7 +56,7 @@ def pre_process_ferre(
     write_input_pixel_arrays=True,
     **kwargs
 ):
-
+    
     if kwargs:
         log.warning(f"astra.pipelines.ferre.pre_process.pre_process ignoring kwargs: {kwargs}")
 
@@ -155,7 +155,7 @@ def pre_process_ferre(
                 continue            
 
             try:
-                pixel_flags = spectrum.pixel_flags
+                pixel_flags = np.copy(spectrum.pixel_flags)
             except AttributeError:
                 warnings.warn(f"At least one spectrum has no pixel_flags attribute")
 

@@ -1,3 +1,4 @@
+import numpy as np
 from peewee import (
     BitField as _BitField,
     VirtualField,
@@ -99,6 +100,7 @@ class PixelArrayAccessorFITS(BasePixelArrayAccessor):
                         except:
                             value = data # image access
                         
+                        value = np.copy(value)
                         
                         if accessor.transform is not None:
                             value = accessor.transform(value, image, instance)
