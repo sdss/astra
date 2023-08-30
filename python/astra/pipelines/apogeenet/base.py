@@ -3,20 +3,23 @@ import torch
 import numpy as np
 import multiprocessing as mp
 from itertools import cycle
-from time import time
+from time import time, sleep
 
 from astra.utils import log, flatten
-from astra.models.apogeenet import ApogeeNet 
+from astra.models.apogeenet import ApogeeNet
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 
 def _prepare_data(spectrum, large_error):
-    N, P = np.atleast_2d(spectrum.flux).shape
-    flux = np.nan_to_num(spectrum.flux).astype(np.float32).reshape((N, P))
-    e_flux = np.nan_to_num(spectrum.ivar**-0.5).astype(np.float32).reshape((N, P))
-    
+    try:    
+        N, P = np.atleast_2d(spectrum.flux).shape
+        flux = np.nan_to_num(spectrum.flux).astype(np.float32).reshape((N, P))
+        e_flux = np.nan_to_num(spectrum.ivar**-0.5).astype(np.float32).reshape((N, P))
+    except:
+        return (spectrum.spectrum_id, spectrum.source_id, None, None, None, None, None)
+
     meta_dict, metadata_norm, missing_photometry = get_metadata(spectrum)
     meta = np.tile(metadata_norm, N).reshape((N, -1))
 
@@ -33,23 +36,30 @@ def _prepare_data(spectrum, large_error):
 
 
 def _worker(q_input, q_output, large_error):
+    
     while True:
         spectrum = q_input.get()
         if spectrum is None:
-            break
-        
+            break        
         try:
             result = _prepare_data(spectrum, large_error)
-            # Only put results when the queue is empty, otherwise we might load data faster than we can process it.
-            # (which eventually leads to an out-of-memory error)
-            while True:
-                if q_output.empty():
-                    q_output.put(result)
-                    break
         except:
             log.exception(f"Exception in worker with data product {spectrum}")
             continue
-    
+        else:
+            # Only put results when the queue is empty, otherwise we might load data faster than we can process it.
+            # (which eventually leads to an out-of-memory error)
+
+            # Note: I commented this out while dealing with some weird COMMIT / GPU hanging, and I dn't know what the cause was.
+            #       If you get out of memory errors in future, maybe uncomment these.
+            while True:
+                if q_output.empty():
+                    q_output.put(result)
+                    log.info(f"Put result {result}")
+                    break
+                
+                sleep(1)
+            
     q_output.put(None)
     return None
 
@@ -62,74 +72,98 @@ def _inference(network, batch, num_uncertainty_draws):
     t_init = time()
     spectrum_ids, source_ids, flux, e_flux, meta, meta_dict, missing_photometrys = ([], [], [], [], [], [], [])
     for spectrum_id, source_id, f, ef, m, md, mp in batch:
-        spectrum_ids.append(spectrum_id)
-        source_ids.append(source_id)
-        flux.append(f)
-        e_flux.append(ef)
-        meta.append(m)
-        meta_dict.append(md)
-        missing_photometrys.append(mp)
+        if f is None:
+            # OS Error when loading it.
+            yield ApogeeNet(
+                spectrum_id=spectrum_id,
+                source_id=source_id,
+                flag_no_result=True
+            )
+        else:
+            spectrum_ids.append(spectrum_id)
+            source_ids.append(source_id)
+            flux.append(f)
+            e_flux.append(ef)
+            meta.append(m)
+            meta_dict.append(md)
+            missing_photometrys.append(mp)
 
-    shape = (-1, 1, 8575)
-    flux = torch.from_numpy(np.array(flux).reshape(shape)).to(DEVICE)
-    e_flux = torch.from_numpy(np.array(e_flux).reshape(shape)).to(DEVICE)
-    N, _, P = flux.shape
-    meta = np.array(meta).reshape((N, -1))
-    meta_torch = torch.from_numpy(meta).to(DEVICE)
+    if len(flux) > 0:
+        shape = (-1, 1, 8575)
+        flux = torch.from_numpy(np.array(flux).reshape(shape)).to(DEVICE)
+        e_flux = torch.from_numpy(np.array(e_flux).reshape(shape)).to(DEVICE)
+        N, _, P = flux.shape
+        meta = np.array(meta).reshape((N, -1))
+        meta_torch = torch.from_numpy(meta).to(DEVICE)
 
-    inputs = (
-        torch.randn(
-            (num_uncertainty_draws, N, 1, P), device=DEVICE
+        inputs = (
+            torch.randn(
+                (num_uncertainty_draws, N, 1, P), device=DEVICE
+            )
+            * e_flux
+            + flux
         )
-        * e_flux
-        + flux
-    )
-    inputs = inputs.reshape((num_uncertainty_draws * N, 1, P))
-    meta_draws = meta_torch.repeat(num_uncertainty_draws, 1).reshape((num_uncertainty_draws * N, -1))
-    with torch.set_grad_enabled(False):
-        predictions = network.predict_spectra(flux, meta_torch)
-        predictions = predictions.cpu().data.numpy()
+        inputs = inputs.reshape((num_uncertainty_draws * N, 1, P))
+        meta_draws = meta_torch.repeat(num_uncertainty_draws, 1).reshape((num_uncertainty_draws * N, -1))
+        with torch.set_grad_enabled(False):
+            predictions = network.predict_spectra(flux, meta_torch)
+            predictions = predictions.cpu().data.numpy()
 
-        draws = network.predict_spectra(inputs, meta_draws)
-        draws = draws.cpu().data.numpy()
+            draws = network.predict_spectra(inputs, meta_draws)
+            draws = draws.cpu().data.numpy()
 
-    # Replace infinites with non-finite.
-    predictions[~np.isfinite(predictions)] = np.nan
+        # Replace infinites with non-finite.
+        predictions[~np.isfinite(predictions)] = np.nan
 
-    draws = draws.reshape((num_uncertainty_draws, N, -1))
+        draws = draws.reshape((num_uncertainty_draws, N, -1))
 
-    # un-log10-ify the draws before calculating summary statistics
-    predictions[:, 1] = 10 ** predictions[:, 1]
-    draws[:, :, 1] = 10 ** draws[:, :, 1]
+        # un-log10-ify the draws before calculating summary statistics
+        predictions[:, 1] = 10 ** predictions[:, 1]
+        draws[:, :, 1] = 10 ** draws[:, :, 1]
 
-    predictions = predictions.T
-    median_draw_predictions = np.nanmedian(draws, axis=0).T
-    std_draw_predictions = np.nanstd(draws, axis=0).T
+        predictions = predictions.T
+        median_draw_predictions = np.nanmedian(draws, axis=0).T
+        std_draw_predictions = np.nanstd(draws, axis=0).T
 
-    logg_median, teff_median, fe_h_median = median_draw_predictions
-    logg_std, teff_std, fe_h_std = std_draw_predictions
-    logg, teff, fe_h = predictions
+        logg_median, teff_median, fe_h_median = median_draw_predictions
+        logg_std, teff_std, fe_h_std = std_draw_predictions
+        logg, teff, fe_h = predictions
 
-    mean_t_elapsed = (time() - t_init) / len(spectrum_ids)
-    for i, (spectrum_id, source_id, missing_photometry) in enumerate(zip(spectrum_ids, source_ids, missing_photometrys)):
-        output = ApogeeNet(
-            spectrum_id=spectrum_id,
-            source_id=source_id,
-            teff=teff[i],
-            logg=logg[i],
-            fe_h=fe_h[i],
-            e_teff=teff_std[i],
-            e_logg=logg_std[i],
-            e_fe_h=fe_h_std[i],
-            teff_sample_median=teff_median[i],
-            logg_sample_median=logg_median[i],
-            fe_h_sample_median=fe_h_median[i],
-            t_elapsed=mean_t_elapsed
-        )
-        output.apply_flags(meta[i], missing_photometry=missing_photometry)
-        yield output
-
-
+        mean_t_elapsed = (time() - t_init) / len(spectrum_ids)
+        for i, (spectrum_id, source_id, missing_photometry) in enumerate(zip(spectrum_ids, source_ids, missing_photometrys)):
+            output = ApogeeNet(
+                spectrum_id=spectrum_id,
+                source_id=source_id,
+                teff=teff[i],
+                logg=logg[i],
+                fe_h=fe_h[i],
+                e_teff=teff_std[i],
+                e_logg=logg_std[i],
+                e_fe_h=fe_h_std[i],
+                teff_sample_median=teff_median[i],
+                logg_sample_median=logg_median[i],
+                fe_h_sample_median=fe_h_median[i],
+                t_elapsed=mean_t_elapsed
+            )
+            output.apply_flags(meta[i], missing_photometry=missing_photometry)
+            yield output
+            '''
+            yield dict(
+                spectrum_id=0 + spectrum_id,
+                source_id=0 + source_id,
+                #teff=teff[i],
+                #logg=logg[i],
+                #fe_h=fe_h[i],
+                #e_teff=teff_std[i],
+                #e_logg=logg_std[i],
+                #e_fe_h=fe_h_std[i],
+                #teff_sample_median=teff_median[i],
+                #logg_sample_median=logg_median[i],
+                #fe_h_sample_median=fe_h_median[i],
+                #t_elapsed=mean_t_elapsed,
+                #result_flags=output.result_flags                
+            )
+            '''
 
 def parallel_batch_read(target, spectra, args, batch_size, cpu_count=None):
     N = cpu_count or mp.cpu_count()
@@ -141,16 +175,23 @@ def parallel_batch_read(target, spectra, args, batch_size, cpu_count=None):
         p.start()
         qps.append((q, p))
 
+    log.info(f"Distributing spectra")
     B, batch = (0, [])
     for i, ((q, p), spectrum) in enumerate(zip(cycle(qps), flatten(spectra))):
         q.put(spectrum)
 
     for (q, p) in qps:
         q.put(None)
+    log.info(f"Done")
 
     N_done = 0
     while True:
-        result = q_output.get()
+        try:
+            result = q_output.get(timeout=30)
+        except:
+            log.exception("Timeout on thing")
+            continue
+        log.info(f"Have result {result}, {B}")
         if result is None:
             N_done += 1
             if N_done == N:

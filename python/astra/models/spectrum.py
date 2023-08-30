@@ -32,7 +32,21 @@ class Spectrum(BaseModel):
     spectrum_id = AutoField()
     spectrum_type_flags = BitField(default=0)
 
+    def resolve(self):
+        for expression, field in self.dependencies():
+            if SpectrumMixin not in field.model.__mro__:
+                continue
+            try:
+                q = field.model.select().where(expression)
+            except:
+                continue
+            else:
+                if q.exists():
+                    return q.first()
+                
+        raise self.model.DoesNotExist(f"Cannot resolve spectrum with identifier {self.spectrum_id}")
 
+                
 class SpectrumMixin:
 
     '''

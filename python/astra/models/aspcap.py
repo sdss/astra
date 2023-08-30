@@ -145,8 +145,10 @@ class FerreCoarse(BaseModel, FerreOutputMixin):
     flag_initial_guess_at_grid_center = initial_flags.flag(2**3, help_text="Initial guess from grid center")
 
     #> FERRE Settings
-    continuum_order = IntegerField(default=-1)
+    continuum_order = IntegerField(default=-1, null=True)
     continuum_reject = FloatField(null=True)
+    #continuum_flag = IntegerField(default=0, null=True)
+    #continuum_observations_flag = IntegerField(default=0, null=True)
     interpolation_order = IntegerField(default=-1)
     weight_path = TextField(default="")
     frozen_flags = BitField(default=0)
@@ -276,6 +278,8 @@ class FerreStellarParameters(BaseModel, FerreOutputMixin):
     #> FERRE Settings
     continuum_order = IntegerField(default=-1)
     continuum_reject = FloatField(null=True)
+    #continuum_flag = IntegerField(default=0, null=True)
+    #continuum_observations_flag = IntegerField(default=0, null=True)
     interpolation_order = IntegerField(default=-1)
     weight_path = TextField(default="")
     frozen_flags = BitField(default=0)
@@ -402,6 +406,8 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
     #> FERRE Settings
     continuum_order = IntegerField(default=-1)
     continuum_reject = FloatField(null=True)
+    #continuum_flag = IntegerField(default=0, null=True)
+    #continuum_observations_flag = IntegerField(default=0, null=True)
     interpolation_order = IntegerField(default=-1)
     weight_path = TextField(default="")
     frozen_flags = BitField(default=0)
@@ -660,6 +666,9 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     #> FERRE Settings
     continuum_order = IntegerField(default=-1)
     continuum_reject = FloatField(null=True)
+    #continuum_flag = IntegerField(default=0, null=True)
+    #continuum_observations_flag = IntegerField(default=0, null=True)
+
     interpolation_order = IntegerField(default=-1)
 
     #> Summary Statistics

@@ -11,7 +11,7 @@ from astra.models.aspcap import FerreStellarParameters, FerreChemicalAbundances
 from astra.pipelines.ferre.operator import FerreOperator, FerreMonitoringOperator
 from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
-from astra.pipelines.ferre.utils import (read_ferre_headers, parse_header_path)
+from astra.pipelines.ferre.utils import (read_ferre_headers, parse_header_path, get_input_spectrum_identifiers)
 from astra.pipelines.aspcap.utils import (get_input_nml_paths, get_abundance_keywords)
 
 STAGE = "abundances"
@@ -20,7 +20,7 @@ STAGE = "abundances"
 def abundances(
     spectra: Iterable[Spectrum],
     parent_dir: str,
-    element_weight_paths: str = "$MWM_ASTRA/pipelines/aspcap/masks/elements.list",
+    element_weight_paths: str,
     operator_kwds: Optional[dict] = None,
     **kwargs
 ) -> Iterable[FerreChemicalAbundances]:
@@ -60,7 +60,7 @@ def abundances(
 def pre_abundances(
     spectra: Iterable[Spectrum], 
     parent_dir: str, 
-    element_weight_paths: str,
+    element_weight_paths: str = "$MWM_ASTRA/pipelines/aspcap/masks/elements.list",
     **kwargs
 ) -> Iterable[FerreChemicalAbundances]:
     """
@@ -104,14 +104,16 @@ def pre_abundances(
     for pwd, items in group.items():
         input_list_path = f"{pwd}/input_list.nml"
         log.info(f"Created grouped FERRE input file with {len(items)} dirs: {input_list_path}")
-        with open(input_list_path, "w") as fp:
-            fp.write("\n".join(items))
+        with open(expand_path(input_list_path), "w") as fp:
+            # Sometimes `wc` would not give the right amount of lines in a file, so we add a \n to the end
+            # https://unix.stackexchange.com/questions/314256/wc-l-not-returning-correct-value
+            fp.write("\n".join(items) + "\n")
     
     yield from []
 
 
 @task
-def post_abundances(parent_dir, **kwargs) -> Iterable[FerreChemicalAbundances]:
+def post_abundances(parent_dir, skip_pixel_arrays=True, **kwargs) -> Iterable[FerreChemicalAbundances]:
     """
     Collect the results from FERRE and create database entries for the abundance step.
 
@@ -124,7 +126,7 @@ def post_abundances(parent_dir, **kwargs) -> Iterable[FerreChemicalAbundances]:
     for dir in map(os.path.dirname, get_input_nml_paths(parent_dir, f"{STAGE}/*")):
         log.info(f"Post-processing FERRE results in {dir}")
         ref_dir = os.path.dirname(dir)
-        for kwds in post_process_ferre(dir, ref_dir):
+        for kwds in post_process_ferre(dir, ref_dir, skip_pixel_arrays=skip_pixel_arrays, **kwargs):
             yield FerreChemicalAbundances(**kwds)    
 
 
@@ -156,6 +158,25 @@ def plan_abundances(
     with open(expand_path(element_weight_paths), "r") as fp:
         weight_paths = list(map(str.strip, fp.readlines()))
 
+
+    if spectra is None:
+        # Get spectrum ids from params stage in parent dir.
+        spectrum_ids = list(get_input_spectrum_identifiers(f"{parent_dir}/params"))
+        if len(spectrum_ids) == 0:
+            log.warning(f"No spectrum identifiers found in {parent_dir}/params")
+            return ([], [])
+        
+        # TODO: assuming all spectra are the same model type..
+        model_class = Spectrum.get(spectrum_ids[0]).resolve().__class__
+        spectra = (
+            model_class
+            .select()
+            .where(model_class.spectrum_id << spectrum_ids)
+        )
+    else:
+        spectrum_ids = [s.spectrum_id for s in spectra]        
+
+
     Alias = FerreStellarParameters.alias()
     sq = (
         Alias
@@ -163,7 +184,7 @@ def plan_abundances(
             Alias.spectrum_id,
             fn.MIN(Alias.penalized_r_chi_sq).alias("min_penalized_r_chi_sq"),
         )
-        .where(Alias.spectrum_id << [s.spectrum_id for s in spectra])
+        .where(Alias.spectrum_id << spectrum_ids)
         .group_by(Alias.spectrum_id)
         .alias("sq")
     )

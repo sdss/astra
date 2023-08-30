@@ -112,18 +112,18 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         primary_key=True,
         default=Spectrum.create
     )
-    input_catalogid = BigIntegerField(index=True, null=True)
+    input_catalogid = BigIntegerField(index=True, null=True, help_text="SDSS input catalog identifier")
 
     #> Data Product Keywords
-    release = TextField(index=True)
-    apred = TextField(index=True)
-    plate = TextField(index=True) # most are integers, but not all!
+    release = TextField(index=True, help_text="SDSS release")
+    apred = TextField(index=True, help_text="APOGEE reduction pipeline")
+    plate = TextField(index=True, help_text="Plate") # most are integers, but not all!
     telescope = TextField(index=True, help_text="Short telescope name")
     fiber = IntegerField(index=True, help_text="Fiber number")
-    mjd = IntegerField(index=True)
-    field = TextField(index=True)
-    prefix = TextField()
-    reduction = TextField(default="") # only used for DR17 apo1m spectra
+    mjd = IntegerField(index=True, help_text="Modified Julian date of observation")
+    field = TextField(index=True, help_text="Field name")
+    prefix = TextField(help_text="Prefix used to separate SDSS 4 north/south spectra")
+    reduction = TextField(default="", help_text="Like `obj`. Only used for apo1m spectra") # only used for DR17 apo1m spectra
     # Note that above I use `default=''` instead of `null=True` because SQLite
     # seems to have some weird bug with using `null=True` on a key field. It
     # meant that `reduction` was being set to null even when I gave it values.
@@ -139,7 +139,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     # closest attribute, healpix, is a per-source attribute, but this is
     # *correctly* calculated from the CATALOG position (ra, dec) and not the
     # input position to the telescope.
-    obj = TextField(null=True)
+    obj = TextField(null=True, help_text="Object name")
 
     #> Pixel arrays
     wavelength = PixelArray(
@@ -161,23 +161,23 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     )
     
     #> Observing Conditions
-    date_obs = DateTimeField(null=True)
-    jd = FloatField(null=True)
-    exptime = FloatField(null=True)
-    dithered = BooleanField(null=True)
+    date_obs = DateTimeField(null=True, help_text="Observation date")
+    jd = FloatField(null=True, help_text="Julian date")
+    exptime = FloatField(null=True, help_text="Exposure time [s]")
+    dithered = BooleanField(null=True, help_text="Was this observation dithered?")
     
     #> Telescope Pointing
-    input_ra = FloatField(null=True)
-    input_dec = FloatField(null=True)
-    n_frames = IntegerField(null=True)
+    input_ra = FloatField(null=True, help_text="Input right ascension [deg]")
+    input_dec = FloatField(null=True, help_text="Input declination [deg]")
+    n_frames = IntegerField(null=True, help_text="Number of frames combined")
     assigned = IntegerField(null=True)
     on_target = IntegerField(null=True)
     valid = IntegerField(null=True)
     # TODO: add fps
     
     #> Statistics and Spectrum Quality 
-    snr = FloatField(null=True)
-    spectrum_flags = BitField(default=0)
+    snr = FloatField(null=True, help_text="S/N ratio reported by APOGEE DRP")
+    spectrum_flags = BitField(default=0, help_text="Spectrum quality flags")
     
     # From https://github.com/sdss/apogee_drp/blob/630d3d45ecff840d49cf75ac2e8a31e22b543838/python/apogee_drp/utils/bitmask.py#L110
     flag_bad_pixels = spectrum_flags.flag(2**0, help_text="Spectrum has many bad pixels (>20%).")
@@ -199,31 +199,31 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     flag_rv_failure = spectrum_flags.flag(2**16, help_text="RV failure.")
 
     #> Radial Velocity (Doppler)
-    v_rad = FloatField(null=True)
-    v_rel = FloatField(null=True)
-    e_v_rel = FloatField(null=True)
-    bc = FloatField(null=True)
-    doppler_rchisq = FloatField(null=True)
+    v_rad = FloatField(null=True, help_text="Barycentric rest frame radial velocity [km/s]")
+    v_rel = FloatField(null=True, help_text="Relative velocity [km/s]")
+    e_v_rel = FloatField(null=True, help_text="Error on relative velocity [km/s]")
+    bc = FloatField(null=True, help_text="Barycentric velocity correction applied [km/s]")
+    doppler_rchisq = FloatField(null=True, help_text="Reduced \chi^2 reported by `Doppler`")
     
-    doppler_teff = FloatField(null=True)
-    doppler_e_teff = FloatField(null=True)
-    doppler_logg = FloatField(null=True)
-    doppler_e_logg = FloatField(null=True)
-    doppler_fe_h = FloatField(null=True)
-    doppler_e_fe_h = FloatField(null=True)
-    doppler_flags = BitField(default=0) # TODO: this is actually STARFLAG from the DRP, re-name
+    doppler_teff = FloatField(null=True, help_text="Effective temperature [K]")
+    doppler_e_teff = FloatField(null=True, help_text="Error on effective temperature [K]")
+    doppler_logg = FloatField(null=True, help_text="Surface gravity [cgs]")
+    doppler_e_logg = FloatField(null=True, help_text="Error on surface gravity [cgs]")
+    doppler_fe_h = FloatField(null=True, help_text="Metallicity [dex]")
+    doppler_e_fe_h = FloatField(null=True, help_text="Error on metallicity [dex]")
+    doppler_flags = BitField(default=0, help_text="APOGEE DRP spectrum quality flags") # TODO: this is actually STARFLAG from the DRP, re-name
 
     #> Radial Velocity (X-Correlation)
-    xcorr_v_rad = FloatField(null=True)
-    xcorr_v_rel = FloatField(null=True)
-    xcorr_e_v_rel = FloatField(null=True)
-    ccfwhm = FloatField(null=True)
-    autofwhm = FloatField(null=True)
-    n_components = IntegerField(null=True)
+    xcorr_v_rad = FloatField(null=True, help_text="Barycentric rest frame radial velocity [km/s]")
+    xcorr_v_rel = FloatField(null=True, help_text="Relative velocity [km/s]")
+    xcorr_e_v_rel = FloatField(null=True, help_text="Error on relative velocity [km/s]")
+    ccfwhm = FloatField(null=True, help_text="Cross-correlation function FWHM")
+    autofwhm = FloatField(null=True, help_text="Auto-correlation function FWHM")
+    n_components = IntegerField(null=True, help_text="Number of components in CCF")
 
     #> Database Identifiers
-    visit_pk = BigIntegerField(null=True, unique=True)
-    rv_visit_pk = BigIntegerField(null=True, unique=True)
+    visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `visit` primary key")
+    rv_visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `rv_visit` primary key")
     
 
     @hybrid_property
@@ -297,27 +297,30 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         index=True,
         lazy_load=False,
         primary_key=True,
-        default=Spectrum.create
+        default=Spectrum.create,
+        help_text="Spectrum identifier"
     )
     drp_spectrum_id = ForeignKeyField(
         ApogeeVisitSpectrum,
         lazy_load=False,
         field=ApogeeVisitSpectrum.spectrum_id,
+        help_text="Spectrum identifier from Data Reduction Pipeline"
     )
 
     #> Data Product Keywords
-    release = TextField()
-    apred = TextField()
+    release = TextField(help_text="SDSS release")
+    apred = TextField(help_text="APOGEE reduction pipeline")
     apstar = TextField(default="stars")
-    obj = TextField()
-    telescope = TextField()
-    healpix = IntegerField(null=True) # only used in SDSS5
-    field = TextField(null=True) # not used in SDSS-V
-    prefix = TextField(null=True) # not used in SDSS-V
-    plate = TextField()
-    mjd = IntegerField()
-    fiber = IntegerField()
-    #reduction = TextField(default="") # only used for DR17 apo1m spectra
+    obj = TextField(help_text="Object name")
+    telescope = TextField(help_text="Short telescope name")
+    # Healpix is only used in SDSS-V, and may not appear in this data product keywords group (since it appears in Source)
+    healpix = IntegerField(null=True, help_text="HEALPix (128 side)") 
+    field = TextField(null=True, help_text="Field name") # not used in SDSS-V
+    prefix = TextField(null=True, help_text="Prefix used to separate SDSS 4 north/south spectra") # not used in SDSS-V
+    plate = TextField(help_text="Plate")
+    mjd = IntegerField(help_text="Modified Julian date of observation")
+    fiber = IntegerField(help_text="Fiber number")
+    #reduction = TextField(default="", help_text="Like `obj`. Only used for apo1m spectra") # only used for DR17 apo1m spectra
 
     @property
     def wavelength(self):
@@ -413,11 +416,6 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
         primary_key=True,
         default=Spectrum.create
     )
-    drp_spectrum_id = ForeignKeyField(
-        ApogeeVisitSpectrum,
-        lazy_load=False,
-        field=ApogeeVisitSpectrum.spectrum_id,
-    )
 
     #> Data Product Keywords
     release = TextField()
@@ -449,15 +447,20 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
 
     @property
     def path(self):
-        templates = {
+        template = {
             "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
             "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits"
-        }
-        return templates[self.release].format(
-            healpix_group="{:d}".format(int(self.healpix) // 1000),
-            **self.__data__
-        )
-    
+        }[self.release]
+
+        kwds = {}
+        if self.release == "sdss5":
+            kwds["healpix_group"] = "{:d}".format(int(self.healpix) // 1000)
+
+        return template.format(
+            **self.__data__,
+            **kwds
+        )        
+
     class Meta:
         indexes = (
             (

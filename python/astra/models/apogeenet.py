@@ -21,26 +21,31 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
     """A result from the APOGEENet pipeline."""
 
     source_id = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
-    spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
+    spectrum_id = ForeignKeyField(
+        Spectrum, 
+        index=True, 
+        lazy_load=False,
+        help_text="Spectrum identifier"
+    )
     
     #> Astra Metadata
-    task_id = AutoField()
-    v_astra = TextField(default=__version__)
-    t_elapsed = FloatField(null=True)
-    tag = TextField(default="", index=True)
+    task_id = AutoField(help_text="Task identifier")
+    v_astra = TextField(default=__version__, help_text="Astra version")
+    t_elapsed = FloatField(null=True, help_text="Estimated task elapsed time [s]")
+    tag = TextField(default="", index=True, help_text="Tag name to segment Astra experiments")
     
     #> Stellar Parameters
-    teff = FloatField(null=True)
-    e_teff = FloatField(null=True)
-    logg = FloatField(null=True)
-    e_logg = FloatField(null=True)
-    fe_h = FloatField(null=True)
-    e_fe_h = FloatField(null=True)
+    teff = FloatField(null=True, help_text="Effective temperature [K]")
+    e_teff = FloatField(null=True, help_text="Error on effective temperature [K]")
+    logg = FloatField(null=True, help_text="Surface gravity")
+    e_logg = FloatField(null=True, help_text="Error in surface gravity")
+    fe_h = FloatField(null=True, help_text="Metallicity [dex]")
+    e_fe_h = FloatField(null=True, help_text="Error in metallicity [dex]")
 
-    teff_sample_median = FloatField(help_text="Median effective temperature from random draws")
-    logg_sample_median = FloatField(help_text="Median surface gravity from random draws")
-    fe_h_sample_median = FloatField(help_text="Median metallicity from random draws")
-    result_flags = BitField(default=0)
+    teff_sample_median = FloatField(null=True, help_text="Median effective temperature of many draws [K]")
+    logg_sample_median = FloatField(null=True, help_text="Median surface gravity of many draws")
+    fe_h_sample_median = FloatField(null=True, help_text="Median metallicity of many draws [dex]")
+    result_flags = BitField(default=0, help_text="Flags describing the results")
 
     #> Flag definitions
     flag_teff_unreliable = result_flags.flag(2**0, help_text="Effective temperature is unreliable")
@@ -56,6 +61,7 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
     flag_e_fe_h_large = result_flags.flag(2**8, help_text="Error on metallicity is large")
     flag_missing_photometry = result_flags.flag(2**9, help_text="Missing photometry")
     flag_result_unreliable = result_flags.flag(2**10, help_text="Stellar parameters are knowingly unreliable")
+    flag_no_result = result_flags.flag(2**11, help_text="Exception raised when loading spectra")
 
     @hybrid_property
     def flag_warn(self):
@@ -84,7 +90,8 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
             self.flag_fe_h_unreliable |
             self.flag_e_teff_unreliable |
             self.flag_e_logg_unreliable |
-            self.flag_e_fe_h_unreliable
+            self.flag_e_fe_h_unreliable |
+            self.flag_no_result
         )
 
     @flag_bad.expression
@@ -96,7 +103,8 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
             self.flag_fe_h_unreliable |
             self.flag_e_teff_unreliable |
             self.flag_e_logg_unreliable |
-            self.flag_e_fe_h_unreliable
+            self.flag_e_fe_h_unreliable |
+            self.flag_no_result
         )
     
 

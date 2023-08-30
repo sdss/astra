@@ -24,7 +24,15 @@ def get_config_paths():
 
 class Timer(object):
 
-    def __init__(self, iterable, frequency=None, callback=None, attribute_name=None):
+    def __init__(
+            self, 
+            iterable, 
+            frequency=None, 
+            callback=None, 
+            attr_t_elapsed=None,
+            attr_t_overhead=None,
+            skip_result_callable=lambda x: x is Ellipsis
+        ):
         """
 
         :param iterable:
@@ -36,26 +44,48 @@ class Timer(object):
         :param callback: [optional]
             A callback function to execute when the timer is complete.
         
-        :param attribute_name: [optional]
+        :param attr_t_elapsed: [optional]
             The attribute name to use to store the elapsed time per object. If `None`
             is given then this will not be stored.
+
+        :param attr_t_overhead: [optional]
+            The attribute name to use to store the mean overhead time per object. If `None`
+            is given then this will not be stored.
+
+        :param skip_result_callable: [optional]
+            A callable that returns `True` if a result should be considered for timing.
+            Usually all results are timed, but if this callable returns `False`, then
+            the interval time will be added to the common overheads for these tasks.
+
+            Usually we recommend using the `Ellipsis` (`yield ...`) to indicate that
+            the interval time spent is related to overheads, and not related to the
+            calculations for a single result.
         """
+        self.start = time()
+        self.frequency = frequency
+        self.callback = callback
+        self.attr_t_elapsed = attr_t_elapsed
+        self.attr_t_overhead = attr_t_overhead
+        self.skip_result_callable = skip_result_callable
+        self.interval = 0
+        self.overheads = 0
         self._iterable = iter(iterable)
         self._time_paused = 0
-        self._start = time()
         self._n_check_points = 0
-        self._last_check_point = time()
-        self._frequency = frequency
-        self._callback = callback
-        self._attribute_name = attribute_name
+        self._n_results = 0
+        self._last_check_point = time()        
 
     def __enter__(self):
         self._time_last = time()
         return self
 
     def __exit__(self, *args):
-        if callable(self._callback):
-            self._callback(time() - self._time_last)
+        self.stop = time()
+        if callable(self.callback):
+            self.callback(time() - self._time_last)
+        
+        # Add the time between last `yield` and the timer's completion to overheads
+        self.overheads += self.stop - self._time_last - self._time_paused
         return None
     
     def __iter__(self):
@@ -63,36 +93,60 @@ class Timer(object):
 
     def __next__(self):
         item = next(self._iterable)
-        self.interval = time() - self._time_last - self._time_paused
-        # If the pipeline has set their own t_elapsed, do not overwrite it.
-        if self._attribute_name is not None and getattr(item, self._attribute_name, None) is None:
-            try:
-                # Note the time it took to analyse this object using the named attribute, 
-                # but don't assume it exists.
-                setattr(item, self._attribute_name, self.interval)
-            except:
-                warnings.warn(f"Could not store elapsed time on attribute name `{self._attribute_name}`")
+
+        interval = time() - self._time_last - self._time_paused
+
+        if self.skip_result_callable(item):
+            self.overheads += interval        
+        else:                
+            self._n_results += 1
+            # If the pipeline has set their own t_elapsed, do not overwrite it.
+            if self.attr_t_elapsed is not None and getattr(item, self.attr_t_elapsed, None) is None:
+                try:
+                    # Note the time it took to analyse this object using the named attribute, 
+                    # but don't assume it exists.
+                    setattr(item, self.attr_t_elapsed, interval)
+                except:
+                    warnings.warn(f"Could not store elapsed time on attribute name `{self.attr_t_elapsed}`")
 
         self._time_paused = 0
         self._time_last = time()
         return item
 
+    def add_overheads(self, items):
+        o = self.mean_overhead_per_result
+        for item in items:
+            try:
+                v = getattr(item, self.attr_t_elapsed, 0)
+                setattr(item, self.attr_t_elapsed, v + o)
+                setattr(item, self.attr_t_overhead, o)
+            except:
+                continue
+        return None
+
     @property
     def elapsed(self):
-        return time() - self._start    
+        return time() - self.start        
+
+    @property
+    def mean_overhead_per_result(self):
+        try:
+            return self.overheads / self._n_results
+        except ZeroDivisionError:
+            return 0
 
     @property
     def check_point(self):
-        if self._frequency is None:
+        if self.frequency is None:
             return False
         
-        is_check_point = (time() - self._last_check_point) > self._frequency
+        is_check_point = (time() - self._last_check_point) > self.frequency
         if is_check_point:
             self._last_check_point = time()
             self._n_check_points += 1
         return is_check_point
 
-    # Make it so we can use `with timer.paused(): ... `
+    # Make it so we can use `with timer.pause(): ... `
     def pause(self):
         def callback(time_paused):
             self._time_paused += time_paused
