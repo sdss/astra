@@ -4,12 +4,78 @@ from tqdm import tqdm
 from tempfile import mkstemp
 from astra.utils import expand_path, log, callable
 from astra.utils.slurm import SlurmJob, SlurmTask
+from inspect import getfullargspec
+from peewee import JOIN
 
 try:
     from airflow.models.baseoperator import BaseOperator
 except ImportError:
     log.warning(f"Cannot import `airflow`: this functionality will not be available")
     BaseOperator = object
+
+
+class Operator(BaseOperator):
+
+    template_fields = ("task_kwargs", "limit", "model_name", "where")
+
+    def __init__(
+        self,
+        task_name,
+        model_name=None,
+        task_kwargs=None,
+        where=None,
+        limit=None,
+        **kwargs
+    ):
+        super(Operator, self).__init__(**kwargs)
+        self.task_name = task_name
+        self.model_name = model_name
+        self.task_kwargs = task_kwargs or {}
+        self.where = where
+        self.limit = limit
+        return None
+    
+
+    def execute(self, context=None):
+
+        from astra import models
+
+        kwds = self.task_kwargs.copy()
+
+        task = callable(self.task_name) 
+        if self.model_name is not None:
+            # Query for spectra that does not have a result in this output model
+            # translate `-> Iterable[OutputModel]` annotation
+            output_model = getfullargspec(task).annotations["return"].__args__[0]
+            input_model = getattr(models, self.model_name)
+            q = (
+                input_model
+                .select()
+                .join(
+                    output_model,
+                    JOIN.LEFT_OUTER,
+                    on=(input_model.spectrum_id == output_model.spectrum_id)
+                )
+            )
+            where = output_model.spectrum_id.is_null()
+            for k, v in (self.where or {}).items():
+                where = where & (getattr(input_model, k) == v)
+    
+            q = (
+                q
+                .where(where)
+                .limit(self.limit)
+            )
+            kwds.setdefault("spectra", q)
+
+        n = 0 
+        for n, item in enumerate(task(**kwds), start=1):
+            None
+        print(f"There were {n} results")
+    
+
+# astra operator  
+
 
 
 class AstraTaskOperator(BaseOperator):

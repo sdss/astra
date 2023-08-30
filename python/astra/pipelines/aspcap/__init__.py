@@ -3,6 +3,8 @@ import numpy as np
 from datetime import datetime
 from tempfile import mkdtemp
 from typing import Optional, Iterable, List, Tuple, Callable, Union
+from peewee import JOIN
+from tqdm import tqdm
 
 from astra import __version__, task
 from astra.utils import log, expand_path
@@ -112,9 +114,11 @@ def aspcap(
     yield from create_aspcap_results(stellar_parameter_results, chemical_abundance_results)
 
 
+@task
 def create_aspcap_results(
-    stellar_parameter_results: Iterable[FerreStellarParameters] = FerreStellarParameters.select(),
-    chemical_abundance_results: Iterable[FerreChemicalAbundances] = FerreChemicalAbundances.select()
+    stellar_parameter_results: Optional[Iterable[FerreStellarParameters]] = None,
+    chemical_abundance_results: Optional[Iterable[FerreChemicalAbundances]] = None,
+    **kwargs
 ) -> Iterable[ASPCAP]:
     """
     Create ASPCAP results based on the results from the stellar parameter stage, and the chemical abundances stage.
@@ -130,13 +134,33 @@ def create_aspcap_results(
         An iterable of `FerreChemicalAbundances`
     """
 
+    if stellar_parameter_results is None:
+        stellar_parameter_results = (
+            FerreStellarParameters
+            .select()
+            .join(
+                ASPCAP,
+                JOIN.LEFT_OUTER,
+                on=(ASPCAP.stellar_parameters_task_id == FerreStellarParameters.task_id)
+            )
+            .where(
+                ASPCAP.stellar_parameters_task_id.is_null()
+            )
+        )
+        stellar_parameter_results = FerreStellarParameters.select()
+
+    if chemical_abundance_results is None:
+        chemical_abundance_results = FerreChemicalAbundances.select()
+
     data, t_elapsed = ({}, {})    
 
-    for result in stellar_parameter_results:
+    print("ont yet including time from upstream")
+    print("not yet fully including flags from upstream")    
+
+    for result in tqdm(stellar_parameter_results, desc="Collecting stellar parameters"):
         data.setdefault(result.task_id, {})
 
         # TODO: Include time from upstream tasks.
-        print("ont yet including time from upstream")
         t_elapsed.setdefault(result.task_id, 0)
         t_elapsed[result.task_id] += result.t_elapsed
         
@@ -196,13 +220,21 @@ def create_aspcap_results(
             "raw_n_m_atm": result.n_m,
             "raw_e_n_m_atm": result.e_n_m,
         })
-        print("not yet fully including flags from upstream")    
 
-    for result in chemical_abundance_results:
+
+    # TODO: For things in chemical_abundance_results where we do not have a stellar_parameter_result..
+    #       should we look to update existing ASPCAP results?
+
+    skipped = 0
+    for result in tqdm(chemical_abundance_results, desc="Collecting abundances"):
         t_elapsed.setdefault(result.upstream_id, 0)
         t_elapsed[result.upstream_id] += result.t_elapsed
 
-        data.setdefault(result.upstream_id, {})
+        if result.upstream_id not in data:
+            skipped += 1
+            continue
+
+        #data.setdefault(result.upstream_id, {})
         species = get_species(result.weight_path)
         
         if species.lower() == "c_12_13":
@@ -235,6 +267,12 @@ def create_aspcap_results(
             f"raw_{label}": value,
             f"raw_e_{label}": e_value,
         })
+    
+    if skipped:
+        log.warn(
+            f"Skipped {skipped} chemical abundance results because no stellar parameter result "
+            f"in the accompanying argument."
+        )
 
     for stellar_parameter_task_id, kwds in data.items():
         yield ASPCAP(**kwds)

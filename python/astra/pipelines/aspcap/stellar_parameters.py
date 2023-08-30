@@ -11,8 +11,8 @@ from astra.pipelines.ferre.operator import FerreOperator, FerreMonitoringOperato
 from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
 from astra.pipelines.ferre.utils import (
-    parse_header_path, read_control_file, read_file_with_name_and_data, read_ferre_headers,
-    format_ferre_input_parameters, format_ferre_control_keywords
+    parse_header_path, get_input_spectrum_identifiers, read_control_file, read_file_with_name_and_data, read_ferre_headers,
+    format_ferre_input_parameters, format_ferre_control_keywords,
 )
 from astra.pipelines.aspcap.utils import get_input_nml_paths
 from astra.pipelines.aspcap.continuum import MedianFilter
@@ -112,6 +112,7 @@ def post_stellar_parameters(parent_dir, **kwargs) -> Iterable[FerreStellarParame
             yield FerreStellarParameters(**kwds)
 
  
+
 def plan_stellar_parameters(
     spectra: Iterable[Spectrum],
     parent_dir: str,
@@ -123,7 +124,32 @@ def plan_stellar_parameters(
     Plan stellar parameter executions with FERRE for some given spectra.
 
     Those spectra are assumed to already have `FerreCoarse` results.
+
+    :param spectra:
+        An iterable of spectra to analyze. If `None` is given then the spectra will be inferred
+        from the coarse stage in `parent_dir`.
+    
+    :param parent_dir:
+        The parent directory where these FERRE executions were planned.
+    
     """
+
+    if spectra is None:
+        # Get spectrum ids from coarse stage in parent dir.
+        spectrum_ids = list(get_input_spectrum_identifiers(f"{parent_dir}/coarse"))
+        if len(spectrum_ids) == 0:
+            log.warning(f"No spectrum identifiers found in {parent_dir}/coarse")
+            return ([], [])
+        
+        # TODO: assuming all spectra are the same model type..
+        model_class = Spectrum.get(spectrum_ids[0]).resolve().__class__
+        spectra = (
+            model_class
+            .select()
+            .where(model_class.spectrum_id << spectrum_ids)
+        )
+    else:
+        spectrum_ids = [s.spectrum_id for s in spectra]        
 
     Alias = FerreCoarse.alias()
     sq = (
@@ -133,7 +159,7 @@ def plan_stellar_parameters(
             fn.MIN(Alias.penalized_r_chi_sq).alias("min_penalized_r_chi_sq"),
         )
         .where(
-            (Alias.spectrum_id << [s.spectrum_id for s in spectra])
+            (Alias.spectrum_id << spectrum_ids)
         &   (Alias.teff.is_null(False))
         &   (Alias.logg.is_null(False))
         &   (Alias.m_h.is_null(False))
