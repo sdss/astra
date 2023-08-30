@@ -46,7 +46,7 @@ def pre_process_ferre(
     f_access: int = 0,
     f_format: int = 1,
     ferre_kwds: Optional[dict] = None,
-    n_threads: int = 32,
+    n_threads: int = 42,
     bad_pixel_flux_value: float = 1e-4,
     bad_pixel_error_value: float = 1e10,
     skyline_sigma_multiplier: float = 100,
@@ -98,16 +98,10 @@ def pre_process_ferre(
             control_kwds[key] = prefix + control_kwds[key]
 
     pwd = expand_path(pwd)
-    os.makedirs(pwd, exist_ok=True)
     log.info(f"FERRE working directory: {pwd}")
 
     control_kwds_formatted = utils.format_ferre_control_keywords(control_kwds)
     log.info(f"FERRE control keywords:\n{control_kwds_formatted}")
-
-
-    # Write the control file        
-    with open(os.path.join(pwd, "input.nml"), "w") as fp:
-        fp.write(control_kwds_formatted)       
 
     # Construct mask to match FERRE model grid.
     chip_wavelengths = tuple(map(utils.wavelength_array, segment_headers))
@@ -186,6 +180,9 @@ def pre_process_ferre(
         batch_initial_parameters.append(initial_parameters)
         index += 1
 
+    if not batch_initial_parameters:
+        return (pwd, 0, skipped)
+
     # Convert list of dicts of initial parameters to array.
     batch_initial_parameters_array = utils.validate_initial_and_frozen_parameters(
         headers,
@@ -194,6 +191,12 @@ def pre_process_ferre(
         clip_initial_parameters_to_boundary_edges=True,
         clip_epsilon_percent=1,
     )
+    # Create directory and write the control file        
+    os.makedirs(pwd, exist_ok=True)
+    with open(os.path.join(pwd, "input.nml"), "w") as fp:
+        fp.write(control_kwds_formatted)       
+
+
     # hack: we do basename here in case we wrote the prefix to PFILE for the abundances run
     with open(os.path.join(pwd, os.path.basename(control_kwds["pfile"])), "w") as fp:
         for name, point in zip(batch_names, batch_initial_parameters_array):
