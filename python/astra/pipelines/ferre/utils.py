@@ -7,6 +7,7 @@ import re
 import subprocess
 from typing import Optional
 from tqdm import tqdm
+from glob import glob
 from itertools import cycle
 from astra.utils import log, expand_path
 
@@ -21,6 +22,22 @@ TRANSLATE_LABELS = {
     "c_m": "C",
     "n_m": "N",
 }
+
+def get_input_spectrum_identifiers(stage_dir):
+    """
+    Get all spectrum identifiers analyzed in a given stage.
+    
+    :param stage_dir:
+        The stage directory (e.g., ``/your/parent_folder/coarse``)
+    """
+    spectrum_ids = set()
+    for path in glob(f"{expand_path(stage_dir)}/*/parameter.input"):
+        for name in np.atleast_1d(np.loadtxt(path, usecols=(0, ), dtype=str)):
+            spectrum_ids.add(parse_ferre_spectrum_name(name)["spectrum_id"])
+    return spectrum_ids
+
+
+
 
 def parse_control_kwds(input_nml_path):
     with open(expand_path(input_nml_path), "r") as fp:
