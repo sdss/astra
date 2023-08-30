@@ -119,7 +119,7 @@ def has_partial_results(pwd, control_kwds=None):
     return (has_partial_results, paths)
     
 
-def partition(items, K, return_indices=False):
+def partition_items(items, K, return_indices=False):
     """
     Partition items into K semi-equal groups.
     """
@@ -201,16 +201,19 @@ def load_balancer(
     input_nml_wildmask="*/input*.nml",
     slurm_kwds=None,
     post_interpolate_model_flux=True,
+    partition=True,
     overwrite=True,
-    n_threads=32,
+    n_threads=42,
     max_nodes=0,
-    max_tasks_per_node=4,
+    max_tasks_per_node=3,
+    balance_threads=False,
     cpus_per_node=128,
+    t_load_estimate=300, # 5 minutes est to load grid
+    chaos_monkey=True,
     full_output=False,
 ):
 
     slurm_kwds = slurm_kwds or DEFAULT_SLURM_KWDS
-    t_load_estimate = 5 * 60 # 5 minutes est to load grid
 
     input_basename = "input.nml"
     stage_dir = expand_path(stage_dir)
@@ -270,7 +273,8 @@ def load_balancer(
         
         input_paths.append(input_path)
         spectra.append(N)
-        core_seconds.append(t)
+        # Set the grid load time as a minimum estimate so that we don't get all small jobs partitioned to one node
+        core_seconds.append(max(t, t_load_estimate))
 
     # Spread the approximate core-seconds over N nodes
     core_seconds = np.array(core_seconds)
@@ -288,10 +292,11 @@ def load_balancer(
 
     log.info(f"Found {total_spectra} spectra total for {nodes} nodes ({core_seconds_per_task/60:.0f} min/task)")
 
+    
     parent_partitions, partitioned_input_paths, partitioned_core_seconds = ({}, [], [])
     for n_tasks, input_path, n_spectra, n_core_seconds in zip(tasks_needed, input_paths, spectra, core_seconds):
 
-        if n_tasks == 1 or is_input_list(input_path): # don't partition the abundances.. too complex
+        if not partition or n_tasks == 1 or is_input_list(input_path): # don't partition the abundances.. too complex
             log.info(f"Keeping FERRE job in {input_path} (with {n_spectra} spectra) as is")
             partitioned_input_paths.append(input_path)
             partitioned_core_seconds.append(n_core_seconds)
@@ -335,14 +340,37 @@ def load_balancer(
     # Partition by tasks, but chunk by node.
     partitioned_core_seconds = np.array(partitioned_core_seconds)        
     
-    chunks = chunked(
-        partition(
-            partitioned_core_seconds, 
-            nodes * max_tasks_per_node, 
-            return_indices=True,
-        ),
-        max_tasks_per_node
-    )
+    if balance_threads:
+        longest_job_index = np.argmax(partitioned_core_seconds)
+        fractional_core_seconds = partitioned_core_seconds / np.sum(partitioned_core_seconds)
+        use_n_nodes = int(np.ceil(1/fractional_core_seconds[longest_job_index]))
+
+        node_indices = partition_items(
+            partitioned_core_seconds,
+            use_n_nodes,
+            return_indices=True
+        )
+        # Now sort each node chunk into tasks.
+        chunks = []
+        for node_index in node_indices:
+            task_indices = partition_items(
+                partitioned_core_seconds[node_index],
+                max_tasks_per_node,
+                return_indices=True
+            )
+            chunks.append([])
+            for task_index in task_indices:
+                chunks[-1].append(np.array(node_index)[task_index])
+
+    else:
+        chunks = chunked(
+            partition_items(
+                partitioned_core_seconds, 
+                nodes * max_tasks_per_node, 
+                return_indices=True,
+            ),
+            max_tasks_per_node
+        )
 
     # For merging partitions afterwards
     partitioned_pwds = flatten(parent_partitions.values())
@@ -358,14 +386,21 @@ def load_balancer(
         # TODO: set the number of threads by proportion of how many spectra in this task compared to others on this node
         denominator = np.sum(partitioned_core_seconds[flatten(node_indices)])
         
-        slurm_tasks, est_times = ([], [])
-        for j, task_indices in enumerate(node_indices, start=1):
+        if balance_threads:
+            t_tasks = np.array([np.sum(partitioned_core_seconds[ni]) for ni in node_indices])
+            use_n_threads = np.ceil(np.clip(cpus_per_node * t_tasks / np.sum(t_tasks), 1, cpus_per_node)).astype(int)
+        else:
+            use_n_threads = [n_threads] * len(node_indices)
+
+        expect_ferre_executions_in_these_pwds, slurm_tasks, est_times = ([], [], [])
+        for j, (task_indices, n_threads) in enumerate(zip(node_indices, use_n_threads), start=1):
 
             #int(max(
             #    1,
             #    (cpus_per_node * np.sum(partitioned_core_seconds[st_indices]) / denominator)
             #))
-            est_time = np.sum(partitioned_core_seconds[task_indices]) / n_threads + t_load_estimate
+
+            est_time = np.clip(np.sum(partitioned_core_seconds[task_indices]) / n_threads, t_load_estimate, np.inf)
 
             log.info(f"  {i}.{j}: {len(task_indices)} executions with {n_threads} threads. Estimated time is {est_time/60:.0f} min")
 
@@ -382,6 +417,9 @@ def load_balancer(
                     N = wc(f"{cwd}/flux.input")
                     with open(input_path, "r") as fp:
                         for rel_input_path in fp.readlines():
+                            if balance_threads:
+                                update_control_kwds(f"{cwd}/{rel_input_path}".rstrip(), "NTHREADS", n_threads)
+                                
                             rel_pwd = os.path.dirname(f"{cwd}/{rel_input_path}")
                             executions.append([
                                 f"{rel_pwd}/parameter.output",
@@ -395,10 +433,13 @@ def load_balancer(
                         wc(f"{cwd}/parameter.input"),
                         0
                     ])
+
                     # Be sure to update the NTHREADS, just in case it was set at some dumb value (eg 1)
                     update_control_kwds(f"{cwd}/input.nml", "NTHREADS", n_threads)
                 
                 command = f"ferre.x {flags}{os.path.basename(input_path)}"
+                expect_ferre_executions_in_these_pwds.append(cwd)
+                
                 execution_commands.append(f"cd {cwd}")
                 execution_commands.append(f"{command} > stdout 2> stderr")
                 if post_interpolate_model_flux:
@@ -423,17 +464,20 @@ def load_balancer(
             slurm_tasks.append(SlurmTask(task_commands))
             est_times.append(est_time)
 
-        #if feed_chaos_monkey:
-        #    execution_commands = ["ferre_chaos_monkey"]
-        #    slurm_tasks.append(SlurmTask(execution_commands))
-        #    for k, command in enumerate(execution_commands, start=1):
-        #        log.info(f"    {i}.{1+j}.{k}: {command}")
+        if chaos_monkey:
+            command = f"ferre_chaos_monkey -v {' '.join(expect_ferre_executions_in_these_pwds)}"
+            command += f" > {stage_dir}/monkey_{i:0>2.0f}.out 2> {stage_dir}/monkey_{i:0>2.0f}.err"
+            
+            slurm_tasks.append(SlurmTask([command]))
+            log.info(f"    {i}.{j+1}.1: {command}")
+
 
         # Time for the node is the worst of individual tasks
         t_node = np.max(est_times)
         log.info(f"Node {i} estimated time is {t_node/60:.0f} min")
         if t_node > t_longest:
             t_longest = t_node
+            
 
         slurm_job = SlurmJob(
             slurm_tasks,
@@ -478,42 +522,6 @@ def load_balancer(
     else:
         return tuple(job_ids)
 
-
-def launch_chaos_monkey(job_ids, interval=1):
-    print(f"JOB IDS: {type(job_ids)} {job_ids}")
-    if isinstance(job_ids, str):
-        job_ids = json.loads(job_ids)
-    queue = get_queue()
-    processes = {}
-    while set(job_ids).difference(processes):
-        
-        for job_id in set(job_ids).difference(processes):
-            try:
-                job = queue[job_id]                        
-            except:
-                log.warning(f"Job {job_id} does not appear in queue! Cannot launch FERRE chaos monkey.")
-                processes[job_id] = None
-            else:
-                if job["status"] == "R":
-                    log.info(f"Slurm job {job_id} has started. Launching FERRE chaos monkey on job {job_id}")
-                    # The `nohup` here *should* make sure the chaos monkey keeps running, even if the SSH
-                    # connection between the operator and the Slurm job is disconnected. But we need to
-                    # test this a bit more!
-                    '''
-                    processes[job_id] = Popen(
-                        ["srun", f"--jobid={job_id}", "nohup", "ferre_chaos_monkey"],
-                        stdin=PIPE,
-                        stdout=PIPE,
-                        stderr=PIPE
-                    )
-                    '''
-                    print(os.system(f"srun --jobid={job_id} nohup ferre_chaos_monkey & disown"))
-                    print(f"launched for {job_id}")
-                    processes[job_id] = True
-
-            sleep(interval)
-        
-    return { job_id: v is not None for job_id, v in processes.items() }
 
 
 def monitor(
