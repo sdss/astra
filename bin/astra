@@ -49,6 +49,7 @@ def initdb(drop_tables):
     return None
 
 
+
 @cli.command(context_settings=dict(ignore_unknown_options=True))
 @click.option("--slurm", is_flag=True, default=False, help="Execute through Slurm (see --slurm-profile)")
 @click.option("--slurm-profile", default=None, help="Use Slurm profile specified in Astra config file. If None is given, it will default to the profile for the task name, or `default`.")
@@ -61,10 +62,41 @@ def execute(slurm, slurm_profile, slurm_dir, limit, kwargs_path, task, spectra):
     """
     Execute a task on one or many spectra.
     """
+    # Resolve spectrum ids.
+    if len(spectra) == 0:
+        raise click.UsageError("No spectral model or spectrum identifiers given.")
+
     import os
     import sys
     from astra import config
     from astra.utils import expand_path, log, callable
+
+    import pickle
+    from inspect import getfullargspec
+    from tqdm import tqdm
+    from peewee import chunked, JOIN
+
+    from astra import models
+    from astra.models.spectrum import Spectrum, SpectrumMixin
+
+    kwargs = {}
+    if kwargs_path is not None:
+        with open(kwargs_path, "rb") as fp:
+            kwargs = pickle.load(fp)
+
+    # Parse any additional keyword arguments which unfortunately get lumped into `spectra`.
+    # TODO: THere must be a nicer way to parse this using click.
+    _spectra = []
+    for arg in spectra:
+        if arg.startswith("--"):
+            k, *v = arg[2:].split("=")
+            k = k.replace("-", "_")
+            kwargs[k] = "=".join(v).strip('"')
+        else:
+            _spectra.append(arg)
+
+    
+    
 
     # Do some cleverness about the task name.
     for prefix in ("", "astra.", "astra.pipelines.", f"astra.pipelines.{task}."):
@@ -81,9 +113,48 @@ def execute(slurm, slurm_profile, slurm_dir, limit, kwargs_path, task, spectra):
         # Raise exception on the no-prefix case.
         f = callable(task)
 
+    # TODO: This is all a bit of spaghetti code. Refactor
 
     if slurm:
-        # TODO: Should we actually check that there is any work to do before submitting a job?
+        # Check that there is any work to do before submitting a job.
+
+        try:
+            spectrum_ids = list(map(int, _spectra))
+        except ValueError:
+            if len(_spectra) > 1:
+                raise NotImplementedError("Only one spectrum model allowed for now. This can be changed.")
+            
+            model_name, = _spectra
+            spectrum_model = getattr(models, model_name)
+            try:
+                output_model = getfullargspec(f).annotations["return"].__args__[0]
+            except:
+                raise ValueError(f"Cannot infer output model for task {f}, is it missing a type annotation?")
+
+            # Query for spectra that does not have a result in this output model
+            iterable = (
+                spectrum_model
+                .select()
+                .join(
+                    output_model,
+                    JOIN.LEFT_OUTER,
+                    on=(spectrum_model.spectrum_id == output_model.spectrum_id)
+                )
+                .where(output_model.spectrum_id.is_null())
+                .limit(limit)
+            )
+            total = limit or iterable.count()
+            log.info(f"Found at least {total} {model_name} spectra that do not have results in {output_model}")
+
+        else:
+            total = len(spectrum_ids)
+
+        if total == 0:
+            # Nothing to do.
+            log.info(f"No spectra to process.")
+            sys.exit(0)
+    
+
         from astra.utils.slurm import SlurmTask, SlurmJob
 
         # Resolve slurm profile.
@@ -117,7 +188,7 @@ def execute(slurm, slurm_profile, slurm_dir, limit, kwargs_path, task, spectra):
             slurm_dir = mkdtemp(prefix=f"{datetime.now().strftime('%Y-%m-%d')}-{resolved_task.split('.')[-1]}-", dir=expand_path(f"$PBS/"))
             os.chmod(slurm_dir, 0o755)
             log.info(f"Using Slurm directory: {slurm_dir}")    
-            job_name = f"{resolved_task.split('.')[-1]}-{os.path.basename(slurm_dir)}"
+            job_name = f"{os.path.basename(slurm_dir)}"
         else:
             os.makedirs(slurm_dir, exist_ok=True)
             job_name = f"{resolved_task.split('.')[-1]}"
@@ -136,34 +207,7 @@ def execute(slurm, slurm_profile, slurm_dir, limit, kwargs_path, task, spectra):
         sys.exit(0)
 
 
-    # Resolve spectrum ids.
-    if len(spectra) == 0:
-        raise click.UsageError("No spectral model or spectrum identifiers given.")
 
-    import pickle
-    from inspect import getfullargspec
-    from tqdm import tqdm
-    from peewee import chunked, JOIN
-
-    from astra import models
-    from astra.models.spectrum import Spectrum, SpectrumMixin
-
-    kwargs = {}
-    if kwargs_path is not None:
-        with open(kwargs_path, "rb") as fp:
-            kwargs = pickle.load(fp)
-
-    # Parse any additional keyword arguments which unfortunately get lumped into `spectra`.
-    # TODO: THere must be a nicer way to parse this using click.
-    _spectra = []
-    for arg in spectra:
-        if arg.startswith("--"):
-            k, *v = arg[2:].split("=")
-            k = k.replace("-", "_")
-            kwargs[k] = "=".join(v).strip('"')
-        else:
-            _spectra.append(arg)
-    
     try:
         spectrum_ids = list(map(int, _spectra))
     except ValueError:
