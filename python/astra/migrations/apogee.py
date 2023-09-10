@@ -15,12 +15,12 @@ def migrate_apogee_obj_from_source(batch_size: Optional[int] = 100, limit: Optio
         ApogeeVisitSpectrum
         .select(
             ApogeeVisitSpectrum.spectrum_id,
-            Source.sdss4_dr17_apogee_id
+            Source.sdss4_apogee_id
         )
         .join(Source, on=(ApogeeVisitSpectrum.source_id == Source.id))
         .where(
             ApogeeVisitSpectrum.obj.is_null()
-        &   Source.sdss4_dr17_apogee_id.is_null(False)
+        &   Source.sdss4_apogee_id.is_null(False)
         )
         .tuples()
     )
@@ -63,11 +63,11 @@ def migrate_sdss4_dr17_member_flags():
         Source
         .select()
         .where(
-            (Source.sdss4_dr17_apogee_id.in_(list(memberships.keys())))
+            (Source.sdss4_apogee_id.in_(list(memberships.keys())))
         )
     )
     for source in sources:
-        source.sdss4_apogee_member_flags = memberships[source.sdss4_dr17_apogee_id]
+        source.sdss4_apogee_member_flags = memberships[source.sdss4_apogee_id]
     
     return (
         Source
@@ -124,7 +124,7 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
             Catalog.dec,
             Catalog.version_id.alias("version_id"),
             Catalog.lead,
-            Star.apogee_id.alias("sdss4_dr17_apogee_id"),
+            Star.apogee_id.alias("sdss4_apogee_id"),
             Visit.apogee_target1.alias("sdss4_apogee_target1_flags"),
             Visit.apogee_target2.alias("sdss4_apogee_target2_flags"),
             Visit.apogee2_target1.alias("sdss4_apogee2_target1_flags"),
@@ -142,7 +142,7 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
             Visit.xcorr_vrel.alias("xcorr_v_rel"),
             Visit.xcorr_vrelerr.alias("xcorr_e_v_rel"),
             Visit.xcorr_vhelio.alias("xcorr_v_rad"),
-            Visit.rv_chi2.alias("doppler_rchisq"),
+            Visit.rv_chi2.alias("doppler_rchi2"),
             Visit.ccfwhm,
             Visit.autofwhm,
             Visit.n_components,
@@ -183,7 +183,7 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
         "sdss5_catalogid_v1",
         "gaia_dr3_source_id",
         "gaia_dr2_source_id",
-        "sdss4_dr17_apogee_id",
+        "sdss4_apogee_id",
         "ra",
         "dec",
         "version_id",
@@ -200,10 +200,10 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
     for spectrum_id, row in zip(spectrum_ids, q):
         basename = row.pop("file")
         
-        apogee_id = row["sdss4_dr17_apogee_id"]
+        apogee_id = row["sdss4_apogee_id"]
 
         if row["telescope"] == "apo1m":
-            row["reduction"] = row["sdss4_dr17_apogee_id"]
+            row["reduction"] = row["sdss4_apogee_id"]
         
         # TODO: Should we just be using APOGEE_ID as a unique identifier?
         unique_identifier = "_".join([apogee_id])
@@ -249,14 +249,14 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
         Source
         .select(
             Source.id,
-            Source.sdss4_dr17_apogee_id
+            Source.sdss4_apogee_id
         )
         .tuples()
         .iterator()
     )
     source_ids = {}
-    for source_id, sdss4_dr17_apogee_id in q:
-        source_ids[sdss4_dr17_apogee_id] = source_id
+    for source_id, sdss4_apogee_id in q:
+        source_ids[sdss4_apogee_id] = source_id
 
     for each in spectrum_data:
         each["source_id"] = source_ids[each.pop("apogee_id")]
@@ -400,7 +400,7 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
             cte.c.vrel.alias("v_rel"),
             cte.c.vrelerr.alias("e_v_rel"),
             cte.c.vrad.alias("v_rad"),
-            cte.c.chisq.alias("doppler_rchisq"),
+            cte.c.chisq.alias("doppler_rchi2"),
             cte.c.rv_teff.alias("doppler_teff"),
             cte.c.rv_tefferr.alias("doppler_e_teff"),
             cte.c.rv_logg.alias("doppler_logg"),
@@ -511,7 +511,7 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
             sq.c.vrel.alias("v_rel"),
             sq.c.vrelerr.alias("e_v_rel"),
             sq.c.vrad.alias("v_rad"),
-            sq.c.chisq.alias("doppler_rchisq"),
+            sq.c.chisq.alias("doppler_rchi2"),
             sq.c.rv_teff.alias("doppler_teff"),
             sq.c.rv_tefferr.alias("doppler_e_teff"),
             sq.c.rv_logg.alias("doppler_logg"),
@@ -863,7 +863,7 @@ def migrate_apvisit_in_apstar_from_existing_apvisits(limit=None, batch_size=100)
             ApogeeVisitSpectrum.obj,
             ApogeeVisitSpectrum.telescope,
             Source.healpix,
-            Source.sdss4_dr17_apogee_id.alias("obj"),
+            Source.sdss4_apogee_id.alias("obj"),
             ApogeeVisitSpectrum.field,
             ApogeeVisitSpectrum.prefix,
             ApogeeVisitSpectrum.plate,

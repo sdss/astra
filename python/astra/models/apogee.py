@@ -18,6 +18,8 @@ from astra.models.base import BaseModel
 from astra.models.spectrum import (Spectrum, SpectrumMixin)
 from astra.models.source import Source
 
+from astra.glossary import Glossary
+
 from astropy.constants import c
 from astropy import units as u
 
@@ -113,6 +115,8 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         default=Spectrum.create
     )
     input_catalogid = BigIntegerField(index=True, null=True, help_text="SDSS input catalog identifier")
+    visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `visit` primary key")
+    rv_visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `rv_visit` primary key")
 
     #> Data Product Keywords
     release = TextField(index=True, help_text="SDSS release")
@@ -203,7 +207,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     v_rel = FloatField(null=True, help_text="Relative velocity [km/s]")
     e_v_rel = FloatField(null=True, help_text="Error on relative velocity [km/s]")
     bc = FloatField(null=True, help_text="Barycentric velocity correction applied [km/s]")
-    doppler_rchisq = FloatField(null=True, help_text="Reduced \chi^2 reported by `Doppler`")
+    doppler_rchi2 = FloatField(null=True, help_text="Reduced \chi^2 reported by `Doppler`")
     
     doppler_teff = FloatField(null=True, help_text="Effective temperature [K]")
     doppler_e_teff = FloatField(null=True, help_text="Error on effective temperature [K]")
@@ -219,12 +223,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     xcorr_e_v_rel = FloatField(null=True, help_text="Error on relative velocity [km/s]")
     ccfwhm = FloatField(null=True, help_text="Cross-correlation function FWHM")
     autofwhm = FloatField(null=True, help_text="Auto-correlation function FWHM")
-    n_components = IntegerField(null=True, help_text="Number of components in CCF")
-
-    #> Database Identifiers
-    visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `visit` primary key")
-    rv_visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `rv_visit` primary key")
-    
+    n_components = IntegerField(null=True, help_text="Number of components in CCF")    
 
     @hybrid_property
     def flag_bad(self):
@@ -298,28 +297,28 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         lazy_load=False,
         primary_key=True,
         default=Spectrum.create,
-        help_text="Spectrum identifier"
+        help_text=Glossary.spectrum_id
     )
     drp_spectrum_id = ForeignKeyField(
         ApogeeVisitSpectrum,
         lazy_load=False,
         field=ApogeeVisitSpectrum.spectrum_id,
-        help_text="Spectrum identifier from Data Reduction Pipeline"
+        help_text=Glossary.drp_spectrum_id
     )
 
     #> Data Product Keywords
-    release = TextField(help_text="SDSS release")
-    apred = TextField(help_text="APOGEE reduction pipeline")
-    apstar = TextField(default="stars")
-    obj = TextField(help_text="Object name")
-    telescope = TextField(help_text="Short telescope name")
+    release = TextField(help_text=Glossary.release)
+    apred = TextField(help_text=Glossary.apred)
+    apstar = TextField(default="stars", help_text=Glossary.apstar)
+    obj = TextField(help_text=Glossary.obj)
+    telescope = TextField(help_text=Glossary.telescope)
     # Healpix is only used in SDSS-V, and may not appear in this data product keywords group (since it appears in Source)
-    healpix = IntegerField(null=True, help_text="HEALPix (128 side)") 
-    field = TextField(null=True, help_text="Field name") # not used in SDSS-V
-    prefix = TextField(null=True, help_text="Prefix used to separate SDSS 4 north/south spectra") # not used in SDSS-V
-    plate = TextField(help_text="Plate")
-    mjd = IntegerField(help_text="Modified Julian date of observation")
-    fiber = IntegerField(help_text="Fiber number")
+    healpix = IntegerField(null=True, help_text=Glossary.healpix) 
+    field = TextField(null=True, help_text=Glossary.field) # not used in SDSS-V
+    prefix = TextField(null=True, help_text=Glossary.prefix) # not used in SDSS-V
+    plate = TextField(help_text=Glossary.plate)
+    mjd = IntegerField(help_text=Glossary.mjd)
+    fiber = IntegerField(help_text=Glossary.fiber)
     #reduction = TextField(default="", help_text="Like `obj`. Only used for apo1m spectra") # only used for DR17 apo1m spectra
 
     @property
@@ -414,18 +413,19 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
         index=True,
         lazy_load=False,
         primary_key=True,
-        default=Spectrum.create
+        default=Spectrum.create,
+        help_text=Glossary.spectrum_id
     )
 
     #> Data Product Keywords
-    release = TextField()
-    apred = TextField()
-    apstar = TextField(default="stars")
-    obj = TextField()
-    telescope = TextField()
-    healpix = IntegerField(null=True) # only used in SDSS5
-    field = TextField(null=True) # not used in SDSS-V
-    prefix = TextField(null=True) # not used in SDSS-V
+    release = TextField(help_text=Glossary.release)
+    apred = TextField(help_text=Glossary.apred)
+    apstar = TextField(default="stars", help_text=Glossary.apstar)
+    obj = TextField(help_text=Glossary.obj)
+    telescope = TextField(help_text=Glossary.telescope)
+    healpix = IntegerField(null=True, help_text=Glossary.healpix) 
+    field = TextField(null=True, help_text=Glossary.field) # not used in SDSS-V
+    prefix = TextField(null=True, help_text=Glossary.prefix) # not used in SDSS-V
 
     flux = PixelArray(
         ext=1,

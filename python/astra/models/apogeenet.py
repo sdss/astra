@@ -1,10 +1,12 @@
 import numpy as np
+import datetime
 from peewee import (
     AutoField,
     FloatField,
     TextField,
     ForeignKeyField,
     BitField,
+    DateTimeField
 )
 from playhouse.hybrid import hybrid_property
 
@@ -15,6 +17,7 @@ from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
 
+from astra.glossary import Glossary
 
 class ApogeeNet(BaseModel, PipelineOutputMixin):
 
@@ -25,27 +28,30 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
         Spectrum, 
         index=True, 
         lazy_load=False,
-        help_text="Spectrum identifier"
+        help_text=Glossary.spectrum_id
     )
     
     #> Astra Metadata
-    task_id = AutoField(help_text="Task identifier")
-    v_astra = TextField(default=__version__, help_text="Astra version")
-    t_elapsed = FloatField(null=True, help_text="Estimated task elapsed time [s]")
-    tag = TextField(default="", index=True, help_text="Tag name to segment Astra experiments")
+    task_id = AutoField(help_text=Glossary.task_id)
+    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
+    #created = DateTimeField(default=datetime.datetime.now)
+    t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
+    #t_overhead = FloatField(null=True)
+    tag = TextField(default="", index=True, help_text=Glossary.tag)
     
     #> Stellar Parameters
-    teff = FloatField(null=True, help_text="Effective temperature [K]")
-    e_teff = FloatField(null=True, help_text="Error on effective temperature [K]")
-    logg = FloatField(null=True, help_text="Surface gravity")
-    e_logg = FloatField(null=True, help_text="Error in surface gravity")
-    fe_h = FloatField(null=True, help_text="Metallicity [dex]")
-    e_fe_h = FloatField(null=True, help_text="Error in metallicity [dex]")
+    teff = FloatField(null=True, help_text=Glossary.teff)
+    e_teff = FloatField(null=True, help_text=Glossary.e_teff)
+    logg = FloatField(null=True, help_text=Glossary.logg)
+    e_logg = FloatField(null=True, help_text=Glossary.e_logg)
+    # TODO: Should we rename these as [M/H]?
+    fe_h = FloatField(null=True, help_text=Glossary.m_h)
+    e_fe_h = FloatField(null=True, help_text=Glossary.e_m_h)
 
     teff_sample_median = FloatField(null=True, help_text="Median effective temperature of many draws [K]")
     logg_sample_median = FloatField(null=True, help_text="Median surface gravity of many draws")
     fe_h_sample_median = FloatField(null=True, help_text="Median metallicity of many draws [dex]")
-    result_flags = BitField(default=0, help_text="Flags describing the results")
+    result_flags = BitField(default=0, help_text=Glossary.result_flags)
 
     #> Flag definitions
     flag_teff_unreliable = result_flags.flag(2**0, help_text="Effective temperature is unreliable")

@@ -19,7 +19,6 @@ from astra.models.fields import BitField
 from astra.models.spectrum import Spectrum
 
 
-
 class Source(BaseModel):
 
     """ An astronomical source. """
@@ -32,7 +31,7 @@ class Source(BaseModel):
     # The following identifiers should be unique, but I'm not convinced it's implemented properly yet.
     gaia_dr2_source_id = BigIntegerField(null=True, help_text="Gaia DR2 source identifier")
     gaia_dr3_source_id = BigIntegerField(null=True, help_text="Gaia DR3 source identifier")
-    sdss4_dr17_apogee_id = TextField(index=True, null=True, unique=True, help_text="SDSS-4 DR17 APOGEE identifier")
+    sdss4_apogee_id = TextField(index=True, null=True, unique=True, help_text="SDSS-4 DR17 APOGEE identifier")
     tic_v8_id = BigIntegerField(null=True, help_text="TESS Input Catalog (v8) identifier")
     
     #> Targeting provenance 
@@ -183,7 +182,7 @@ class Source(BaseModel):
     #< See https://zenodo.org/record/7811871
 
     #> Targeting
-    carton_0 = TextField(default="")
+    carton_0 = TextField(default="", help_text="Highest priority carton name")
 
     # Only do carton_flags if we have a postgresql database.
     if isinstance(database, PostgresqlDatabase):
@@ -480,10 +479,3 @@ class Source(BaseModel):
         for expr, column in self.dependencies():
             if Spectrum in column.model.__mro__[1:]:
                 yield from column.model.select().where(expr)
-
-
-
-class SDSSCatalog(BaseModel):
-
-    catalogid = BigIntegerField(primary_key=True)
-    sdss_id = ForeignKeyField(Source, backref="catalogids")

@@ -26,6 +26,8 @@ def task(function, *args, **kwargs):
     :Keyword Arguments:
         * *frequency* (``int``) --
           The number of seconds to wait before saving the results to the database (default: 300).        
+        * *result_frequency* (``int``) --
+          The number of results  to wait before saving the results to the database (default: 300).        
         * *batch_size* (``int``) --
           The number of rows to insert per batch (default: 1000).
         * *re_raise_exceptions* (``bool``) -- 
@@ -36,6 +38,7 @@ def task(function, *args, **kwargs):
         raise TypeError("Tasks must be generators that `yield` results.")
 
     frequency = kwargs.pop("frequency", 300)
+    result_frequency = kwargs.pop("result_frequency", 100_000)
     batch_size = kwargs.pop("batch_size", 1000)
     re_raise_exceptions = kwargs.pop("re_raise_exceptions", True)
 
@@ -68,7 +71,7 @@ def task(function, *args, **kwargs):
                     raise
             
             else:
-                if timer.check_point or n_results_since_last_check_point > batch_size:
+                if timer.check_point or n_results_since_last_check_point >= result_frequency:
                     with timer.pause():
 
                         # Add estimated overheads to each result.

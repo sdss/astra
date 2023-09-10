@@ -100,7 +100,6 @@ def has_partial_results(pwd, control_kwds=None):
         - a bool indicating whether partial results exist already;
         - a tuple of paths identified which indicate there are partial results.
     """
-
     pwd = expand_path(pwd)
     if control_kwds is None:
         control_kwds = parse_control_kwds(f"{pwd}/input.nml")

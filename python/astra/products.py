@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import datetime
 from astropy.io import fits
 from tqdm import tqdm
 from typing import Iterable, Union, Optional, Tuple
@@ -23,7 +24,10 @@ from astra.models import BaseModel, Source, SpectrumMixin, ApogeeVisitSpectrum
 from astra.utils import log, expand_path
 from astra.models.fields import BitField
 
+from astra.glossary import Glossary
 
+
+DATETIME_FMT = "%y-%m-%d %H:%M:%S"
 BLANK_CARD = (" ", " ", None)
 FILLER_CARD = (FILLER_CARD_KEY, *_) = ("TTYPE0", "Water cuggle", None)
 
@@ -34,7 +38,7 @@ def create_hdu(
     drp_spectrum_model=None, 
     where=None, 
     header=None, 
-    ignore_fields=("carton_flags", ),
+    ignore_fields=("carton_flags", "source", "pk"),
     fill_values=None, 
     upper=True,
     limit=None,
@@ -288,7 +292,7 @@ def create_summary_pipeline_product(
     basename_prefix: str, 
     drp_spectrum_model: Optional[Union[BaseModel, str]] = None,
     overwrite: Optional[bool] = False,
-    full_output: Optional[bool] = False,     
+    full_output: Optional[bool] = False,
     **kwargs           
 ):
     """
@@ -323,21 +327,115 @@ def create_summary_pipeline_product(
     """
     path = _get_summary_path(f"{basename_prefix}-{__version__}.fits")
     _prevent_summary_overwrite(path, overwrite)    
-    
-    # TODO: revisit this when we have BOSS models too and can separate by telescope/observatory
+
+    primary_hdu = create_summary_pipeline_primary_hdu(pipeline_model)
+
+    # TODO: this is hacky, but we can revise when we have to deal with pipelines that Do It All(tm)
+    is_apogee = spectrum_model.__name__.lower().startswith("apogee")
+    is_boss = spectrum_model.__name__.lower().startswith("boss")
+    if (not is_apogee and not is_boss) or (is_apogee and is_boss):
+        raise NotImplementedError("can't figure out this")
+
+    kwds = dict(
+        spectrum_model=spectrum_model,
+        pipeline_model=pipeline_model,
+        drp_spectrum_model=drp_spectrum_model,
+        **kwargs
+    )
+
+    if is_apogee:
+        # make empty boss hdus
+        hdu_boss_apo = create_empty_hdu("APO", "BOSS", False)
+        hdu_boss_lco = create_empty_hdu("LCO", "BOSS", False)
+
+        hdu_apogee_apo = create_hdu(where=spectrum_model.telescope.startswith("apo"), header=fits.Header(cards=metadata_cards("APO", "APOGEE")), **kwds)
+        hdu_apogee_lco = create_hdu(where=spectrum_model.telescope.startswith("lco"), header=fits.Header(cards=metadata_cards("LCO", "APOGEE")), **kwds)
+
+    else:
+        hdu_apogee_apo = create_empty_hdu("APO", "APOGEE", False)
+        hdu_apogee_lco = create_empty_hdu("LCO", "APOGEE", False)
+
+        hdu_boss_apo = create_hdu(where=spectrum_model.telescope.startswith("apo"), header=fits.Header(cards=metadata_cards("APO", "BOSS")), **kwds)
+        hdu_boss_lco = create_hdu(where=spectrum_model.telescope.startswith("lco"), header=fits.Header(cards=metadata_cards("LCO", "BOSS")), **kwds)
+
     hdu_list = fits.HDUList([
-        fits.PrimaryHDU(),
-        create_hdu(
-            spectrum_model=spectrum_model,
-            pipeline_model=pipeline_model,
-            drp_spectrum_model=drp_spectrum_model,
-            **kwargs
-        ),
+        primary_hdu,
+        hdu_boss_apo,
+        hdu_boss_lco,
+        hdu_apogee_apo,
+        hdu_apogee_lco,
     ])
     hdu_list.writeto(path, overwrite=overwrite)
     return (path, hdu_list) if full_output else path
 
+
+#def create_mwmvisit_mwmstar_
+
+
+
+def metadata_cards(observatory: str, instrument: str):
+    return [
+        BLANK_CARD,
+        (" ", "METADATA"),
+        ("EXTNAME", _get_extname(instrument, observatory), "Extension name"),
+        ("OBSRVTRY", observatory, "Observatory"),
+        ("INSTRMNT", instrument, "Instrument"),
+    ]
+
+
+def create_empty_hdu(observatory: str, instrument: str, is_data=True) -> fits.BinTableHDU:
+    """
+    Create an empty HDU to use as a filler.
+    """
+
+    x = "data" if is_data else "results"
+    y = "source" if is_data else "pipeline"
+
+    cards = metadata_cards(observatory, instrument)
+    cards.extend(
+        [
+            BLANK_CARD,
+            (
+                "COMMENT",
+                f"No {instrument} {x} available from {observatory} for this {y}.",
+            ),
+        ]
+    )
+    return fits.BinTableHDU(
+        header=fits.Header(cards),
+    )
+
     
+
+def create_summary_pipeline_primary_hdu(pipeline_model):
+    # I would like to use .isoformat(), but it is too long and makes headers look disorganised.
+    # Even %Y-%m-%d %H:%M:%S is one character too long! ARGH!
+    created = datetime.datetime.utcnow().strftime(DATETIME_FMT)
+
+    cards = [
+        BLANK_CARD,
+        (" ", "METADATA", None),
+        BLANK_CARD,
+        ("V_ASTRA", __version__, Glossary.v_astra),
+        ("CREATED", created, f"File creation time (UTC {DATETIME_FMT})"),
+        ("PIPELINE", pipeline_model.__name__, "Pipeline name"),
+        BLANK_CARD,
+        (" ", "HDU DESCRIPTIONS", None),
+        BLANK_CARD,
+        ("COMMENT", "HDU 0: Summary information only", None),
+        ("COMMENT", "HDU 1: Results from BOSS spectra taken at Apache Point Observatory"),
+        ("COMMENT", "HDU 2: Results from BOSS spectra taken at Las Campanas Observatory"),
+        ("COMMENT", "HDU 3: Results from APOGEE spectra taken at Apache Point Observatory"),
+        ("COMMENT", "HDU 4: Results from APOGEE spectra taken at Las Campanas Observatory"),
+    ]
+    primary_hdu = fits.PrimaryHDU(header=fits.Header(cards))
+    primary_hdu.add_checksum()
+    primary_hdu.header.insert("CHECKSUM", BLANK_CARD)
+    primary_hdu.header.insert("CHECKSUM", (" ", "DATA INTEGRITY"))
+    primary_hdu.header.insert("CHECKSUM", BLANK_CARD)
+    primary_hdu.add_checksum()
+    return primary_hdu
+
 
 def _resolve_model(model_name):
     if isinstance(model_name, str):    
@@ -345,6 +443,8 @@ def _resolve_model(model_name):
     else:
         return model_name
 
+def _get_extname(instrument, observatory):
+    return f"{instrument}/{observatory}"
 
 def _get_summary_path(basename):
     return expand_path(f"$MWM_ASTRA/{__version__}/summary/{basename}")

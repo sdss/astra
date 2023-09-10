@@ -3,12 +3,12 @@ import numpy as np
 from datetime import datetime
 from tempfile import mkdtemp
 from typing import Optional, Iterable, List, Tuple, Callable, Union
-from peewee import JOIN
+from peewee import JOIN, fn
 from tqdm import tqdm
 
 from astra import __version__, task
 from astra.utils import log, expand_path
-from astra.models.aspcap import ASPCAP, FerreStellarParameters, FerreChemicalAbundances
+from astra.models.aspcap import ASPCAP, FerreCoarse, FerreStellarParameters, FerreChemicalAbundances
 from astra.models.spectrum import Spectrum, SpectrumMixin
 from astra.pipelines.aspcap.initial import get_initial_guesses
 from astra.pipelines.aspcap.coarse import coarse_stellar_parameters
@@ -152,17 +152,23 @@ def create_aspcap_results(
     if chemical_abundance_results is None:
         chemical_abundance_results = FerreChemicalAbundances.select()
 
-    data, t_elapsed = ({}, {})    
+    t_coarse = dict(
+        FerreCoarse
+        .select(
+            FerreCoarse.spectrum_id,
+            fn.sum(FerreCoarse.t_elapsed)
+        )
+        .group_by(FerreCoarse.spectrum_id)
+        .tuples()
+    )
 
-    print("ont yet including time from upstream")
-    print("not yet fully including flags from upstream")    
+    data, t_elapsed = ({}, {})
 
     for result in tqdm(stellar_parameter_results, desc="Collecting stellar parameters"):
         data.setdefault(result.task_id, {})
 
-        # TODO: Include time from upstream tasks.
         t_elapsed.setdefault(result.task_id, 0)
-        t_elapsed[result.task_id] += result.t_elapsed
+        t_elapsed[result.task_id] += result.t_elapsed + t_coarse.get(result.spectrum_id, 0)
         
         v_sini = 10**(result.log10_v_sini or np.nan)
         e_v_sini = (result.e_log10_v_sini or np.nan) * v_sini * np.log(10)
@@ -198,7 +204,7 @@ def create_aspcap_results(
             "interpolation_order": result.interpolation_order,
 
             "snr": result.snr,
-            "r_chi_sq": result.r_chi_sq,
+            "rchi2": result.rchi2,
             "ferre_flags": result.ferre_flags,
             "ferre_log_snr_sq": result.ferre_log_snr_sq,            
             "stellar_parameters_task_id": result.task_id,
@@ -260,7 +266,7 @@ def create_aspcap_results(
             
         data[result.upstream_id].update({
             f"{label}_task_id": result.task_id,
-            f"{label}_r_chi_sq": result.r_chi_sq,
+            f"{label}_rchi2": result.rchi2,
             f"{label}": value,
             f"e_{label}": e_value,
             f"{label}_flags": flags,
