@@ -3,12 +3,14 @@ import warnings
 from itertools import combinations
 
 def _get_glossary_parts(value, glossary, delimiter="_"):
+    # Just get the glossary terms once so that we don't cause many "No glossary definition for XXX"
+    terms = list(filter(lambda x: not x.startswith(delimiter), Glossary.__dict__.keys()))
     parts = value.split(delimiter)
     matches = []
     for i, j in combinations(range(len(parts)), 2):
         if i > 0: break
         a, b = (delimiter.join(parts[i:j]), delimiter.join(parts[j:]))
-        if hasattr(glossary, a) and hasattr(glossary, b):
+        if a in terms and b in terms:
             matches.append((a, b))    
     if len(matches) == 0:
         raise ValueError(f"No matches found for '{value}'")
@@ -140,8 +142,8 @@ class Glossary(BaseGlossary):
     carton_0 = "First carton for source (see documentation)"
     carton_flags = "Carton bit field."
 
-
-
+    created = "Datetime when task record was created"
+    t_overhead = "Estimated core-time spent in overhads [s]"
     t_elapsed = "Core-time elapsed on this analysis [s]"
     tag = "Experiment tag for this result"
 
@@ -153,16 +155,17 @@ class Glossary(BaseGlossary):
     release = "The SDSS release name."
 
     # BOSS specFull keyword arguments
-    run2d = "BOSS data reduction pipeline version."
-    mjd = "Modified Julian Date of observation."
-    fieldid = "Field identifier."
-    catalogid = "Catalog identifier used to target the source."
+    run2d = "BOSS data reduction pipeline version"
+    mjd = "Modified Julian Date of observation"
+    fieldid = "Field identifier"
+    catalogid = "Catalog identifier used to target the source"
 
     # Pixel arrays
-    wavelength = "Wavelength in a vacuum [Angstrom]"
+    wavelength = "Wavelength (vacuum) [Angstrom]"
     flux = "Flux [10^-17 erg/s/cm^2/Angstrom]"
-    ivar = "Inverse variance of flux [1/(10^-17 erg/s/cm^2/Angstrom)^2]"
-    pixel_flags = "Pixel-level bitfield flags (see documentation)."
+    ivar = "Inverse variance of flux values"
+    wresl = "Spectral resolution [Angstrom]"
+    pixel_flags = "Pixel-level quality flags (see documentation)"
 
 
     spectrum_flags = "Data reduction pipeline flags for this spectrum."
@@ -178,7 +181,7 @@ class Glossary(BaseGlossary):
     airtemp = "Air temperature [C]"
     dewpoint = "Dew point temperature [C]"
     humidity = "Humidity [%]"
-    pressure = "Air pressure [inch Hg?]"
+    pressure = "Air pressure [millibar]"
     moon_phase_mean = "Mean phase of the moon"
     moon_dist_mean = "Mean sky distance to the moon [deg]"
     seeing = "Median seeing conditions [arcsecond]"
@@ -195,7 +198,7 @@ class Glossary(BaseGlossary):
     nres = "Sinc bandlimit [pixel/resolution element]"
     filtsize = "Median filter size for pseudo-continuum [pixel]"
     normsize = "Gaussian width for pseudo-continuum [pixel]"
-    conscale = "Scale by pseudo-continuuwhen stacking"
+    conscale = "Scale by pseudo-continuum when stacking"
     v_boss = "Version of the BOSS ICC"
     v_jaeger = "Version of Jaeger"
     v_kaiju = "Version of Kaiju"
@@ -227,11 +230,16 @@ class Glossary(BaseGlossary):
     delta_dec = "Offset in declination [arcsecond]"
     date_obs = "Observation date (UTC)"
 
+
+    v_rad = "Barycentric rest frame radial velocity [km/s]"
+    e_v_rad = "Error on radial velocity [km/s]"
+
+
     # apVisit keywords
     apred = "APOGEE data reduction pipeline version."
     plate = "Plate number of observation."
     telescope = "Telescope used to observe the source."
-    field = "Field name."
+    field = "Field identifier"
     fiber = "Fiber number."
     prefix = "Short prefix used for DR17 apVisit files."    
 
@@ -318,7 +326,6 @@ class Glossary(BaseGlossary):
     obj = "Object name"
     telescope = "Short telescope name"
     healpix = "HEALPix (128 side)"
-    field = "Field name"
     prefix = "Prefix used to separate SDSS 4 north/south"
     plate = "Plate identifier"
     mjd = "Modified Julian date of observation"

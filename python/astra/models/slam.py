@@ -24,15 +24,15 @@ class Slam(BaseModel, PipelineOutputMixin):
 
     """A result from the 'Stellar Labels Machine'."""
 
-    sdss_id = ForeignKeyField(Source, index=True, help_text=Glossary.sdss_id)
+    sdss_id = ForeignKeyField(Source, null=True, index=True, lazy_load=False, help_text=Glossary.sdss_id)
     spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False, help_text=Glossary.spectrum_id)
     
     #> Astra Metadata
     task_id = AutoField(help_text=Glossary.task_id)
     v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
-    created = DateTimeField(default=datetime.datetime.now)
+    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
     t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
-    t_overhead = FloatField(null=True)
+    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
     tag = TextField(default="", index=True, help_text=Glossary.tag)
     
     #> Stellar Labels

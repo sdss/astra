@@ -46,7 +46,11 @@ def run(packages, install_requires):
                 "NN_normalized_spectra.npz",
             ],
         },
-        scripts=["bin/astra"],
+        scripts=[
+            "bin/astra",
+            "bin/ferre_chaos_monkey",
+            "bin/ferre_interpolate_unnormalized_model_flux"
+        ],
         # entry_points = {
         #    'console_scripts': [
         #        'apogeenet=astra.contrib.apogeenet.cli:main',

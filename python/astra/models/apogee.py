@@ -290,20 +290,25 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         backref="apogee_visit_spectra_in_apstar",
     )
 
-    #> Spectrum Identifiers
-    spectrum_id = ForeignKeyField(
-        Spectrum,
-        index=True,
-        lazy_load=False,
-        primary_key=True,
-        default=Spectrum.create,
-        help_text=Glossary.spectrum_id
+    # TODO: put this somewhere else?
+    #> Spectral Data
+    flux = PixelArray(
+        ext=1,
+        transform=transform,
+        help_text=Glossary.flux,
+        pixels=8575
     )
-    drp_spectrum_id = ForeignKeyField(
-        ApogeeVisitSpectrum,
-        lazy_load=False,
-        field=ApogeeVisitSpectrum.spectrum_id,
-        help_text=Glossary.drp_spectrum_id
+    ivar = PixelArray(
+        ext=2,
+        transform=lambda *a, **k: _transform_err_to_ivar(transform(*a, **k)),
+        help_text=Glossary.ivar,
+        pixels=8575
+    )
+    pixel_flags = PixelArray(
+        ext=3,
+        transform=transform,
+        help_text=Glossary.pixel_flags,
+        pixels=8575
     )
 
     #> Data Product Keywords
@@ -320,6 +325,22 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
     mjd = IntegerField(help_text=Glossary.mjd)
     fiber = IntegerField(help_text=Glossary.fiber)
     #reduction = TextField(default="", help_text="Like `obj`. Only used for apo1m spectra") # only used for DR17 apo1m spectra
+
+    #> Spectrum Identifiers
+    spectrum_id = ForeignKeyField(
+        Spectrum,
+        index=True,
+        lazy_load=False,
+        primary_key=True,
+        default=Spectrum.create,
+        help_text=Glossary.spectrum_id
+    )
+    drp_spectrum_id = ForeignKeyField(
+        ApogeeVisitSpectrum,
+        lazy_load=False,
+        field=ApogeeVisitSpectrum.spectrum_id,
+        help_text=Glossary.drp_spectrum_id
+    )
 
     @property
     def wavelength(self):
@@ -342,20 +363,8 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
             **kwds
         )
 
+    
 
-    # TODO: put this somewhere else?
-    flux = PixelArray(
-        ext=1,
-        transform=transform
-    )
-    ivar = PixelArray(
-        ext=2,
-        transform=lambda *a, **k: _transform_err_to_ivar(transform(*a, **k))
-    )
-    pixel_flags = PixelArray(
-        ext=3,
-        transform=transform
-    )
 
     class Meta:
         indexes = (
@@ -429,15 +438,18 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
 
     flux = PixelArray(
         ext=1,
-        transform=_transform_coadded_spectrum
+        transform=_transform_coadded_spectrum,
+        pixels=8575
     )
     ivar = PixelArray(
         ext=2,
-        transform=lambda *a, **k: _transform_err_to_ivar(_transform_coadded_spectrum(*a, **k))
+        transform=lambda *a, **k: _transform_err_to_ivar(_transform_coadded_spectrum(*a, **k)),
+        pixels=8575
     )
     pixel_flags = PixelArray(
         ext=3,
-        transform=_transform_coadded_spectrum
+        transform=_transform_coadded_spectrum,
+        pixels=8575
     )
 
     @property

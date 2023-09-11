@@ -7,7 +7,9 @@ from time import time
 def get_logger(kwargs=None):
     logger = _get_logger("astra", **(kwargs or {}))
     # https://stackoverflow.com/questions/6729268/log-messages-appearing-twice-with-python-logging
-    logger.propagate = False
+    # This used to cause lots of problems where logs would appear twice in Airflow / stdout.
+    # But by setting it to false, I don't get *any* logs in Airflow.
+    logger.propagate = True
     handler, *_ = logger.handlers
     handler.setFormatter(
         StreamFormatter("%(asctime)s %(message)s")
