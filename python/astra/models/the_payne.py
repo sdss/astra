@@ -18,14 +18,19 @@ class ThePayne(BaseModel, PipelineOutputMixin):
 
     """A result from The Payne."""
     
-    source_id = ForeignKeyField(Source, index=True)
-    spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
+    source_id = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
+    spectrum_id = ForeignKeyField(
+        Spectrum, 
+        index=True, 
+        lazy_load=False,
+        help_text="Spectrum identifier"
+    )
     
     #> Astra Metadata
-    task_id = AutoField()
-    v_astra = TextField(default=__version__)
-    t_elapsed = FloatField(null=True)
-    tag = TextField(default="", index=True)
+    task_id = AutoField(help_text="Task identifier")
+    v_astra = TextField(default=__version__, help_text="Astra version")
+    t_elapsed = FloatField(null=True, help_text="Estimated task elapsed time [s]")
+    tag = TextField(default="", index=True, help_text="Tag name to segment Astra experiments")
     
     #> Task Parameters
     model_path = TextField(default="")
@@ -90,8 +95,7 @@ class ThePayne(BaseModel, PipelineOutputMixin):
     #> Summary Statistics
     chi_sq = FloatField(null=True)
     reduced_chi_sq = FloatField(null=True)
-    result_flags = BitField(default=0)
-    
+    result_flags = BitField(default=0, help_text="Flags describing the results")    
 
     #> Correlation Coefficients
     rho_teff_logg = FloatField(null=True)

@@ -53,6 +53,7 @@ def the_payne(
         #    continuum = None
         continuum = None
 
+        print('*'*6, 'starting estimate_labels', '*'*6)
         result = estimate_labels( 
             spectrum,
             *args,
@@ -62,5 +63,14 @@ def the_payne(
             opt_tolerance=opt_tolerance,
             continuum=continuum,
         )
+        print('*'*6, 'finished estimate_labels', '*'*6)
         # if `result` is an instance of `ThePayne(...)` then you can just yield it here
-        yield result
+
+        # create a new instance of `ThePayne` with the results
+        output = ThePayne()
+
+        # set the attributes of the new instance
+        for kwrds in result:
+            setattr(output, kwrds, result[kwrds])
+
+        yield output

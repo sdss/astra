@@ -192,10 +192,15 @@ def estimate_labels(
             #meta_results.append(meta)
 
         print(result)
+        return result
 
-        for kwds in result:
-            yield ThePayne(**kwds)
+        #output = ThePayne()
 
+        #for kwds in result:
+        #    setattr(output, kwds, result[kwds])
+        #    #return ThePayne(**kwds)
+
+        #yield output
     #return (results, meta_results)
 
 
