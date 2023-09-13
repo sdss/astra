@@ -30,7 +30,7 @@ def lineplot(wl, fl, ivar, corvmodel, params, gap = 0.3, printparams = True,
                                      corvmodel.edges[line])
         if len(cwl) == 0:
             continue
-        
+
         _, cmodel, _ = cont_norm_line(wl, model, model, 
                                      corvmodel.centres[line],
                                      corvmodel.windows[line],
@@ -53,12 +53,12 @@ def lineplot(wl, fl, ivar, corvmodel, params, gap = 0.3, printparams = True,
     
         plt.text(0.97, 0.05, 
                  r'$T_{\mathrm{eff}} = %.0f \pm %.0f\ K$' % 
-                 (params['teff'].value, params['teff'].stderr),
+                 (params['teff'].value, params['teff'].stderr or np.nan),
     			transform = plt.gca().transAxes, fontsize = 14, ha = 'right')
     		
         plt.text(0.97, 0.12, 
                  r'$\log{g} = %.2f \pm %.2f $' % 
-                 (params['logg'].value, params['logg'].stderr),
+                 (params['logg'].value, params['logg'].stderr or np.nan),
     			transform = plt.gca().transAxes, fontsize = 14, ha = 'right')
     				 
         plt.text(0.97, 0.19, r'$\chi_r^2$ = %.2f' % (redchi),
