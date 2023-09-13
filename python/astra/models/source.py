@@ -386,7 +386,7 @@ class Source(BaseModel):
     rms_f4_5 = FloatField(null=True, help_text="RMS deviation of individual detections from final flux [mJy]")
     sqf_4_5 = BitField(default=0, help_text="Source quality flag for IRAC band 4.5 micron")
     mf_4_5 = BitField(default=0, help_text="Flux calculation method flag")
-    csf = IntegerField(default=0, help_text="Close source flag")
+    csf = BitField(default=0, help_text="Close source flag")
     #< See https://irsa.ipac.caltech.edu/data/SPITZER/GLIMPSE/gator_docs/GLIMPSE_colDescriptions.html
 
     flag_glimpse_poor_dark_pixel_current = sqf_4_5.flag(2**0, "Poor pixels in dark current")

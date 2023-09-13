@@ -15,7 +15,7 @@ from functools import cached_property
 
 from astra import __version__
 from astra.models.base import BaseModel
-from astra.models.fields import BitField
+from astra.models.fields import BitField, PixelArray, BasePixelArrayAccessor
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
@@ -257,10 +257,11 @@ class FerreStellarParameters(BaseModel, FerreOutputMixin):
     #> Astra Metadata
     task_id = AutoField()
     v_astra = TextField(default=__version__)
-    created = DateTimeField(default=datetime.datetime.now)
+    #created = DateTimeField(default=datetime.datetime.now)
     t_elapsed = FloatField(null=True)
-    t_overhead = FloatField(null=True)
+    #t_overhead = FloatField(null=True)
     tag = TextField(default="", index=True)
+    print("FerreStellarParameters needs created and t_overhead")
 
     #> Grid and Working Directory
     pwd = TextField(default="")
@@ -391,10 +392,11 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
     #> Astra Metadata
     task_id = AutoField()
     v_astra = TextField(default=__version__)
-    created = DateTimeField(default=datetime.datetime.now)
+    #created = DateTimeField(default=datetime.datetime.now)
     t_elapsed = FloatField(null=True)
-    t_overhead = FloatField(null=True)
+    #t_overhead = FloatField(null=True)
     tag = TextField(default="", index=True)
+    print("FerreChemicalAbundances needs created and t_overhead")
 
     #> Grid and Working Directory
     pwd = TextField(default="")
@@ -515,12 +517,57 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
 if __version__ != "0.4.0":
     print("ANDY ADD created AND t_overhead to ASPCAP models")
 
+class UpstreamFerrePixelArrayAccessor(BasePixelArrayAccessor):
+    
+    def __get__(self, instance, instance_type=None):
+        if instance is not None:
+            try:
+                return instance.__pixel_data__[self.name]
+            except (AttributeError, KeyError):
+                # Load them all.
+                instance.__pixel_data__ = {}
+
+                # TODO: THIS IS SO SLOW AND SUCH A HACK
+                upstream = FerreStellarParameters.get(instance.stellar_parameters_task_id)
+                instance.__pixel_data__.setdefault("model_flux", upstream.unmask(upstream.model_flux))
+                instance.__pixel_data__.setdefault("continuum", upstream.unmask(upstream.ferre_flux / upstream.rectified_flux))
+                
+                return instance.__pixel_data__[self.name]
+
+        return self.field
+
+
+
+class MG_HFerrePixelArrayAccessor(BasePixelArrayAccessor):
+    
+    def __get__(self, instance, instance_type=None):
+        if instance is not None:
+            try:
+                return instance.__pixel_data__[self.name]
+            except (AttributeError, KeyError):
+                # Load them all.
+                instance.__pixel_data__ = {}
+
+                # TODO: THIS IS SO SLOW AND SUCH A HACK
+                upstream = FerreChemicalAbundances.get(instance.ti_h_task_id)
+                try:
+                    instance.__pixel_data__.setdefault("model_flux", upstream.unmask(upstream.model_flux))
+                    instance.__pixel_data__.setdefault("continuum", upstream.unmask(upstream.ferre_flux / upstream.rectified_flux))
+                except:
+                    instance.__pixel_data__["model_flux"] = np.nan * np.ones(8575)
+                    instance.__pixel_data__["continuum"] = np.nan * np.ones(8575)
+
+                return instance.__pixel_data__[self.name]
+
+        return self.field
+
+
 class ASPCAP(BaseModel, PipelineOutputMixin):
 
     """ APOGEE Stellar Parameter and Chemical Abundances Pipeline (ASPCAP) """
 
     source_id = ForeignKeyField(Source, index=True, lazy_load=False)
-    spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False, help_text=Glossary.spectrum_id)
+    spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False, help_text=Glossary.spectrum_id)    
     
     #> Astra Metadata
     task_id = AutoField(help_text=Glossary.task_id)
@@ -530,6 +577,12 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     #t_overhead = FloatField(null=True)
     tag = TextField(default="", index=True, help_text=Glossary.tag)
     
+    #> Spectral Data
+    model_flux = PixelArray(accessor_class=UpstreamFerrePixelArrayAccessor, pixels=8575)
+    continuum = PixelArray(accessor_class=UpstreamFerrePixelArrayAccessor, pixels=8575)    
+    # TODO: Add other model fluxes
+    #ti_hmodel_flux = PixelArray(accessor_class=MG_HFerrePixelArrayAccessor)
+
     #> Stellar Parameters
     teff = FloatField(null=True, help_text=Glossary.teff)
     e_teff = FloatField(null=True, help_text=Glossary.e_teff)

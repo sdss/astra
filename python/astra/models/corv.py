@@ -1,10 +1,7 @@
 import datetime
 from peewee import (
     FloatField,
-    BooleanField,
     DateTimeField,
-    BigIntegerField,
-    IntegerField,
     TextField,
     ForeignKeyField,
     AutoField

@@ -40,7 +40,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     wavelength = PixelArray(
         ext=1, 
         column_name="loglam", 
-        transform=lambda x: 10**x,
+        transform=lambda v, *a: 10**v,
         pixels=4648,
         help_text=Glossary.wavelength
     )

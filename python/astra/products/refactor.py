@@ -408,6 +408,12 @@ def create_mwm_visit_and_star_products(
 
     hdu_primary = create_source_primary_hdu(source)
 
+    # TODO: Add log-lambda keywords
+    # TODO: Add EXTNAME cards for header
+    # TODO: Add continuum pixel array and NMF keywords
+    # TODO: Add "in_stack" 
+    # TODO: Add 'dithered', 'nvisits', 'fps' to star-level
+
     hdu_boss_apo = create_spectrum_hdu(
         BossVisitSpectrum,
         where=(
@@ -443,7 +449,7 @@ def create_mwm_visit_and_star_products(
         &   (ApogeeVisitSpectrum.telescope.startswith("lco"))
         &   (ApogeeVisitSpectrum.apred == apred)
         )
-    )    
+    )
 
     hdu_list = fits.HDUList([
         hdu_primary,
