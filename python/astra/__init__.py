@@ -1,13 +1,13 @@
-from inspect import isgeneratorfunction, getfullargspec
+from inspect import isgeneratorfunction
 from decorator import decorator
-from peewee import chunked, IntegrityError, SqliteDatabase
+from peewee import IntegrityError, SqliteDatabase
 from playhouse.sqlite_ext import SqliteExtDatabase
 from sdsstools.configuration import get_config
 
-from astra.utils import log, Timer, flatten
+from astra.utils import log, Timer
 
 NAME = "astra"
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 @decorator
 def task(function, *args, **kwargs):
