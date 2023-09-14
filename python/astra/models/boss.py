@@ -1,4 +1,5 @@
 from peewee import (
+    AutoField,
     FloatField,
     BooleanField,
     DateTimeField,
@@ -14,26 +15,30 @@ from astra.models.fields import PixelArray, BitField
 
 from astra.glossary import Glossary
 
-xcsao_glossary = Glossary("XCSAO")
-
 
 class BossVisitSpectrum(BaseModel, SpectrumMixin):
 
     """A BOSS visit spectrum, where a visit is defined by spectra taken on a single MJD."""
 
+    PIXELS = 4648
+
+    pk = AutoField()
+
     source = ForeignKeyField(
         Source,
         null=True,
         index=True,
+        column_name="source_pk",
         backref="boss_visit_spectra"
     )
 
     #> Spectrum identifier
-    spectrum_id = ForeignKeyField(
+    spectrum_pk = ForeignKeyField(
         Spectrum,
         index=True, 
+        unique=True,
         lazy_load=False,
-        help_text=Glossary.spectrum_id,
+        help_text=Glossary.spectrum_pk,
     )
 
     #> Spectral data
@@ -41,16 +46,17 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
         ext=1, 
         column_name="loglam", 
         transform=lambda v, *a: 10**v,
-        pixels=4648,
+        pixels=PIXELS,
         help_text=Glossary.wavelength
     )
-    flux = PixelArray(ext=1, pixels=4648, help_text=Glossary.flux)
-    ivar = PixelArray(ext=1, pixels=4648, help_text=Glossary.ivar)
-    wresl = PixelArray(ext=1, pixels=4648, help_text=Glossary.wresl) # TODO: No help text yet!
-    pixel_flags = PixelArray(ext=1, column_name="or_mask", pixels=4648, help_text=Glossary.pixel_flags)
+    flux = PixelArray(ext=1, pixels=PIXELS, help_text=Glossary.flux)
+    ivar = PixelArray(ext=1, pixels=PIXELS, help_text=Glossary.ivar)
+    wresl = PixelArray(ext=1, pixels=PIXELS, help_text=Glossary.wresl)
+    pixel_flags = PixelArray(ext=1, column_name="or_mask", pixels=PIXELS, help_text=Glossary.pixel_flags)
 
     #> Data Product Keywords
     release = TextField(help_text=Glossary.release)
+    filetype = TextField(default="specFull", help_text=Glossary.filetype)
     run2d = TextField(help_text=Glossary.run2d)
     mjd = IntegerField(help_text=Glossary.mjd)
     fieldid = IntegerField(help_text=Glossary.fieldid)
@@ -114,14 +120,14 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     zwarning = BitField(default=0, help_text="BOSS DRP warning flags") # TODO: rename to _flags?
 
     #> XCSAO
-    xcsao_v_rad = FloatField(null=True, help_text=xcsao_glossary.v_rad)
-    xcsao_e_v_rad = FloatField(null=True, help_text=xcsao_glossary.e_v_rad)
-    xcsao_teff = FloatField(null=True, help_text=xcsao_glossary.teff)
-    xcsao_e_teff = FloatField(null=True, help_text=xcsao_glossary.e_teff)
-    xcsao_logg = FloatField(null=True, help_text=xcsao_glossary.logg)
-    xcsao_e_logg = FloatField(null=True, help_text=xcsao_glossary.e_logg)
-    xcsao_fe_h = FloatField(null=True, help_text=xcsao_glossary.fe_h)
-    xcsao_e_fe_h = FloatField(null=True, help_text=xcsao_glossary.e_fe_h)
+    xcsao_v_rad = FloatField(null=True, help_text=Glossary.v_rad)
+    xcsao_e_v_rad = FloatField(null=True, help_text=Glossary.e_v_rad)
+    xcsao_teff = FloatField(null=True, help_text=Glossary.teff)
+    xcsao_e_teff = FloatField(null=True, help_text=Glossary.e_teff)
+    xcsao_logg = FloatField(null=True, help_text=Glossary.logg)
+    xcsao_e_logg = FloatField(null=True, help_text=Glossary.e_logg)
+    xcsao_fe_h = FloatField(null=True, help_text=Glossary.fe_h)
+    xcsao_e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
     xcsao_rxc = FloatField(null=True, help_text="Cross-correlation R-value (1979AJ.....84.1511T)")
 
     # gri_gaia_transform

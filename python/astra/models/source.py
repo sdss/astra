@@ -25,25 +25,30 @@ class Source(BaseModel):
     """ An astronomical source. """
 
     #> Identifiers
-    id = AutoField(primary_key=True, help_text="Astra source identifier")
+    pk = AutoField(primary_key=True, help_text=Glossary.pk)
     
     sdss_id = BigIntegerField(index=True, null=True, help_text="SDSS unique identifier")
     healpix = IntegerField(null=True, help_text="HEALPix (128 side)")
     # The following identifiers should be unique, but I'm not convinced it's implemented properly yet.
     gaia_dr2_source_id = BigIntegerField(null=True, help_text="Gaia DR2 source identifier")
     gaia_dr3_source_id = BigIntegerField(null=True, help_text="Gaia DR3 source identifier")
-    sdss4_apogee_id = TextField(index=True, null=True, unique=True, help_text="SDSS-4 DR17 APOGEE identifier")
+    sdss4_apogee_id = TextField(index=True, null=True, help_text="SDSS-4 DR17 APOGEE identifier")
     tic_v8_id = BigIntegerField(null=True, help_text="TESS Input Catalog (v8) identifier")
     
     #> Targeting provenance 
-    sdss5_catalogid_v1 = BigIntegerField(null=True, help_text="SDSS catalog identifier")
-    version_id = IntegerField(null=True, help_text="SDSS catalog version for targeting")
-    lead = TextField(null=True, help_text="Lead catalog used for cross-match")
     carton_0 = TextField(default="", help_text="Highest priority carton name")
+    lead = TextField(null=True, help_text="Lead catalog used for cross-match")
+    version_id = IntegerField(null=True, help_text="SDSS catalog version for targeting")
+    catalogid = BigIntegerField(null=True, help_text=Glossary.catalogid)
+    catalogid21 = BigIntegerField(null=True, help_text=Glossary.catalogid21)
+    catalogid25 = BigIntegerField(null=True, help_text=Glossary.catalogid25)
+    catalogid31 = BigIntegerField(null=True, help_text=Glossary.catalogid31)
+    n_associated = IntegerField(null=True, help_text=Glossary.n_associated)
+    n_neighborhood = IntegerField(default=-1, help_text="Gaia sources brighter than G=X within Y\"") # TODO: get numbers from JAJ
 
     # Only do carton_flags if we have a postgresql database.
     if isinstance(database, PostgresqlDatabase):
-        carton_flags = BigBitField(null=True)
+        sdss5_target_flags = BigBitField(null=True, help_text=Glossary.sdss5_target_flags)
 
     sdss4_apogee_target1_flags = BitField(default=0, help_text="SDSS4 APOGEE1 targeting flags (1/2)")
     sdss4_apogee_target2_flags = BitField(default=0, help_text="SDSS4 APOGEE1 targeting flags (2/2)")
@@ -52,9 +57,6 @@ class Source(BaseModel):
     sdss4_apogee2_target3_flags = BitField(default=0, help_text="SDSS4 APOGEE2 targeting flags (3/3)")
     sdss4_apogee_member_flags = BitField(default=0, help_text="SDSS4 likely cluster/galaxy member flags")
     sdss4_apogee_extra_target_flags = BitField(default=0, help_text="SDSS4 target info (aka EXTRATARG)")
-
-    # Define flags for all bit fields
-    # TODO: Should we only bind these flags when asked? Do a speed time comparison of Source() and `import Source` with and without them.
     
     # sdss4_apogee_target1_flags
     flag_sdss4_apogee_faint = sdss4_apogee_target1_flags.flag(2**0, help_text="Star selected in faint bin of its cohort")
@@ -380,14 +382,14 @@ class Source(BaseModel):
     flag_unwise_w2_no_aggressive_deblend = w2aflags.flag(2**6, "Sources in this pixel will not be aggressively deblended")
     flag_unwise_w2_candidate_sources_must_be_sharp = w2aflags.flag(2**7, "Candidate sources in this pixel must be \"sharp\" to be optimized")
 
-    #> ALLGLIMPSE Photometry
+    #> GLIMPSE Photometry
     mag4_5 = FloatField(null=True, help_text="IRAC band 4.5 micron magnitude [mag]")
     d4_5m = FloatField(null=True, help_text="Error on IRAC band 4.5 micron magnitude [mag]")
     rms_f4_5 = FloatField(null=True, help_text="RMS deviation of individual detections from final flux [mJy]")
     sqf_4_5 = BitField(default=0, help_text="Source quality flag for IRAC band 4.5 micron")
-    mf_4_5 = BitField(default=0, help_text="Flux calculation method flag")
+    mf4_5 = BitField(default=0, help_text="Flux calculation method flag")
     csf = BitField(default=0, help_text="Close source flag")
-    #< See https://irsa.ipac.caltech.edu/data/SPITZER/GLIMPSE/gator_docs/GLIMPSE_colDescriptions.html
+    #< See https://irsa.ipac.caltech.edu/data/SPITZER/GLIMPSE/gator_docs/
 
     flag_glimpse_poor_dark_pixel_current = sqf_4_5.flag(2**0, "Poor pixels in dark current")
     flag_glimpse_flat_field_questionable = sqf_4_5.flag(2**1, "Flat field applied using questionable value")
@@ -418,7 +420,6 @@ class Source(BaseModel):
     flag_glimpse_5_sources_within_0p5_and_1_arcsecond = csf.flag(2**5, "5 sources in GLIMPSE within 0.5\" and 1.0\" of the source")
     flag_glimpse_6_sources_within_0p5_arcsecond = csf.flag(2**6, "6 sources in GLIMPSE within 0.5\" of this source")
 
-
     #> Gaia XP Stellar Parameters (Zhang, Green & Rix 2023)
     zgr_teff = FloatField(null=True, help_text=Glossary.teff)
     zgr_e_teff = FloatField(null=True, help_text=Glossary.e_teff)
@@ -426,18 +427,18 @@ class Source(BaseModel):
     zgr_e_logg = FloatField(null=True, help_text=Glossary.e_logg)
     zgr_fe_h = FloatField(null=True, help_text=Glossary.fe_h)
     zgr_e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
-    zgr_e = FloatField(null=True, help_text="Extinction")
-    zgr_e_e = FloatField(null=True, help_text="Error on extinction")
+    zgr_e = FloatField(null=True, help_text="Extinction [mag]")
+    zgr_e_e = FloatField(null=True, help_text="Error on extinction [mag]")
     zgr_plx = FloatField(null=True, help_text=Glossary.plx)
     zgr_e_plx = FloatField(null=True, help_text=Glossary.e_plx)
     zgr_teff_confidence = FloatField(null=True, help_text="Confidence estimate in TEFF")
     zgr_logg_confidence = FloatField(null=True, help_text="Confidence estimate in LOGG")
     zgr_fe_h_confidence = FloatField(null=True, help_text="Confidence estimate in FE_H")
+    zgr_ln_prior = FloatField(null=True, help_text="Log prior probability")
+    zgr_chi2 = FloatField(null=True, help_text=Glossary.chi2)
     zgr_quality_flags = BitField(default=0, help_text="Quality flags")
-    #< See https://zenodo.org/record/7811871
+    # See https://zenodo.org/record/7811871
 
-    # Neighborhood
-    #neighbor = IntegerField(default=-1, help_text="Bright Gaia neighbours within 5\"")
 
     @property
     def cartons(self):

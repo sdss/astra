@@ -73,6 +73,8 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
 
     """An APOGEE visit spectrum, stored in an apVisit data product."""
 
+    pk = AutoField()
+    
     # Won't appear in a header group because it is first referenced in `Source`.
     source = ForeignKeyField(
         Source, 
@@ -81,20 +83,21 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         # own checks to make sure that spectra and sources are linked.
         null=True, 
         index=True,
+        column_name="source_pk",
         backref="apogee_visit_spectra",
     )
 
     # A decision was made here.
 
-    # I want the `spectrum_id` to be unique across tables. I don't want to run
-    # a single INSERT statement to create `spectrum_id` each time, because that
+    # I want the `spectrum_pk` to be unique across tables. I don't want to run
+    # a single INSERT statement to create `spectrum_pk` each time, because that
     # is the limiting speed factor when we have bulk inserts of spectra. If I
-    # pre-allocate the `spectrum_id` values then ends up having big gaps, and I
-    # later have to remove and set the sequence value. If I allow `spectrum_id`
+    # pre-allocate the `spectrum_pk` values then ends up having big gaps, and I
+    # later have to remove and set the sequence value. If I allow `spectrum_pk`
     # to be null then that introduces risky behaviour for the user (since they
-    # would need to 'remember' to create a `spectrum_id` after), and it muddles
+    # would need to 'remember' to create a `spectrum_pk` after), and it muddles
     # the primary key, since we'd need an `AutoField()` for primary key, which
-    # is different from `spectrum_id`. And not all of these solutions are
+    # is different from `spectrum_pk`. And not all of these solutions are
     # consistent between PostgreSQL and SQLite.
 
     # I'm going to provide a default function of `Spectrum.create`, and then
@@ -106,28 +109,29 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     
     # Note that this explicitly breaks one of the 'Lessons learned from IPL-2'!
 
-    #> Spectrum Identifiers
-    spectrum_id = ForeignKeyField(
+    #> Identifiers
+    spectrum_pk = ForeignKeyField(
         Spectrum,
+        null=True,
         index=True,
+        unique=True,
         lazy_load=False,
-        primary_key=True,
-        default=Spectrum.create
     )
-    input_catalogid = BigIntegerField(index=True, null=True, help_text="SDSS input catalog identifier")
+    catalogid = BigIntegerField(index=True, null=True, help_text="SDSS input catalog identifier")
     visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `visit` primary key")
     rv_visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `rv_visit` primary key")
 
     #> Data Product Keywords
-    release = TextField(index=True, help_text="SDSS release")
-    apred = TextField(index=True, help_text="APOGEE reduction pipeline")
-    plate = TextField(index=True, help_text="Plate") # most are integers, but not all!
-    telescope = TextField(index=True, help_text="Short telescope name")
-    fiber = IntegerField(index=True, help_text="Fiber number")
-    mjd = IntegerField(index=True, help_text="Modified Julian date of observation")
-    field = TextField(index=True, help_text="Field name")
-    prefix = TextField(help_text="Prefix used to separate SDSS 4 north/south spectra")
-    reduction = TextField(default="", help_text="Like `obj`. Only used for apo1m spectra") # only used for DR17 apo1m spectra
+    release = TextField(index=True, help_text=Glossary.release)
+    filetype = TextField(default="apStar", help_text=Glossary.filetype)
+    apred = TextField(index=True, help_text=Glossary.apred)
+    plate = TextField(index=True, help_text=Glossary.plate) # most are integers, but not all!
+    telescope = TextField(index=True, help_text=Glossary.telescope)
+    fiber = IntegerField(index=True, help_text=Glossary.fiber)
+    mjd = IntegerField(index=True, help_text=Glossary.mjd)
+    field = TextField(index=True, help_text=Glossary.field)
+    prefix = TextField(help_text=Glossary.prefix)
+    reduction = TextField(default="", help_text=Glossary.reduction) # only used for DR17 apo1m spectra
     # Note that above I use `default=''` instead of `null=True` because SQLite
     # seems to have some weird bug with using `null=True` on a key field. It
     # meant that `reduction` was being set to null even when I gave it values.
@@ -143,9 +147,9 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     # closest attribute, healpix, is a per-source attribute, but this is
     # *correctly* calculated from the CATALOG position (ra, dec) and not the
     # input position to the telescope.
-    obj = TextField(null=True, help_text="Object name")
+    obj = TextField(null=True, help_text=Glossary.obj)
 
-    #> Pixel arrays
+    #> Spectral Data
     wavelength = PixelArray(
         ext=4, 
         transform=lambda x, *_: x[::-1, ::-1],
@@ -165,23 +169,23 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     )
     
     #> Observing Conditions
-    date_obs = DateTimeField(null=True, help_text="Observation date")
-    jd = FloatField(null=True, help_text="Julian date")
-    exptime = FloatField(null=True, help_text="Exposure time [s]")
-    dithered = BooleanField(null=True, help_text="Was this observation dithered?")
+    date_obs = DateTimeField(null=True, help_text=Glossary.date_obs)
+    jd = FloatField(null=True, help_text=Glossary.jd)
+    exptime = FloatField(null=True, help_text=Glossary.exptime)
+    dithered = BooleanField(null=True, help_text=Glossary.dithered)
     
     #> Telescope Pointing
-    input_ra = FloatField(null=True, help_text="Input right ascension [deg]")
-    input_dec = FloatField(null=True, help_text="Input declination [deg]")
-    n_frames = IntegerField(null=True, help_text="Number of frames combined")
-    assigned = IntegerField(null=True)
-    on_target = IntegerField(null=True)
-    valid = IntegerField(null=True)
-    # TODO: add fps
+    input_ra = FloatField(null=True, help_text=Glossary.input_ra)
+    input_dec = FloatField(null=True, help_text=Glossary.input_dec)
+    n_frames = IntegerField(null=True, help_text=Glossary.n_frames)
+    assigned = IntegerField(null=True, help_text=Glossary.assigned)
+    on_target = IntegerField(null=True, help_text=Glossary.on_target)
+    valid = IntegerField(null=True, help_text=Glossary.valid)
+    fps = BooleanField(null=True, help_text=Glossary.fps)
     
     #> Statistics and Spectrum Quality 
-    snr = FloatField(null=True, help_text="S/N ratio reported by APOGEE DRP")
-    spectrum_flags = BitField(default=0, help_text="Spectrum quality flags")
+    snr = FloatField(null=True, help_text=Glossary.snr)
+    spectrum_flags = BitField(default=0, help_text=Glossary.spectrum_flags)
     
     # From https://github.com/sdss/apogee_drp/blob/630d3d45ecff840d49cf75ac2e8a31e22b543838/python/apogee_drp/utils/bitmask.py#L110
     flag_bad_pixels = spectrum_flags.flag(2**0, help_text="Spectrum has many bad pixels (>20%).")
@@ -203,27 +207,27 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     flag_rv_failure = spectrum_flags.flag(2**16, help_text="RV failure.")
 
     #> Radial Velocity (Doppler)
-    v_rad = FloatField(null=True, help_text="Barycentric rest frame radial velocity [km/s]")
-    v_rel = FloatField(null=True, help_text="Relative velocity [km/s]")
-    e_v_rel = FloatField(null=True, help_text="Error on relative velocity [km/s]")
-    bc = FloatField(null=True, help_text="Barycentric velocity correction applied [km/s]")
-    doppler_rchi2 = FloatField(null=True, help_text="Reduced \chi^2 reported by `Doppler`")
+    v_rad = FloatField(null=True, help_text=Glossary.v_rad)
+    v_rel = FloatField(null=True, help_text=Glossary.v_rel)
+    e_v_rel = FloatField(null=True, help_text=Glossary.e_v_rel)
+    bc = FloatField(null=True, help_text=Glossary.bc)
+    doppler_rchi2 = FloatField(null=True, help_text=Glossary.doppler_rchi2)
     
-    doppler_teff = FloatField(null=True, help_text="Effective temperature [K]")
-    doppler_e_teff = FloatField(null=True, help_text="Error on effective temperature [K]")
-    doppler_logg = FloatField(null=True, help_text="Surface gravity [cgs]")
-    doppler_e_logg = FloatField(null=True, help_text="Error on surface gravity [cgs]")
-    doppler_fe_h = FloatField(null=True, help_text="Metallicity [dex]")
-    doppler_e_fe_h = FloatField(null=True, help_text="Error on metallicity [dex]")
-    doppler_flags = BitField(default=0, help_text="APOGEE DRP spectrum quality flags") # TODO: this is actually STARFLAG from the DRP, re-name
+    doppler_teff = FloatField(null=True, help_text=Glossary.teff)
+    doppler_e_teff = FloatField(null=True, help_text=Glossary.e_teff)
+    doppler_logg = FloatField(null=True, help_text=Glossary.logg)
+    doppler_e_logg = FloatField(null=True, help_text=Glossary.e_logg)
+    doppler_fe_h = FloatField(null=True, help_text=Glossary.fe_h)
+    doppler_e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
+    doppler_flags = BitField(default=0, help_text="Doppler flags") # TODO: is this actually STARFLAG from the DRP?
 
     #> Radial Velocity (X-Correlation)
-    xcorr_v_rad = FloatField(null=True, help_text="Barycentric rest frame radial velocity [km/s]")
-    xcorr_v_rel = FloatField(null=True, help_text="Relative velocity [km/s]")
-    xcorr_e_v_rel = FloatField(null=True, help_text="Error on relative velocity [km/s]")
-    ccfwhm = FloatField(null=True, help_text="Cross-correlation function FWHM")
-    autofwhm = FloatField(null=True, help_text="Auto-correlation function FWHM")
-    n_components = IntegerField(null=True, help_text="Number of components in CCF")    
+    xcorr_v_rad = FloatField(null=True, help_text=Glossary.v_rad)
+    xcorr_v_rel = FloatField(null=True, help_text=Glossary.v_rel)
+    xcorr_e_v_rel = FloatField(null=True, help_text=Glossary.e_v_rel)
+    ccfwhm = FloatField(null=True, help_text=Glossary.ccfwhm)
+    autofwhm = FloatField(null=True, help_text=Glossary.autofwhm)
+    n_components = IntegerField(null=True, help_text=Glossary.n_components)    
 
     @hybrid_property
     def flag_bad(self):
@@ -233,7 +237,6 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         |   self.flag_bad_rv_combination
         |   self.flag_rv_failure
         )
-    
 
     @hybrid_property
     def flag_warn(self):
@@ -279,6 +282,8 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
 
     """An APOGEE stacked spectrum, stored in an apStar data product."""
 
+    pk = AutoField()
+
     # Won't appear in a header group because it is first referenced in `Source`.
     source = ForeignKeyField(
         Source, 
@@ -287,11 +292,33 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         # own checks to make sure that spectra and sources are linked.
         null=True, 
         index=True,
+        column_name="source_pk",
         backref="apogee_visit_spectra_in_apstar",
     )
 
-    # TODO: put this somewhere else?
+
+    #> Spectrum Identifiers
+    spectrum_pk = ForeignKeyField(
+        Spectrum,
+        index=True,
+        unique=True,
+        lazy_load=False,
+        default=Spectrum.create,
+        help_text=Glossary.spectrum_pk
+    )
+    drp_spectrum_pk = ForeignKeyField(
+        ApogeeVisitSpectrum,
+        lazy_load=False,
+        field=ApogeeVisitSpectrum.spectrum_pk,
+        help_text=Glossary.drp_spectrum_pk
+    )    
+
     #> Spectral Data
+    @property
+    def wavelength(self):
+        # TODO: Do I need to store this as a PixelArray?
+        return 10**(4.179 + 6e-6 * np.arange(8575))
+
     flux = PixelArray(
         ext=1,
         transform=transform,
@@ -313,39 +340,22 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
 
     #> Data Product Keywords
     release = TextField(help_text=Glossary.release)
+    filetype = TextField(default="apStar", help_text=Glossary.filetype)
     apred = TextField(help_text=Glossary.apred)
     apstar = TextField(default="stars", help_text=Glossary.apstar)
     obj = TextField(help_text=Glossary.obj)
     telescope = TextField(help_text=Glossary.telescope)
-    # Healpix is only used in SDSS-V, and may not appear in this data product keywords group (since it appears in Source)
-    healpix = IntegerField(null=True, help_text=Glossary.healpix) 
+    # Healpix is only used in SDSS-V, and may not appear in this data product keywords group (since it appears in Source).
+    # Here we repeat it because the APOGEE DRP has a habit of incorrectly computing healpix, so we need to store their version so that we can access paths.
+    healpix = IntegerField(null=True, help_text=Glossary.healpix)
     field = TextField(null=True, help_text=Glossary.field) # not used in SDSS-V
     prefix = TextField(null=True, help_text=Glossary.prefix) # not used in SDSS-V
     plate = TextField(help_text=Glossary.plate)
     mjd = IntegerField(help_text=Glossary.mjd)
     fiber = IntegerField(help_text=Glossary.fiber)
-    #reduction = TextField(default="", help_text="Like `obj`. Only used for apo1m spectra") # only used for DR17 apo1m spectra
+    reduction = TextField(default="", help_text=Glossary.reduction) # only used for DR17 apo1m spectra
 
-    #> Spectrum Identifiers
-    spectrum_id = ForeignKeyField(
-        Spectrum,
-        index=True,
-        lazy_load=False,
-        primary_key=True,
-        default=Spectrum.create,
-        help_text=Glossary.spectrum_id
-    )
-    drp_spectrum_id = ForeignKeyField(
-        ApogeeVisitSpectrum,
-        lazy_load=False,
-        field=ApogeeVisitSpectrum.spectrum_id,
-        help_text=Glossary.drp_spectrum_id
-    )
 
-    @property
-    def wavelength(self):
-        # TODO: Do I need to store this as a PixelArray?
-        return 10**(4.179 + 6e-6 * np.arange(8575))
 
     @property
     def path(self):
@@ -413,21 +423,23 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
         # own checks to make sure that spectra and sources are linked.
         null=True, 
         index=True,
+        column_name="source_pk",
         backref="apogee_coadded_spectra_in_apstar",
     )
 
     #> Spectrum Identifiers
-    spectrum_id = ForeignKeyField(
+    spectrum_pk = ForeignKeyField(
         Spectrum,
         index=True,
         lazy_load=False,
         primary_key=True,
         default=Spectrum.create,
-        help_text=Glossary.spectrum_id
+        help_text=Glossary.spectrum_pk
     )
 
     #> Data Product Keywords
     release = TextField(help_text=Glossary.release)
+    filetype = TextField(default="apStar", help_text=Glossary.filetype)
     apred = TextField(help_text=Glossary.apred)
     apstar = TextField(default="stars", help_text=Glossary.apstar)
     obj = TextField(help_text=Glossary.obj)
@@ -436,26 +448,31 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     field = TextField(null=True, help_text=Glossary.field) # not used in SDSS-V
     prefix = TextField(null=True, help_text=Glossary.prefix) # not used in SDSS-V
 
-    flux = PixelArray(
-        ext=1,
-        transform=_transform_coadded_spectrum,
-        pixels=8575
-    )
-    ivar = PixelArray(
-        ext=2,
-        transform=lambda *a, **k: _transform_err_to_ivar(_transform_coadded_spectrum(*a, **k)),
-        pixels=8575
-    )
-    pixel_flags = PixelArray(
-        ext=3,
-        transform=_transform_coadded_spectrum,
-        pixels=8575
-    )
-
+    #> Spectral Data
     @property
     def wavelength(self):
         # TODO: Do I need to store this as a PixelArray?
         return 10**(4.179 + 6e-6 * np.arange(8575))
+
+    flux = PixelArray(
+        ext=1,
+        transform=_transform_coadded_spectrum,
+        pixels=8575,
+        help_text=Glossary.flux
+    )
+    ivar = PixelArray(
+        ext=2,
+        transform=lambda *a, **k: _transform_err_to_ivar(_transform_coadded_spectrum(*a, **k)),
+        pixels=8575,
+        help_text=Glossary.ivar
+    )
+    pixel_flags = PixelArray(
+        ext=3,
+        transform=_transform_coadded_spectrum,
+        pixels=8575,
+        help_text=Glossary.pixel_flags
+    )
+
 
     @property
     def path(self):
