@@ -18,7 +18,7 @@ def _prepare_data(spectrum, large_error):
         flux = np.nan_to_num(spectrum.flux).astype(np.float32).reshape((N, P))
         e_flux = np.nan_to_num(spectrum.ivar**-0.5).astype(np.float32).reshape((N, P))
     except:
-        return (spectrum.spectrum_id, spectrum.source_id, None, None, None, None, None)
+        return (spectrum.spectrum_pk, spectrum.source_pk, None, None, None, None, None)
 
     meta_dict, metadata_norm, missing_photometry = get_metadata(spectrum)
     meta = np.tile(metadata_norm, N).reshape((N, -1))
@@ -31,7 +31,7 @@ def _prepare_data(spectrum, large_error):
         bad_pixel = (e_flux[j] == large_error) | (e_flux[j] >= value)
         e_flux[j][bad_pixel] = value
 
-    return (spectrum.spectrum_id, spectrum.source_id, flux, e_flux, meta, meta_dict, missing_photometry)
+    return (spectrum.spectrum_pk, spectrum.source_pk, flux, e_flux, meta, meta_dict, missing_photometry)
 
 
 
@@ -70,18 +70,18 @@ def _inference(network, batch, num_uncertainty_draws):
     # the whole batch, and all others having some small value (1e-5), so we will calculate the average time here
 
     t_init = time()
-    spectrum_ids, source_ids, flux, e_flux, meta, meta_dict, missing_photometrys = ([], [], [], [], [], [], [])
-    for spectrum_id, source_id, f, ef, m, md, mp in batch:
+    spectrum_pks, source_pks, flux, e_flux, meta, meta_dict, missing_photometrys = ([], [], [], [], [], [], [])
+    for spectrum_pk, source_pk, f, ef, m, md, mp in batch:
         if f is None:
             # OS Error when loading it.
             yield ApogeeNet(
-                spectrum_id=spectrum_id,
-                source_id=source_id,
+                spectrum_pk=spectrum_pk,
+                source_pk=source_pk,
                 flag_no_result=True
             )
         else:
-            spectrum_ids.append(spectrum_id)
-            source_ids.append(source_id)
+            spectrum_pks.append(spectrum_pk)
+            source_pks.append(source_pk)
             flux.append(f)
             e_flux.append(ef)
             meta.append(m)
@@ -125,45 +125,29 @@ def _inference(network, batch, num_uncertainty_draws):
         median_draw_predictions = np.nanmedian(draws, axis=0).T
         std_draw_predictions = np.nanstd(draws, axis=0).T
 
-        logg_median, teff_median, fe_h_median = median_draw_predictions
-        logg_std, teff_std, fe_h_std = std_draw_predictions
-        logg, teff, fe_h = predictions
+        logg_median, teff_median, m_h_median = median_draw_predictions
+        logg_std, teff_std, m_h_std = std_draw_predictions
+        logg, teff, m_h = predictions
 
-        mean_t_elapsed = (time() - t_init) / len(spectrum_ids)
-        for i, (spectrum_id, source_id, missing_photometry) in enumerate(zip(spectrum_ids, source_ids, missing_photometrys)):
+        mean_t_elapsed = (time() - t_init) / len(spectrum_pks)
+        for i, (spectrum_pk, source_pk, missing_photometry) in enumerate(zip(spectrum_pks, source_pks, missing_photometrys)):
             output = ApogeeNet(
-                spectrum_id=spectrum_id,
-                source_id=source_id,
+                spectrum_pk=spectrum_pk,
+                source_pk=source_pk,
                 teff=teff[i],
                 logg=logg[i],
-                fe_h=fe_h[i],
+                m_h=m_h[i],
                 e_teff=teff_std[i],
                 e_logg=logg_std[i],
-                e_fe_h=fe_h_std[i],
+                e_m_h=m_h_std[i],
                 teff_sample_median=teff_median[i],
                 logg_sample_median=logg_median[i],
-                fe_h_sample_median=fe_h_median[i],
+                m_h_sample_median=m_h_median[i],
                 t_elapsed=mean_t_elapsed
             )
             output.apply_flags(meta[i], missing_photometry=missing_photometry)
             yield output
-            '''
-            yield dict(
-                spectrum_id=0 + spectrum_id,
-                source_id=0 + source_id,
-                #teff=teff[i],
-                #logg=logg[i],
-                #fe_h=fe_h[i],
-                #e_teff=teff_std[i],
-                #e_logg=logg_std[i],
-                #e_fe_h=fe_h_std[i],
-                #teff_sample_median=teff_median[i],
-                #logg_sample_median=logg_median[i],
-                #fe_h_sample_median=fe_h_median[i],
-                #t_elapsed=mean_t_elapsed,
-                #result_flags=output.result_flags                
-            )
-            '''
+
 
 def parallel_batch_read(target, spectra, args, batch_size, cpu_count=None):
     N = cpu_count or mp.cpu_count()

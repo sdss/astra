@@ -13,7 +13,7 @@ get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
 def create_all_star_product(
     where=None,
     limit=None,
-    ignore_field_names=("carton_flags", ),
+    ignore_field_names=("sdss5_target_flags", ),
     name_conflict_strategy=None,
     upper=True,
     fill_values=None,
@@ -99,7 +99,7 @@ def create_all_visit_product(
     apred=None,
     where=None,
     limit=None,
-    ignore_field_names=("carton_flags", ),
+    ignore_field_names=("sdss5_target_flags", ),
     name_conflict_strategy=None,
     upper=True,
     fill_values=None,
@@ -199,7 +199,7 @@ def create_all_visit_product(
         q = (
             model
             .select(*tuple(fields.values()))
-            .join(Source, on=(Source.id == model.source_id))
+            .join(Source, on=(Source.pk == model.source_pk))
             .where(model.telescope.startswith(observatory))
         )
         if hdu_where is not None:
