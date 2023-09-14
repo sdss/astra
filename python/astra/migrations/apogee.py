@@ -216,10 +216,7 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
         # Use sdss4_apogee_id because not everything will have a sdss_id (e.g., the Sun)
         source_identifier = row["sdss4_apogee_id"]
         assert source_identifier is not None
-        #print(source_identifier)
-        #if source_identifier in ("2M00002304+6151253", "2M00085084-0008022"):
-        #    raise a
-
+        
         this_source_data = dict(zip(source_only_keys, [row.pop(k) for k in source_only_keys]))
 
         for key in sdss4_apogee_targeting_flag_keys:        
@@ -285,19 +282,22 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
     # Assign spectrum_pk values to any spectra missing it.
     N = len(pks)
     if pks:
-        log.info(f"Aassigning primary keys to spectra")
-        N_assigned = 0
-        for batch in chunked(pks, batch_size):
-            N_assigned +=  (
-                ApogeeVisitSpectrum
-                .update(
-                    spectrum_pk=Case(None, (
-                        (ApogeeVisitSpectrum.pk == pk, spectrum_pk) for spectrum_pk, pk in enumerate_new_spectrum_pks(batch)
-                    ))
+        with tqdm(total=N, desc="Assigning primary keys to spectra") as pb:
+            N_assigned = 0
+            for batch in chunked(pks, batch_size):
+                B =  (
+                    ApogeeVisitSpectrum
+                    .update(
+                        spectrum_pk=Case(None, (
+                            (ApogeeVisitSpectrum.pk == pk, spectrum_pk) for spectrum_pk, pk in enumerate_new_spectrum_pks(batch)
+                        ))
+                    )
+                    .where(ApogeeVisitSpectrum.pk.in_(batch))
+                    .execute()
                 )
-                .where(ApogeeVisitSpectrum.pk.in_(batch))
-                .execute()
-            )
+                pb.update(B)
+                N_assigned += B
+
         log.info(f"There were {N} spectra inserted and we assigned {N_assigned} spectra with new spectrum_pk values")
 
     # Sanity check
@@ -338,14 +338,14 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
             (Source.gaia_dr3_source_id <= 0) | (Source.gaia_dr3_source_id.is_null())
         )
     )
-
-    log.warning(f"Fixing instances where gaia_dr3_source_id <= 0 or NULL")
+    N_broken = q.count()
+    log.warning(f"Fixing {N_broken} instances where gaia_dr3_source_id <= 0 or NULL. This could take a few minutes.")
 
     # Logic: 
     # query TwoMASSPSC based on designation, then to catalog, then everything from there.
     # TODO: This is slow because we are doing one-by-one. consider refactor
     N_fixed = 0
-    for record in tqdm(q.iterator(), total=1):
+    for record in tqdm(q.iterator(), total=N_broken):
 
         sdss4_apogee_id = record.source.sdss4_apogee_id or record.obj
         if sdss4_apogee_id.startswith("2M"):
@@ -397,7 +397,8 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
             record.source.sdss4_apogee_id = sdss4_apogee_id
             record.source.save()
             N_fixed += 1
-        
+
+    log.warning(f"Fixed {N_fixed} of {N_broken} examples")
     log.info(f"Ingested {N} spectra")
     return N
     

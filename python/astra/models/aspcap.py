@@ -83,8 +83,8 @@ class FerreOutputMixin(PipelineOutputMixin):
 
             meta = parse_ferre_spectrum_name(name)
             if (
-                (int(meta["source_id"]) != self.source_id)
-            or (int(meta["spectrum_id"]) != self.spectrum_id)
+                (int(meta["source_pk"]) != self.source_pk)
+            or (int(meta["spectrum_pk"]) != self.spectrum_pk)
             or (int(meta["index"]) != self.ferre_input_index)
             ):
                 raise a
@@ -92,7 +92,7 @@ class FerreOutputMixin(PipelineOutputMixin):
             del kwds["skiprows"]
             del kwds["max_rows"]
 
-            name = get_ferre_spectrum_name(self.ferre_input_index, self.source_id, self.spectrum_id, self.initial_flags, self.upstream_id)
+            name = get_ferre_spectrum_name(self.ferre_input_index, self.source_pk, self.spectrum_pk, self.initial_flags, self.upstream_id)
 
             index = list(np.loadtxt(usecols=(0, ), dtype=str, **kwds)).index(name)
             self.ferre_output_index = index
@@ -109,19 +109,19 @@ class FerreOutputMixin(PipelineOutputMixin):
         array = np.loadtxt(usecols=range(1, 1+P), **kwds)
 
         meta = parse_ferre_spectrum_name(name)
-        assert int(meta["source_id"]) == self.source_id
-        assert int(meta["spectrum_id"]) == self.spectrum_id
+        assert int(meta["source_pk"]) == self.source_pk
+        assert int(meta["spectrum_pk"]) == self.spectrum_pk
         assert int(meta["index"]) == self.ferre_input_index
         return array
 
 
 class FerreCoarse(BaseModel, FerreOutputMixin):
 
-    source_id = ForeignKeyField(Source, index=True, lazy_load=False)
-    spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
+    source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
+    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     
     #> Astra Metadata
-    task_id = AutoField()
+    task_pk = AutoField()
     v_astra = TextField(default=__version__)
     created = DateTimeField(default=datetime.datetime.now)
     t_elapsed = FloatField(null=True)
@@ -154,8 +154,8 @@ class FerreCoarse(BaseModel, FerreOutputMixin):
     #> FERRE Settings
     continuum_order = IntegerField(default=-1, null=True)
     continuum_reject = FloatField(null=True)
-    #continuum_flag = IntegerField(default=0, null=True)
-    #continuum_observations_flag = IntegerField(default=0, null=True)
+    continuum_flag = IntegerField(default=0, null=True)
+    continuum_observations_flag = IntegerField(default=0, null=True)
     interpolation_order = IntegerField(default=-1)
     weight_path = TextField(default="")
     frozen_flags = BitField(default=0)
@@ -250,19 +250,18 @@ class FerreCoarse(BaseModel, FerreOutputMixin):
 
 class FerreStellarParameters(BaseModel, FerreOutputMixin):
 
-    source_id = ForeignKeyField(Source, index=True, lazy_load=False)
-    spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
+    source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
+    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     upstream = ForeignKeyField(FerreCoarse, index=True)
 
     #> Astra Metadata
-    task_id = AutoField()
+    task_pk = AutoField()
     v_astra = TextField(default=__version__)
-    #created = DateTimeField(default=datetime.datetime.now)
+    created = DateTimeField(default=datetime.datetime.now)
     t_elapsed = FloatField(null=True)
-    #t_overhead = FloatField(null=True)
+    t_overhead = FloatField(null=True)
     tag = TextField(default="", index=True)
-    print("FerreStellarParameters needs created and t_overhead")
-
+    
     #> Grid and Working Directory
     pwd = TextField(default="")
     short_grid_name = TextField(default="")
@@ -288,8 +287,8 @@ class FerreStellarParameters(BaseModel, FerreOutputMixin):
     #> FERRE Settings
     continuum_order = IntegerField(default=-1)
     continuum_reject = FloatField(null=True)
-    #continuum_flag = IntegerField(default=0, null=True)
-    #continuum_observations_flag = IntegerField(default=0, null=True)
+    continuum_flag = IntegerField(default=0, null=True)
+    continuum_observations_flag = IntegerField(default=0, null=True)
     interpolation_order = IntegerField(default=-1)
     weight_path = TextField(default="")
     frozen_flags = BitField(default=0)
@@ -385,19 +384,18 @@ class FerreStellarParameters(BaseModel, FerreOutputMixin):
 
 class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
 
-    source_id = ForeignKeyField(Source, index=True, lazy_load=False)
-    spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
+    source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
+    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     upstream = ForeignKeyField(FerreStellarParameters, index=True)
 
     #> Astra Metadata
-    task_id = AutoField()
+    task_pk = AutoField()
     v_astra = TextField(default=__version__)
-    #created = DateTimeField(default=datetime.datetime.now)
+    created = DateTimeField(default=datetime.datetime.now)
     t_elapsed = FloatField(null=True)
-    #t_overhead = FloatField(null=True)
+    t_overhead = FloatField(null=True)
     tag = TextField(default="", index=True)
-    print("FerreChemicalAbundances needs created and t_overhead")
-
+    
     #> Grid and Working Directory
     pwd = TextField(default="")
     short_grid_name = TextField(default="")
@@ -419,8 +417,8 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
     #> FERRE Settings
     continuum_order = IntegerField(default=-1)
     continuum_reject = FloatField(null=True)
-    #continuum_flag = IntegerField(default=0, null=True)
-    #continuum_observations_flag = IntegerField(default=0, null=True)
+    continuum_flag = IntegerField(default=0, null=True)
+    continuum_observations_flag = IntegerField(default=0, null=True)
     interpolation_order = IntegerField(default=-1)
     weight_path = TextField(default="")
     frozen_flags = BitField(default=0)
@@ -514,9 +512,6 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
 
 
 
-if __version__ != "0.4.0":
-    print("ANDY ADD created AND t_overhead to ASPCAP models")
-
 class UpstreamFerrePixelArrayAccessor(BasePixelArrayAccessor):
     
     def __get__(self, instance, instance_type=None):
@@ -528,7 +523,7 @@ class UpstreamFerrePixelArrayAccessor(BasePixelArrayAccessor):
                 instance.__pixel_data__ = {}
 
                 # TODO: THIS IS SO SLOW AND SUCH A HACK
-                upstream = FerreStellarParameters.get(instance.stellar_parameters_task_id)
+                upstream = FerreStellarParameters.get(instance.stellar_parameters_task_pk)
                 instance.__pixel_data__.setdefault("model_flux", upstream.unmask(upstream.model_flux))
                 instance.__pixel_data__.setdefault("continuum", upstream.unmask(upstream.ferre_flux / upstream.rectified_flux))
                 
@@ -549,7 +544,7 @@ class MG_HFerrePixelArrayAccessor(BasePixelArrayAccessor):
                 instance.__pixel_data__ = {}
 
                 # TODO: THIS IS SO SLOW AND SUCH A HACK
-                upstream = FerreChemicalAbundances.get(instance.ti_h_task_id)
+                upstream = FerreChemicalAbundances.get(instance.ti_h_task_pk)
                 try:
                     instance.__pixel_data__.setdefault("model_flux", upstream.unmask(upstream.model_flux))
                     instance.__pixel_data__.setdefault("continuum", upstream.unmask(upstream.ferre_flux / upstream.rectified_flux))
@@ -566,15 +561,15 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
 
     """ APOGEE Stellar Parameter and Chemical Abundances Pipeline (ASPCAP) """
 
-    source_id = ForeignKeyField(Source, index=True, lazy_load=False)
-    spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False, help_text=Glossary.spectrum_id)    
+    source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
+    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False, help_text=Glossary.spectrum_pk)    
     
     #> Astra Metadata
-    task_id = AutoField(help_text=Glossary.task_id)
+    task_pk = AutoField(help_text=Glossary.task_pk)
     v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
-    #created = DateTimeField(default=datetime.datetime.now) # TODO: ADD
+    created = DateTimeField(default=datetime.datetime.now) # TODO: ADD
     t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
-    #t_overhead = FloatField(null=True)
+    t_overhead = FloatField(null=True)
     tag = TextField(default="", index=True, help_text=Glossary.tag)
     
     #> Spectral Data
@@ -767,98 +762,130 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     
     # TODO: Should we store these here like this, or some othe way?
 
-    #> Task Identifiers
-    stellar_parameters_task_id = ForeignKeyField(FerreStellarParameters, null=True, lazy_load=False, help_text="Task identifier for stellar parameters")
-    al_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Al/H]")
-    c_12_13_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for C12/C13")
-    ca_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Ca/H]")
-    ce_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Ce/H]")
-    c_1_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [C 1/H]")
-    c_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [C/H]")
-    co_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Co/H]")
-    cr_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Cr/H]")
-    cu_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Cu/H]")
-    fe_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Fe/H]")
-    k_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [K/H]")
-    mg_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Mg/H]")
-    mn_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Mn/H]")
-    na_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Na/H]")
-    nd_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Nd/H]")
-    ni_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Ni/H]")
-    n_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [N/H]")
-    o_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [O/H]")
-    p_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [P/H]")
-    si_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Si/H]")
-    s_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [S/H]")
-    ti_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Ti/H]")
-    ti_2_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [Ti 2/H]")
-    v_h_task_id = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task identifier for [V/H]")
+    #> Task Primary Keys
+    stellar_parameters_task_pk = ForeignKeyField(FerreStellarParameters, null=True, lazy_load=False, help_text="Task primary key for stellar parameters")
+    al_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Al/H]")
+    c_12_13_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for C12/C13")
+    ca_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Ca/H]")
+    ce_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Ce/H]")
+    c_1_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [C 1/H]")
+    c_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [C/H]")
+    co_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Co/H]")
+    cr_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Cr/H]")
+    cu_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Cu/H]")
+    fe_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Fe/H]")
+    k_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [K/H]")
+    mg_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Mg/H]")
+    mn_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Mn/H]")
+    na_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Na/H]")
+    nd_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Nd/H]")
+    ni_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Ni/H]")
+    n_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [N/H]")
+    o_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [O/H]")
+    p_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [P/H]")
+    si_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Si/H]")
+    s_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [S/H]")
+    ti_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Ti/H]")
+    ti_2_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Ti 2/H]")
+    v_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [V/H]")
 
 
     #> Raw (Uncalibrated) Quantities
     calibrated = BooleanField(default=False, help_text=Glossary.calibrated)
     raw_teff = FloatField(null=True, help_text=Glossary.raw_teff)
     raw_e_teff = FloatField(null=True, help_text=Glossary.raw_e_teff)
+    raw_e_sys_teff = FloatField(null=True, help_text=Glossary.raw_e_sys_teff)
     raw_logg = FloatField(null=True, help_text=Glossary.raw_logg)
     raw_e_logg = FloatField(null=True, help_text=Glossary.raw_e_logg)
+    raw_e_sys_logg = FloatField(null=True, help_text=Glossary.raw_e_sys_logg)
     raw_v_micro = FloatField(null=True, help_text=Glossary.raw_v_micro)
     raw_e_v_micro = FloatField(null=True, help_text=Glossary.raw_e_v_micro)
+    raw_e_sys_v_micro = FloatField(null=True, help_text=Glossary.raw_e_sys_v_micro)
     raw_v_sini = FloatField(null=True, help_text=Glossary.raw_v_sini)
     raw_e_v_sini = FloatField(null=True, help_text=Glossary.raw_e_v_sini)
+    raw_e_sys_v_sini = FloatField(null=True, help_text=Glossary.raw_e_sys_v_sini)
     raw_m_h_atm = FloatField(null=True, help_text=Glossary.raw_m_h_atm)
     raw_e_m_h_atm = FloatField(null=True, help_text=Glossary.raw_e_m_h_atm)
+    raw_e_sys_m_h_atm = FloatField(null=True, help_text=Glossary.raw_e_sys_m_h_atm)
     raw_alpha_m_atm = FloatField(null=True, help_text=Glossary.raw_alpha_m_atm)
     raw_e_alpha_m_atm = FloatField(null=True, help_text=Glossary.raw_e_alpha_m_atm)
+    raw_e_sys_alpha_m_atm = FloatField(null=True, help_text=Glossary.raw_e_sys_alpha_m_atm)
     raw_c_m_atm = FloatField(null=True, help_text=Glossary.raw_c_m_atm)
     raw_e_c_m_atm = FloatField(null=True, help_text=Glossary.raw_e_c_m_atm)
+    raw_e_sys_c_m_atm = FloatField(null=True, help_text=Glossary.raw_e_sys_c_m_atm)
     raw_n_m_atm = FloatField(null=True, help_text=Glossary.raw_n_m_atm)
     raw_e_n_m_atm = FloatField(null=True, help_text=Glossary.raw_e_n_m_atm)
+    raw_e_sys_n_m_atm = FloatField(null=True, help_text=Glossary.raw_e_sys_n_m_atm)
     raw_al_h = FloatField(null=True, help_text=Glossary.raw_al_h)
     raw_e_al_h = FloatField(null=True, help_text=Glossary.raw_e_al_h)
+    raw_e_sys_al_h = FloatField(null=True, help_text=Glossary.raw_e_sys_al_h)
     raw_c_12_13 = FloatField(null=True, help_text=Glossary.raw_c_12_13)
     raw_e_c_12_13 = FloatField(null=True, help_text=Glossary.raw_e_c_12_13)
+    raw_e_sys_c_12_13 = FloatField(null=True, help_text=Glossary.raw_e_sys_c_12_13)
     raw_ca_h = FloatField(null=True, help_text=Glossary.raw_ca_h)
     raw_e_ca_h = FloatField(null=True, help_text=Glossary.raw_e_ca_h)
+    raw_e_sys_ca_h = FloatField(null=True, help_text=Glossary.raw_e_sys_ca_h)
     raw_ce_h = FloatField(null=True, help_text=Glossary.raw_ce_h)
     raw_e_ce_h = FloatField(null=True, help_text=Glossary.raw_e_ce_h)
+    raw_e_sys_ce_h = FloatField(null=True, help_text=Glossary.raw_e_sys_ce_h)
     raw_c_1_h = FloatField(null=True, help_text=Glossary.raw_c_1_h)
     raw_e_c_1_h = FloatField(null=True, help_text=Glossary.raw_e_c_1_h)
+    raw_e_sys_c_1_h = FloatField(null=True, help_text=Glossary.raw_e_sys_c_1_h)
     raw_c_h = FloatField(null=True, help_text=Glossary.raw_c_h)
     raw_e_c_h = FloatField(null=True, help_text=Glossary.raw_e_c_h)
+    raw_e_sys_c_h = FloatField(null=True, help_text=Glossary.raw_e_sys_c_h)
     raw_co_h = FloatField(null=True, help_text=Glossary.raw_co_h)
     raw_e_co_h = FloatField(null=True, help_text=Glossary.raw_e_co_h)
+    raw_e_sys_co_h = FloatField(null=True, help_text=Glossary.raw_e_sys_co_h)
     raw_cr_h = FloatField(null=True, help_text=Glossary.raw_cr_h)
     raw_e_cr_h = FloatField(null=True, help_text=Glossary.raw_e_cr_h)
+    raw_e_sys_cr_h = FloatField(null=True, help_text=Glossary.raw_e_sys_cr_h)
     raw_cu_h = FloatField(null=True, help_text=Glossary.raw_cu_h)
     raw_e_cu_h = FloatField(null=True, help_text=Glossary.raw_e_cu_h) 
+    raw_e_sys_cu_h = FloatField(null=True, help_text=Glossary.raw_e_sys_cu_h)
     raw_fe_h = FloatField(null=True, help_text=Glossary.raw_fe_h)
     raw_e_fe_h = FloatField(null=True, help_text=Glossary.raw_e_fe_h)
+    raw_e_sys_fe_h = FloatField(null=True, help_text=Glossary.raw_e_sys_fe_h)
     raw_k_h = FloatField(null=True, help_text=Glossary.raw_k_h)
     raw_e_k_h = FloatField(null=True, help_text=Glossary.raw_e_k_h)
+    raw_e_sys_k_h = FloatField(null=True, help_text=Glossary.raw_e_sys_k_h)
     raw_mg_h = FloatField(null=True, help_text=Glossary.raw_mg_h)
     raw_e_mg_h = FloatField(null=True, help_text=Glossary.raw_e_mg_h)
+    raw_e_sys_mg_h = FloatField(null=True, help_text=Glossary.raw_e_sys_mg_h)
     raw_mn_h = FloatField(null=True, help_text=Glossary.raw_mn_h)
     raw_e_mn_h = FloatField(null=True, help_text=Glossary.raw_e_mn_h)
+    raw_e_sys_mn_h = FloatField(null=True, help_text=Glossary.raw_e_sys_mn_h)
     raw_na_h = FloatField(null=True, help_text=Glossary.raw_na_h)
     raw_e_na_h = FloatField(null=True, help_text=Glossary.raw_e_na_h)
+    raw_e_sys_na_h = FloatField(null=True, help_text=Glossary.raw_e_sys_na_h)
     raw_nd_h = FloatField(null=True, help_text=Glossary.raw_nd_h)
     raw_e_nd_h = FloatField(null=True, help_text=Glossary.raw_e_nd_h)
+    raw_e_sys_nd_h = FloatField(null=True, help_text=Glossary.raw_e_sys_nd_h)
     raw_ni_h = FloatField(null=True, help_text=Glossary.raw_ni_h)
     raw_e_ni_h = FloatField(null=True, help_text=Glossary.raw_e_ni_h)
+    raw_e_sys_ni_h = FloatField(null=True, help_text=Glossary.raw_e_sys_ni_h)
     raw_n_h = FloatField(null=True, help_text=Glossary.raw_n_h)
     raw_e_n_h = FloatField(null=True, help_text=Glossary.raw_e_n_h)
+    raw_e_sys_n_h = FloatField(null=True, help_text=Glossary.raw_e_sys_n_h)
     raw_o_h = FloatField(null=True, help_text=Glossary.raw_o_h)
     raw_e_o_h = FloatField(null=True, help_text=Glossary.raw_e_o_h)
+    raw_e_sys_o_h = FloatField(null=True, help_text=Glossary.raw_e_sys_o_h)
     raw_p_h = FloatField(null=True, help_text=Glossary.raw_p_h)
     raw_e_p_h = FloatField(null=True, help_text=Glossary.raw_e_p_h)
+    raw_e_sys_p_h = FloatField(null=True, help_text=Glossary.raw_e_sys_p_h)
     raw_si_h = FloatField(null=True, help_text=Glossary.raw_si_h)
     raw_e_si_h = FloatField(null=True, help_text=Glossary.raw_e_si_h)
+    raw_e_sys_si_h = FloatField(null=True, help_text=Glossary.raw_e_sys_si_h)
     raw_s_h = FloatField(null=True, help_text=Glossary.raw_s_h)
     raw_e_s_h = FloatField(null=True, help_text=Glossary.raw_e_s_h)
+    raw_e_sys_s_h = FloatField(null=True, help_text=Glossary.raw_e_sys_s_h)
     raw_ti_h = FloatField(null=True, help_text=Glossary.raw_ti_h)
     raw_e_ti_h = FloatField(null=True, help_text=Glossary.raw_e_ti_h)
+    raw_e_sys_ti_h = FloatField(null=True, help_text=Glossary.raw_e_sys_ti_h)
     raw_ti_2_h = FloatField(null=True, help_text=Glossary.raw_ti_2_h)
     raw_e_ti_2_h = FloatField(null=True, help_text=Glossary.raw_e_ti_2_h)
+    raw_e_sys_ti_2_h = FloatField(null=True, help_text=Glossary.raw_e_sys_ti_2_h)
     raw_v_h = FloatField(null=True, help_text=Glossary.raw_v_h)
     raw_e_v_h = FloatField(null=True, help_text=Glossary.raw_e_v_h)
+    raw_e_sys_v_h = FloatField(null=True, help_text=Glossary.raw_e_sys_v_h)
     
