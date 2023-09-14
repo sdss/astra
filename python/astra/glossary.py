@@ -79,8 +79,7 @@ class BaseGlossary(object, metaclass=GlossaryType):
 class Glossary(BaseGlossary):
 
     #> Identifiers
-    task_id = "Task identifier"
-    source_id = "DEPRECATED REMOVE ME"
+    task_pk = "Task model primary key"
     sdss_id = "SDSS unique source identifier"
     healpix = "Healpix location (128 sides)"
     gaia_dr3_source_id = "Gaia (DR3) source identifier"
@@ -148,7 +147,7 @@ class Glossary(BaseGlossary):
     tag = "Experiment tag for this result"
 
     # Spectrum information
-    spectrum_id = "Unique identifier for a spectrum."
+    spectrum_pk = "Unique primary key for a spectrum"
     snr = "Signal-to-noise ratio"
 
     #: General data product keyword arguments.
@@ -159,6 +158,11 @@ class Glossary(BaseGlossary):
     mjd = "Modified Julian Date of observation"
     fieldid = "Field identifier"
     catalogid = "Catalog identifier used to target the source"
+    catalogid21 = "Catalog identifier (v21)"
+    catalogid25 = "Catalog identifier (v25; v0.5)"
+    catalogid31 = "Catalog identifier (v31; v1.0)"
+    sdss5_target_flags = "Targeting flags"
+    n_associated = "Number of SDSS_IDs associated with this catalogid"
 
     # Pixel arrays
     wavelength = "Wavelength (vacuum) [Angstrom]"
@@ -168,8 +172,12 @@ class Glossary(BaseGlossary):
     pixel_flags = "Pixel-level quality flags (see documentation)"
 
 
-    spectrum_flags = "Data reduction pipeline flags for this spectrum."
+    spectrum_flags = "Data reduction pipeline flags for this spectrum"
     result_flags = "Flags describing the results"
+    
+
+    input_ra = "Input right ascension [deg]"
+    input_dec = "Input declination [deg]"
     
 
     # BOSS data reduction pipeline keywords
@@ -230,10 +238,20 @@ class Glossary(BaseGlossary):
     delta_dec = "Offset in declination [arcsecond]"
     date_obs = "Observation date (UTC)"
 
+    pk = "Database primary key"
+    fps = "Fibre Positioning System used to acquire this data"
 
+    v_rel = "Relative velocity [km/s]"
     v_rad = "Barycentric rest frame radial velocity [km/s]"
+    bc = "Barycentric velocity correction applied [km/s]"
+
+    ccfwhm = "Cross-correlation function FWHM"
+    autofwhm = "Auto-correlation function FWHM"
+    n_components = "Number of components in CCF"
+    
     e_v_rad = "Error on radial velocity [km/s]"
 
+    filetype = "SDSS file type that stores this spectrum"
 
     # apVisit keywords
     apred = "APOGEE data reduction pipeline version."
@@ -241,7 +259,8 @@ class Glossary(BaseGlossary):
     telescope = "Telescope used to observe the source."
     field = "Field identifier"
     fiber = "Fiber number."
-    prefix = "Short prefix used for DR17 apVisit files."    
+    prefix = "Short prefix used for DR17 apVisit files"    
+    reduction = "An `obj`-like keyword used for apo1m spectra"
 
     # APOGEE data reduction pipeline keywords    
     v_apred = "APOGEE Data Reduction Pipeline version"
@@ -317,8 +336,7 @@ class Glossary(BaseGlossary):
 
     calibrated = "Any calibration applied to raw measurements?"
 
-    drp_spectrum_id = "Data Reduction Pipeline spectrum identifier"
-    spectrum_id = "Spectrum identifier"
+    drp_spectrum_pk = "Data Reduction Pipeline spectrum primary key"
 
     release = "SDSS release"
     apred = "APOGEE reduction pipeline"
