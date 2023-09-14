@@ -28,7 +28,7 @@ def corv(spectra: Iterable) -> Iterable[Corv]:
         
         try:
             fig = utils.lineplot(*args, result.params)
-            path = expand_path(f"$MWM_ASTRA/{__version__}/pipelines/corv/{spectrum.spectrum_id}-{__version__}.png")
+            path = expand_path(f"$MWM_ASTRA/{__version__}/pipelines/corv/{spectrum.spectrum_pk}-{__version__}.png")
             os.makedirs(os.path.dirname(path), exist_ok=True)
             fig.savefig(path)
             plt.close("all")
@@ -37,8 +37,8 @@ def corv(spectra: Iterable) -> Iterable[Corv]:
             log.exception(f"Exception trying to make figure for {spectrum}")
 
         yield Corv(
-            source_id=spectrum.source_id,
-            spectrum_id=spectrum.spectrum_id,
+            source_pk=spectrum.source_pk,
+            spectrum_pk=spectrum.spectrum_pk,
             v_rad=v_rad,
             e_v_rad=e_v_rad,
             teff=result.params["teff"].value,

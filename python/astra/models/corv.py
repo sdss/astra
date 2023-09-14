@@ -19,20 +19,20 @@ class Corv(BaseModel, PipelineOutputMixin):
 
     """A result from the `corv` pipeline."""
 
-    source_id = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
-    spectrum_id = ForeignKeyField(
+    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
+    spectrum_pk = ForeignKeyField(
         Spectrum, 
         index=True, 
         lazy_load=False,
-        help_text=Glossary.spectrum_id
+        help_text=Glossary.spectrum_pk
     )
     
     #> Astra Metadata
-    task_id = AutoField(help_text=Glossary.task_id)
+    task_pk = AutoField(help_text=Glossary.task_pk, help_text=Glossary.task_pk)
     v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
-    created = DateTimeField(default=datetime.datetime.now)
+    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
     t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
-    t_overhead = FloatField(null=True)
+    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
     tag = TextField(default="", index=True, help_text=Glossary.tag)
 
     #> Radial Velocity (corv)
