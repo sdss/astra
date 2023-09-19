@@ -122,16 +122,16 @@ def pre_coarse_stellar_parameters(
     yield ... # tell Astra that all the work up until now has been in overheads
     for spectrum in skipped_spectra:
         yield FerreCoarse(
-            source_id=spectrum.source_id,
-            spectrum_id=spectrum.spectrum_id,
+            source_pk=spectrum.source_pk,
+            spectrum_pk=spectrum.spectrum_pk,
             flag_spectrum_io_error=True
         )
 
     # Create database entries for those with no initial guess.
     for spectrum in spectra_with_no_initial_guess:
         yield FerreCoarse(
-            source_id=spectrum.source_id,
-            spectrum_id=spectrum.spectrum_id,
+            source_pk=spectrum.source_pk,
+            spectrum_pk=spectrum.spectrum_pk,
             flag_no_suitable_initial_guess=True,
         )
 
@@ -160,21 +160,21 @@ def penalize_coarse_stellar_parameter_result(result: FerreCoarse):
     """
 
     # Penalize GK-esque things at cool temperatures.
-    result.penalized_r_chi_sq = 0 + result.r_chi_sq
+    result.penalized_rchi2 = 0 + result.rchi2
     if result.teff < 3900 and "GK_200921" in result.header_path:
-        result.penalized_r_chi_sq += np.log10(10)
+        result.penalized_rchi2 += np.log10(10)
     
     if result.flag_logg_grid_edge_warn:
-        result.penalized_r_chi_sq += np.log10(5)
+        result.penalized_rchi2 += np.log10(5)
 
     if result.flag_teff_grid_edge_warn:
-        result.penalized_r_chi_sq += np.log10(5)
+        result.penalized_rchi2 += np.log10(5)
 
     if result.flag_logg_grid_edge_bad:
-        result.penalized_r_chi_sq += np.log10(5)
+        result.penalized_rchi2 += np.log10(5)
 
     if result.flag_teff_grid_edge_bad:
-        result.penalized_r_chi_sq += np.log10(5)
+        result.penalized_rchi2 += np.log10(5)
     return None
 
         
@@ -204,13 +204,13 @@ def plan_coarse_stellar_parameters(
     )
 
     all_kwds = []
-    spectrum_ids_with_at_least_one_initial_guess = set()
+    spectrum_primary_keys_with_at_least_one_initial_guess = set()
     for spectrum, input_initial_guess in tqdm(initial_guess_callable(spectra), total=0, desc="Initial guesses"):
 
         n_initial_guesses = 0
         for strict in (True, False):
             for header_path, meta, headers in yield_suitable_grids(all_headers, strict=strict, **input_initial_guess):
-                spectrum_ids_with_at_least_one_initial_guess.add(spectrum.spectrum_id)
+                spectrum_primary_keys_with_at_least_one_initial_guess.add(spectrum.spectrum_pk)
 
                 initial_guess = clip_initial_guess(input_initial_guess, headers)
 
@@ -254,7 +254,7 @@ def plan_coarse_stellar_parameters(
                 centered_initial_guess.update(teff=teff, logg=logg)
 
                 for header_path, meta, headers in yield_suitable_grids(all_headers, strict=True, **centered_initial_guess):
-                    spectrum_ids_with_at_least_one_initial_guess.add(spectrum.spectrum_id)                    
+                    spectrum_primary_keys_with_at_least_one_initial_guess.add(spectrum.spectrum_pk)                    
                     initial_guess = clip_initial_guess(centered_initial_guess, headers)
 
                     frozen_parameters = dict()
@@ -284,7 +284,7 @@ def plan_coarse_stellar_parameters(
     # Anything that has no suitable initial guess?
     spectra_with_no_initial_guess = [
         s for s in spectra \
-            if s.spectrum_id not in spectrum_ids_with_at_least_one_initial_guess
+            if s.spectrum_pk not in spectrum_primary_keys_with_at_least_one_initial_guess
     ]
     if spectra_with_no_initial_guess:
         log.warning(

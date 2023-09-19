@@ -27,12 +27,13 @@ class Source(BaseModel):
     #> Identifiers
     pk = AutoField(primary_key=True, help_text=Glossary.pk)
     
-    sdss_id = BigIntegerField(index=True, null=True, help_text="SDSS unique identifier")
     healpix = IntegerField(null=True, help_text="HEALPix (128 side)")
-    # The following identifiers should be unique, but I'm not convinced it's implemented properly yet.
+    # The following identifiers are usually unique, but let's not base our integrity on it because
+    # there will be things with n_associated > 1.
+    sdss_id = BigIntegerField(index=True, unique=True, null=True, help_text="SDSS-5 unique identifier")
+    sdss4_apogee_id = TextField(index=True, unique=True, null=True, help_text="SDSS-4 DR17 APOGEE identifier")
     gaia_dr2_source_id = BigIntegerField(null=True, help_text="Gaia DR2 source identifier")
     gaia_dr3_source_id = BigIntegerField(null=True, help_text="Gaia DR3 source identifier")
-    sdss4_apogee_id = TextField(index=True, null=True, help_text="SDSS-4 DR17 APOGEE identifier")
     tic_v8_id = BigIntegerField(null=True, help_text="TESS Input Catalog (v8) identifier")
     
     #> Targeting provenance 
@@ -44,8 +45,8 @@ class Source(BaseModel):
     catalogid25 = BigIntegerField(null=True, help_text=Glossary.catalogid25)
     catalogid31 = BigIntegerField(null=True, help_text=Glossary.catalogid31)
     n_associated = IntegerField(null=True, help_text=Glossary.n_associated)
-    n_neighborhood = IntegerField(default=-1, help_text="Gaia sources brighter than G=X within Y\"") # TODO: get numbers from JAJ
-
+    n_neighborhood = IntegerField(default=-1, help_text="Sources within 3\" and G_MAG > G_MAG_source + 5")
+    
     # Only do carton_flags if we have a postgresql database.
     if isinstance(database, PostgresqlDatabase):
         sdss5_target_flags = BigBitField(null=True, help_text=Glossary.sdss5_target_flags)
@@ -385,7 +386,7 @@ class Source(BaseModel):
     #> GLIMPSE Photometry
     mag4_5 = FloatField(null=True, help_text="IRAC band 4.5 micron magnitude [mag]")
     d4_5m = FloatField(null=True, help_text="Error on IRAC band 4.5 micron magnitude [mag]")
-    rms_f4_5 = FloatField(null=True, help_text="RMS deviation of individual detections from final flux [mJy]")
+    rms_f4_5 = FloatField(null=True, help_text="RMS deviations from final flux [mJy]")
     sqf_4_5 = BitField(default=0, help_text="Source quality flag for IRAC band 4.5 micron")
     mf4_5 = BitField(default=0, help_text="Flux calculation method flag")
     csf = BitField(default=0, help_text="Close source flag")
@@ -438,7 +439,7 @@ class Source(BaseModel):
     zgr_chi2 = FloatField(null=True, help_text=Glossary.chi2)
     zgr_quality_flags = BitField(default=0, help_text="Quality flags")
     # See https://zenodo.org/record/7811871
-
+ 
 
     @property
     def cartons(self):

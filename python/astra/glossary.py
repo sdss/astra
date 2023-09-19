@@ -162,7 +162,7 @@ class Glossary(BaseGlossary):
     catalogid25 = "Catalog identifier (v25; v0.5)"
     catalogid31 = "Catalog identifier (v31; v1.0)"
     sdss5_target_flags = "Targeting flags"
-    n_associated = "Number of SDSS_IDs associated with this catalogid"
+    n_associated = "SDSS_IDs associated with this CATALOGID"
 
     # Pixel arrays
     wavelength = "Wavelength (vacuum) [Angstrom]"
@@ -244,6 +244,7 @@ class Glossary(BaseGlossary):
     v_rel = "Relative velocity [km/s]"
     v_rad = "Barycentric rest frame radial velocity [km/s]"
     bc = "Barycentric velocity correction applied [km/s]"
+    median_e_v_rad = "Median error in radial velocity [km/s]"
 
     ccfwhm = "Cross-correlation function FWHM"
     autofwhm = "Auto-correlation function FWHM"

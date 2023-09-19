@@ -525,17 +525,17 @@ def load_balancer(
 
 def monitor(
     job_ids,
-    executions,
+    planned_executions,
     show_progress=True,
     refresh_interval=10,
-    chaos_monkey=True,    
+    chaos_monkey=False,    
 ):
 
     # Check progress.
     log.info(f"Monitoring progress of the following FERRE execution directories:")
 
     n_spectra, executions = (0, [])
-    for n_executions, e in enumerate(executions, start=1):
+    for n_executions, e in enumerate(planned_executions, start=1):
         executions.append(e)
         n_spectra += e[1]
         log.info(f"\t{os.path.dirname(e[0])}")
@@ -724,14 +724,15 @@ class FerreOperator:
     def execute(self, context=None):
         return load_balancer(
             self.stage_dir,
-            self.job_name,
-            self.input_nml_wildmask,
-            self.post_interpolate_model_flux,
-            self.overwrite,
-            self.n_threads,
-            self.max_nodes,
-            self.max_tasks_per_node,
-            self.cpus_per_node,
+            slurm_kwds=self.slurm_kwds,
+            job_name=self.job_name,
+            input_nml_wildmask=self.input_nml_wildmask,
+            post_interpolate_model_flux=self.post_interpolate_model_flux,
+            overwrite=self.overwrite,
+            n_threads=self.n_threads,
+            max_nodes=self.max_nodes,
+            max_tasks_per_node=self.max_tasks_per_node,
+            cpus_per_node=self.cpus_per_node,
             full_output=True         
         )
 
@@ -744,7 +745,7 @@ class FerreMonitoringOperator:
         executions,
         show_progress=True,
         refresh_interval=10,
-        chaos_monkey=True,
+        chaos_monkey=False,
         **kwargs
     ):
         self.job_ids = job_ids

@@ -211,7 +211,6 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     v_rel = FloatField(null=True, help_text=Glossary.v_rel)
     e_v_rel = FloatField(null=True, help_text=Glossary.e_v_rel)
     bc = FloatField(null=True, help_text=Glossary.bc)
-    doppler_rchi2 = FloatField(null=True, help_text=Glossary.doppler_rchi2)
     
     doppler_teff = FloatField(null=True, help_text=Glossary.teff)
     doppler_e_teff = FloatField(null=True, help_text=Glossary.e_teff)
@@ -219,8 +218,9 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     doppler_e_logg = FloatField(null=True, help_text=Glossary.e_logg)
     doppler_fe_h = FloatField(null=True, help_text=Glossary.fe_h)
     doppler_e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
-    doppler_flags = BitField(default=0, help_text="Doppler flags") # TODO: is this actually STARFLAG from the DRP?
-
+    doppler_rchi2 = FloatField(null=True, help_text=Glossary.doppler_rchi2)
+    doppler_flags = BitField(default=0, help_text="Doppler flags") 
+    
     #> Radial Velocity (X-Correlation)
     xcorr_v_rad = FloatField(null=True, help_text=Glossary.v_rad)
     xcorr_v_rel = FloatField(null=True, help_text=Glossary.v_rel)
@@ -303,11 +303,12 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         index=True,
         unique=True,
         lazy_load=False,
-        default=Spectrum.create,
         help_text=Glossary.spectrum_pk
     )
     drp_spectrum_pk = ForeignKeyField(
         ApogeeVisitSpectrum,
+        index=True,
+        unique=True,
         lazy_load=False,
         field=ApogeeVisitSpectrum.spectrum_pk,
         help_text=Glossary.drp_spectrum_pk
@@ -353,7 +354,7 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
     plate = TextField(help_text=Glossary.plate)
     mjd = IntegerField(help_text=Glossary.mjd)
     fiber = IntegerField(help_text=Glossary.fiber)
-    reduction = TextField(default="", help_text=Glossary.reduction) # only used for DR17 apo1m spectra
+    reduction = TextField(null=True, default="", help_text=Glossary.reduction) # only used for DR17 apo1m spectra
 
 
 
@@ -415,6 +416,8 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     A co-added (stacked) APOGEE spectrum of a star, which is stored in an `apStar` data product.
     """
 
+    pk = AutoField()
+
     # Won't appear in a header group because it is first referenced in `Source`.
     source = ForeignKeyField(
         Source, 
@@ -423,17 +426,19 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
         # own checks to make sure that spectra and sources are linked.
         null=True, 
         index=True,
+        unique=True,
         column_name="source_pk",
         backref="apogee_coadded_spectra_in_apstar",
     )
 
-    #> Spectrum Identifiers
+    #> Identifiers
+    star_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `star` primary key")
     spectrum_pk = ForeignKeyField(
         Spectrum,
+        null=True,
         index=True,
+        unique=True,
         lazy_load=False,
-        primary_key=True,
-        default=Spectrum.create,
         help_text=Glossary.spectrum_pk
     )
 
@@ -446,7 +451,44 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     telescope = TextField(help_text=Glossary.telescope)
     healpix = IntegerField(null=True, help_text=Glossary.healpix) 
     field = TextField(null=True, help_text=Glossary.field) # not used in SDSS-V
-    prefix = TextField(null=True, help_text=Glossary.prefix) # not used in SDSS-V
+    prefix = TextField(null=True, help_text=Glossary.prefix) # not used in SDSS-V    
+
+    min_mjd = IntegerField(null=True, help_text="Minimum MJD of visits")
+    max_mjd = IntegerField(null=True, help_text="Maximum MJD of visits")
+
+    n_entries = IntegerField(null=True, help_text="apStar entries for this SDSS4_APOGEE_ID") # Only present in DR17
+    n_visits = IntegerField(null=True, help_text="Number of APOGEE visits")
+    n_good_visits = IntegerField(null=True, help_text="Number of 'good' APOGEE visits")
+    n_good_rvs = IntegerField(null=True, help_text="Number of 'good' APOGEE radial velocities")
+
+    snr = FloatField(null=True, help_text=Glossary.snr)
+    spectrum_flags = BitField(default=0, help_text=Glossary.spectrum_flags)
+
+    mean_fiber = FloatField(null=True, help_text="S/N-weighted mean visit fiber number")
+    std_fiber = FloatField(null=True, help_text="Standard deviation of visit fiber numbers")
+
+    #> Radial Velocity (Doppler)
+    v_rad = FloatField(null=True, help_text=Glossary.v_rad)
+    e_v_rad = FloatField(null=True, help_text=Glossary.e_v_rad)
+    std_v_rad = FloatField(null=True, help_text="Standard deviation of visit V_RAD [km/s]")
+    median_e_v_rad = FloatField(null=True, help_text=Glossary.median_e_v_rad) # Only in SDSS5
+    
+    doppler_teff = FloatField(null=True, help_text=Glossary.teff)
+    doppler_e_teff = FloatField(null=True, help_text=Glossary.e_teff)
+    doppler_logg = FloatField(null=True, help_text=Glossary.logg)
+    doppler_e_logg = FloatField(null=True, help_text=Glossary.e_logg)
+    doppler_fe_h = FloatField(null=True, help_text=Glossary.fe_h)
+    doppler_e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
+    doppler_rchi2 = FloatField(null=True, help_text=Glossary.doppler_rchi2)
+    doppler_flags = BitField(default=0, help_text="Doppler flags") # TODO: is this actually STARFLAG from the DRP?
+
+    #> Radial Velocity (X-Correlation)
+    xcorr_v_rad = FloatField(null=True, help_text=Glossary.v_rad)
+    xcorr_v_rel = FloatField(null=True, help_text=Glossary.v_rel)
+    xcorr_e_v_rel = FloatField(null=True, help_text=Glossary.e_v_rel)
+    ccfwhm = FloatField(null=True, help_text=Glossary.ccfwhm)
+    autofwhm = FloatField(null=True, help_text=Glossary.autofwhm)
+    n_components = IntegerField(null=True, help_text=Glossary.n_components)    
 
     #> Spectral Data
     @property
@@ -472,6 +514,9 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
         pixels=8575,
         help_text=Glossary.pixel_flags
     )
+
+    # Other stuff we need
+    mean_fiber = FloatField(null=True)
 
 
     @property

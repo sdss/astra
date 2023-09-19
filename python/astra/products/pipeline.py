@@ -17,10 +17,11 @@ def create_star_pipeline_product(
     pipeline_model,
     boss_spectrum_model=None,
     apogee_spectrum_model=None,
-    ignore_field_names=("carton_flags", "source", "flux", "ivar", "pixel_flags"),
+    ignore_field_names=("sdss5_target_flags", "source", "flux", "ivar", "pixel_flags"),
     name_conflict_strategy=None,
     upper=True,
     fill_values=None,
+    limit=1,
     overwrite=False,
     full_output=False,        
 ):
@@ -71,19 +72,17 @@ def create_star_pipeline_product(
         otherwise just return the path.     
     """
 
-    # TODO: Allow apred/run2d?
-
     pipeline_model = resolve_model(pipeline_model)
     pipeline = pipeline_model.__name__
 
-    #assert source.sdss_id is not None, f"Source {source} has no sdss_id"
-    sdss_id = source.sdss_id or source.id
+    sdss_id = source.sdss_id or source.pk
     if source.sdss_id is None:
         print("WARNING SOURCE ID IS NONE")
+        raise a
 
-    print("WARNING: using 00/00 as sdss_id_groups")
-    sdss_id_groups = "00/00"
-
+    chars = str(source.sdss_id)[-4:]
+    sdss_id_groups = f"{chars[:2]}/{chars[2:]}"
+    
     path = expand_path(
         f"$MWM_ASTRA/{__version__}/results/star/{sdss_id_groups}/"
         f"astraStar-{pipeline}-{__version__}-{sdss_id}.fits"
@@ -99,6 +98,7 @@ def create_star_pipeline_product(
         apogee_spectrum_model = ApogeeCoaddedSpectrumInApStar
     
 
+    # TODO: Put the source info in the primary HDU, and remove the Source from the models set
     kwds = dict(upper=upper, fill_values=fill_values)
     hdus = [
         fits.PrimaryHDU(header=get_basic_header(pipeline=pipeline, include_hdu_descriptions=True))
@@ -162,10 +162,13 @@ def create_star_pipeline_product(
         q = (
             pipeline_model
             .select(*models)
-            .join(spectrum_model, on=(pipeline_model.spectrum_id == spectrum_model.spectrum_id), attr="__spectrum")
+            .distinct(pipeline_model.spectrum_pk)
+            .join(spectrum_model, on=(pipeline_model.spectrum_pk == spectrum_model.spectrum_pk), attr="__spectrum")
             .switch(pipeline_model)
-            .join(Source, on=(pipeline_model.source_id == Source.id), attr="__source")
-            .where(hdu_where & (Source.id == source.id))
+            .join(Source, on=(pipeline_model.source_pk == Source.pk), attr="__source")
+            .where(hdu_where & (Source.pk == source.pk))
+            .order_by(pipeline_model.task_pk.desc())
+            .limit(limit)
         )
 
         if q.count() > 1:
@@ -222,7 +225,7 @@ def create_visit_pipeline_product(
     pipeline_model,
     boss_spectrum_model=None,
     apogee_spectrum_model=None,
-    ignore_field_names=("carton_flags", "source", "wavelength", "flux", "ivar", "pixel_flags"),
+    ignore_field_names=("sdss5_target_flags", "source", "wavelength", "flux", "ivar", "pixel_flags"),
     name_conflict_strategy=None,
     upper=True,
     fill_values=None,
@@ -284,7 +287,7 @@ def create_visit_pipeline_product(
 
 
     #assert source.sdss_id is not None, f"Source {source} has no sdss_id"
-    sdss_id = source.sdss_id or source.id
+    sdss_id = source.sdss_id or source.pk
     if source.sdss_id is None:
         print("WARNING SOURCE ID IS NONE")
 
@@ -376,19 +379,19 @@ def create_visit_pipeline_product(
         q = (
             pipeline_model
             .select(*models)
-            .join(spectrum_model, on=(pipeline_model.spectrum_id == spectrum_model.spectrum_id), attr="__spectrum")
+            .join(spectrum_model, on=(pipeline_model.spectrum_pk == spectrum_model.spectrum_pk), attr="__spectrum")
             .switch(pipeline_model)
         )
         if drp_spectrum_model != spectrum_model:
             q = (
                 q
-                .join(drp_spectrum_model, on=(spectrum_model.drp_spectrum_id == drp_spectrum_model.spectrum_id), attr="__drp_spectrum")
+                .join(drp_spectrum_model, on=(spectrum_model.drp_spectrum_pk == drp_spectrum_model.spectrum_pk), attr="__drp_spectrum")
                 .switch(pipeline_model)
             )
         q = (
             q
-            .join(Source, on=(pipeline_model.source_id == Source.id), attr="__source")
-            .where(hdu_where & (Source.id == source.id))
+            .join(Source, on=(pipeline_model.source_pk == Source.pk), attr="__source")
+            .where(hdu_where & (Source.pk == source.pk))
         )
 
         if q.count() > 1:

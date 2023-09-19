@@ -73,7 +73,7 @@ class FerreOutputMixin(PipelineOutputMixin):
 
         kwds = dict(
             fname=f"{self.pwd}/{basename}",
-            skiprows=int(self.ferre_input_index), 
+            skiprows=int(self.ferre_output_index), 
             max_rows=1,
         )
         '''
@@ -112,6 +112,7 @@ class FerreOutputMixin(PipelineOutputMixin):
         assert int(meta["source_pk"]) == self.source_pk
         assert int(meta["spectrum_pk"]) == self.spectrum_pk
         assert int(meta["index"]) == self.ferre_input_index
+
         return array
 
 
@@ -146,10 +147,11 @@ class FerreCoarse(BaseModel, FerreOutputMixin):
     initial_flags = BitField(default=0)
     flag_initial_guess_from_apogeenet = initial_flags.flag(2**0, help_text="Initial guess from APOGEENet")
     flag_initial_guess_from_doppler = initial_flags.flag(2**1, help_text="Initial guess from Doppler (SDSS-V)")
-    flag_initial_guess_from_doppler_sdss4 = initial_flags.flag(2**1, help_text="Initial guess from Doppler (SDSS-IV)")
-    flag_initial_guess_from_gaia_xp_andrae23 = initial_flags.flag(2**3, help_text="Initial guess from Andrae et al. (2023)")
-    flag_initial_guess_from_user = initial_flags.flag(2**2, help_text="Initial guess specified by user")
-    flag_initial_guess_at_grid_center = initial_flags.flag(2**3, help_text="Initial guess from grid center")
+    flag_initial_guess_from_doppler_sdss4 = initial_flags.flag(2**2, help_text="Initial guess from Doppler (SDSS-IV)")
+    flag_initial_guess_from_gaia_xp_andrae_2023 = initial_flags.flag(2**3, help_text="Initial guess from Andrae et al. (2023)")
+    flag_initial_guess_from_gaia_xp_zhang_2023 = initial_flags.flag(2**4, "Initial guess from Zhang, Green & Rix (2023)")
+    flag_initial_guess_from_user = initial_flags.flag(2**5, help_text="Initial guess specified by user")
+    flag_initial_guess_at_grid_center = initial_flags.flag(2**6, help_text="Initial guess from grid center")
 
     #> FERRE Settings
     continuum_order = IntegerField(default=-1, null=True)
@@ -252,7 +254,7 @@ class FerreStellarParameters(BaseModel, FerreOutputMixin):
 
     source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
     spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
-    upstream = ForeignKeyField(FerreCoarse, index=True)
+    upstream = ForeignKeyField(FerreCoarse, column_name="upstream_pk", index=True)
 
     #> Astra Metadata
     task_pk = AutoField()
@@ -384,9 +386,18 @@ class FerreStellarParameters(BaseModel, FerreOutputMixin):
 
 class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
 
+    @cached_property
+    def ferre_flux(self):
+        return self._get_input_pixel_array("../flux.input")
+        
+    @cached_property
+    def ferre_e_flux(self):
+        return self._get_input_pixel_array("../e_flux.input")
+    
+
     source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
     spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
-    upstream = ForeignKeyField(FerreStellarParameters, index=True)
+    upstream = ForeignKeyField(FerreStellarParameters, column_name="upstream_pk", index=True)
 
     #> Astra Metadata
     task_pk = AutoField()
@@ -512,7 +523,7 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
 
 
 
-class UpstreamFerrePixelArrayAccessor(BasePixelArrayAccessor):
+class StellarParameterPixelAccessor(BasePixelArrayAccessor):
     
     def __get__(self, instance, instance_type=None):
         if instance is not None:
@@ -522,39 +533,45 @@ class UpstreamFerrePixelArrayAccessor(BasePixelArrayAccessor):
                 # Load them all.
                 instance.__pixel_data__ = {}
 
-                # TODO: THIS IS SO SLOW AND SUCH A HACK
                 upstream = FerreStellarParameters.get(instance.stellar_parameters_task_pk)
+                continuum = upstream.unmask(
+                    (upstream.rectified_model_flux/upstream.model_flux)
+                /   (upstream.rectified_flux/upstream.ferre_flux)
+                )
+
+                instance.__pixel_data__.setdefault("continuum", continuum)
                 instance.__pixel_data__.setdefault("model_flux", upstream.unmask(upstream.model_flux))
-                instance.__pixel_data__.setdefault("continuum", upstream.unmask(upstream.ferre_flux / upstream.rectified_flux))
-                
+
                 return instance.__pixel_data__[self.name]
 
         return self.field
 
+        
 
+class ChemicalAbundancePixelAccessor(BasePixelArrayAccessor):
 
-class MG_HFerrePixelArrayAccessor(BasePixelArrayAccessor):
-    
     def __get__(self, instance, instance_type=None):
         if instance is not None:
             try:
                 return instance.__pixel_data__[self.name]
             except (AttributeError, KeyError):
-                # Load them all.
                 instance.__pixel_data__ = {}
 
-                # TODO: THIS IS SO SLOW AND SUCH A HACK
-                upstream = FerreChemicalAbundances.get(instance.ti_h_task_pk)
+                x_h = self.name[len("model_flux_"):]
+                upstream = FerreChemicalAbundances.get(getattr(instance, f"{x_h}_task_pk"))
+
                 try:
-                    instance.__pixel_data__.setdefault("model_flux", upstream.unmask(upstream.model_flux))
-                    instance.__pixel_data__.setdefault("continuum", upstream.unmask(upstream.ferre_flux / upstream.rectified_flux))
+                    instance.__pixel_data__.setdefault(self.name, upstream.unmask(upstream.rectified_model_flux))
                 except:
-                    instance.__pixel_data__["model_flux"] = np.nan * np.ones(8575)
-                    instance.__pixel_data__["continuum"] = np.nan * np.ones(8575)
-
+                    instance.__pixel_data__[self.name] = np.nan * np.ones(8575)
+                
+            finally:
                 return instance.__pixel_data__[self.name]
-
+        
         return self.field
+
+
+
 
 
 class ASPCAP(BaseModel, PipelineOutputMixin):
@@ -567,16 +584,118 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     #> Astra Metadata
     task_pk = AutoField(help_text=Glossary.task_pk)
     v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
-    created = DateTimeField(default=datetime.datetime.now) # TODO: ADD
+    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created) 
     t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
-    t_overhead = FloatField(null=True)
+    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
     tag = TextField(default="", index=True, help_text=Glossary.tag)
     
     #> Spectral Data
-    model_flux = PixelArray(accessor_class=UpstreamFerrePixelArrayAccessor, pixels=8575)
-    continuum = PixelArray(accessor_class=UpstreamFerrePixelArrayAccessor, pixels=8575)    
-    # TODO: Add other model fluxes
-    #ti_hmodel_flux = PixelArray(accessor_class=MG_HFerrePixelArrayAccessor)
+    model_flux = PixelArray(
+        accessor_class=StellarParameterPixelAccessor, 
+        help_text="Best-fit model flux when fitting stellar parameters"
+    )
+    continuum = PixelArray(
+        accessor_class=StellarParameterPixelAccessor,
+        help_text="Continuum"
+    )
+
+    #> Model Fluxes from Chemical Abundance Fits
+    model_flux_al_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Al/H]"
+    )
+    model_flux_c_12_13 = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting C12/13"
+    )
+    model_flux_ca_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Ca/H]"
+    )
+    model_flux_ce_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Ce/H]"
+    )
+    model_flux_c_1_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [C 1/H]"
+    )
+    model_flux_c_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [C/H]"
+    )
+    model_flux_co_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Co/H]"
+    )
+    model_flux_cr_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Cr/H]"
+    )
+    model_flux_cu_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Cu/H]"
+    )
+    model_flux_fe_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Fe/H]"
+    )
+    model_flux_k_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [K/H]"
+    )
+    model_flux_mg_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Mg/H]"
+    )
+    model_flux_mn_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Mn/H]"
+    )
+    model_flux_na_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Na/H]"
+    )
+    model_flux_nd_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Nd/H]"
+    )
+    model_flux_ni_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Ni/H]"
+    )
+    model_flux_n_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [N/H]"
+    )
+    model_flux_o_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [O/H]"
+    )
+    model_flux_p_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [P/H]"
+    )
+    model_flux_si_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Si/H]"
+    )
+    model_flux_s_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [S/H]"
+    )
+    model_flux_ti_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Ti/H]"
+    )
+    model_flux_ti_2_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [Ti 2/H]"
+    )
+    model_flux_v_h = PixelArray(
+        accessor_class=ChemicalAbundancePixelAccessor,
+        help_text="Best-fit model flux when fitting [V/H]"
+    )
 
     #> Stellar Parameters
     teff = FloatField(null=True, help_text=Glossary.teff)
@@ -717,14 +836,11 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     v_h_flags = BitField(default=0, help_text=Glossary.v_h_flags)
     v_h_rchi2 = FloatField(null=True, help_text=Glossary.v_h_rchi2)
 
-    # TODO: include the initial parameters from the stellar parameter run? Or the COARSE run?
 
     #> FERRE Settings
     short_grid_name = TextField(default="", help_text="Short name describing the FERRE grid used")
     continuum_order = IntegerField(default=-1, help_text="Continuum order used in FERRE")
     continuum_reject = FloatField(null=True, help_text="Tolerance for FERRE to reject continuum points")
-    #continuum_flag = IntegerField(default=0, null=True)
-    #continuum_observations_flag = IntegerField(default=0, null=True)
     interpolation_order = IntegerField(default=-1, help_text="Interpolation order used by FERRE")
     initial_flags = BitField(default=0, help_text=Glossary.initial_flags)
     flag_initial_guess_from_apogeenet = initial_flags.flag(2**0, help_text="Initial guess from APOGEENet")
@@ -794,98 +910,66 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     calibrated = BooleanField(default=False, help_text=Glossary.calibrated)
     raw_teff = FloatField(null=True, help_text=Glossary.raw_teff)
     raw_e_teff = FloatField(null=True, help_text=Glossary.raw_e_teff)
-    raw_e_sys_teff = FloatField(null=True, help_text=Glossary.raw_e_sys_teff)
     raw_logg = FloatField(null=True, help_text=Glossary.raw_logg)
     raw_e_logg = FloatField(null=True, help_text=Glossary.raw_e_logg)
-    raw_e_sys_logg = FloatField(null=True, help_text=Glossary.raw_e_sys_logg)
     raw_v_micro = FloatField(null=True, help_text=Glossary.raw_v_micro)
     raw_e_v_micro = FloatField(null=True, help_text=Glossary.raw_e_v_micro)
-    raw_e_sys_v_micro = FloatField(null=True, help_text=Glossary.raw_e_sys_v_micro)
     raw_v_sini = FloatField(null=True, help_text=Glossary.raw_v_sini)
     raw_e_v_sini = FloatField(null=True, help_text=Glossary.raw_e_v_sini)
-    raw_e_sys_v_sini = FloatField(null=True, help_text=Glossary.raw_e_sys_v_sini)
     raw_m_h_atm = FloatField(null=True, help_text=Glossary.raw_m_h_atm)
     raw_e_m_h_atm = FloatField(null=True, help_text=Glossary.raw_e_m_h_atm)
-    raw_e_sys_m_h_atm = FloatField(null=True, help_text=Glossary.raw_e_sys_m_h_atm)
     raw_alpha_m_atm = FloatField(null=True, help_text=Glossary.raw_alpha_m_atm)
     raw_e_alpha_m_atm = FloatField(null=True, help_text=Glossary.raw_e_alpha_m_atm)
-    raw_e_sys_alpha_m_atm = FloatField(null=True, help_text=Glossary.raw_e_sys_alpha_m_atm)
     raw_c_m_atm = FloatField(null=True, help_text=Glossary.raw_c_m_atm)
     raw_e_c_m_atm = FloatField(null=True, help_text=Glossary.raw_e_c_m_atm)
-    raw_e_sys_c_m_atm = FloatField(null=True, help_text=Glossary.raw_e_sys_c_m_atm)
     raw_n_m_atm = FloatField(null=True, help_text=Glossary.raw_n_m_atm)
     raw_e_n_m_atm = FloatField(null=True, help_text=Glossary.raw_e_n_m_atm)
-    raw_e_sys_n_m_atm = FloatField(null=True, help_text=Glossary.raw_e_sys_n_m_atm)
     raw_al_h = FloatField(null=True, help_text=Glossary.raw_al_h)
     raw_e_al_h = FloatField(null=True, help_text=Glossary.raw_e_al_h)
-    raw_e_sys_al_h = FloatField(null=True, help_text=Glossary.raw_e_sys_al_h)
     raw_c_12_13 = FloatField(null=True, help_text=Glossary.raw_c_12_13)
     raw_e_c_12_13 = FloatField(null=True, help_text=Glossary.raw_e_c_12_13)
-    raw_e_sys_c_12_13 = FloatField(null=True, help_text=Glossary.raw_e_sys_c_12_13)
     raw_ca_h = FloatField(null=True, help_text=Glossary.raw_ca_h)
     raw_e_ca_h = FloatField(null=True, help_text=Glossary.raw_e_ca_h)
-    raw_e_sys_ca_h = FloatField(null=True, help_text=Glossary.raw_e_sys_ca_h)
     raw_ce_h = FloatField(null=True, help_text=Glossary.raw_ce_h)
     raw_e_ce_h = FloatField(null=True, help_text=Glossary.raw_e_ce_h)
-    raw_e_sys_ce_h = FloatField(null=True, help_text=Glossary.raw_e_sys_ce_h)
     raw_c_1_h = FloatField(null=True, help_text=Glossary.raw_c_1_h)
     raw_e_c_1_h = FloatField(null=True, help_text=Glossary.raw_e_c_1_h)
-    raw_e_sys_c_1_h = FloatField(null=True, help_text=Glossary.raw_e_sys_c_1_h)
     raw_c_h = FloatField(null=True, help_text=Glossary.raw_c_h)
     raw_e_c_h = FloatField(null=True, help_text=Glossary.raw_e_c_h)
-    raw_e_sys_c_h = FloatField(null=True, help_text=Glossary.raw_e_sys_c_h)
     raw_co_h = FloatField(null=True, help_text=Glossary.raw_co_h)
     raw_e_co_h = FloatField(null=True, help_text=Glossary.raw_e_co_h)
-    raw_e_sys_co_h = FloatField(null=True, help_text=Glossary.raw_e_sys_co_h)
     raw_cr_h = FloatField(null=True, help_text=Glossary.raw_cr_h)
     raw_e_cr_h = FloatField(null=True, help_text=Glossary.raw_e_cr_h)
-    raw_e_sys_cr_h = FloatField(null=True, help_text=Glossary.raw_e_sys_cr_h)
     raw_cu_h = FloatField(null=True, help_text=Glossary.raw_cu_h)
     raw_e_cu_h = FloatField(null=True, help_text=Glossary.raw_e_cu_h) 
-    raw_e_sys_cu_h = FloatField(null=True, help_text=Glossary.raw_e_sys_cu_h)
     raw_fe_h = FloatField(null=True, help_text=Glossary.raw_fe_h)
     raw_e_fe_h = FloatField(null=True, help_text=Glossary.raw_e_fe_h)
-    raw_e_sys_fe_h = FloatField(null=True, help_text=Glossary.raw_e_sys_fe_h)
     raw_k_h = FloatField(null=True, help_text=Glossary.raw_k_h)
     raw_e_k_h = FloatField(null=True, help_text=Glossary.raw_e_k_h)
-    raw_e_sys_k_h = FloatField(null=True, help_text=Glossary.raw_e_sys_k_h)
     raw_mg_h = FloatField(null=True, help_text=Glossary.raw_mg_h)
     raw_e_mg_h = FloatField(null=True, help_text=Glossary.raw_e_mg_h)
-    raw_e_sys_mg_h = FloatField(null=True, help_text=Glossary.raw_e_sys_mg_h)
     raw_mn_h = FloatField(null=True, help_text=Glossary.raw_mn_h)
     raw_e_mn_h = FloatField(null=True, help_text=Glossary.raw_e_mn_h)
-    raw_e_sys_mn_h = FloatField(null=True, help_text=Glossary.raw_e_sys_mn_h)
     raw_na_h = FloatField(null=True, help_text=Glossary.raw_na_h)
     raw_e_na_h = FloatField(null=True, help_text=Glossary.raw_e_na_h)
-    raw_e_sys_na_h = FloatField(null=True, help_text=Glossary.raw_e_sys_na_h)
     raw_nd_h = FloatField(null=True, help_text=Glossary.raw_nd_h)
     raw_e_nd_h = FloatField(null=True, help_text=Glossary.raw_e_nd_h)
-    raw_e_sys_nd_h = FloatField(null=True, help_text=Glossary.raw_e_sys_nd_h)
     raw_ni_h = FloatField(null=True, help_text=Glossary.raw_ni_h)
     raw_e_ni_h = FloatField(null=True, help_text=Glossary.raw_e_ni_h)
-    raw_e_sys_ni_h = FloatField(null=True, help_text=Glossary.raw_e_sys_ni_h)
     raw_n_h = FloatField(null=True, help_text=Glossary.raw_n_h)
     raw_e_n_h = FloatField(null=True, help_text=Glossary.raw_e_n_h)
-    raw_e_sys_n_h = FloatField(null=True, help_text=Glossary.raw_e_sys_n_h)
     raw_o_h = FloatField(null=True, help_text=Glossary.raw_o_h)
     raw_e_o_h = FloatField(null=True, help_text=Glossary.raw_e_o_h)
-    raw_e_sys_o_h = FloatField(null=True, help_text=Glossary.raw_e_sys_o_h)
     raw_p_h = FloatField(null=True, help_text=Glossary.raw_p_h)
     raw_e_p_h = FloatField(null=True, help_text=Glossary.raw_e_p_h)
-    raw_e_sys_p_h = FloatField(null=True, help_text=Glossary.raw_e_sys_p_h)
     raw_si_h = FloatField(null=True, help_text=Glossary.raw_si_h)
     raw_e_si_h = FloatField(null=True, help_text=Glossary.raw_e_si_h)
-    raw_e_sys_si_h = FloatField(null=True, help_text=Glossary.raw_e_sys_si_h)
     raw_s_h = FloatField(null=True, help_text=Glossary.raw_s_h)
     raw_e_s_h = FloatField(null=True, help_text=Glossary.raw_e_s_h)
-    raw_e_sys_s_h = FloatField(null=True, help_text=Glossary.raw_e_sys_s_h)
     raw_ti_h = FloatField(null=True, help_text=Glossary.raw_ti_h)
     raw_e_ti_h = FloatField(null=True, help_text=Glossary.raw_e_ti_h)
-    raw_e_sys_ti_h = FloatField(null=True, help_text=Glossary.raw_e_sys_ti_h)
     raw_ti_2_h = FloatField(null=True, help_text=Glossary.raw_ti_2_h)
     raw_e_ti_2_h = FloatField(null=True, help_text=Glossary.raw_e_ti_2_h)
-    raw_e_sys_ti_2_h = FloatField(null=True, help_text=Glossary.raw_e_sys_ti_2_h)
     raw_v_h = FloatField(null=True, help_text=Glossary.raw_v_h)
     raw_e_v_h = FloatField(null=True, help_text=Glossary.raw_e_v_h)
-    raw_e_sys_v_h = FloatField(null=True, help_text=Glossary.raw_e_sys_v_h)
     

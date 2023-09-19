@@ -11,7 +11,7 @@ from astra.pipelines.ferre.operator import FerreOperator, FerreMonitoringOperato
 from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
 from astra.pipelines.ferre.utils import (
-    parse_header_path, get_input_spectrum_identifiers, read_control_file, read_file_with_name_and_data, read_ferre_headers,
+    parse_header_path, get_input_spectrum_primary_keys, read_control_file, read_file_with_name_and_data, read_ferre_headers,
     format_ferre_input_parameters, format_ferre_control_keywords,
 )
 from astra.pipelines.aspcap.utils import get_input_nml_paths
@@ -88,8 +88,8 @@ def pre_stellar_parameters(
     # Create database entries for those with upstream failures.
     for upstream in upstream_failed:
         yield FerreStellarParameters(
-            source_id=upstream.source_id,
-            spectrum_id=upstream.spectrum_id,
+            source_pk=upstream.source_pk,
+            spectrum_pk=upstream.spectrum_pk,
             upstream=upstream,
             ferre_flags=upstream.ferre_flags,
             initial_flags=upstream.initial_flags,
@@ -136,35 +136,35 @@ def plan_stellar_parameters(
 
     if spectra is None:
         # Get spectrum ids from coarse stage in parent dir.
-        spectrum_ids = list(get_input_spectrum_identifiers(f"{parent_dir}/coarse"))
-        if len(spectrum_ids) == 0:
+        spectrum_pks = list(get_input_spectrum_primary_keys(f"{parent_dir}/coarse"))
+        if len(spectrum_pks) == 0:
             log.warning(f"No spectrum identifiers found in {parent_dir}/coarse")
             return ([], [])
         
         # TODO: assuming all spectra are the same model type..
-        model_class = Spectrum.get(spectrum_ids[0]).resolve().__class__
+        model_class = Spectrum.get(spectrum_pks[0]).resolve().__class__
         spectra = (
             model_class
             .select()
-            .where(model_class.spectrum_id << spectrum_ids)
+            .where(model_class.spectrum_id << spectrum_pks)
         )
     else:
-        spectrum_ids = [s.spectrum_id for s in spectra]        
+        spectrum_pks = [s.spectrum_pk for s in spectra]        
 
     Alias = FerreCoarse.alias()
     sq = (
         Alias
         .select(
-            Alias.spectrum_id,
-            fn.MIN(Alias.penalized_r_chi_sq).alias("min_penalized_r_chi_sq"),
+            Alias.spectrum_pk.alias("spectrum_pk"),
+            fn.MIN(Alias.penalized_rchi2).alias("min_penalized_rchi2"),
         )
         .where(
-            (Alias.spectrum_id << spectrum_ids)
+            (Alias.spectrum_pk << spectrum_pks)
         &   (Alias.teff.is_null(False))
         &   (Alias.logg.is_null(False))
         &   (Alias.m_h.is_null(False))
         )
-        .group_by(Alias.spectrum_id)
+        .group_by(Alias.spectrum_pk)
         .alias("sq")
     )
 
@@ -175,13 +175,13 @@ def plan_stellar_parameters(
         .join(
             sq, 
             on=(
-                (FerreCoarse.spectrum_id == sq.c.spectrum_id) &
-                (FerreCoarse.penalized_r_chi_sq == sq.c.min_penalized_r_chi_sq)
+                (FerreCoarse.spectrum_pk == sq.c.spectrum_pk) &
+                (FerreCoarse.penalized_rchi2 == sq.c.min_penalized_rchi2)
             )
         )
     )
     
-    lookup_spectrum_by_id = { s.spectrum_id: s for s in spectra }
+    lookup_spectrum_by_id = { s.spectrum_pk: s for s in spectra }
 
     log.info(f"Preparing stellar parameters")
 
@@ -199,21 +199,21 @@ def plan_stellar_parameters(
             upstream_failed.append(r)
             continue
 
-        coarse_results_dict.setdefault(r.spectrum_id, [])
-        coarse_results_dict[r.spectrum_id].append(r)
+        coarse_results_dict.setdefault(r.spectrum_pk, [])
+        coarse_results_dict[r.spectrum_pk].append(r)
     
-    for spectrum_id, coarse_results in coarse_results_dict.items():
+    for spectrum_pk, coarse_results in coarse_results_dict.items():
         if len(coarse_results) > 1:
-            log.warning(f"Multiple coarse results for spectrum {spectrum_id}: {coarse_results}")
+            log.warning(f"Multiple coarse results for spectrum {spectrum_pk}: {coarse_results}")
 
-        index = np.argmin([r.r_chi_sq for r in coarse_results])
-        coarse_results_dict[spectrum_id] = coarse_results[index]
+        index = np.argmin([r.rchi2 for r in coarse_results])
+        coarse_results_dict[spectrum_pk] = coarse_results[index]
 
     group_task_kwds, pre_computed_continuum = ({}, {})
     for coarse_result in tqdm(coarse_results_dict.values(), total=0):
 
         group_task_kwds.setdefault(coarse_result.header_path, [])
-        spectrum = lookup_spectrum_by_id[coarse_result.spectrum_id]
+        spectrum = lookup_spectrum_by_id[coarse_result.spectrum_pk]
 
         if pre_continuum is not None:
             try:
@@ -223,12 +223,12 @@ def plan_stellar_parameters(
                 log.exception(f"Exception for spectrum {spectrum} from coarse result {coarse_result}:")
                 continue
 
-            pre_computed_continuum[spectrum.spectrum_id] = continuum
+            pre_computed_continuum[spectrum.spectrum_pk] = continuum
 
         group_task_kwds[coarse_result.header_path].append(
             dict(
                 spectra=spectrum,
-                pre_computed_continuum=pre_computed_continuum.get(spectrum.spectrum_id, None),
+                pre_computed_continuum=pre_computed_continuum.get(spectrum.spectrum_pk, None),
                 initial_teff=coarse_result.teff,
                 initial_logg=coarse_result.logg,
                 initial_m_h=coarse_result.m_h,
@@ -238,7 +238,7 @@ def plan_stellar_parameters(
                 initial_c_m=coarse_result.c_m,
                 initial_n_m=coarse_result.n_m,
                 initial_flags=coarse_result.initial_flags,                
-                upstream_id=coarse_result.task_id,
+                upstream_pk=coarse_result.task_pk,
             )
         )
 

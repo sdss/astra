@@ -3,7 +3,7 @@
 from astropy.io import fits
 from astra import __version__
 from astra.utils import expand_path
-from astra.models import Source, ApogeeVisitSpectrum, BossVisitSpectrum
+from astra.models import Source, ApogeeVisitSpectrum, ApogeeCoaddedSpectrumInApStar, BossVisitSpectrum
 from astra.products.utils import (
     get_fields, get_basic_header, get_binary_table_hdu, check_path
 )
@@ -11,8 +11,12 @@ from astra.products.utils import (
 get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
 
 def create_all_star_product(
+    run2d=None,
+    apred=None,        
     where=None,
     limit=None,
+    boss_spectrum_model=BossVisitSpectrum,
+    apogee_spectrum_model=ApogeeCoaddedSpectrumInApStar,
     ignore_field_names=("pk", "sdss5_target_flags", ),
     name_conflict_strategy=None,
     upper=True,
@@ -60,38 +64,34 @@ def create_all_star_product(
         otherwise just return the path.        
     """
     
-    path = get_path(f"astraAllStar-{__version__}.fits")
-    check_path(path, overwrite)    
+    # TODO: Do we want to allow this tom-fuckery?
+    if run2d is None and apred is None:
+        boss_where = apogee_where = None
+        path = get_path(f"astraAllStar-{__version__}.fits")
 
-    fields = get_fields(
-        (Source, ),
+    elif run2d is not None and apred is not None:
+        boss_where = (boss_spectrum_model.run2d == run2d)
+        apogee_where = (apogee_spectrum_model.apred == apred) 
+        path = get_path(f"astraAllStar-{run2d}-{apred}-{__version__}.fits")   
+        
+    else:
+        raise ValueError(f"Either `apred` and `run2d` must both be None, or both given")
+        
+    return _create_summary_product(
+        path,
+        where=where,
+        limit=limit,
+        boss_where=boss_where,
+        apogee_where=apogee_where,
+        boss_spectrum_model=boss_spectrum_model,
+        apogee_spectrum_model=apogee_spectrum_model,
+        ignore_field_names=ignore_field_names,
         name_conflict_strategy=name_conflict_strategy,
-        ignore_field_names=ignore_field_names
-    )
-
-    q = (
-        Source
-        .select(*tuple(fields.values()))
-        .where(where)
-        .limit(limit)
-        .dicts()
-    )
-
-    hdu = get_binary_table_hdu(
-        q,
-        models=[Source],
-        fields=fields,
         upper=upper,
         fill_values=fill_values,
-        limit=limit,
+        overwrite=overwrite,
+        full_output=full_output
     )
-
-    hdu_list = fits.HDUList([
-        fits.PrimaryHDU(header=get_basic_header()),
-        hdu
-    ])
-    hdu_list.writeto(path, overwrite=overwrite)
-    return (path, hdu_list) if full_output else path
 
 
 def create_all_visit_product(
@@ -99,6 +99,8 @@ def create_all_visit_product(
     apred=None,
     where=None,
     limit=None,
+    boss_spectrum_model=BossVisitSpectrum,
+    apogee_spectrum_model=ApogeeVisitSpectrum,
     ignore_field_names=("pk", "sdss5_target_flags", ),
     name_conflict_strategy=None,
     upper=True,
@@ -157,13 +159,44 @@ def create_all_visit_product(
         path = get_path(f"astraAllVisit-{__version__}.fits")
 
     elif run2d is not None and apred is not None:
-        boss_where = (BossVisitSpectrum.run2d == run2d)
-        apogee_where = (ApogeeVisitSpectrum.apred == apred) 
+        boss_where = (boss_spectrum_model.run2d == run2d)
+        apogee_where = (apogee_spectrum_model.apred == apred) 
         path = get_path(f"astraAllVisit-{run2d}-{apred}-{__version__}.fits")   
         
     else:
         raise ValueError(f"Either `apred` and `run2d` must both be None, or both given")
 
+    return _create_summary_product(
+        path,
+        where=where,
+        limit=limit,
+        boss_where=boss_where,
+        apogee_where=apogee_where,
+        boss_spectrum_model=boss_spectrum_model,
+        apogee_spectrum_model=apogee_spectrum_model,
+        ignore_field_names=ignore_field_names,
+        name_conflict_strategy=name_conflict_strategy,
+        upper=upper,
+        fill_values=fill_values,
+        overwrite=overwrite,
+        full_output=full_output
+    )
+
+def _create_summary_product(
+    path,
+    where=None,
+    limit=None,
+    boss_where=None,
+    apogee_where=None,
+    boss_spectrum_model=BossVisitSpectrum,
+    apogee_spectrum_model=ApogeeVisitSpectrum,
+    ignore_field_names=("pk", "sdss5_target_flags", ),
+    name_conflict_strategy=None,
+    upper=True,
+    fill_values=None,
+    overwrite=False,
+    full_output=False,        
+):    
     check_path(path, overwrite)
 
     kwds = dict(upper=upper, fill_values=fill_values, limit=limit)
@@ -173,10 +206,10 @@ def create_all_visit_product(
     ]
 
     struct = [
-        (BossVisitSpectrum, "apo", boss_where),
-        (BossVisitSpectrum, "lco", boss_where),
-        (ApogeeVisitSpectrum, "apo", apogee_where),
-        (ApogeeVisitSpectrum, "lco", apogee_where),
+        (boss_spectrum_model, "apo", boss_where),
+        (boss_spectrum_model, "lco", boss_where),
+        (apogee_spectrum_model, "apo", apogee_where),
+        (apogee_spectrum_model, "lco", apogee_where),
     ]
     
     all_fields = {}
@@ -222,3 +255,38 @@ def create_all_visit_product(
     hdu_list = fits.HDUList(hdus)
     hdu_list.writeto(path, overwrite=overwrite)
     return (path, hdu_list) if full_output else path
+
+
+
+'''
+
+    fields = get_fields(
+        (Source, ),
+        name_conflict_strategy=name_conflict_strategy,
+        ignore_field_names=ignore_field_names
+    )
+
+    q = (
+        Source
+        .select(*tuple(fields.values()))
+        .where(where)
+        .limit(limit)
+        .dicts()
+    )
+
+    hdu = get_binary_table_hdu(
+        q,
+        models=[Source],
+        fields=fields,
+        upper=upper,
+        fill_values=fill_values,
+        limit=limit,
+    )
+
+    hdu_list = fits.HDUList([
+        fits.PrimaryHDU(header=get_basic_header()),
+        hdu
+    ])
+    hdu_list.writeto(path, overwrite=overwrite)
+    return (path, hdu_list) if full_output else path
+'''
