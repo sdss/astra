@@ -4,6 +4,7 @@ from astropy.io import fits
 from astra import __version__
 from astra.utils import log, expand_path
 from astra.models import Source, ApogeeVisitSpectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar, BossVisitSpectrum
+from astra.products.source import create_source_primary_hdu
 from astra.products.utils import (
     BLANK_CARD,
     get_fields_and_pixel_arrays, get_basic_header, fits_column_kwargs, get_fill_value, get_binary_table_hdu, check_path, resolve_model,
@@ -101,8 +102,10 @@ def create_star_pipeline_product(
     # TODO: Put the source info in the primary HDU, and remove the Source from the models set
     kwds = dict(upper=upper, fill_values=fill_values)
     hdus = [
-        fits.PrimaryHDU(header=get_basic_header(pipeline=pipeline, include_hdu_descriptions=True))
+    #    fits.PrimaryHDU(header=get_basic_header(pipeline=pipeline, include_hdu_descriptions=True))
+        create_source_primary_hdu(source),
     ]
+    
     
     struct = [
         (
@@ -315,7 +318,8 @@ def create_visit_pipeline_product(
 
     kwds = dict(upper=upper, fill_values=fill_values)
     hdus = [
-        fits.PrimaryHDU(header=get_basic_header(pipeline=pipeline, include_hdu_descriptions=True))
+        #fits.PrimaryHDU(header=get_basic_header(pipeline=pipeline, include_hdu_descriptions=True))
+        create_source_primary_hdu(source),
     ]
     
     struct = [

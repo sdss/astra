@@ -154,27 +154,40 @@ def post_coarse_stellar_parameters(parent_dir, **kwargs) -> Iterable[FerreCoarse
             yield result
 
 
-def penalize_coarse_stellar_parameter_result(result: FerreCoarse):
+def penalize_coarse_stellar_parameter_result(result: FerreCoarse, warn_multiplier=5, bad_multiplier=10, fail_multiplier=20, cool_star_in_gk_grid_multiplier=10):
     """
     Penalize the coarse stellar parameter result if it is not a good fit.
+
+    This follows the same logic from DR17 (see  https://github.com/sdss/apogee/blob/e134409dc14b20f69e68a0d4d34b2c1b5056a901/python/apogee/aspcap/aspcap.py#L655-L664 )
+    with additional penalties if FERRE actually failed (e.g., returned a -9999 error), which would usually only happen if the end result was actually on the very edge
+    of the grid.
     """
 
     # Penalize GK-esque things at cool temperatures.
     result.penalized_rchi2 = 0 + result.rchi2
     if result.teff < 3900 and "GK_200921" in result.header_path:
-        result.penalized_rchi2 += np.log10(10)
-    
+        result.penalized_rchi2 *= cool_star_in_gk_grid_multiplier
+        
     if result.flag_logg_grid_edge_warn:
-        result.penalized_rchi2 += np.log10(5)
+        result.penalized_rchi2 *= warn_multiplier
 
     if result.flag_teff_grid_edge_warn:
-        result.penalized_rchi2 += np.log10(5)
+        result.penalized_rchi2 *= warn_multiplier
 
     if result.flag_logg_grid_edge_bad:
-        result.penalized_rchi2 += np.log10(5)
+        result.penalized_rchi2 *= bad_multiplier
 
     if result.flag_teff_grid_edge_bad:
-        result.penalized_rchi2 += np.log10(5)
+        result.penalized_rchi2 *= bad_multiplier
+
+    # Add penalization terms for if FERRE failed.
+    if result.flag_teff_ferre_fail:
+        result.penalized_rchi2 *= fail_multiplier
+    
+    if result.flag_logg_ferre_fail:
+        result.penalized_rchi2 *= fail_multiplier
+    
+    
     return None
 
         

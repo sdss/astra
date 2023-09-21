@@ -95,7 +95,6 @@ class Timer(object):
 
     def __next__(self):
         item = next(self._iterable)
-
         interval = time() - self._time_last - self._time_paused
 
         if self.skip_result_callable(item):

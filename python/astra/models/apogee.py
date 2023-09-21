@@ -404,6 +404,7 @@ _transform = lambda x, *_: np.atleast_2d(x)[0]
 def _transform_coadded_spectrum(v, image, instance):
     # Accessor class for the PixelArrays
     v = np.atleast_2d(v)
+    return v[0]
     if image[0].header["NVISITS"] == 1:
         raise ValueError("No coadded spectrum")
     else:

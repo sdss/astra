@@ -17,7 +17,7 @@ def create_all_star_pipeline_product(
     apogee_spectrum_model=None,
     where=None,
     limit=None,
-    ignore_field_names=("carton_flags", ),
+    ignore_field_names=("sdss5_target_flags", ),
     name_conflict_strategy=None,
     upper=True,
     fill_values=None,
@@ -127,9 +127,9 @@ def create_all_star_pipeline_product(
         q = (
             spectrum_model
             .select(*tuple(fields.values()))
-            .join(pipeline_model, on=(pipeline_model.spectrum_id == spectrum_model.spectrum_id))
+            .join(pipeline_model, on=(pipeline_model.spectrum_pk == spectrum_model.spectrum_pk))
             .switch(spectrum_model)
-            .join(Source, on=(Source.id == spectrum_model.source_id))
+            .join(Source, on=(Source.pk == spectrum_model.source_pk))
             .where(spectrum_model.telescope.startswith(observatory))
         )
         if where: # Need to check, otherwise it requires AND with previous where.
@@ -158,7 +158,7 @@ def create_all_visit_pipeline_product(
     apogee_spectrum_model=None,
     where=None,
     limit=None,
-    ignore_field_names=("carton_flags", ),
+    ignore_field_names=("sdss5_target_flags", ),
     name_conflict_strategy=None,
     upper=True,
     fill_values=None,
@@ -283,15 +283,15 @@ def create_all_visit_pipeline_product(
         if drp_spectrum_model != spectrum_model:
             q = (
                 q
-                .join(drp_spectrum_model, on=(spectrum_model.drp_spectrum_id == drp_spectrum_model.spectrum_id))
+                .join(drp_spectrum_model, on=(spectrum_model.drp_spectrum_pk == drp_spectrum_model.spectrum_pk))
                 .switch(spectrum_model)
             )
             
         q = (
             q
-            .join(pipeline_model, on=(pipeline_model.spectrum_id == spectrum_model.spectrum_id))
+            .join(pipeline_model, on=(pipeline_model.spectrum_pk == spectrum_model.spectrum_pk))
             .switch(spectrum_model)
-            .join(Source, on=(Source.id == spectrum_model.source_id))
+            .join(Source, on=(Source.pk == spectrum_model.source_pk))
             .where(spectrum_model.telescope.startswith(observatory))
         )
         if where: # Need to check, otherwise it requires AND with previous where.

@@ -441,6 +441,8 @@ def load_balancer(
                 
                 execution_commands.append(f"cd {cwd}")
                 execution_commands.append(f"{command} > stdout 2> stderr")
+                execution_commands.append(f"ferre_timing . > timing.csv")
+                
                 if post_interpolate_model_flux:
                     execution_commands.append(f"ferre_interpolate_unnormalized_model_flux {cwd} > post_execute_stdout 2> post_execute_stderr")
                 
@@ -462,6 +464,7 @@ def load_balancer(
                             
             slurm_tasks.append(SlurmTask(task_commands))
             est_times.append(est_time)
+
 
         if chaos_monkey:
             command = f"ferre_chaos_monkey -v {' '.join(expect_ferre_executions_in_these_pwds)}"
@@ -554,7 +557,7 @@ def monitor(
 
     # Get a parent folder from the executions so that we can put the FERRE chaos monkey logs somewhere.
 
-    dead_processes, chaos_monkey_processes = ([], {})
+    dead_processes, warn_on_dead_processes, chaos_monkey_processes = ([], [], {})
     with tqdm(**tqdm_kwds) as pb:
         while True:
             
@@ -616,12 +619,16 @@ def monitor(
                         except:
                             None
                         else:
-                            if "error" in stderr or "Segmentation fault" in stderr:
+                            # Don't die on deaths.. we expect the chaos monkey to restart it.
+                            if ("error" in stderr or "Segmentation fault" in stderr):
+                                warn_on_dead_processes.append(output_path)
+                            '''
                                 dead_processes.append(output_path)
                                 n_executions_done += 1
                                 last_updated = time()
                                 pb.set_description(desc(n_executions_done, n_executions, last_updated))
                                 pb.refresh()
+                            '''
 
                 if n_now_done >= n_input:
                     last_updated = time()
@@ -642,18 +649,18 @@ def monitor(
 
             sleep(refresh_interval)
 
-    if dead_processes:
-        log.warning(f"Segmentation faults or chaos monkey deaths detected in following executions:")
-        for output_path in dead_processes:
+    if warn_on_dead_processes:
+        log.warning(f"Segmentation faults or chaos monkey deaths detected in following executions (these may have been restarted):")
+        for output_path in warn_on_dead_processes:
             log.warning(f"\t{os.path.dirname(output_path)}")
 
-    if job_ids and pb.n >= n_spectra:
+    if job_ids:# and pb.n >= n_spectra:
         log.info(f"Checking that all Slurm jobs are complete")
         while True:
             queue = get_queue()
             for job_id in job_ids:
                 if job_id in queue:
-                    log.info(f"Job {job_id} has status {queue[job_id]['status']}")
+                    log.info(f"\tJob {job_id} has status {queue[job_id]['status']}")
                     break
             else:
                 log.info("All Slurm jobs complete.")

@@ -1,6 +1,7 @@
 import concurrent
 import subprocess
-from peewee import chunked, Case, fn, JOIN
+from collections import OrderedDict
+from peewee import chunked, Case, fn, JOIN, IntegrityError
 from typing import Optional
 from tqdm import tqdm
 from astropy.table import Table
@@ -10,7 +11,6 @@ from astra.models.base import database
 from astra.utils import expand_path, flatten, log
 
 from astra.migrations.utils import enumerate_new_spectrum_pks
-
 
 def migrate_apogee_obj_from_source(batch_size: Optional[int] = 100, limit: Optional[int] = None):
 
@@ -385,7 +385,7 @@ def _migrate_apstar_metadata(
 
 
 
-def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 100, limit: Optional[int] = None):
+def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(where=None, batch_size: Optional[int] = 100, limit: Optional[int] = None):
     """
     Migrate all SDSS4 DR17 APOGEE visit information (`apVisit` files) stored in the SDSS-V database.
     
@@ -476,10 +476,16 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
         .join(CatalogToGaia_DR2, JOIN.LEFT_OUTER, on=(Catalog.catalogid == CatalogToGaia_DR2.catalog))
         .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(CatalogToGaia_DR2.catalog == SDSS_ID_Flat.catalogid))
         .join(SDSS_ID_Stacked, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
+        .order_by(SDSS_ID_Flat.sdss_id.asc()) # link duplicates to earlier SDSS ID 
+    )
+    if where:
+        q = q.where(where)
+
+    q = (
+        q
         .limit(limit)
         .dicts()
-    )
-    
+    )    
     # The query above will return the same ApogeeVisit when it is associated with multiple sdss_id values,
     # but the .on_conflict_ignore() when upserting will mean that the spectra are not duplicated in the database.
     source_only_keys = (
@@ -504,7 +510,7 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
     )
     sdss4_apogee_targeting_flag_keys = [k for k in source_only_keys if k.startswith("sdss4_apogee") and k.endswith("_flags")]
 
-    source_data, spectrum_data = ({}, [])
+    source_data, spectrum_data = (OrderedDict(), [])
     for row in tqdm(q.iterator(), total=limit or 1, desc="Retrieving spectra"):
         basename = row.pop("file")
         
@@ -550,7 +556,7 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
                 )
                 pb.update(min(batch_size, len(chunk)))
                 pb.refresh()
-    
+
     log.info(f"Getting data for sources")
     q = (
         Source
@@ -565,18 +571,20 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
 
     source_pk_by_sdss_id, source_pk_by_sdss4_apogee_id = ({}, {})
     for pk, sdss_id, sdss4_apogee_id in q:
-        source_pk_by_sdss_id[sdss_id] = pk
-        source_pk_by_sdss4_apogee_id[sdss4_apogee_id] = pk
+        if sdss_id is not None:
+            source_pk_by_sdss_id[sdss_id] = pk
+        if sdss4_apogee_id is not None:
+            source_pk_by_sdss4_apogee_id[sdss4_apogee_id] = pk
 
     for each in spectrum_data:
         sdss_id, sdss4_apogee_id = each.pop("source_identifiers")
 
         try:
             source_pk = source_pk_by_sdss_id[sdss_id]
-        except:
+        except KeyError:
             try:
                 source_pk = source_pk_by_sdss4_apogee_id[sdss4_apogee_id]
-            except:
+            except KeyError:
                 # Usually this is because of something like AP00422506+4057177 vs AP00422506+4057178
                 # very annoying
                 for k, v in source_data.items():
@@ -653,8 +661,11 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
     return N
     
 
-def fix_apvisit_instances_of_invalid_gaia_dr3_source_id():
+def fix_apvisit_instances_of_invalid_gaia_dr3_source_id(fuzz_ratio_min=75):
 
+    source_pks_up_for_deletion = []
+
+    from fuzzywuzzy import fuzz
     from astra.migrations.sdss5db.catalogdb import (
         Catalog,
         SDSS_DR17_APOGEE_Allvisits as Visit,
@@ -735,11 +746,51 @@ def fix_apvisit_instances_of_invalid_gaia_dr3_source_id():
             # Update this source
             for key, value in q_identifiers.items():
                 setattr(record.source, key, value)
-            record.source.sdss4_apogee_id = sdss4_apogee_id
-            record.source.save()
-            N_fixed += 1
 
-    log.warning(f"Fixed {N_fixed} of {N_broken} examples")
+            try:
+                record.source.sdss4_apogee_id = sdss4_apogee_id
+                record.source.save()
+
+            except IntegrityError as exception:
+                log.exception(f"Unable to update record {record} with source {record.source}: {exception}")
+
+                # In these situations, there are usually two different APOGEE_ID values which are nominally the same:
+                # e.g., 2M17204208+6538238 and J17204208+6538238
+                # and then we try to assign the same SDSS_ID value to two different APOGEE_ID values.
+
+                # If this is the case, let's assign things to the other source because it will have more information.
+                alt_source = Source.get(sdss_id=record.source.sdss_id)
+                alt_sdss4_apogee_id = alt_source.sdss4_apogee_id
+
+                fuzz_ratio = fuzz.ratio(sdss4_apogee_id, alt_sdss4_apogee_id)
+                if fuzz_ratio > fuzz_ratio_min:
+                    
+                    # Delete the alternative source>
+                    source_pks_up_for_deletion.append(record.source.pk)
+
+                    record.source_pk = alt_source.pk
+                    record.save()
+
+                    N_fixed += 1
+
+                else:
+                    raise RuntimeError(f"record {record} with source={record.source} not matched {sdss4_apogee_id} != {alt_sdss4_apogee_id} ({fuzz_ratio} > {fuzz_ratio_min})")
+            else:
+                N_fixed += 1
+
+    log.warning(f"Tried to fix {N_fixed} of {N_broken} examples")
+    if source_pks_up_for_deletion:
+        log.warning(f"Source primary keys up for deletion: {source_pks_up_for_deletion}")
+        N_deleted = (
+            Source
+            .delete()
+            .where(
+                Source.pk.in_(tuple(set(source_pks_up_for_deletion)))
+            )
+            .execute()
+        )
+        log.warning(f"Deleted {N_deleted} sources")
+
     return (N_fixed, N_broken)
 
 

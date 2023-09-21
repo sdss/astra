@@ -11,516 +11,15 @@ from peewee import (
 
 import datetime
 import numpy as np
-from functools import cached_property
 
 from astra import __version__
 from astra.models.base import BaseModel
 from astra.models.fields import BitField, PixelArray, BasePixelArrayAccessor
+from astra.models.ferre import FerreCoarse, FerreStellarParameters, FerreChemicalAbundances
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
 from astra.glossary import Glossary
-
-
-class FerreOutputMixin(PipelineOutputMixin):
-        
-    @cached_property
-    def ferre_flux(self):
-        return self._get_input_pixel_array("flux.input")
-        
-    @cached_property
-    def ferre_e_flux(self):
-        return self._get_input_pixel_array("e_flux.input")
-    
-
-    @cached_property
-    def model_flux(self):
-        return self._get_output_pixel_array("model_flux.output")
-        
-    @cached_property
-    def rectified_model_flux(self):
-        return self._get_output_pixel_array("rectified_model_flux.output")
-        
-    @cached_property
-    def rectified_flux(self):
-        return self._get_output_pixel_array("rectified_flux.output")
-
-    @cached_property
-    def e_rectified_flux(self):
-        continuum = self.ferre_flux / self.rectified_flux
-        return self.ferre_e_flux / continuum
-
-    def unmask(self, array, fill_value=np.nan):
-        from astra.pipelines.ferre.utils import get_apogee_pixel_mask
-        mask = get_apogee_pixel_mask()
-        unmasked_array = fill_value * np.ones(mask.shape)
-        unmasked_array[mask] = array
-        return unmasked_array
-
-        
-    def _get_input_pixel_array(self, basename):
-        return np.loadtxt(
-            fname=f"{self.pwd}/{basename}",
-            skiprows=int(self.ferre_input_index), 
-            max_rows=1,
-        )
-
-
-    def _get_output_pixel_array(self, basename, P=7514):
-        from astra.pipelines.ferre.utils import parse_ferre_spectrum_name, get_ferre_spectrum_name
-        
-        #assert self.ferre_input_index >= 0
-
-        kwds = dict(
-            fname=f"{self.pwd}/{basename}",
-            skiprows=int(self.ferre_output_index), 
-            max_rows=1,
-        )
-        '''
-        try:
-            name, = np.atleast_1d(np.loadtxt(usecols=(0, ), dtype=str, **kwds))
-            array = np.loadtxt(usecols=range(1, 1+P), **kwds)
-
-            meta = parse_ferre_spectrum_name(name)
-            if (
-                (int(meta["source_pk"]) != self.source_pk)
-            or (int(meta["spectrum_pk"]) != self.spectrum_pk)
-            or (int(meta["index"]) != self.ferre_input_index)
-            ):
-                raise a
-        except:
-            del kwds["skiprows"]
-            del kwds["max_rows"]
-
-            name = get_ferre_spectrum_name(self.ferre_input_index, self.source_pk, self.spectrum_pk, self.initial_flags, self.upstream_id)
-
-            index = list(np.loadtxt(usecols=(0, ), dtype=str, **kwds)).index(name)
-            self.ferre_output_index = index
-            self.save()
-            print("saved!")
-            kwds["skiprows"] = index
-            kwds["max_rows"] = 1
-
-            name, = np.atleast_1d(np.loadtxt(usecols=(0, ), dtype=str, **kwds))
-            array = np.loadtxt(usecols=range(1, 1+P), **kwds)
-
-        '''
-        name, = np.atleast_1d(np.loadtxt(usecols=(0, ), dtype=str, **kwds))
-        array = np.loadtxt(usecols=range(1, 1+P), **kwds)
-
-        meta = parse_ferre_spectrum_name(name)
-        assert int(meta["source_pk"]) == self.source_pk
-        assert int(meta["spectrum_pk"]) == self.spectrum_pk
-        assert int(meta["index"]) == self.ferre_input_index
-
-        return array
-
-
-class FerreCoarse(BaseModel, FerreOutputMixin):
-
-    source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
-    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
-    
-    #> Astra Metadata
-    task_pk = AutoField()
-    v_astra = TextField(default=__version__)
-    created = DateTimeField(default=datetime.datetime.now)
-    t_elapsed = FloatField(null=True)
-    t_overhead = FloatField(null=True)
-    tag = TextField(default="", index=True)
-
-    #> Grid and Working Directory
-    pwd = TextField(default="")
-    short_grid_name = TextField(default="")
-    header_path = TextField(default="")
-    
-    #> Initial Stellar Parameters
-    initial_teff = FloatField(null=True)
-    initial_logg = FloatField(null=True)
-    initial_m_h = FloatField(null=True)
-    initial_log10_v_sini = FloatField(null=True)
-    initial_log10_v_micro = FloatField(null=True)
-    initial_alpha_m = FloatField(null=True)
-    initial_c_m = FloatField(null=True)
-    initial_n_m = FloatField(null=True)
-
-    initial_flags = BitField(default=0)
-    flag_initial_guess_from_apogeenet = initial_flags.flag(2**0, help_text="Initial guess from APOGEENet")
-    flag_initial_guess_from_doppler = initial_flags.flag(2**1, help_text="Initial guess from Doppler (SDSS-V)")
-    flag_initial_guess_from_doppler_sdss4 = initial_flags.flag(2**2, help_text="Initial guess from Doppler (SDSS-IV)")
-    flag_initial_guess_from_gaia_xp_andrae_2023 = initial_flags.flag(2**3, help_text="Initial guess from Andrae et al. (2023)")
-    flag_initial_guess_from_gaia_xp_zhang_2023 = initial_flags.flag(2**4, "Initial guess from Zhang, Green & Rix (2023)")
-    flag_initial_guess_from_user = initial_flags.flag(2**5, help_text="Initial guess specified by user")
-    flag_initial_guess_at_grid_center = initial_flags.flag(2**6, help_text="Initial guess from grid center")
-
-    #> FERRE Settings
-    continuum_order = IntegerField(default=-1, null=True)
-    continuum_reject = FloatField(null=True)
-    continuum_flag = IntegerField(default=0, null=True)
-    continuum_observations_flag = IntegerField(default=0, null=True)
-    interpolation_order = IntegerField(default=-1)
-    weight_path = TextField(default="")
-    frozen_flags = BitField(default=0)
-    f_access = IntegerField(default=-1)
-    f_format = IntegerField(default=-1)
-    n_threads = IntegerField(default=-1)
-
-    flag_teff_frozen = frozen_flags.flag(2**0, "Effective temperature is frozen")
-    flag_logg_frozen = frozen_flags.flag(2**1, "Surface gravity is frozen")
-    flag_m_h_frozen = frozen_flags.flag(2**2, "[M/H] is frozen")
-    flag_log10_v_sini_frozen = frozen_flags.flag(2**3, "Rotational broadening is frozen")
-    flag_log10_v_micro_frozen = frozen_flags.flag(2**4, "Microturbulence is frozen")
-    flag_alpha_m_frozen = frozen_flags.flag(2**5, "[alpha/M] is frozen")
-    flag_c_m_frozen = frozen_flags.flag(2**6, "[C/M] is frozen")
-    flag_n_m_frozen = frozen_flags.flag(2**7, "[N/M] is frozen")
-
-    #> Stellar Parameters
-    teff = FloatField(null=True)
-    e_teff = FloatField(null=True)
-    logg = FloatField(null=True)
-    e_logg = FloatField(null=True)
-    m_h = FloatField(null=True)
-    e_m_h = FloatField(null=True)
-    log10_v_sini = FloatField(null=True)
-    e_log10_v_sini = FloatField(null=True)
-    log10_v_micro = FloatField(null=True)
-    e_log10_v_micro = FloatField(null=True)
-    alpha_m = FloatField(null=True)
-    e_alpha_m = FloatField(null=True)
-    c_m = FloatField(null=True)
-    e_c_m = FloatField(null=True)
-    n_m = FloatField(null=True)
-    e_n_m = FloatField(null=True)
-
-    teff_flags = BitField(default=0)
-    logg_flags = BitField(default=0)
-    m_h_flags = BitField(default=0)
-    log10_v_sini_flags = BitField(default=0)
-    log10_v_micro_flags = BitField(default=0)
-    alpha_m_flags = BitField(default=0)
-    c_m_flags = BitField(default=0)
-    n_m_flags = BitField(default=0)
-
-    # TODO: Is there a way to inherit these or assign these dynamically so we don't repeat ourselves?
-    flag_teff_ferre_fail = teff_flags.flag(2**0)
-    flag_teff_grid_edge_warn = teff_flags.flag(2**1)
-    flag_teff_grid_edge_bad = teff_flags.flag(2**2)
-    flag_logg_ferre_fail = logg_flags.flag(2**0)
-    flag_logg_grid_edge_warn = logg_flags.flag(2**1)
-    flag_logg_grid_edge_bad = logg_flags.flag(2**2)
-    flag_m_h_ferre_fail = m_h_flags.flag(2**0)
-    flag_m_h_grid_edge_warn = m_h_flags.flag(2**1)
-    flag_m_h_grid_edge_bad = m_h_flags.flag(2**2)
-    flag_log10_v_sini_ferre_fail = log10_v_sini_flags.flag(2**0)
-    flag_log10_v_sini_grid_edge_warn = log10_v_sini_flags.flag(2**1)
-    flag_log10_v_sini_grid_edge_bad = log10_v_sini_flags.flag(2**2)
-    flag_log10_v_micro_ferre_fail = log10_v_micro_flags.flag(2**0)
-    flag_log10_v_micro_grid_edge_warn = log10_v_micro_flags.flag(2**1)
-    flag_log10_v_micro_grid_edge_bad = log10_v_micro_flags.flag(2**2)
-    flag_alpha_m_ferre_fail = alpha_m_flags.flag(2**0)
-    flag_alpha_m_grid_edge_warn = alpha_m_flags.flag(2**1)
-    flag_alpha_m_grid_edge_bad = alpha_m_flags.flag(2**2)
-    flag_c_m_ferre_fail = c_m_flags.flag(2**0)
-    flag_c_m_grid_edge_warn = c_m_flags.flag(2**1)
-    flag_c_m_grid_edge_bad = c_m_flags.flag(2**2)
-    flag_n_m_ferre_fail = n_m_flags.flag(2**0)
-    flag_n_m_grid_edge_warn = n_m_flags.flag(2**1)
-    flag_n_m_grid_edge_bad = n_m_flags.flag(2**2)    
-
-    #> FERRE Access Fields
-    ferre_name = TextField(default="")
-    ferre_input_index = IntegerField(default=-1)
-    ferre_output_index = IntegerField(default=-1)
-    ferre_n_obj = IntegerField(default=-1)
-
-    #> Summary Statistics
-    snr = FloatField(null=True)
-    rchi2 = FloatField(null=True)
-    penalized_rchi2 = FloatField(null=True) 
-    ferre_log_snr_sq = FloatField(null=True)
-    ferre_time_load_grid = FloatField(null=True)
-    ferre_time_elapsed = FloatField(null=True)
-    ferre_flags = BitField(default=0)
-
-    flag_ferre_fail = ferre_flags.flag(2**0, "FERRE failed")
-    flag_missing_model_flux = ferre_flags.flag(2**1, "Missing model fluxes from FERRE")
-    flag_potential_ferre_timeout = ferre_flags.flag(2**2, "Potentially impacted by FERRE timeout")
-    flag_no_suitable_initial_guess = ferre_flags.flag(2**3, help_text="FERRE not executed because there's no suitable initial guess")
-    flag_spectrum_io_error = ferre_flags.flag(2**4, help_text="Error accessing spectrum pixel data")
-
-
-
-class FerreStellarParameters(BaseModel, FerreOutputMixin):
-
-    source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
-    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
-    upstream = ForeignKeyField(FerreCoarse, column_name="upstream_pk", index=True)
-
-    #> Astra Metadata
-    task_pk = AutoField()
-    v_astra = TextField(default=__version__)
-    created = DateTimeField(default=datetime.datetime.now)
-    t_elapsed = FloatField(null=True)
-    t_overhead = FloatField(null=True)
-    tag = TextField(default="", index=True)
-    
-    #> Grid and Working Directory
-    pwd = TextField(default="")
-    short_grid_name = TextField(default="")
-    header_path = TextField(default="")
-    
-    #> Initial Stellar Parameters
-    initial_teff = FloatField(null=True)
-    initial_logg = FloatField(null=True)
-    initial_m_h = FloatField(null=True)
-    initial_log10_v_sini = FloatField(null=True)
-    initial_log10_v_micro = FloatField(null=True)
-    initial_alpha_m = FloatField(null=True)
-    initial_c_m = FloatField(null=True)
-    initial_n_m = FloatField(null=True)
-
-    initial_flags = BitField(default=0)
-    flag_initial_guess_from_apogeenet = initial_flags.flag(2**0, help_text="Initial guess from APOGEENet")
-    flag_initial_guess_from_doppler = initial_flags.flag(2**1, help_text="Initial guess from Doppler (SDSS-V)")
-    flag_initial_guess_from_doppler_sdss4 = initial_flags.flag(2**1, help_text="Initial guess from Doppler (SDSS-IV)")
-    flag_initial_guess_from_gaia_xp_andrae23 = initial_flags.flag(2**3, help_text="Initial guess from Andrae et al. (2023)")
-    flag_initial_guess_from_user = initial_flags.flag(2**2, help_text="Initial guess specified by user")
-
-    #> FERRE Settings
-    continuum_order = IntegerField(default=-1)
-    continuum_reject = FloatField(null=True)
-    continuum_flag = IntegerField(default=0, null=True)
-    continuum_observations_flag = IntegerField(default=0, null=True)
-    interpolation_order = IntegerField(default=-1)
-    weight_path = TextField(default="")
-    frozen_flags = BitField(default=0)
-    f_access = IntegerField(default=-1)
-    f_format = IntegerField(default=-1)
-    n_threads = IntegerField(default=-1)
-
-    flag_teff_frozen = frozen_flags.flag(2**0, "Effective temperature is frozen")
-    flag_logg_frozen = frozen_flags.flag(2**1, "Surface gravity is frozen")
-    flag_m_h_frozen = frozen_flags.flag(2**2, "[M/H] is frozen")
-    flag_log10_v_sini_frozen = frozen_flags.flag(2**3, "Rotational broadening is frozen")
-    flag_log10_v_micro_frozen = frozen_flags.flag(2**4, "Microturbulence is frozen")
-    flag_alpha_m_frozen = frozen_flags.flag(2**5, "[alpha/M] is frozen")
-    flag_c_m_frozen = frozen_flags.flag(2**6, "[C/M] is frozen")
-    flag_n_m_frozen = frozen_flags.flag(2**7, "[N/M] is frozen")
-
-    #> Stellar Parameters
-    teff = FloatField(null=True)
-    e_teff = FloatField(null=True)
-    logg = FloatField(null=True)
-    e_logg = FloatField(null=True)
-    m_h = FloatField(null=True)
-    e_m_h = FloatField(null=True)
-    log10_v_sini = FloatField(null=True)
-    e_log10_v_sini = FloatField(null=True)
-    log10_v_micro = FloatField(null=True)
-    e_log10_v_micro = FloatField(null=True)
-    alpha_m = FloatField(null=True)
-    e_alpha_m = FloatField(null=True)
-    c_m = FloatField(null=True)
-    e_c_m = FloatField(null=True)
-    n_m = FloatField(null=True)
-    e_n_m = FloatField(null=True)
-
-    teff_flags = BitField(default=0)
-    logg_flags = BitField(default=0)
-    m_h_flags = BitField(default=0)
-    log10_v_sini_flags = BitField(default=0)
-    log10_v_micro_flags = BitField(default=0)
-    alpha_m_flags = BitField(default=0)
-    c_m_flags = BitField(default=0)
-    n_m_flags = BitField(default=0)
-
-    # Define flags.
-    flag_teff_ferre_fail = teff_flags.flag(2**0)
-    flag_teff_grid_edge_warn = teff_flags.flag(2**1)
-    flag_teff_grid_edge_bad = teff_flags.flag(2**2)
-    flag_logg_ferre_fail = logg_flags.flag(2**0)
-    flag_logg_grid_edge_warn = logg_flags.flag(2**1)
-    flag_logg_grid_edge_bad = logg_flags.flag(2**2)
-    flag_m_h_ferre_fail = m_h_flags.flag(2**0)
-    flag_m_h_grid_edge_warn = m_h_flags.flag(2**1)
-    flag_m_h_grid_edge_bad = m_h_flags.flag(2**2)
-    flag_log10_v_sini_ferre_fail = log10_v_sini_flags.flag(2**0)
-    flag_log10_v_sini_grid_edge_warn = log10_v_sini_flags.flag(2**1)
-    flag_log10_v_sini_grid_edge_bad = log10_v_sini_flags.flag(2**2)
-    flag_log10_v_micro_ferre_fail = log10_v_micro_flags.flag(2**0)
-    flag_log10_v_micro_grid_edge_warn = log10_v_micro_flags.flag(2**1)
-    flag_log10_v_micro_grid_edge_bad = log10_v_micro_flags.flag(2**2)
-    flag_alpha_m_ferre_fail = alpha_m_flags.flag(2**0)
-    flag_alpha_m_grid_edge_warn = alpha_m_flags.flag(2**1)
-    flag_alpha_m_grid_edge_bad = alpha_m_flags.flag(2**2)
-    flag_c_m_ferre_fail = c_m_flags.flag(2**0)
-    flag_c_m_grid_edge_warn = c_m_flags.flag(2**1)
-    flag_c_m_grid_edge_bad = c_m_flags.flag(2**2)
-    flag_n_m_ferre_fail = n_m_flags.flag(2**0)
-    flag_n_m_grid_edge_warn = n_m_flags.flag(2**1)
-    flag_n_m_grid_edge_bad = n_m_flags.flag(2**2)
-
-
-    # TODO: flag definitions for each dimension (DRY)
-    #> FERRE Access Fields
-    ferre_name = TextField(default="")
-    ferre_input_index = IntegerField(default=-1)
-    ferre_output_index = IntegerField(default=-1)
-    ferre_n_obj = IntegerField(default=-1)
-
-    #> Summary Statistics
-    snr = FloatField(null=True)
-    rchi2 = FloatField(null=True)
-    penalized_rchi2 = FloatField(null=True)
-    ferre_log_snr_sq = FloatField(null=True)
-    ferre_time_load_grid = FloatField(null=True)
-    ferre_time_elapsed = FloatField(null=True)
-    ferre_flags = BitField(default=0)
-    
-    flag_ferre_fail = ferre_flags.flag(2**0, "FERRE failed")
-    flag_missing_model_flux = ferre_flags.flag(2**1, "Missing model fluxes from FERRE")
-    flag_potential_ferre_timeout = ferre_flags.flag(2**2, "Potentially impacted by FERRE timeout")
-    flag_no_suitable_initial_guess = ferre_flags.flag(2**3, help_text="FERRE not executed because there's no suitable initial guess")
-
-
-
-class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
-
-    @cached_property
-    def ferre_flux(self):
-        return self._get_input_pixel_array("../flux.input")
-        
-    @cached_property
-    def ferre_e_flux(self):
-        return self._get_input_pixel_array("../e_flux.input")
-    
-
-    source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
-    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
-    upstream = ForeignKeyField(FerreStellarParameters, column_name="upstream_pk", index=True)
-
-    #> Astra Metadata
-    task_pk = AutoField()
-    v_astra = TextField(default=__version__)
-    created = DateTimeField(default=datetime.datetime.now)
-    t_elapsed = FloatField(null=True)
-    t_overhead = FloatField(null=True)
-    tag = TextField(default="", index=True)
-    
-    #> Grid and Working Directory
-    pwd = TextField(default="")
-    short_grid_name = TextField(default="")
-    header_path = TextField(default="")
-    
-    #> Initial Stellar Parameters
-    initial_teff = FloatField(null=True)
-    initial_logg = FloatField(null=True)
-    initial_m_h = FloatField(null=True)
-    initial_log10_v_sini = FloatField(null=True)
-    initial_log10_v_micro = FloatField(null=True)
-    initial_alpha_m = FloatField(null=True)
-    initial_c_m = FloatField(null=True)
-    initial_n_m = FloatField(null=True)
-
-    initial_flags = BitField(default=0)
-    # TODO: Not sure what flag definitions are needed for initial guess.
-
-    #> FERRE Settings
-    continuum_order = IntegerField(default=-1)
-    continuum_reject = FloatField(null=True)
-    continuum_flag = IntegerField(default=0, null=True)
-    continuum_observations_flag = IntegerField(default=0, null=True)
-    interpolation_order = IntegerField(default=-1)
-    weight_path = TextField(default="")
-    frozen_flags = BitField(default=0)
-    f_access = IntegerField(default=-1)
-    f_format = IntegerField(default=-1)
-    n_threads = IntegerField(default=-1)
-
-    flag_teff_frozen = frozen_flags.flag(2**0, "Effective temperature is frozen")
-    flag_logg_frozen = frozen_flags.flag(2**1, "Surface gravity is frozen")
-    flag_m_h_frozen = frozen_flags.flag(2**2, "[M/H] is frozen")
-    flag_log10_v_sini_frozen = frozen_flags.flag(2**3, "Rotational broadening is frozen")
-    flag_log10_v_micro_frozen = frozen_flags.flag(2**4, "Microturbulence is frozen")
-    flag_alpha_m_frozen = frozen_flags.flag(2**5, "[alpha/M] is frozen")
-    flag_c_m_frozen = frozen_flags.flag(2**6, "[C/M] is frozen")
-    flag_n_m_frozen = frozen_flags.flag(2**7, "[N/M] is frozen")
-
-    #> Stellar Parameters
-    teff = FloatField(null=True)
-    e_teff = FloatField(null=True)
-    logg = FloatField(null=True)
-    e_logg = FloatField(null=True)
-    m_h = FloatField(null=True)
-    e_m_h = FloatField(null=True)
-    log10_v_sini = FloatField(null=True)
-    e_log10_v_sini = FloatField(null=True)
-    log10_v_micro = FloatField(null=True)
-    e_log10_v_micro = FloatField(null=True)
-    alpha_m = FloatField(null=True)
-    e_alpha_m = FloatField(null=True)
-    c_m = FloatField(null=True)
-    e_c_m = FloatField(null=True)
-    n_m = FloatField(null=True)
-    e_n_m = FloatField(null=True)
-
-    teff_flags = BitField(default=0)
-    logg_flags = BitField(default=0)
-    m_h_flags = BitField(default=0)
-    log10_v_sini_flags = BitField(default=0)
-    log10_v_micro_flags = BitField(default=0)
-    alpha_m_flags = BitField(default=0)
-    c_m_flags = BitField(default=0)
-    n_m_flags = BitField(default=0)
-
-    # Define flags.
-    flag_teff_ferre_fail = teff_flags.flag(2**0)
-    flag_teff_grid_edge_warn = teff_flags.flag(2**1)
-    flag_teff_grid_edge_bad = teff_flags.flag(2**2)
-    flag_logg_ferre_fail = logg_flags.flag(2**0)
-    flag_logg_grid_edge_warn = logg_flags.flag(2**1)
-    flag_logg_grid_edge_bad = logg_flags.flag(2**2)
-    flag_m_h_ferre_fail = m_h_flags.flag(2**0)
-    flag_m_h_grid_edge_warn = m_h_flags.flag(2**1)
-    flag_m_h_grid_edge_bad = m_h_flags.flag(2**2)
-    flag_log10_v_sini_ferre_fail = log10_v_sini_flags.flag(2**0)
-    flag_log10_v_sini_grid_edge_warn = log10_v_sini_flags.flag(2**1)
-    flag_log10_v_sini_grid_edge_bad = log10_v_sini_flags.flag(2**2)
-    flag_log10_v_micro_ferre_fail = log10_v_micro_flags.flag(2**0)
-    flag_log10_v_micro_grid_edge_warn = log10_v_micro_flags.flag(2**1)
-    flag_log10_v_micro_grid_edge_bad = log10_v_micro_flags.flag(2**2)
-    flag_alpha_m_ferre_fail = alpha_m_flags.flag(2**0)
-    flag_alpha_m_grid_edge_warn = alpha_m_flags.flag(2**1)
-    flag_alpha_m_grid_edge_bad = alpha_m_flags.flag(2**2)
-    flag_c_m_ferre_fail = c_m_flags.flag(2**0)
-    flag_c_m_grid_edge_warn = c_m_flags.flag(2**1)
-    flag_c_m_grid_edge_bad = c_m_flags.flag(2**2)
-    flag_n_m_ferre_fail = n_m_flags.flag(2**0)
-    flag_n_m_grid_edge_warn = n_m_flags.flag(2**1)
-    flag_n_m_grid_edge_bad = n_m_flags.flag(2**2)
-
-
-    # TODO: flag definitions for each dimension (DRY)
-    #> FERRE Access Fields
-    ferre_name = TextField(default="")
-    ferre_input_index = IntegerField(default=-1)
-    ferre_output_index = IntegerField(default=-1)
-    ferre_n_obj = IntegerField(default=-1)
-
-    #> Summary Statistics
-    snr = FloatField(null=True)
-    rchi2 = FloatField(null=True)
-    penalized_rchi2 = FloatField(null=True)
-    ferre_log_snr_sq = FloatField(null=True)
-    ferre_time_load_grid = FloatField(null=True)
-    ferre_time_elapsed = FloatField(null=True)
-    ferre_flags = BitField(default=0)
-    
-    flag_ferre_fail = ferre_flags.flag(2**0, "FERRE failed")
-    flag_missing_model_flux = ferre_flags.flag(2**1, "Missing model fluxes from FERRE")
-    flag_potential_ferre_timeout = ferre_flags.flag(2**2, "Potentially impacted by FERRE timeout")
-    flag_no_suitable_initial_guess = ferre_flags.flag(2**3, help_text="FERRE not executed because there's no suitable initial guess")
-
 
 
 class StellarParameterPixelAccessor(BasePixelArrayAccessor):
@@ -571,8 +70,19 @@ class ChemicalAbundancePixelAccessor(BasePixelArrayAccessor):
         return self.field
 
 
-
-
+class ChemicalAbundanceModelFluxArray(PixelArray):
+    
+    def __init__(self, ext=None, column_name=None, transform=None, accessor_class=ChemicalAbundancePixelAccessor, help_text=None, pixels=None, **kwargs):
+        super(ChemicalAbundanceModelFluxArray, self).__init__(
+            ext=ext,
+            column_name=column_name,
+            transform=transform,
+            accessor_class=accessor_class,
+            help_text=help_text,
+            pixels=pixels,
+            **kwargs
+        )
+        
 
 class ASPCAP(BaseModel, PipelineOutputMixin):
 
@@ -592,7 +102,7 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     #> Spectral Data
     model_flux = PixelArray(
         accessor_class=StellarParameterPixelAccessor, 
-        help_text="Best-fit model flux when fitting stellar parameters"
+        help_text="Model flux at optimized stellar parameters"
     )
     continuum = PixelArray(
         accessor_class=StellarParameterPixelAccessor,
@@ -600,102 +110,30 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     )
 
     #> Model Fluxes from Chemical Abundance Fits
-    model_flux_al_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Al/H]"
-    )
-    model_flux_c_12_13 = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting C12/13"
-    )
-    model_flux_ca_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Ca/H]"
-    )
-    model_flux_ce_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Ce/H]"
-    )
-    model_flux_c_1_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [C 1/H]"
-    )
-    model_flux_c_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [C/H]"
-    )
-    model_flux_co_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Co/H]"
-    )
-    model_flux_cr_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Cr/H]"
-    )
-    model_flux_cu_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Cu/H]"
-    )
-    model_flux_fe_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Fe/H]"
-    )
-    model_flux_k_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [K/H]"
-    )
-    model_flux_mg_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Mg/H]"
-    )
-    model_flux_mn_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Mn/H]"
-    )
-    model_flux_na_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Na/H]"
-    )
-    model_flux_nd_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Nd/H]"
-    )
-    model_flux_ni_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Ni/H]"
-    )
-    model_flux_n_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [N/H]"
-    )
-    model_flux_o_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [O/H]"
-    )
-    model_flux_p_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [P/H]"
-    )
-    model_flux_si_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Si/H]"
-    )
-    model_flux_s_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [S/H]"
-    )
-    model_flux_ti_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Ti/H]"
-    )
-    model_flux_ti_2_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [Ti 2/H]"
-    )
-    model_flux_v_h = PixelArray(
-        accessor_class=ChemicalAbundancePixelAccessor,
-        help_text="Best-fit model flux when fitting [V/H]"
-    )
+    model_flux_al_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Al/H] and stellar parameters")
+    model_flux_c_12_13 = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized C12/13 and stellar parameters")
+    model_flux_ca_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ca/H] and stellar parameters")
+    model_flux_ce_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ce/H] and stellar parameters")
+    model_flux_c_1_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [C 1/H] and stellar parameters")
+    model_flux_c_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [C/H] and stellar parameters")
+    model_flux_co_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Co/H] and stellar parameters")
+    model_flux_cr_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Cr/H] and stellar parameters")
+    model_flux_cu_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Cu/H] and stellar parameters")
+    model_flux_fe_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Fe/H] and stellar parameters")
+    model_flux_k_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [K/H] and stellar parameters")
+    model_flux_mg_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Mg/H] and stellar parameters")
+    model_flux_mn_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Mn/H] and stellar parameters")
+    model_flux_na_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Na/H] and stellar parameters")
+    model_flux_nd_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Nd/H] and stellar parameters")
+    model_flux_ni_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ni/H] and stellar parameters")
+    model_flux_n_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [N/H] and stellar parameters")
+    model_flux_o_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [O/H] and stellar parameters")
+    model_flux_p_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [P/H] and stellar parameters")
+    model_flux_si_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Si/H] and stellar parameters")
+    model_flux_s_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [S/H] and stellar parameters")
+    model_flux_ti_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ti/H] and stellar parameters")
+    model_flux_ti_2_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ti 2/H] and stellar parameters")
+    model_flux_v_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [V/H] and stellar parameters")
 
     #> Stellar Parameters
     teff = FloatField(null=True, help_text=Glossary.teff)
@@ -853,58 +291,57 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     snr = FloatField(null=True, help_text=Glossary.snr)
     rchi2 = FloatField(null=True, help_text=Glossary.rchi2)
     ferre_log_snr_sq = FloatField(null=True, help_text="FERRE-reported log10(snr**2)")
+    ferre_time_elapsed = FloatField(null=True, help_text="Total core-second use reported by FERRE [s]")
     ferre_flags = BitField(default=0, help_text="Flags indicating FERRE issues")
-    
+
     flag_ferre_fail = ferre_flags.flag(2**0, "FERRE failed")
     flag_missing_model_flux = ferre_flags.flag(2**1, "Missing model fluxes from FERRE")
     flag_potential_ferre_timeout = ferre_flags.flag(2**2, "Potentially impacted by FERRE timeout")
     flag_no_suitable_initial_guess = ferre_flags.flag(2**3, help_text="FERRE not executed because there's no suitable initial guess")
-    flag_teff_grid_edge_warn = ferre_flags.flag(2**4)
-    flag_teff_grid_edge_bad = ferre_flags.flag(2**5)
-    flag_logg_grid_edge_warn = ferre_flags.flag(2**6)
-    flag_logg_grid_edge_bad = ferre_flags.flag(2**7)
-    flag_v_micro_grid_edge_warn = ferre_flags.flag(2**8)
-    flag_v_micro_grid_edge_bad = ferre_flags.flag(2**9)
-    flag_v_sini_grid_edge_warn = ferre_flags.flag(2**10)
-    flag_v_sini_grid_edge_bad = ferre_flags.flag(2**11)
-    flag_m_h_atm_grid_edge_warn = ferre_flags.flag(2**12)
-    flag_m_h_atm_grid_edge_bad = ferre_flags.flag(2**13)
-    flag_alpha_m_grid_edge_warn = ferre_flags.flag(2**14)
-    flag_alpha_m_grid_edge_bad = ferre_flags.flag(2**15)
-    flag_c_m_atm_grid_edge_warn = ferre_flags.flag(2**16)
-    flag_c_m_atm_grid_edge_bad = ferre_flags.flag(2**17)
-    flag_n_m_atm_grid_edge_warn = ferre_flags.flag(2**18)
-    flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**19)
+    flag_spectrum_io_error = ferre_flags.flag(2**4, help_text="Error accessing spectrum pixel data")
+    flag_teff_grid_edge_warn = ferre_flags.flag(2**5)
+    flag_teff_grid_edge_bad = ferre_flags.flag(2**6)
+    flag_logg_grid_edge_warn = ferre_flags.flag(2**7)
+    flag_logg_grid_edge_bad = ferre_flags.flag(2**8)
+    flag_v_micro_grid_edge_warn = ferre_flags.flag(2**9)
+    flag_v_micro_grid_edge_bad = ferre_flags.flag(2**10)
+    flag_v_sini_grid_edge_warn = ferre_flags.flag(2**11)
+    flag_v_sini_grid_edge_bad = ferre_flags.flag(2**12)
+    flag_m_h_atm_grid_edge_warn = ferre_flags.flag(2**13)
+    flag_m_h_atm_grid_edge_bad = ferre_flags.flag(2**14)
+    flag_alpha_m_grid_edge_warn = ferre_flags.flag(2**15)
+    flag_alpha_m_grid_edge_bad = ferre_flags.flag(2**16)
+    flag_c_m_atm_grid_edge_warn = ferre_flags.flag(2**17)
+    flag_c_m_atm_grid_edge_bad = ferre_flags.flag(2**18)
+    flag_n_m_atm_grid_edge_warn = ferre_flags.flag(2**19)
+    flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**20)    
     
-    # TODO: Should we store these here like this, or some othe way?
-
     #> Task Primary Keys
-    stellar_parameters_task_pk = ForeignKeyField(FerreStellarParameters, null=True, lazy_load=False, help_text="Task primary key for stellar parameters")
-    al_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Al/H]")
-    c_12_13_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for C12/C13")
-    ca_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Ca/H]")
-    ce_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Ce/H]")
-    c_1_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [C 1/H]")
-    c_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [C/H]")
-    co_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Co/H]")
-    cr_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Cr/H]")
-    cu_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Cu/H]")
-    fe_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Fe/H]")
-    k_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [K/H]")
-    mg_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Mg/H]")
-    mn_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Mn/H]")
-    na_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Na/H]")
-    nd_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Nd/H]")
-    ni_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Ni/H]")
-    n_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [N/H]")
-    o_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [O/H]")
-    p_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [P/H]")
-    si_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Si/H]")
-    s_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [S/H]")
-    ti_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Ti/H]")
-    ti_2_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [Ti 2/H]")
-    v_h_task_pk = ForeignKeyField(FerreChemicalAbundances, null=True, lazy_load=False, help_text="Task primary key for [V/H]")
-
+    stellar_parameters_task_pk = ForeignKeyField(FerreStellarParameters, unique=True, null=True, lazy_load=False, help_text="Task primary key for stellar parameters")
+    al_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Al/H]")
+    c_12_13_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for C12/C13")
+    ca_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Ca/H]")
+    ce_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Ce/H]")
+    c_1_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [C 1/H]")
+    c_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [C/H]")
+    co_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Co/H]")
+    cr_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Cr/H]")
+    cu_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Cu/H]")
+    fe_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Fe/H]")
+    k_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [K/H]")
+    mg_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Mg/H]")
+    mn_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Mn/H]")
+    na_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Na/H]")
+    nd_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Nd/H]")
+    ni_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Ni/H]")
+    n_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [N/H]")
+    o_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [O/H]")
+    p_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [P/H]")
+    si_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Si/H]")
+    s_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [S/H]")
+    ti_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Ti/H]")
+    ti_2_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Ti 2/H]")
+    v_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [V/H]")
 
     #> Raw (Uncalibrated) Quantities
     calibrated = BooleanField(default=False, help_text=Glossary.calibrated)

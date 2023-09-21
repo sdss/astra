@@ -66,7 +66,7 @@ def migrate_healpix(
     return updated
 
 
-def migrate_zhang_stellar_parameters(batch_size: Optional[int] = 500, limit: Optional[int] = None):
+def migrate_zhang_stellar_parameters(where=None, batch_size: Optional[int] = 500, limit: Optional[int] = None):
     """
     Migrate stellar parameters derived using Gaia XP spectra from Zhang, Green & Rix (2023) using the cross-match with `catalogid31` (v1).
     """
@@ -94,8 +94,13 @@ def migrate_zhang_stellar_parameters(batch_size: Optional[int] = 500, limit: Opt
             Source.pk,
             Source.gaia_dr3_source_id
         )
+    )
+    if where:
+        q = q.where(where)
+    q = (
+        q
         .where(
-            Source.zgr_teff.is_null() & Source.gaia_dr3_source_id.is_null(False)
+            (Source.zgr_teff.is_null() & Source.gaia_dr3_source_id.is_null(False))
         )
         .limit(limit)
         .iterator()
@@ -354,7 +359,18 @@ def migrate_twomass_photometry(
 
 
 
-def migrate_unwise_photometry(catalogid_field_name="catalogid21", batch_size: Optional[int] = 500, limit: Optional[int] = None):
+def migrate_unwise_photometry(
+    where=(
+        (
+            Source.w1_flux.is_null()
+        |   Source.w2_flux.is_null()
+        )
+        &   Source.catalogid21.is_null(False)
+    ),
+    catalogid_field_name="catalogid21", 
+    batch_size: Optional[int] = 500, 
+    limit: Optional[int] = None
+):
     """
     Migrate 2MASS photometry from the database, using the cross-match with `catalogid21` (v0).
 
@@ -372,16 +388,8 @@ def migrate_unwise_photometry(catalogid_field_name="catalogid21", batch_size: Op
             Source.pk,
             catalogid_field
         )
-        .where(
-            (
-                Source.w1_flux.is_null()
-            |   Source.w2_flux.is_null()
-            )
-            &   catalogid_field.is_null(False)
-        )
-        .order_by(
-            catalogid_field.asc()
-        )
+        .where(where)
+        .order_by(catalogid_field.asc())
         .limit(limit)
         .iterator()
     )    
@@ -528,7 +536,7 @@ def migrate_glimpse_photometry(catalogid_field_name="catalogid31", batch_size: O
 
 
 
-def migrate_gaia_dr3_astrometry_and_photometry(limit: Optional[int] = None, batch_size: Optional[int] = 500):
+def migrate_gaia_dr3_astrometry_and_photometry(where = None, limit: Optional[int] = None, batch_size: Optional[int] = 500):
     """
     Migrate Gaia DR3 astrometry and photometry from the SDSS-V database for any sources (`astra.models.Source`)
     that have a Gaia DR3 source identifier (`astra.models.Source.gaia_dr3_source_id`) but are missing Gaia
@@ -564,6 +572,12 @@ def migrate_gaia_dr3_astrometry_and_photometry(limit: Optional[int] = None, batc
         .order_by(
             Source.gaia_dr3_source_id.asc()
         )
+    )
+    if where is not None:
+        q = q.where(where)
+    
+    q = (
+        q
         .limit(limit)
         .tuples()
     )
@@ -619,6 +633,8 @@ def migrate_gaia_dr3_astrometry_and_photometry(limit: Optional[int] = None, batc
             )
         )        
     )
+    if where:
+        q = q.where(where)
 
     updated_sources = []
     for source in q:

@@ -48,20 +48,25 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
     ref_dir = pwd or dir 
 
     # When finding paths, if the path is in the input.nml file, we should use `ref_dir`, otherwise `dir`.
-
-    # TODO: Put this somewhere common?
-    stdout_path = os.path.join(ref_dir, "stdout")
-    if ref_dir != dir:
-        relative_input_nml_path = dir[len(ref_dir) + 1:] + "/input.nml"
-    else:
-        relative_input_nml_path = None
+    timing = {}
     try:
-        # Parse timing information
-        timing = get_processing_times(stdout_path, relative_input_nml_path)
-    
+        raw_timing = np.atleast_2d(np.loadtxt(os.path.join(ref_dir, "timing.csv"), dtype=str, delimiter=","))
     except:
-        log.warning(f"No timing information available (tried stdout: {stdout_path})")
-        timing = {}
+        log.warning(f"No FERRE timing information available for execution in {ref_dir}")
+    else:
+        try:                
+            for name, relative_input_nml_path, t_load, t_elapsed in raw_timing:
+                timing.setdefault(relative_input_nml_path, {})
+                timing[relative_input_nml_path][name] = (float(t_load), float(t_elapsed))
+
+            if ref_dir != dir:
+                relative_input_nml_path = dir[len(ref_dir) + 1:] + "/input.nml"
+                timing = timing[relative_input_nml_path]
+            else:
+                timing = timing["input.nml"]
+        except:
+            log.exception(f"Exception when trying to load timing for {ref_dir}")
+            raise 
 
     control_kwds = read_control_file(os.path.join(dir, "input.nml"))
 
@@ -210,12 +215,15 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
         #meta["cov"]
         # Add timing information, if we can.
         try:
+            t_load, t_elapsed = timing[name]    
             result.update(
-                ferre_time_load_grid=timing["t_load_grid"],
-                ferre_time_elapsed=timing["t_elapsed_per_spectrum"][i],
+                ferre_time_load_grid=t_load,
+                ferre_time_elapsed=t_elapsed,
             )
         except:
-            log.warning(f"No FERRE timing for spectrum_pk={name_meta['spectrum_pk']}")
+            if len(timing) > 0:
+                # Only warn when there are specific timings missing
+                log.warning(f"No FERRE timing for spectrum_pk={name_meta['spectrum_pk']}")
 
         if not skip_pixel_arrays:
             snr = np.nanmedian(flux[i]/e_flux[i])
@@ -229,10 +237,22 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
             )
 
         for j, parameter in enumerate(parameter_names):
+
+            value = parameters[i, j]
+            e_value = e_parameters[i, j]
+
+            if e_value <= 0 or e_value >= 9999:
+                e_value = np.nan
+                flag_ferre_fail[i, j] = True # TODO: should we have more specific flags here?
+            
+            if parameter != "teff" and (value >= 9999 or value <= -9999):
+                value = np.nan
+                flag_ferre_fail[i, j] = True
+                
             result.update({
                 f"initial_{parameter}": input_parameters[i, j],
-                parameter: parameters[i, j],
-                f"e_{parameter}": e_parameters[i, j],
+                parameter: value,
+                f"e_{parameter}": e_value,
                 f"flag_{parameter}_ferre_fail": flag_ferre_fail[i, j],
                 f"flag_{parameter}_grid_edge_bad": flag_grid_edge_bad[i, j],
                 f"flag_{parameter}_grid_edge_warn": flag_grid_edge_warn[i, j],

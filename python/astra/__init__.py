@@ -1,13 +1,13 @@
 from inspect import isgeneratorfunction
 from decorator import decorator
-from peewee import IntegrityError, SqliteDatabase
+from peewee import chunked, IntegrityError, SqliteDatabase
 from playhouse.sqlite_ext import SqliteExtDatabase
 from sdsstools.configuration import get_config
 
 from astra.utils import log, Timer
 
 NAME = "astra"
-__version__ = "0.4.2"
+__version__ = "0.4.3"
 
 @decorator
 def task(function, *args, **kwargs):
@@ -101,6 +101,8 @@ def task(function, *args, **kwargs):
         _bulk_insert(results, batch_size, re_raise_exceptions)
     except:
         log.exception(f"Exception trying to insert results to database:")
+        if re_raise_exceptions:
+            raise
 
     yield from results
 
@@ -119,7 +121,7 @@ def _bulk_insert(results, batch_size, re_raise_exceptions=False):
     log.info(f"Bulk inserting {len(results)} into the database with batch size {batch_size}")
     if not results:
         return None
-    
+
     from astra.models.base import database
 
     model = results[0].__class__
@@ -136,9 +138,13 @@ def _bulk_insert(results, batch_size, re_raise_exceptions=False):
                 if _result.is_dirty():
                     results[i] = model.create(**_result.__data__)
         else:
-            with database.atomic():
-                model.bulk_create(results, batch_size=batch_size)
+            try:
+                with database.atomic():
+                    model.bulk_create(results, batch_size)
+            except:
+                raise
 
+                    
     except IntegrityError:
         log.exception(f"Integrity error when saving results to database.")
         # Save the entries to a pickle file so we can figure out what went wrong.

@@ -20,7 +20,7 @@ STAGE = "abundances"
 def abundances(
     spectra: Iterable[Spectrum],
     parent_dir: str,
-    element_weight_paths: str,
+    element_weight_paths: str = "$MWM_ASTRA/pipelines/aspcap/masks/elements.list",
     operator_kwds: Optional[dict] = None,
     **kwargs
 ) -> Iterable[FerreChemicalAbundances]:
@@ -187,7 +187,7 @@ def plan_abundances(
         .where(Alias.spectrum_pk << spectrum_pks)
         .group_by(Alias.spectrum_pk)
         .alias("sq")
-    )
+    )        
 
     q = (
         FerreStellarParameters
@@ -195,13 +195,11 @@ def plan_abundances(
         # Only get one result per spectrum.
         .where(
             FerreStellarParameters.penalized_rchi2.is_null(False)
+            # Don't calculate abundances for things that failed SPECTACULARLY
         &   (~FerreStellarParameters.flag_ferre_fail)
+        &   (~FerreStellarParameters.flag_spectrum_io_error)
         &   (~FerreStellarParameters.flag_no_suitable_initial_guess)
         &   (~FerreStellarParameters.flag_missing_model_flux)
-            # Don't calculate abundances for stellar parameters that are on the grid edge of TEFF/LOGG/METALS
-        &   (~FerreStellarParameters.flag_teff_grid_edge_bad)
-        &   (~FerreStellarParameters.flag_logg_grid_edge_bad)
-        &   (~FerreStellarParameters.flag_m_h_grid_edge_bad)
         )
         .join(
             sq, 
@@ -221,7 +219,10 @@ def plan_abundances(
     done, group_task_kwds, pre_computed_continuum = ([], {}, {})
     for result in q:
         if result.spectrum_pk in done:
+            # We have a more recent FerreStellarParameters result which we will use instead of this one.
+            log.warning(f"Ignoring stellar parameter result {result} because we have a more recent result for this spectrum_pk={result.spectrum_pk}")
             continue
+
         done.append(result.spectrum_pk)
         group_task_kwds.setdefault(result.header_path, [])
 

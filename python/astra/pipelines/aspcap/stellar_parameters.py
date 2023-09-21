@@ -204,9 +204,9 @@ def plan_stellar_parameters(
     
     for spectrum_pk, coarse_results in coarse_results_dict.items():
         if len(coarse_results) > 1:
-            log.warning(f"Multiple coarse results for spectrum {spectrum_pk}: {coarse_results}")
+            log.warning(f"Multiple equally good coarse results for spectrum {spectrum_pk}: {coarse_results}")
 
-        index = np.argmin([r.rchi2 for r in coarse_results])
+        index = np.argmin([r.penalized_rchi2 for r in coarse_results])
         coarse_results_dict[spectrum_pk] = coarse_results[index]
 
     group_task_kwds, pre_computed_continuum = ({}, {})
