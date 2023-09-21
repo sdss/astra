@@ -66,7 +66,6 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
                 timing = timing["input.nml"]
         except:
             log.exception(f"Exception when trying to load timing for {ref_dir}")
-            raise 
 
     control_kwds = read_control_file(os.path.join(dir, "input.nml"))
 

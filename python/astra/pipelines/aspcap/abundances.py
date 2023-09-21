@@ -12,7 +12,7 @@ from astra.pipelines.ferre.operator import FerreOperator, FerreMonitoringOperato
 from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
 from astra.pipelines.ferre.utils import (read_ferre_headers, parse_header_path, get_input_spectrum_primary_keys)
-from astra.pipelines.aspcap.utils import (get_input_nml_paths, get_abundance_keywords)
+from astra.pipelines.aspcap.utils import (get_input_nml_paths, get_abundance_keywords, sanitise_parent_dir)
 
 STAGE = "abundances"
 
@@ -176,6 +176,7 @@ def plan_abundances(
     else:
         spectrum_pks = [s.spectrum_pk for s in spectra]        
 
+    parent_dir = sanitise_parent_dir(parent_dir)
 
     Alias = FerreStellarParameters.alias()
     sq = (
@@ -185,6 +186,7 @@ def plan_abundances(
             fn.MIN(Alias.penalized_rchi2).alias("min_penalized_rchi2"),
         )
         .where(Alias.spectrum_pk << spectrum_pks)
+        .where(Alias.pwd.startswith(parent_dir))
         .group_by(Alias.spectrum_pk)
         .alias("sq")
     )        

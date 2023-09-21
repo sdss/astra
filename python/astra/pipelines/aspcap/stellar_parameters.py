@@ -14,7 +14,7 @@ from astra.pipelines.ferre.utils import (
     parse_header_path, get_input_spectrum_primary_keys, read_control_file, read_file_with_name_and_data, read_ferre_headers,
     format_ferre_input_parameters, format_ferre_control_keywords,
 )
-from astra.pipelines.aspcap.utils import get_input_nml_paths
+from astra.pipelines.aspcap.utils import get_input_nml_paths, sanitise_parent_dir
 from astra.pipelines.aspcap.continuum import MedianFilter
 
 STAGE = "params"
@@ -134,6 +134,8 @@ def plan_stellar_parameters(
     
     """
 
+    parent_dir = sanitise_parent_dir(parent_dir)
+
     if spectra is None:
         # Get spectrum ids from coarse stage in parent dir.
         spectrum_pks = list(get_input_spectrum_primary_keys(f"{parent_dir}/coarse"))
@@ -163,6 +165,7 @@ def plan_stellar_parameters(
         &   (Alias.teff.is_null(False))
         &   (Alias.logg.is_null(False))
         &   (Alias.m_h.is_null(False))
+        &   (Alias.pwd.startswith(parent_dir))
         )
         .group_by(Alias.spectrum_pk)
         .alias("sq")

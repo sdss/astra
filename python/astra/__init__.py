@@ -58,9 +58,18 @@ def task(function, *args, **kwargs):
                 if result is Ellipsis:
                     continue
 
-                results.append(result)
-                n_results += 1
-                n_results_since_last_check_point += 1
+                try:
+                    pk = getattr(result, result._meta.primary_key.name, None)
+                except:
+                    None
+                else:
+                    if pk is not None:
+                        # already saved from downstream task wrapper
+                        yield result                        
+                    else:
+                        results.append(result)
+                        n_results += 1
+                        n_results_since_last_check_point += 1
             
             except StopIteration:
                 break
@@ -118,9 +127,10 @@ def _bulk_insert(results, batch_size, re_raise_exceptions=False):
     :param batch_size:
         The batch size to use when creating results.
     """
-    log.info(f"Bulk inserting {len(results)} into the database with batch size {batch_size}")
     if not results:
         return None
+
+    log.info(f"Bulk inserting {len(results)} into the database with batch size {batch_size}")
 
     from astra.models.base import database
 

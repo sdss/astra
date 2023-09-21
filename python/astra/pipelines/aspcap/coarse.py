@@ -59,7 +59,7 @@ def coarse_stellar_parameters(
         weight_path,
         **kwargs
     )
-
+    
     # Execute ferre.
     job_ids, executions = (
         FerreOperator(
@@ -187,7 +187,6 @@ def penalize_coarse_stellar_parameter_result(result: FerreCoarse, warn_multiplie
     if result.flag_logg_ferre_fail:
         result.penalized_rchi2 *= fail_multiplier
     
-    
     return None
 
         
@@ -308,6 +307,8 @@ def plan_coarse_stellar_parameters(
         )
         for s in spectra_with_no_initial_guess:
             log.warning(f"\s{s} ({s.path})")
+
+    log.info(f"Processing {len(spectrum_primary_keys_with_at_least_one_initial_guess)} unique spectra")
 
     # Bundle them together into executables based on common header paths.
     header_paths = list(set([ea["header_path"] for ea in all_kwds]))

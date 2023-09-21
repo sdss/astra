@@ -93,7 +93,6 @@ def aspcap(
             **kwargs
         )
     )
-
     # Here we don't need list() because the stellar parameter results will get processed first
     # in the `create_aspcap_results` function, and then the chemical abundance results.
     # TODO: This might become a bit of a clusterfuck if the FERRE jobs fail. Maybe revisit this.
@@ -285,7 +284,6 @@ def create_aspcap_results(
         else:
             raise ValueError(f"Can't figure out which label to use")
         
-        flags = getattr(result, f"{key}_flags")
         value = getattr(result, key)
         e_value = getattr(result, f"e_{key}")
 
@@ -300,10 +298,11 @@ def create_aspcap_results(
             f"{label}_rchi2": result.rchi2,
             f"{label}": value,
             f"e_{label}": e_value,
-            f"{label}_flags": flags,
             f"raw_{label}": value,
             f"raw_e_{label}": e_value,
         })
+        if hasattr(result, f"{key}_flags"):
+            data[result.upstream_pk][f"{label}_flags"] = getattr(result, f"{key}_flags")
     
     if skipped:
         log.warn(
