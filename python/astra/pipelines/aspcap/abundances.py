@@ -202,6 +202,7 @@ def plan_abundances(
         &   (~FerreStellarParameters.flag_spectrum_io_error)
         &   (~FerreStellarParameters.flag_no_suitable_initial_guess)
         &   (~FerreStellarParameters.flag_missing_model_flux)
+        &   (FerreStellarParameters.pwd.startswith(parent_dir))
         )
         .join(
             sq, 

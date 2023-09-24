@@ -151,36 +151,17 @@ def plan_stellar_parameters(
             .where(model_class.spectrum_id << spectrum_pks)
         )
     else:
-        spectrum_pks = [s.spectrum_pk for s in spectra]        
-
-    Alias = FerreCoarse.alias()
-    sq = (
-        Alias
-        .select(
-            Alias.spectrum_pk.alias("spectrum_pk"),
-            fn.MIN(Alias.penalized_rchi2).alias("min_penalized_rchi2"),
-        )
-        .where(
-            (Alias.spectrum_pk << spectrum_pks)
-        &   (Alias.teff.is_null(False))
-        &   (Alias.logg.is_null(False))
-        &   (Alias.m_h.is_null(False))
-        &   (Alias.pwd.startswith(parent_dir))
-        )
-        .group_by(Alias.spectrum_pk)
-        .alias("sq")
-    )
+        spectrum_pks = [s.spectrum_pk for s in spectra] 
 
     q = (
         FerreCoarse
         .select()
-        # Some times the same star is analysed by two grids and has the same \chi^2 (to the precision that FERRE reports)
-        .join(
-            sq, 
-            on=(
-                (FerreCoarse.spectrum_pk == sq.c.spectrum_pk) &
-                (FerreCoarse.penalized_rchi2 == sq.c.min_penalized_rchi2)
-            )
+        .where(
+            (FerreCoarse.teff.is_null(False))
+        &   (FerreCoarse.logg.is_null(False))
+        &   (FerreCoarse.m_h.is_null(False))
+        &   (FerreCoarse.pwd.startswith(parent_dir))
+        &   (FerreCoarse.spectrum_pk << spectrum_pks)
         )
     )
     
@@ -206,11 +187,14 @@ def plan_stellar_parameters(
         coarse_results_dict[r.spectrum_pk].append(r)
     
     for spectrum_pk, coarse_results in coarse_results_dict.items():
-        if len(coarse_results) > 1:
-            log.warning(f"Multiple equally good coarse results for spectrum {spectrum_pk}: {coarse_results}")
+        # TODO: Should we do anything other than getting the minimum penalized rchi2?
+        penalized_rchi2 = np.array([r.penalized_rchi2 for r in coarse_results])
+        indices = np.argsort(penalized_rchi2)
 
-        index = np.argmin([r.penalized_rchi2 for r in coarse_results])
-        coarse_results_dict[spectrum_pk] = coarse_results[index]
+        if len(indices) > 1 and (penalized_rchi2[indices[0]] == penalized_rchi2[indices[1]]):
+            log.warning(f"Multiple results for spectrum {spectrum_pk}: {penalized_rchi2[indices]}")
+
+        coarse_results_dict[spectrum_pk] = coarse_results[indices[0]]
 
     group_task_kwds, pre_computed_continuum = ({}, {})
     for coarse_result in tqdm(coarse_results_dict.values(), total=0):

@@ -93,6 +93,7 @@ def aspcap(
             **kwargs
         )
     )
+
     # Here we don't need list() because the stellar parameter results will get processed first
     # in the `create_aspcap_results` function, and then the chemical abundance results.
     # TODO: This might become a bit of a clusterfuck if the FERRE jobs fail. Maybe revisit this.
@@ -309,7 +310,7 @@ def create_aspcap_results(
             f"Skipped {skipped} chemical abundance results because no stellar parameter result "
             f"in the accompanying argument."
         )
-        raise a
+
     for stellar_parameter_task_pk, kwds in data.items():
         yield ASPCAP(**kwds)
     

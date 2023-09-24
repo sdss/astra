@@ -222,7 +222,7 @@ def parse_header_path(header_path):
 
         is_giant_grid = gd == "g"
 
-    short_grid_name = f"{spectral_type}{gd}_{lsf}"
+    short_grid_name = f"{lsf_telescope_model}_{lsf}_{spectral_type}{gd}"
 
     kwds = dict(
         radiative_transfer_code=radiative_transfer_code,
