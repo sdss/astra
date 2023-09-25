@@ -1,23 +1,24 @@
-""""Functions for creating summary products (e.g., astraAllStar, astraAllVisit)."""
+""""Functions for creating summary products (e.g., mwmAllStar, mwmAllVisit)."""
 
 from astropy.io import fits
 from astra import __version__
 from astra.utils import expand_path
 from astra.models import Source, ApogeeVisitSpectrum, ApogeeCoaddedSpectrumInApStar, BossVisitSpectrum
-from astra.products.utils import (
-    get_fields, get_basic_header, get_binary_table_hdu, check_path
-)
+from astra.products.utils import (get_fields, get_basic_header, get_binary_table_hdu, check_path)
 
 get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
 
-def create_all_star_product(
-    run2d=None,
-    apred=None,        
+DEFAULT_IGNORE_FIELD_NAMES = ("pk", "sdss5_target_flags", )
+
+def create_mwm_all_star_product(
     where=None,
     limit=None,
+    boss_where=None,
+    apogee_where=None,
     boss_spectrum_model=BossVisitSpectrum,
     apogee_spectrum_model=ApogeeCoaddedSpectrumInApStar,
-    ignore_field_names=("pk", "sdss5_target_flags", ),
+    output_template="mwmAllStar-{version}.fits",
+    ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
     name_conflict_strategy=None,
     upper=True,
     fill_values=None,
@@ -25,7 +26,7 @@ def create_all_star_product(
     full_output=False,
 ):
     """
-    Create an `astraAllStar` product containing the information about all sources.
+    Create an `mwmAllStar` product containing the information about all sources (NOT including pipeline results).
 
     :param where: [optional]
         A `where` clause for the `Source.select()` query.
@@ -33,6 +34,21 @@ def create_all_star_product(
     :param limit: [optional]
         Specify an optional limit on the number of rows.
     
+    :param boss_where: [optional]
+        A `where` clause for the `boss_spectrum_model` query.
+    
+    :param apogee_where: [optional]
+        A `where` clause for the `apogee_spectrum_model` query.
+
+    :param boss_spectrum_model: [optional]
+        The BOSS spectrum model to use when constructing this query.
+    
+    :param apogee_spectrum_model: [optional]
+        The APOGEE spectrum model to use when constructing this query.
+        
+    :param output_template: [optional]
+        The output basename template to use for this product.
+
     :param ignore_field_names: [optional]
         Ignore the given field names.
 
@@ -63,20 +79,7 @@ def create_all_star_product(
         If `True`, return a two-length tuple containing the path and the HDU list,
         otherwise just return the path.        
     """
-    
-    # TODO: Do we want to allow this tom-fuckery?
-    if run2d is None and apred is None:
-        boss_where = apogee_where = None
-        path = get_path(f"astraAllStar-{__version__}.fits")
-
-    elif run2d is not None and apred is not None:
-        boss_where = (boss_spectrum_model.run2d == run2d)
-        apogee_where = (apogee_spectrum_model.apred == apred) 
-        path = get_path(f"astraAllStar-{run2d}-{apred}-{__version__}.fits")   
-        
-    else:
-        raise ValueError(f"Either `apred` and `run2d` must both be None, or both given")
-        
+    path = get_path(output_template.format(version=__version__))
     return _create_summary_product(
         path,
         where=where,
@@ -94,14 +97,15 @@ def create_all_star_product(
     )
 
 
-def create_all_visit_product(
-    run2d=None,
-    apred=None,
+def create_mwm_all_visit_product(
     where=None,
     limit=None,
+    boss_where=None,
+    apogee_where=None,
     boss_spectrum_model=BossVisitSpectrum,
     apogee_spectrum_model=ApogeeVisitSpectrum,
-    ignore_field_names=("pk", "sdss5_target_flags", ),
+    output_template="mwmAllVisit-{version}.fits",
+    ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
     name_conflict_strategy=None,
     upper=True,
     fill_values=None,
@@ -109,13 +113,7 @@ def create_all_visit_product(
     full_output=False,
 ):
     """
-    Create an `astraAllVisit` product containing all the visit information about all sources.
-
-    :param run2d: [optional]
-        The version of the BOSS data reduction pipeline to include. If `run2d` is given then `apred` must also be given.
-    
-    :param apred: [optional]
-        The version of the APOGEE data reduction pipeline to include. If `run2d` is given then `apred` must also be given.
+    Create an `mwmAllVisit` product containing all the visit information about all sources (NOT including pipeline results).
     
     :param where: [optional]
         A `where` clause for the database query.
@@ -123,6 +121,21 @@ def create_all_visit_product(
     :param limit: [optional]
         Specify an optional limit on the number of rows per HDU.
     
+    :param boss_where: [optional]
+        A `where` clause for the `boss_spectrum_model` query.
+    
+    :param apogee_where: [optional]
+        A `where` clause for the `apogee_spectrum_model` query.
+
+    :param boss_spectrum_model: [optional]
+        The BOSS spectrum model to use when constructing this query.
+    
+    :param apogee_spectrum_model: [optional]
+        The APOGEE spectrum model to use when constructing this query.
+
+    :param output_template: [optional]
+        The output basename template to use for this product.
+
     :param ignore_field_names: [optional]
         Ignore the given field names.
 
@@ -153,19 +166,7 @@ def create_all_visit_product(
         If `True`, return a two-length tuple containing the path and the HDU list,
         otherwise just return the path.        
     """
-    # TODO: Do we want to allow this tom-fuckery?
-    if run2d is None and apred is None:
-        boss_where = apogee_where = None
-        path = get_path(f"astraAllVisit-{__version__}.fits")
-
-    elif run2d is not None and apred is not None:
-        boss_where = (boss_spectrum_model.run2d == run2d)
-        apogee_where = (apogee_spectrum_model.apred == apred) 
-        path = get_path(f"astraAllVisit-{run2d}-{apred}-{__version__}.fits")   
-        
-    else:
-        raise ValueError(f"Either `apred` and `run2d` must both be None, or both given")
-
+    path = get_path(output_template.format(version=__version__))
     return _create_summary_product(
         path,
         where=where,
@@ -255,38 +256,3 @@ def _create_summary_product(
     hdu_list = fits.HDUList(hdus)
     hdu_list.writeto(path, overwrite=overwrite)
     return (path, hdu_list) if full_output else path
-
-
-
-'''
-
-    fields = get_fields(
-        (Source, ),
-        name_conflict_strategy=name_conflict_strategy,
-        ignore_field_names=ignore_field_names
-    )
-
-    q = (
-        Source
-        .select(*tuple(fields.values()))
-        .where(where)
-        .limit(limit)
-        .dicts()
-    )
-
-    hdu = get_binary_table_hdu(
-        q,
-        models=[Source],
-        fields=fields,
-        upper=upper,
-        fill_values=fill_values,
-        limit=limit,
-    )
-
-    hdu_list = fits.HDUList([
-        fits.PrimaryHDU(header=get_basic_header()),
-        hdu
-    ])
-    hdu_list.writeto(path, overwrite=overwrite)
-    return (path, hdu_list) if full_output else path
-'''
