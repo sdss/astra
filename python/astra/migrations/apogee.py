@@ -1,5 +1,7 @@
 import concurrent
 import subprocess
+import numpy as np
+
 from collections import OrderedDict
 from peewee import chunked, Case, fn, JOIN, IntegrityError
 from typing import Optional
@@ -11,6 +13,66 @@ from astra.models.base import database
 from astra.utils import expand_path, flatten, log
 
 from astra.migrations.utils import enumerate_new_spectrum_pks
+
+
+def copy_doppler_results_from_visit_to_coadd(batch_size: Optional[int] = 100, limit: Optional[int] = None):
+
+    q = (
+        ApogeeCoaddedSpectrumInApStar
+        .select()
+        .where(ApogeeCoaddedSpectrumInApStar.doppler_teff.is_null())
+    )
+
+    N_updated = 0
+    total = limit or q.count()
+    with tqdm(total=total, desc="Updating", unit="star") as pb:
+        for chunk in chunked(q.iterator(), batch_size):
+            sources = {}
+            for spectrum in chunk:
+                sources.setdefault(spectrum.source_pk, [])
+                sources[spectrum.source_pk].append(spectrum)
+
+            q_visit = (
+                ApogeeVisitSpectrum
+                .select()
+                .where(ApogeeVisitSpectrum.source_pk.in_([s.source_pk for s in chunk]))
+            )
+
+            updated = []
+            for visit in q_visit:
+                for spectrum in sources[visit.source_pk]:
+                    spectrum.doppler_teff   = float(visit.doppler_teff or np.nan)
+                    spectrum.doppler_e_teff = float(visit.doppler_e_teff or np.nan)
+                    spectrum.doppler_logg   = float(visit.doppler_logg  or np.nan)
+                    spectrum.doppler_e_logg = float(visit.doppler_e_logg or np.nan)
+                    spectrum.doppler_fe_h   = float(visit.doppler_fe_h  or np.nan)
+                    spectrum.doppler_e_fe_h = float(visit.doppler_e_fe_h or np.nan)
+                    spectrum.doppler_rchi2  = float(visit.doppler_rchi2  or np.nan)
+                    spectrum.doppler_flags  = visit.doppler_flags 
+                    updated.append(spectrum)
+            
+                        
+            N_updated += (
+                ApogeeCoaddedSpectrumInApStar
+                .bulk_update(
+                    updated,
+                    fields=[
+                        ApogeeCoaddedSpectrumInApStar.doppler_teff,
+                        ApogeeCoaddedSpectrumInApStar.doppler_e_teff,
+                        ApogeeCoaddedSpectrumInApStar.doppler_logg,
+                        ApogeeCoaddedSpectrumInApStar.doppler_e_logg,
+                        ApogeeCoaddedSpectrumInApStar.doppler_fe_h,
+                        ApogeeCoaddedSpectrumInApStar.doppler_e_fe_h,
+                        ApogeeCoaddedSpectrumInApStar.doppler_rchi2,
+                        ApogeeCoaddedSpectrumInApStar.doppler_flags,
+                    ]
+                )
+            )
+            
+            pb.update(min(len(chunk), batch_size))
+    return N_updated
+
+
 
 def migrate_apogee_obj_from_source(batch_size: Optional[int] = 100, limit: Optional[int] = None):
 

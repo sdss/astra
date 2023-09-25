@@ -65,6 +65,9 @@ def task(function, *args, **kwargs):
                 else:
                     if pk is not None:
                         # already saved from downstream task wrapper
+                        # TODO: should we save this?
+                        #result.save()
+
                         yield result                        
                     else:
                         results.append(result)

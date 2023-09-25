@@ -73,9 +73,7 @@ def create_all_star_pipeline_product(
         If `True`, return a two-length tuple containing the path and the HDU list,
         otherwise just return the path.        
     """
-    
-    # TODO: Allow run2d and apred
-    
+        
     if boss_spectrum_model is None:
         log.warning("Defaulting boss_spectrum_model in astra.products.pipeline_summary.create_all_star_pipeline_product")
         boss_spectrum_model = BossVisitSpectrum
