@@ -100,7 +100,6 @@ def has_partial_results(pwd, control_kwds=None):
         - a bool indicating whether partial results exist already;
         - a tuple of paths identified which indicate there are partial results.
     """
-
     pwd = expand_path(pwd)
     if control_kwds is None:
         control_kwds = parse_control_kwds(f"{pwd}/input.nml")
@@ -442,6 +441,8 @@ def load_balancer(
                 
                 execution_commands.append(f"cd {cwd}")
                 execution_commands.append(f"{command} > stdout 2> stderr")
+                execution_commands.append(f"ferre_timing . > timing.csv")
+                
                 if post_interpolate_model_flux:
                     execution_commands.append(f"ferre_interpolate_unnormalized_model_flux {cwd} > post_execute_stdout 2> post_execute_stderr")
                 
@@ -463,6 +464,7 @@ def load_balancer(
                             
             slurm_tasks.append(SlurmTask(task_commands))
             est_times.append(est_time)
+
 
         if chaos_monkey:
             command = f"ferre_chaos_monkey -v {' '.join(expect_ferre_executions_in_these_pwds)}"
@@ -526,17 +528,17 @@ def load_balancer(
 
 def monitor(
     job_ids,
-    executions,
+    planned_executions,
     show_progress=True,
     refresh_interval=10,
-    chaos_monkey=True,    
+    chaos_monkey=False,    
 ):
 
     # Check progress.
     log.info(f"Monitoring progress of the following FERRE execution directories:")
 
     n_spectra, executions = (0, [])
-    for n_executions, e in enumerate(executions, start=1):
+    for n_executions, e in enumerate(planned_executions, start=1):
         executions.append(e)
         n_spectra += e[1]
         log.info(f"\t{os.path.dirname(e[0])}")
@@ -555,7 +557,7 @@ def monitor(
 
     # Get a parent folder from the executions so that we can put the FERRE chaos monkey logs somewhere.
 
-    dead_processes, chaos_monkey_processes = ([], {})
+    dead_processes, warn_on_dead_processes, chaos_monkey_processes = ([], [], {})
     with tqdm(**tqdm_kwds) as pb:
         while True:
             
@@ -617,12 +619,16 @@ def monitor(
                         except:
                             None
                         else:
-                            if "error" in stderr or "Segmentation fault" in stderr:
+                            # Don't die on deaths.. we expect the chaos monkey to restart it.
+                            if ("error" in stderr or "Segmentation fault" in stderr):
+                                warn_on_dead_processes.append(output_path)
+                            '''
                                 dead_processes.append(output_path)
                                 n_executions_done += 1
                                 last_updated = time()
                                 pb.set_description(desc(n_executions_done, n_executions, last_updated))
                                 pb.refresh()
+                            '''
 
                 if n_now_done >= n_input:
                     last_updated = time()
@@ -643,18 +649,18 @@ def monitor(
 
             sleep(refresh_interval)
 
-    if dead_processes:
-        log.warning(f"Segmentation faults or chaos monkey deaths detected in following executions:")
-        for output_path in dead_processes:
+    if warn_on_dead_processes:
+        log.warning(f"Segmentation faults or chaos monkey deaths detected in following executions (these may have been restarted):")
+        for output_path in warn_on_dead_processes:
             log.warning(f"\t{os.path.dirname(output_path)}")
 
-    if job_ids and pb.n >= n_spectra:
+    if job_ids:# and pb.n >= n_spectra:
         log.info(f"Checking that all Slurm jobs are complete")
         while True:
             queue = get_queue()
             for job_id in job_ids:
                 if job_id in queue:
-                    log.info(f"Job {job_id} has status {queue[job_id]['status']}")
+                    log.info(f"\tJob {job_id} has status {queue[job_id]['status']}")
                     break
             else:
                 log.info("All Slurm jobs complete.")
@@ -725,14 +731,15 @@ class FerreOperator:
     def execute(self, context=None):
         return load_balancer(
             self.stage_dir,
-            self.job_name,
-            self.input_nml_wildmask,
-            self.post_interpolate_model_flux,
-            self.overwrite,
-            self.n_threads,
-            self.max_nodes,
-            self.max_tasks_per_node,
-            self.cpus_per_node,
+            slurm_kwds=self.slurm_kwds,
+            job_name=self.job_name,
+            input_nml_wildmask=self.input_nml_wildmask,
+            post_interpolate_model_flux=self.post_interpolate_model_flux,
+            overwrite=self.overwrite,
+            n_threads=self.n_threads,
+            max_nodes=self.max_nodes,
+            max_tasks_per_node=self.max_tasks_per_node,
+            cpus_per_node=self.cpus_per_node,
             full_output=True         
         )
 
@@ -745,7 +752,7 @@ class FerreMonitoringOperator:
         executions,
         show_progress=True,
         refresh_interval=10,
-        chaos_monkey=True,
+        chaos_monkey=False,
         **kwargs
     ):
         self.job_ids = job_ids

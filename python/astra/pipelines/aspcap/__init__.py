@@ -3,19 +3,20 @@ import numpy as np
 from datetime import datetime
 from tempfile import mkdtemp
 from typing import Optional, Iterable, List, Tuple, Callable, Union
-from peewee import JOIN
+from peewee import JOIN, fn
 from tqdm import tqdm
 
 from astra import __version__, task
 from astra.utils import log, expand_path
-from astra.models.aspcap import ASPCAP, FerreStellarParameters, FerreChemicalAbundances
+from astra.models.aspcap import ASPCAP, FerreCoarse, FerreStellarParameters, FerreChemicalAbundances
 from astra.models.spectrum import Spectrum, SpectrumMixin
 from astra.pipelines.aspcap.initial import get_initial_guesses
-from astra.pipelines.aspcap.coarse import coarse_stellar_parameters
-from astra.pipelines.aspcap.stellar_parameters import stellar_parameters
-from astra.pipelines.aspcap.abundances import abundances, get_species
+from astra.pipelines.aspcap.coarse import coarse_stellar_parameters, post_coarse_stellar_parameters
+from astra.pipelines.aspcap.stellar_parameters import stellar_parameters, post_stellar_parameters
+from astra.pipelines.aspcap.abundances import abundances, get_species, post_abundances
 from astra.pipelines.aspcap.utils import ABUNDANCE_RELATIVE_TO_H
         
+
 
 @task
 def aspcap(
@@ -115,16 +116,33 @@ def aspcap(
 
 
 @task
+def post_process_aspcap(parent_dir, **kwargs) -> Iterable[ASPCAP]:
+    """
+    Run all the post-processing steps for each ASPCAP stage.
+    
+    :param parent_dir:
+        The parent directory where these FERRE executions will be planned. If `None` is given then this will default
+        to a temporary directory in `$MWM_ASTRA/X.Y.Z/pipelines/aspcap/`.    
+    """
+
+    coarse_results = list(post_coarse_stellar_parameters(parent_dir, **kwargs))
+    stellar_parameter_results = list(post_stellar_parameters(parent_dir, **kwargs))
+    chemical_abundance_results = list(post_abundances(parent_dir, **kwargs))
+    yield from create_aspcap_results(stellar_parameter_results, chemical_abundance_results)
+
+
+
+@task
 def create_aspcap_results(
-    stellar_parameter_results: Optional[Iterable[FerreStellarParameters]] = None,
-    chemical_abundance_results: Optional[Iterable[FerreChemicalAbundances]] = None,
+    stellar_parameter_results: Optional[Iterable[FerreStellarParameters]] = None, 
+    chemical_abundance_results: Optional[Iterable[FerreChemicalAbundances]] = None, 
     **kwargs
 ) -> Iterable[ASPCAP]:
     """
     Create ASPCAP results based on the results from the stellar parameter stage, and the chemical abundances stage.
 
-    These result iterables are linked through the `FerreChemicalAbundances.upstream_id` being equal to the
-    `FerreStellarParameters.task_id` attributes. One ASPCAP result will be created for each stellar parameter result,
+    These result iterables are linked through the `FerreChemicalAbundances.upstream_pk` being equal to the
+    `FerreStellarParameters.task_pk` attributes. One ASPCAP result will be created for each stellar parameter result,
     even if there are no abundances available for that stellar parameter result.
 
     :param stellar_parameter_results:
@@ -135,45 +153,63 @@ def create_aspcap_results(
     """
 
     if stellar_parameter_results is None:
-        stellar_parameter_results = (
+            
+        stellar_parameter_results = list(
             FerreStellarParameters
             .select()
-            .join(
-                ASPCAP,
-                JOIN.LEFT_OUTER,
-                on=(ASPCAP.stellar_parameters_task_id == FerreStellarParameters.task_id)
-            )
-            .where(
-                ASPCAP.stellar_parameters_task_id.is_null()
-            )
+            #.join(ASPCAP, JOIN.LEFT_OUTER, on=(ASPCAP.stellar_parameters_task_pk == FerreStellarParameters.task_pk))
+            #.where(ASPCAP.stellar_parameters_task_pk.is_null())
         )
-        stellar_parameter_results = FerreStellarParameters.select()
+        '''
+        if stellar_parameter_results:
+            spectrum_pks = [r.spectrum_pk for r in stellar_parameter_results]
+            chemical_abundance_results = list(
+                FerreChemicalAbundances
+                .select()
+                .where(FerreChemicalAbundances.spectrum_pk.in_(spectrum_pks))
+            )
+        else:
+            chemical_abundance_results = []
+        '''
+    
+        chemical_abundance_results = list(
+            FerreChemicalAbundances
+            .select()
+        )        
+        
+    t_coarse = (
+        FerreCoarse
+        .select(
+            FerreCoarse.spectrum_pk,
+            fn.sum(FerreCoarse.t_elapsed),        
+            fn.sum(FerreCoarse.ferre_time_elapsed)
+        )
+        .where(FerreCoarse.spectrum_pk.in_([ea.spectrum_pk for ea in stellar_parameter_results]))
+        .group_by(FerreCoarse.spectrum_pk)
+        .tuples()
+    )
+    t_coarse = { k: v for k, *v in t_coarse }
 
-    if chemical_abundance_results is None:
-        chemical_abundance_results = FerreChemicalAbundances.select()
-
-    data, t_elapsed = ({}, {})    
-
-    print("ont yet including time from upstream")
-    print("not yet fully including flags from upstream")    
+    data, ferre_time_elapsed, t_elapsed = ({}, {}, {})
 
     for result in tqdm(stellar_parameter_results, desc="Collecting stellar parameters"):
-        data.setdefault(result.task_id, {})
+        data.setdefault(result.task_pk, {})
 
-        # TODO: Include time from upstream tasks.
-        t_elapsed.setdefault(result.task_id, 0)
-        t_elapsed[result.task_id] += result.t_elapsed
+        t_elapsed.setdefault(result.task_pk, 0)
+        t_elapsed[result.task_pk] += (result.t_elapsed or 0) + (t_coarse.get(result.spectrum_pk, [0])[0] or 0)
+        ferre_time_elapsed.setdefault(result.task_pk, 0)
+        ferre_time_elapsed[result.task_pk] += (result.ferre_time_elapsed or 0) + (t_coarse.get(result.spectrum_pk, [0])[-1] or 0)
         
         v_sini = 10**(result.log10_v_sini or np.nan)
         e_v_sini = (result.e_log10_v_sini or np.nan) * v_sini * np.log(10)
         v_micro = 10**(result.log10_v_micro or np.nan)
         e_v_micro = (result.e_log10_v_micro or np.nan) * v_micro * np.log(10)
 
-        data[result.task_id].update({
-            "source_id": result.source_id,
-            "spectrum_id": result.spectrum_id,
-            "t_elapsed": t_elapsed[result.task_id],
+        data[result.task_pk].update({
+            "source_pk": result.source_pk,
+            "spectrum_pk": result.spectrum_pk,
             "tag": result.tag,
+            "t_elapsed": t_elapsed[result.task_pk],
             "short_grid_name": result.short_grid_name,
             "teff": result.teff,
             "e_teff": result.e_teff,
@@ -198,10 +234,11 @@ def create_aspcap_results(
             "interpolation_order": result.interpolation_order,
 
             "snr": result.snr,
-            "r_chi_sq": result.r_chi_sq,
+            "rchi2": result.rchi2,
             "ferre_flags": result.ferre_flags,
-            "ferre_log_snr_sq": result.ferre_log_snr_sq,            
-            "stellar_parameters_task_id": result.task_id,
+            "ferre_log_snr_sq": result.ferre_log_snr_sq,     
+            "ferre_time_elapsed": ferre_time_elapsed[result.task_pk],
+            "stellar_parameters_task_pk": result.task_pk,
 
             "raw_teff": result.teff,
             "raw_e_teff": result.e_teff,
@@ -227,14 +264,14 @@ def create_aspcap_results(
 
     skipped = 0
     for result in tqdm(chemical_abundance_results, desc="Collecting abundances"):
-        t_elapsed.setdefault(result.upstream_id, 0)
-        t_elapsed[result.upstream_id] += result.t_elapsed
+        ferre_time_elapsed.setdefault(result.upstream_pk, 0)
+        ferre_time_elapsed[result.upstream_pk] += (result.ferre_time_elapsed or 0)
 
-        if result.upstream_id not in data:
+        if result.upstream_pk not in data:
             skipped += 1
             continue
 
-        #data.setdefault(result.upstream_id, {})
+        #data.setdefault(result.upstream_pk, {})
         species = get_species(result.weight_path)
         
         if species.lower() == "c_12_13":
@@ -248,25 +285,25 @@ def create_aspcap_results(
         else:
             raise ValueError(f"Can't figure out which label to use")
         
-        flags = getattr(result, f"{key}_flags")
         value = getattr(result, key)
         e_value = getattr(result, f"e_{key}")
 
         if not ABUNDANCE_RELATIVE_TO_H[species] and value is not None:
             # [X/M] = [X/H] - [M/H]
             # [X/H] = [X/M] + [M/H]                
-            value += data[result.upstream_id]["m_h_atm"]
-            e_value = np.sqrt(e_value**2 + data[result.upstream_id]["e_m_h_atm"]**2)
+            value += data[result.upstream_pk]["m_h_atm"]
+            e_value = np.sqrt(e_value**2 + data[result.upstream_pk]["e_m_h_atm"]**2)
             
-        data[result.upstream_id].update({
-            f"{label}_task_id": result.task_id,
-            f"{label}_r_chi_sq": result.r_chi_sq,
+        data[result.upstream_pk].update({
+            f"{label}_task_pk": result.task_pk,
+            f"{label}_rchi2": result.rchi2,
             f"{label}": value,
             f"e_{label}": e_value,
-            f"{label}_flags": flags,
             f"raw_{label}": value,
             f"raw_e_{label}": e_value,
         })
+        if hasattr(result, f"{key}_flags"):
+            data[result.upstream_pk][f"{label}_flags"] = getattr(result, f"{key}_flags")
     
     if skipped:
         log.warn(
@@ -274,6 +311,6 @@ def create_aspcap_results(
             f"in the accompanying argument."
         )
 
-    for stellar_parameter_task_id, kwds in data.items():
+    for stellar_parameter_task_pk, kwds in data.items():
         yield ASPCAP(**kwds)
     

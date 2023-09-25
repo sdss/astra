@@ -44,24 +44,28 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
         In these cases, the thing you want is `post_process_ferre('abundances/GKg_b/Al', 'abundances/GKg_b')`.
     """
     
-    if skip_pixel_arrays:
-        log.warning(f"Not checking any pixel arrays from FERRE!")
-
     dir = expand_path(dir)
     ref_dir = pwd or dir 
+
     # When finding paths, if the path is in the input.nml file, we should use `ref_dir`, otherwise `dir`.
-    
-    # TODO: Put this somewhere common?
-    stdout_path = os.path.join(dir, "stdout")
+    timing = {}
     try:
-        with open(stdout_path, "r") as fp:
-            stdout = fp.read()
-        # Parse timing information
-        timing = get_processing_times(stdout)
-    
+        raw_timing = np.atleast_2d(np.loadtxt(os.path.join(ref_dir, "timing.csv"), dtype=str, delimiter=","))
     except:
-        log.warning(f"No timing information available (tried stdout: {stdout_path})")
-        timing = {}
+        log.warning(f"No FERRE timing information available for execution in {ref_dir}")
+    else:
+        try:                
+            for name, relative_input_nml_path, t_load, t_elapsed in raw_timing:
+                timing.setdefault(relative_input_nml_path, {})
+                timing[relative_input_nml_path][name] = (float(t_load), float(t_elapsed))
+
+            if ref_dir != dir:
+                relative_input_nml_path = dir[len(ref_dir) + 1:] + "/input.nml"
+                timing = timing[relative_input_nml_path]
+            else:
+                timing = timing["input.nml"]
+        except:
+            log.exception(f"Exception when trying to load timing for {ref_dir}")
 
     control_kwds = read_control_file(os.path.join(dir, "input.nml"))
 
@@ -85,20 +89,24 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
         log.warn(f"The following {len(names_with_missing_outputs)} are missing outputs: {names_with_missing_outputs}")
 
     offile_path = os.path.join(ref_dir, control_kwds["OFFILE"])
+    # Load and sort the rectified model flux path because this happens in abundances when we would normally use skip_pixel_arrays=True
+    try:
+        rectified_model_flux, names_with_missing_rectified_model_flux, output_rectified_model_flux_indices = read_and_sort_output_data_file(
+            offile_path, 
+            input_names
+        )
+        write_pixel_array_with_names(offile_path, input_names, rectified_model_flux)
+    except:
+        log.exception(f"Exception when trying to read and sort {offile_path}")
+        names_with_missing_rectified_model_flux = input_names
+        rectified_model_flux = np.nan * np.ones((N, 7514))
+        is_missing_rectified_model_flux = np.ones(N, dtype=bool)
+    else:
+        is_missing_rectified_model_flux = ~np.all(np.isfinite(rectified_model_flux), axis=1)
+
     if not skip_pixel_arrays:
         flux = np.atleast_2d(np.loadtxt(os.path.join(ref_dir, control_kwds["FFILE"])))
         e_flux = np.atleast_2d(np.loadtxt(os.path.join(ref_dir, control_kwds["ERFILE"])))
-
-        try:
-            rectified_model_flux, names_with_missing_rectified_model_flux, output_rectified_model_flux_indices = read_and_sort_output_data_file(
-                offile_path, 
-                input_names
-            )
-            write_pixel_array_with_names(offile_path, input_names, rectified_model_flux)
-        except:
-            log.exception(f"Exception when trying to read and sort {offile_path}")
-            names_with_missing_rectified_model_flux = input_names
-            rectified_model_flux = np.nan * np.ones_like(flux)
                             
         sffile_path = os.path.join(ref_dir, control_kwds["SFFILE"])
         try:
@@ -112,8 +120,6 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
             log.exception(f"Exception when trying to read and sort {sffile_path}")
             names_with_missing_rectified_flux = input_names
             rectified_flux = np.nan * np.ones_like(flux)
-
-
 
         model_flux_output_path = os.path.join(dir, "model_flux.output")
         if os.path.exists(model_flux_output_path):
@@ -132,11 +138,9 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
             log.warn(f"The following {len(names_with_missing_rectified_flux)} are missing rectified fluxes: {names_with_missing_rectified_flux}")
 
         is_missing_model_flux = ~np.all(np.isfinite(model_flux), axis=1)
-        is_missing_rectified_flux = ~np.all(np.isfinite(rectified_flux), axis=1)
 
     else:
         is_missing_model_flux = np.zeros(N, dtype=bool)
-        is_missing_rectified_flux = np.zeros(N, dtype=bool)
 
     ferre_log_chi_sq = meta["log_chisq_fit"]
     ferre_log_snr_sq = meta["log_snr_sq"]
@@ -156,7 +160,7 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
     flag_ferre_fail = (parameters == -9999) | (e_parameters < -0.01) | ~np.isfinite(parameters)
     flag_any_ferre_fail = np.any(flag_ferre_fail, axis=1)
     flag_potential_ferre_timeout = is_missing_parameters
-    flag_missing_model_flux = is_missing_model_flux | is_missing_rectified_flux
+    flag_missing_model_flux = is_missing_model_flux | is_missing_rectified_model_flux
 
     # Get human-readable parameter names.
     to_human_readable_parameter_name = dict([(v, k) for k, v in TRANSLATE_LABELS.items()])
@@ -191,15 +195,15 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
 
         result = common.copy()
         result.update(
-            source_id=name_meta["source_id"],
-            spectrum_id=name_meta["spectrum_id"],
+            source_pk=name_meta["source_pk"],
+            spectrum_pk=name_meta["spectrum_pk"],
             initial_flags=name_meta["initial_flags"] or 0,
-            upstream_id=name_meta["upstream_id"],
+            upstream_pk=name_meta["upstream_pk"],
             ferre_name=name,
             ferre_input_index=name_meta["index"],
             ferre_output_index=i,
-            r_chi_sq=10**ferre_log_chi_sq[i], 
-            penalized_r_chi_sq=10**ferre_log_chi_sq[i],     
+            rchi2=10**ferre_log_chi_sq[i], 
+            penalized_rchi2=10**ferre_log_chi_sq[i],     
             ferre_log_snr_sq=ferre_log_snr_sq[i],
             flag_ferre_fail=flag_any_ferre_fail[i],
             flag_potential_ferre_timeout=flag_potential_ferre_timeout[i],
@@ -208,17 +212,17 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
 
         # Add correlation coefficients.
         #meta["cov"]
-        #raise a
-
         # Add timing information, if we can.
         try:
+            t_load, t_elapsed = timing[name]    
             result.update(
-                ferre_time_load_grid=timing["ferre_time_load_grid"][i],
-                ferre_time_elapsed=timing["ferre_time_elapsed"][i],
+                ferre_time_load_grid=t_load,
+                ferre_time_elapsed=t_elapsed,
             )
-            result["t_elapsed"] = result["ferre_time_elapsed"] + result["ferre_time_load_grid"]/len(input_names)
         except:
-            None
+            if len(timing) > 0:
+                # Only warn when there are specific timings missing
+                log.warning(f"No FERRE timing for spectrum_pk={name_meta['spectrum_pk']}")
 
         if not skip_pixel_arrays:
             snr = np.nanmedian(flux[i]/e_flux[i])
@@ -232,10 +236,22 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
             )
 
         for j, parameter in enumerate(parameter_names):
+
+            value = parameters[i, j]
+            e_value = e_parameters[i, j]
+
+            if e_value <= 0 or e_value >= 9999:
+                e_value = np.nan
+                flag_ferre_fail[i, j] = True # TODO: should we have more specific flags here?
+            
+            if parameter != "teff" and (value >= 9999 or value <= -9999):
+                value = np.nan
+                flag_ferre_fail[i, j] = True
+                
             result.update({
                 f"initial_{parameter}": input_parameters[i, j],
-                parameter: parameters[i, j],
-                f"e_{parameter}": e_parameters[i, j],
+                parameter: value,
+                f"e_{parameter}": e_value,
                 f"flag_{parameter}_ferre_fail": flag_ferre_fail[i, j],
                 f"flag_{parameter}_grid_edge_bad": flag_grid_edge_bad[i, j],
                 f"flag_{parameter}_grid_edge_warn": flag_grid_edge_warn[i, j],

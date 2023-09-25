@@ -1,13 +1,13 @@
-from inspect import isgeneratorfunction, getfullargspec
+from inspect import isgeneratorfunction
 from decorator import decorator
 from peewee import chunked, IntegrityError, SqliteDatabase
 from playhouse.sqlite_ext import SqliteExtDatabase
 from sdsstools.configuration import get_config
 
-from astra.utils import log, Timer, flatten
+from astra.utils import log, Timer
 
 NAME = "astra"
-__version__ = "0.4.0"
+__version__ = "0.4.3"
 
 @decorator
 def task(function, *args, **kwargs):
@@ -26,6 +26,8 @@ def task(function, *args, **kwargs):
     :Keyword Arguments:
         * *frequency* (``int``) --
           The number of seconds to wait before saving the results to the database (default: 300).        
+        * *result_frequency* (``int``) --
+          The number of results  to wait before saving the results to the database (default: 300).        
         * *batch_size* (``int``) --
           The number of rows to insert per batch (default: 1000).
         * *re_raise_exceptions* (``bool``) -- 
@@ -36,6 +38,7 @@ def task(function, *args, **kwargs):
         raise TypeError("Tasks must be generators that `yield` results.")
 
     frequency = kwargs.pop("frequency", 300)
+    result_frequency = kwargs.pop("result_frequency", 100_000)
     batch_size = kwargs.pop("batch_size", 1000)
     re_raise_exceptions = kwargs.pop("re_raise_exceptions", True)
 
@@ -55,9 +58,21 @@ def task(function, *args, **kwargs):
                 if result is Ellipsis:
                     continue
 
-                results.append(result)
-                n_results += 1
-                n_results_since_last_check_point += 1
+                try:
+                    pk = getattr(result, result._meta.primary_key.name, None)
+                except:
+                    None
+                else:
+                    if pk is not None:
+                        # already saved from downstream task wrapper
+                        # TODO: should we save this?
+                        #result.save()
+
+                        yield result                        
+                    else:
+                        results.append(result)
+                        n_results += 1
+                        n_results_since_last_check_point += 1
             
             except StopIteration:
                 break
@@ -68,7 +83,7 @@ def task(function, *args, **kwargs):
                     raise
             
             else:
-                if timer.check_point or n_results_since_last_check_point > batch_size:
+                if timer.check_point or n_results_since_last_check_point >= result_frequency:
                     with timer.pause():
 
                         # Add estimated overheads to each result.
@@ -98,6 +113,8 @@ def task(function, *args, **kwargs):
         _bulk_insert(results, batch_size, re_raise_exceptions)
     except:
         log.exception(f"Exception trying to insert results to database:")
+        if re_raise_exceptions:
+            raise
 
     yield from results
 
@@ -113,10 +130,11 @@ def _bulk_insert(results, batch_size, re_raise_exceptions=False):
     :param batch_size:
         The batch size to use when creating results.
     """
-    log.info(f"Bulk inserting {len(results)} into the database with batch size {batch_size}")
     if not results:
         return None
-    
+
+    log.info(f"Bulk inserting {len(results)} into the database with batch size {batch_size}")
+
     from astra.models.base import database
 
     model = results[0].__class__
@@ -133,9 +151,13 @@ def _bulk_insert(results, batch_size, re_raise_exceptions=False):
                 if _result.is_dirty():
                     results[i] = model.create(**_result.__data__)
         else:
-            with database.atomic():
-                model.bulk_create(results, batch_size=batch_size)
+            try:
+                with database.atomic():
+                    model.bulk_create(results, batch_size)
+            except:
+                raise
 
+                    
     except IntegrityError:
         log.exception(f"Integrity error when saving results to database.")
         # Save the entries to a pickle file so we can figure out what went wrong.

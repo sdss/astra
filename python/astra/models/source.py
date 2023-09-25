@@ -18,176 +18,38 @@ from astra.models.base import database, BaseModel
 from astra.models.fields import BitField
 from astra.models.spectrum import Spectrum
 
-
+from astra.glossary import Glossary
 
 class Source(BaseModel):
 
     """ An astronomical source. """
 
     #> Identifiers
-    id = AutoField(primary_key=True, help_text="Astra source identifier")
+    pk = AutoField(primary_key=True, help_text=Glossary.pk)
     
-    sdss_id = BigIntegerField(index=True, null=True, help_text="SDSS unique identifier")
     healpix = IntegerField(null=True, help_text="HEALPix (128 side)")
-    # The following identifiers should be unique, but I'm not convinced it's implemented properly yet.
+    # The following identifiers are usually unique, but let's not base our integrity on it because
+    # there will be things with n_associated > 1.
+    sdss_id = BigIntegerField(index=True, unique=True, null=True, help_text="SDSS-5 unique identifier")
+    sdss4_apogee_id = TextField(index=True, unique=True, null=True, help_text="SDSS-4 DR17 APOGEE identifier")
     gaia_dr2_source_id = BigIntegerField(null=True, help_text="Gaia DR2 source identifier")
     gaia_dr3_source_id = BigIntegerField(null=True, help_text="Gaia DR3 source identifier")
-    sdss4_dr17_apogee_id = TextField(index=True, null=True, unique=True, help_text="SDSS-4 DR17 APOGEE identifier")
     tic_v8_id = BigIntegerField(null=True, help_text="TESS Input Catalog (v8) identifier")
     
     #> Targeting provenance 
-    sdss5_catalogid_v1 = BigIntegerField(null=True, help_text="SDSS catalog identifier")
-    version_id = IntegerField(null=True, help_text="SDSS catalog version for targeting")
+    carton_0 = TextField(default="", help_text="Highest priority carton name")
     lead = TextField(null=True, help_text="Lead catalog used for cross-match")
-
-    #> Astrometry
-    ra = FloatField(null=True, help_text="Right ascension [deg]")
-    dec = FloatField(null=True, help_text="Declination [deg]")
-    plx = FloatField(null=True, help_text="Parallax [mas]")
-    e_plx = FloatField(null=True, help_text="Error on parallax [mas]")
-    pmra = FloatField(null=True, help_text="Proper motion in RA [mas/yr]")
-    e_pmra = FloatField(null=True, help_text="Error on proper motion in RA [mas/yr]")
-    pmde = FloatField(null=True, help_text="Proper motion in DEC [mas/yr]")
-    e_pmde = FloatField(null=True, help_text="Error on proper motion in DEC [mas/yr]")
-    gaia_v_rad = FloatField(null=True, help_text="Gaia radial velocity [km/s]")
-    gaia_e_v_rad = FloatField(null=True, help_text="Error on Gaia radial velocity [km/s]")
-
-    # A decision was made here.
-    # It would be nice to keep the original field names from each photometric survey so that
-    # users know exactly which column means what. In other words, "do we be internally 
-    # consistent with naming things, or be consistent with the original names?".
+    version_id = IntegerField(null=True, help_text="SDSS catalog version for targeting")
+    catalogid = BigIntegerField(null=True, help_text=Glossary.catalogid)
+    catalogid21 = BigIntegerField(null=True, help_text=Glossary.catalogid21)
+    catalogid25 = BigIntegerField(null=True, help_text=Glossary.catalogid25)
+    catalogid31 = BigIntegerField(null=True, help_text=Glossary.catalogid31)
+    n_associated = IntegerField(null=True, help_text=Glossary.n_associated)
+    n_neighborhood = IntegerField(default=-1, help_text="Sources within 3\" and G_MAG > G_MAG_source + 5")
     
-    # Unfortunately, some of the original field names are longer than 8 characters, so we 
-    # would end up with many HIERARCH cards if we kept the original names. There might be
-    # some other downsides if we wrote code that relied on some of those naming conventions.
-    # For example, if bitfields always have the suffix `_flags` and then we wanted to create
-    # documentation for any flag set (based on the `_flags` suffix instead of BitField type)
-    # then some flagging things would not be documented. 
-
-    # Neither avenue is clearly better, so we make a decision, document it, and live with it.
-    # For Gaia, we use `_mag`. For 2MASS we use `_mag`. 
-    # 
-    # For unWISE they report fluxes, so we keep their naming convention where it fits within 
-    # 8 characters, and document when the name differs from the original catalog.
-
-    #> Gaia Photometry
-    g_mag = FloatField(null=True, help_text="Gaia DR3 mean G band magnitude [mag]")
-    bp_mag = FloatField(null=True, help_text="Gaia DR3 mean BP band magnitude [mag]")
-    rp_mag = FloatField(null=True, help_text="Gaia DR3 mean RP band magnitude [mag]")
-
-    #> 2MASS Photometry
-    j_mag = FloatField(null=True, help_text="2MASS J band magnitude [mag]")
-    e_j_mag = FloatField(null=True, help_text="Error on 2MASS J band magnitude [mag]")
-    h_mag = FloatField(null=True, help_text="2MASS H band magnitude [mag]")
-    e_h_mag = FloatField(null=True, help_text="Error on 2MASS H band magnitude [mag]")
-    k_mag = FloatField(null=True, help_text="2MASS K band magnitude [mag]")
-    e_k_mag = FloatField(null=True, help_text="Error on 2MASS K band magnitude [mag]")
-    ph_qual = TextField(null=True, help_text="2MASS photometric quality flag")
-    bl_flg = TextField(null=True, help_text="Number of components fit per band (JHK)")
-    cc_flg = TextField(null=True, help_text="Contamination and confusion flag")
-    #< See https://www.ipac.caltech.edu/2mass/releases/allsky/doc/sec2_2a.html 
-
-    #> unWISE Photometry
-    w1_flux = FloatField(null=True, help_text="W1 flux [Vega nMgy]")
-    w1_dflux = FloatField(null=True, help_text="Error on W1 flux [Vega nMgy]")
-    w2_flux = FloatField(null=True, help_text="W2 flux [Vega nMgy]")
-    w2_dflux = FloatField(null=True, help_text="Error on W2 flux [Vega nMgy]")
-    w1_frac = FloatField(null=True, help_text="Fraction of W1 flux from this object")
-    w2_frac = FloatField(null=True, help_text="Fraction of W2 flux from this object")
-    w1uflags = BitField(default=0, null=True, help_text="unWISE flags for W1")
-    w2uflags = BitField(default=0, null=True, help_text="unWISE flags for W2")
-    w1aflags = BitField(default=0, null=True, help_text="Additional flags for W1")
-    w2aflags = BitField(default=0, null=True, help_text="Additional flags for W2")
-    #< See https://catalog.unwise.me/catalogs.html
-    
-    flag_unwise_w1_in_core_or_wings = w1uflags.flag(2**0, "In core or wings")
-    flag_unwise_w1_in_diffraction_spike = w1uflags.flag(2**1, "In diffraction spike")
-    flag_unwise_w1_in_ghost = w1uflags.flag(2**2, "In ghost")
-    flag_unwise_w1_in_first_latent = w1uflags.flag(2**3, "In first latent")
-    flag_unwise_w1_in_second_latent = w1uflags.flag(2**4, "In second latent")
-    flag_unwise_w1_in_circular_halo = w1uflags.flag(2**5, "In circular halo")
-    flag_unwise_w1_saturated = w1uflags.flag(2**6, "Saturated")
-    flag_unwise_w1_in_geometric_diffraction_spike = w1uflags.flag(2**7, "In geometric diffraction spike")
-    
-    flag_unwise_w2_in_core_or_wings = w2uflags.flag(2**0, "In core or wings")
-    flag_unwise_w2_in_diffraction_spike = w2uflags.flag(2**1, "In diffraction spike")
-    flag_unwise_w2_in_ghost = w2uflags.flag(2**2, "In ghost")
-    flag_unwise_w2_in_first_latent = w2uflags.flag(2**3, "In first latent")
-    flag_unwise_w2_in_second_latent = w2uflags.flag(2**4, "In second latent")
-    flag_unwise_w2_in_circular_halo = w2uflags.flag(2**5, "In circular halo")
-    flag_unwise_w2_saturated = w2uflags.flag(2**6, "Saturated")
-    flag_unwise_w2_in_geometric_diffraction_spike = w2uflags.flag(2**7, "In geometric diffraction spike")
-        
-    flag_unwise_w1_in_bright_star_psf = w1aflags.flag(2**0, "In PSF of bright star falling off coadd")
-    flag_unwise_w1_in_hyperleda_galaxy = w1aflags.flag(2**1, "In HyperLeda large galaxy")
-    flag_unwise_w1_in_big_object = w1aflags.flag(2**2, "In \"big object\" (e.g., a Magellanic cloud)")
-    flag_unwise_w1_pixel_in_very_bright_star_centroid = w1aflags.flag(2**3, "Pixel may contain the centroid of a very bright star")
-    flag_unwise_w1_crowdsource_saturation = w1aflags.flag(2**4, "crowdsource considers this pixel potentially affected by saturation")
-    flag_unwise_w1_possible_nebulosity = w1aflags.flag(2**5, "Pixel may contain nebulosity")
-    flag_unwise_w1_no_aggressive_deblend = w1aflags.flag(2**6, "Sources in this pixel will not be aggressively deblended")
-    flag_unwise_w1_candidate_sources_must_be_sharp = w1aflags.flag(2**7, "Candidate sources in this pixel must be \"sharp\" to be optimized")
-
-    flag_unwise_w2_in_bright_star_psf = w2aflags.flag(2**0, "In PSF of bright star falling off coadd")
-    flag_unwise_w2_in_hyperleda_galaxy = w2aflags.flag(2**1, "In HyperLeda large galaxy")
-    flag_unwise_w2_in_big_object = w2aflags.flag(2**2, "In \"big object\" (e.g., a Magellanic cloud)")
-    flag_unwise_w2_pixel_in_very_bright_star_centroid = w2aflags.flag(2**3, "Pixel may contain the centroid of a very bright star")
-    flag_unwise_w2_crowdsource_saturation = w2aflags.flag(2**4, "crowdsource considers this pixel potentially affected by saturation")
-    flag_unwise_w2_possible_nebulosity = w2aflags.flag(2**5, "Pixel may contain nebulosity")
-    flag_unwise_w2_no_aggressive_deblend = w2aflags.flag(2**6, "Sources in this pixel will not be aggressively deblended")
-    flag_unwise_w2_candidate_sources_must_be_sharp = w2aflags.flag(2**7, "Candidate sources in this pixel must be \"sharp\" to be optimized")
-
-    #> ALLGLIMPSE Photometry
-    mag4_5 = FloatField(null=True)
-    d4_5m = FloatField(null=True)
-    rms_f4_5 = FloatField(null=True)
-    sqf_4_5 = BitField(default=0)
-    mf_4_5 = BitField(default=0) # TODO: unclear what these definitions are
-    csf = IntegerField(default=0) # no idea what this is
-
-    flag_glimpse_poor_dark_pixel_current = sqf_4_5.flag(2**0, "Poor pixels in dark current")
-    flag_glimpse_flat_field_questionable = sqf_4_5.flag(2**1, "Flat field applied using questionable value")
-    flag_glimpse_latent_image = sqf_4_5.flag(2**2, "Latent image")
-    flag_glimpse_saturated_star_correction = sqf_4_5.flag(2**3, "Sat star correction")
-    flag_glimpse_muxbleed_correction_applied = sqf_4_5.flag(2**6, "Muxbleed correction applied")
-    flag_glimpse_hot_or_dead_pixels = sqf_4_5.flag(2**7, "Hot, dead or otherwise unacceptable pixel")
-    flag_glimpse_muxbleed_significant = sqf_4_5.flag(2**8, "Muxbleed > 3-sigma above the background")
-    flag_glimpse_allstar_tweak_positive = sqf_4_5.flag(2**9, "Allstar tweak positive")
-    flag_glimpse_allstar_tweak_negative = sqf_4_5.flag(2**10, "Allstar tweak negative")
-    flag_glimpse_confusion_in_band_merge = sqf_4_5.flag(2**12, "Confusion in in-band merge")
-    flag_glimpse_confusion_in_cross_band_merge = sqf_4_5.flag(2**13, "Confusion in cross-band merge")
-    flag_glimpse_column_pulldown_correction = sqf_4_5.flag(2**14, "Column pulldown correction")
-    flag_glimpse_banding_correction = sqf_4_5.flag(2**15, "Banding correction")
-    flag_glimpse_stray_light = sqf_4_5.flag(2**16, "Stray light")
-    flag_glimpse_no_nonlinear_correction = sqf_4_5.flag(2**18, "Nonlinear correction not applied")
-    flag_glimpse_saturated_star_wing_region = sqf_4_5.flag(2**19, "Saturated star wing region")
-    flag_glimpse_pre_lumping_in_band_merge = sqf_4_5.flag(2**20, "Pre-lumping in in-band merge")
-    flag_glimpse_post_lumping_in_cross_band_merge = sqf_4_5.flag(2**21, "Post-lumping in cross-band merge")
-    flag_glimpse_edge_of_frame = sqf_4_5.flag(2**29, "Edge of frame (within 3 pixels of edge)")
-    flag_glimpse_truth_list = sqf_4_5.flag(2**30, "Truth list (for simulated data)")
-
-    #> Gaia XP Stellar Parameters (Zhang, Green & Rix 2023)
-    zgr_teff = FloatField(null=True, help_text="Effective temperature [K]")
-    zgr_e_teff = FloatField(null=True, help_text="Error on effective temperature [K]")
-    zgr_logg = FloatField(null=True, help_text="Surface gravity [cgs]")
-    zgr_e_logg = FloatField(null=True, help_text="Error on surface gravity [cgs]")
-    zgr_fe_h = FloatField(null=True, help_text="Metallicity [dex]")
-    zgr_e_fe_h = FloatField(null=True, help_text="Error on metallicity [dex]")
-    zgr_e = FloatField(null=True, help_text="Extinction")
-    zgr_e_e = FloatField(null=True, help_text="")
-    zgr_plx = FloatField(null=True, help_text="Parallax [mas]")
-    zgr_e_plx = FloatField(null=True, help_text="Error on parallax [mas]")
-    zgr_teff_confidence = FloatField(null=True, help_text="Confidence estimate in TEFF")
-    zgr_logg_confidence = FloatField(null=True, help_text="Confidence estimate in LOGG")
-    zgr_fe_h_confidence = FloatField(null=True, help_text="Confidence estimate in FE_H")
-    zgr_quality_flags = BitField(default=0, help_text="Quality flags")
-    #< See https://zenodo.org/record/7811871
-
-    #> Targeting
-    carton_0 = TextField(default="")
-
     # Only do carton_flags if we have a postgresql database.
     if isinstance(database, PostgresqlDatabase):
-        carton_flags = BigBitField(null=True)
+        sdss5_target_flags = BigBitField(null=True, help_text=Glossary.sdss5_target_flags)
 
     sdss4_apogee_target1_flags = BitField(default=0, help_text="SDSS4 APOGEE1 targeting flags (1/2)")
     sdss4_apogee_target2_flags = BitField(default=0, help_text="SDSS4 APOGEE1 targeting flags (2/2)")
@@ -196,9 +58,6 @@ class Source(BaseModel):
     sdss4_apogee2_target3_flags = BitField(default=0, help_text="SDSS4 APOGEE2 targeting flags (3/3)")
     sdss4_apogee_member_flags = BitField(default=0, help_text="SDSS4 likely cluster/galaxy member flags")
     sdss4_apogee_extra_target_flags = BitField(default=0, help_text="SDSS4 target info (aka EXTRATARG)")
-
-    # Define flags for all bit fields
-    # TODO: Should we only bind these flags when asked? Do a speed time comparison of Source() and `import Source` with and without them.
     
     # sdss4_apogee_target1_flags
     flag_sdss4_apogee_faint = sdss4_apogee_target1_flags.flag(2**0, help_text="Star selected in faint bin of its cohort")
@@ -428,6 +287,159 @@ class Source(BaseModel):
     flag_sdss4_apogee_member_sculptor = sdss4_apogee_member_flags.flag(2**60, help_text="Likely member of Sculptor")
     flag_sdss4_apogee_member_carina = sdss4_apogee_member_flags.flag(2**61, help_text="Likely member of Carina")
 
+    #> Astrometry
+    ra = FloatField(null=True, help_text="Right ascension [deg]")
+    dec = FloatField(null=True, help_text="Declination [deg]")
+    plx = FloatField(null=True, help_text="Parallax [mas]")
+    e_plx = FloatField(null=True, help_text="Error on parallax [mas]")
+    pmra = FloatField(null=True, help_text="Proper motion in RA [mas/yr]")
+    e_pmra = FloatField(null=True, help_text="Error on proper motion in RA [mas/yr]")
+    pmde = FloatField(null=True, help_text="Proper motion in DEC [mas/yr]")
+    e_pmde = FloatField(null=True, help_text="Error on proper motion in DEC [mas/yr]")
+    gaia_v_rad = FloatField(null=True, help_text="Gaia radial velocity [km/s]")
+    gaia_e_v_rad = FloatField(null=True, help_text="Error on Gaia radial velocity [km/s]")
+
+    # A decision was made here.
+    # It would be nice to keep the original field names from each photometric survey so that
+    # users know exactly which column means what. In other words, "do we be internally 
+    # consistent with naming things, or be consistent with the original names?".
+    
+    # Unfortunately, some of the original field names are longer than 8 characters, so we 
+    # would end up with many HIERARCH cards if we kept the original names. There might be
+    # some other downsides if we wrote code that relied on some of those naming conventions.
+    # For example, if bitfields always have the suffix `_flags` and then we wanted to create
+    # documentation for any flag set (based on the `_flags` suffix instead of BitField type)
+    # then some flagging things would not be documented. 
+
+    # Neither avenue is clearly better, so we make a decision, document it, and live with it.
+    # For Gaia, we use `_mag`. For 2MASS we use `_mag`. 
+    # 
+    # For unWISE they report fluxes, so we keep their naming convention where it fits within 
+    # 8 characters, and document when the name differs from the original catalog.
+
+    #> Gaia Photometry
+    g_mag = FloatField(null=True, help_text="Gaia DR3 mean G band magnitude [mag]")
+    bp_mag = FloatField(null=True, help_text="Gaia DR3 mean BP band magnitude [mag]")
+    rp_mag = FloatField(null=True, help_text="Gaia DR3 mean RP band magnitude [mag]")
+
+    #> 2MASS Photometry
+    j_mag = FloatField(null=True, help_text="2MASS J band magnitude [mag]")
+    e_j_mag = FloatField(null=True, help_text="Error on 2MASS J band magnitude [mag]")
+    h_mag = FloatField(null=True, help_text="2MASS H band magnitude [mag]")
+    e_h_mag = FloatField(null=True, help_text="Error on 2MASS H band magnitude [mag]")
+    k_mag = FloatField(null=True, help_text="2MASS K band magnitude [mag]")
+    e_k_mag = FloatField(null=True, help_text="Error on 2MASS K band magnitude [mag]")
+    ph_qual = TextField(null=True, help_text="2MASS photometric quality flag")
+    bl_flg = TextField(null=True, help_text="Number of components fit per band (JHK)")
+    cc_flg = TextField(null=True, help_text="Contamination and confusion flag")
+    #< See https://www.ipac.caltech.edu/2mass/releases/allsky/doc/sec2_2a.html 
+
+    #> unWISE Photometry
+    w1_flux = FloatField(null=True, help_text="W1 flux [Vega nMgy]")
+    w1_dflux = FloatField(null=True, help_text="Error on W1 flux [Vega nMgy]")
+    w2_flux = FloatField(null=True, help_text="W2 flux [Vega nMgy]")
+    w2_dflux = FloatField(null=True, help_text="Error on W2 flux [Vega nMgy]")
+    w1_frac = FloatField(null=True, help_text="Fraction of W1 flux from this object")
+    w2_frac = FloatField(null=True, help_text="Fraction of W2 flux from this object")
+    w1uflags = BitField(default=0, null=True, help_text="unWISE flags for W1")
+    w2uflags = BitField(default=0, null=True, help_text="unWISE flags for W2")
+    w1aflags = BitField(default=0, null=True, help_text="Additional flags for W1")
+    w2aflags = BitField(default=0, null=True, help_text="Additional flags for W2")
+    #< See https://catalog.unwise.me/catalogs.html
+    
+    flag_unwise_w1_in_core_or_wings = w1uflags.flag(2**0, "In core or wings")
+    flag_unwise_w1_in_diffraction_spike = w1uflags.flag(2**1, "In diffraction spike")
+    flag_unwise_w1_in_ghost = w1uflags.flag(2**2, "In ghost")
+    flag_unwise_w1_in_first_latent = w1uflags.flag(2**3, "In first latent")
+    flag_unwise_w1_in_second_latent = w1uflags.flag(2**4, "In second latent")
+    flag_unwise_w1_in_circular_halo = w1uflags.flag(2**5, "In circular halo")
+    flag_unwise_w1_saturated = w1uflags.flag(2**6, "Saturated")
+    flag_unwise_w1_in_geometric_diffraction_spike = w1uflags.flag(2**7, "In geometric diffraction spike")
+    
+    flag_unwise_w2_in_core_or_wings = w2uflags.flag(2**0, "In core or wings")
+    flag_unwise_w2_in_diffraction_spike = w2uflags.flag(2**1, "In diffraction spike")
+    flag_unwise_w2_in_ghost = w2uflags.flag(2**2, "In ghost")
+    flag_unwise_w2_in_first_latent = w2uflags.flag(2**3, "In first latent")
+    flag_unwise_w2_in_second_latent = w2uflags.flag(2**4, "In second latent")
+    flag_unwise_w2_in_circular_halo = w2uflags.flag(2**5, "In circular halo")
+    flag_unwise_w2_saturated = w2uflags.flag(2**6, "Saturated")
+    flag_unwise_w2_in_geometric_diffraction_spike = w2uflags.flag(2**7, "In geometric diffraction spike")
+        
+    flag_unwise_w1_in_bright_star_psf = w1aflags.flag(2**0, "In PSF of bright star falling off coadd")
+    flag_unwise_w1_in_hyperleda_galaxy = w1aflags.flag(2**1, "In HyperLeda large galaxy")
+    flag_unwise_w1_in_big_object = w1aflags.flag(2**2, "In \"big object\" (e.g., a Magellanic cloud)")
+    flag_unwise_w1_pixel_in_very_bright_star_centroid = w1aflags.flag(2**3, "Pixel may contain the centroid of a very bright star")
+    flag_unwise_w1_crowdsource_saturation = w1aflags.flag(2**4, "crowdsource considers this pixel potentially affected by saturation")
+    flag_unwise_w1_possible_nebulosity = w1aflags.flag(2**5, "Pixel may contain nebulosity")
+    flag_unwise_w1_no_aggressive_deblend = w1aflags.flag(2**6, "Sources in this pixel will not be aggressively deblended")
+    flag_unwise_w1_candidate_sources_must_be_sharp = w1aflags.flag(2**7, "Candidate sources in this pixel must be \"sharp\" to be optimized")
+
+    flag_unwise_w2_in_bright_star_psf = w2aflags.flag(2**0, "In PSF of bright star falling off coadd")
+    flag_unwise_w2_in_hyperleda_galaxy = w2aflags.flag(2**1, "In HyperLeda large galaxy")
+    flag_unwise_w2_in_big_object = w2aflags.flag(2**2, "In \"big object\" (e.g., a Magellanic cloud)")
+    flag_unwise_w2_pixel_in_very_bright_star_centroid = w2aflags.flag(2**3, "Pixel may contain the centroid of a very bright star")
+    flag_unwise_w2_crowdsource_saturation = w2aflags.flag(2**4, "crowdsource considers this pixel potentially affected by saturation")
+    flag_unwise_w2_possible_nebulosity = w2aflags.flag(2**5, "Pixel may contain nebulosity")
+    flag_unwise_w2_no_aggressive_deblend = w2aflags.flag(2**6, "Sources in this pixel will not be aggressively deblended")
+    flag_unwise_w2_candidate_sources_must_be_sharp = w2aflags.flag(2**7, "Candidate sources in this pixel must be \"sharp\" to be optimized")
+
+    #> GLIMPSE Photometry
+    mag4_5 = FloatField(null=True, help_text="IRAC band 4.5 micron magnitude [mag]")
+    d4_5m = FloatField(null=True, help_text="Error on IRAC band 4.5 micron magnitude [mag]")
+    rms_f4_5 = FloatField(null=True, help_text="RMS deviations from final flux [mJy]")
+    sqf_4_5 = BitField(default=0, help_text="Source quality flag for IRAC band 4.5 micron")
+    mf4_5 = BitField(default=0, help_text="Flux calculation method flag")
+    csf = BitField(default=0, help_text="Close source flag")
+    #< See https://irsa.ipac.caltech.edu/data/SPITZER/GLIMPSE/gator_docs/
+
+    flag_glimpse_poor_dark_pixel_current = sqf_4_5.flag(2**0, "Poor pixels in dark current")
+    flag_glimpse_flat_field_questionable = sqf_4_5.flag(2**1, "Flat field applied using questionable value")
+    flag_glimpse_latent_image = sqf_4_5.flag(2**2, "Latent image")
+    flag_glimpse_saturated_star_correction = sqf_4_5.flag(2**3, "Sat star correction")
+    flag_glimpse_muxbleed_correction_applied = sqf_4_5.flag(2**6, "Muxbleed correction applied")
+    flag_glimpse_hot_or_dead_pixels = sqf_4_5.flag(2**7, "Hot, dead or otherwise unacceptable pixel")
+    flag_glimpse_muxbleed_significant = sqf_4_5.flag(2**8, "Muxbleed > 3-sigma above the background")
+    flag_glimpse_allstar_tweak_positive = sqf_4_5.flag(2**9, "Allstar tweak positive")
+    flag_glimpse_allstar_tweak_negative = sqf_4_5.flag(2**10, "Allstar tweak negative")
+    flag_glimpse_confusion_in_band_merge = sqf_4_5.flag(2**12, "Confusion in in-band merge")
+    flag_glimpse_confusion_in_cross_band_merge = sqf_4_5.flag(2**13, "Confusion in cross-band merge")
+    flag_glimpse_column_pulldown_correction = sqf_4_5.flag(2**14, "Column pulldown correction")
+    flag_glimpse_banding_correction = sqf_4_5.flag(2**15, "Banding correction")
+    flag_glimpse_stray_light = sqf_4_5.flag(2**16, "Stray light")
+    flag_glimpse_no_nonlinear_correction = sqf_4_5.flag(2**18, "Nonlinear correction not applied")
+    flag_glimpse_saturated_star_wing_region = sqf_4_5.flag(2**19, "Saturated star wing region")
+    flag_glimpse_pre_lumping_in_band_merge = sqf_4_5.flag(2**20, "Pre-lumping in in-band merge")
+    flag_glimpse_post_lumping_in_cross_band_merge = sqf_4_5.flag(2**21, "Post-lumping in cross-band merge")
+    flag_glimpse_edge_of_frame = sqf_4_5.flag(2**29, "Edge of frame (within 3 pixels of edge)")
+    flag_glimpse_truth_list = sqf_4_5.flag(2**30, "Truth list (for simulated data)")
+
+    flag_glimpse_no_source_within_3_arcsecond = csf.flag(2**0, "No sources in GLIMPSE within 3\" of the source")
+    flag_glimpse_1_source_within_2p5_and_3_arcsecond = csf.flag(2**1, "1 sources in GLIMPSE between 2.5\" and 3\" of the source")
+    flag_glimpse_2_sources_within_2_and_2p5_arcsecond = csf.flag(2**2, "2 sources in GLIMPSE within 2\" and 2.5\" of the source")
+    flag_glimpse_3_sources_within_1p5_and_2_arcsecond = csf.flag(2**3, "3 sources in GLIMPSE within 1.5\" and 2\" of the source")
+    flag_glimpse_4_sources_within_1_and_1p5_arcsecond = csf.flag(2**4, "4 sources in GLIMPSE within 1\" and 1.5\" of the source")
+    flag_glimpse_5_sources_within_0p5_and_1_arcsecond = csf.flag(2**5, "5 sources in GLIMPSE within 0.5\" and 1.0\" of the source")
+    flag_glimpse_6_sources_within_0p5_arcsecond = csf.flag(2**6, "6 sources in GLIMPSE within 0.5\" of this source")
+
+    #> Gaia XP Stellar Parameters (Zhang, Green & Rix 2023)
+    zgr_teff = FloatField(null=True, help_text=Glossary.teff)
+    zgr_e_teff = FloatField(null=True, help_text=Glossary.e_teff)
+    zgr_logg = FloatField(null=True, help_text=Glossary.logg)
+    zgr_e_logg = FloatField(null=True, help_text=Glossary.e_logg)
+    zgr_fe_h = FloatField(null=True, help_text=Glossary.fe_h)
+    zgr_e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
+    zgr_e = FloatField(null=True, help_text="Extinction [mag]")
+    zgr_e_e = FloatField(null=True, help_text="Error on extinction [mag]")
+    zgr_plx = FloatField(null=True, help_text=Glossary.plx)
+    zgr_e_plx = FloatField(null=True, help_text=Glossary.e_plx)
+    zgr_teff_confidence = FloatField(null=True, help_text="Confidence estimate in TEFF")
+    zgr_logg_confidence = FloatField(null=True, help_text="Confidence estimate in LOGG")
+    zgr_fe_h_confidence = FloatField(null=True, help_text="Confidence estimate in FE_H")
+    zgr_ln_prior = FloatField(null=True, help_text="Log prior probability")
+    zgr_chi2 = FloatField(null=True, help_text=Glossary.chi2)
+    zgr_quality_flags = BitField(default=0, help_text="Quality flags")
+    # See https://zenodo.org/record/7811871
+ 
 
     @property
     def cartons(self):
@@ -480,10 +492,3 @@ class Source(BaseModel):
         for expr, column in self.dependencies():
             if Spectrum in column.model.__mro__[1:]:
                 yield from column.model.select().where(expr)
-
-
-
-class SDSSCatalog(BaseModel):
-
-    catalogid = BigIntegerField(primary_key=True)
-    sdss_id = ForeignKeyField(Source, backref="catalogids")

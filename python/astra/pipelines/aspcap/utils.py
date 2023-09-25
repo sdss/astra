@@ -146,6 +146,9 @@ ABUNDANCE_CONTROLS = {
     },
 }
 
+def sanitise_parent_dir(parent_dir):
+    return parent_dir.rstrip("/") + "/"
+
 def get_input_nml_paths(parent_dir, stage):
     return glob(os.path.join(expand_path(parent_dir), stage, "*", "input.nml"))
 

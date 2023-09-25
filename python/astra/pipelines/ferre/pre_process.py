@@ -25,7 +25,7 @@ def pre_process_ferre(
     initial_c_m: Iterable[float] = None,
     initial_n_m: Iterable[float] = None,
     initial_flags: Iterable[str] = None,
-    upstream_id: Iterable[int] = None,
+    upstream_pk: Iterable[int] = None,
     frozen_parameters: Optional[dict] = None,
     interpolation_order: int = 3,
     weight_path: Optional[str] = None,
@@ -117,7 +117,7 @@ def pre_process_ferre(
         c_m=values_or_cycle_none(initial_c_m),
         n_m=values_or_cycle_none(initial_n_m),
         initial_flags=values_or_cycle_none(initial_flags),
-        upstream_id=values_or_cycle_none(upstream_id)
+        upstream_pk=values_or_cycle_none(upstream_pk)
     ))
 
     # Retrict to the pixels within the model wavelength grid.
@@ -173,10 +173,11 @@ def pre_process_ferre(
             batch_flux.append(flux[mask])
             batch_e_flux.append(e_flux[mask])
 
-        initial_flags = initial_parameters.pop("initial_flags")
-        upstream_id = initial_parameters.pop("upstream_id")
+        # make the initial flags 0 if None is given
+        initial_flags = initial_parameters.pop("initial_flags") or 0
+        upstream_pk = initial_parameters.pop("upstream_pk")
 
-        batch_names.append(utils.get_ferre_spectrum_name(index, spectrum.source_id, spectrum.spectrum_id, initial_flags, upstream_id))
+        batch_names.append(utils.get_ferre_spectrum_name(index, spectrum.source_pk, spectrum.spectrum_pk, initial_flags, upstream_pk))
         batch_initial_parameters.append(initial_parameters)
         index += 1
 
