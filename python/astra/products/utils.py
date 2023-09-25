@@ -25,7 +25,6 @@ from astra.utils import log, flatten, expand_path
 from astra import models as astra_models
 from astra.models.fields import BitField, BasePixelArrayAccessor
 from typing import Union
-
 from astra.glossary import Glossary
 
 DATETIME_FMT = "%y-%m-%d %H:%M:%S"
@@ -38,12 +37,6 @@ INSTRUMENT_COMMON_DISPERSION_VALUES = {
     "boss": (3.5523, 1e-4, 4648)
 }
 
-import datetime
-from astropy.io import fits
-from astra import __version__
-
-from astra.glossary import Glossary
-from astra.products.utils import (add_category_headers, add_category_comments, warn_on_long_name_or_comment)
 
 
 def create_source_primary_hdu(
