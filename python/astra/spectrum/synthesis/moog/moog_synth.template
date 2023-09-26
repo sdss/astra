@@ -1,0 +1,17 @@
+synth
+terminal '{terminal}'
+standard_out '{standard_out}'
+summary_out '{summary_out}'
+model_in '{model_in}'
+lines_in '{lines_in}'
+stronglines_in '{stronglines_in}'
+atmosphere {atmosphere_flag:.0f}
+molecules {molecules_flag:.0f}
+lines {lines_flag:.0f}
+flux/int {flux_int_flag:.0f}
+damping {damping_flag:.0f}
+strong {strong_flag:.0f}
+abundances {abundances_formatted}
+isotopes {isotopes_formatted}
+synlimits
+{lambda_min:.2f} {lambda_max:.2f} {lambda_delta:.2f} {opacity_contribution:.2f}
