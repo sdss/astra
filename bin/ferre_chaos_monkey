@@ -1,0 +1,287 @@
+#!/usr/bin/env python3
+import click
+
+@click.command()
+@click.option("--executable", default="ferre.x", help="Name of FERRE executable")
+@click.option("--output-basename", default="rectified_model_flux.output", help="Basename of output path to check")
+@click.option("--wait", default=600, help="Minimum seconds before killing a process")
+@click.option("--factor", default=3, help="How many (estimated) standard deviations to wait before killing a process")
+@click.option("--interval", default=1, help="How many seconds to wait between iterations")
+@click.option("--min-iter", default=10, help="Minimum iterations before killing a process")
+@click.option("--warn-to-kill", default=120, help="Show warning if we plan to kill process within this number of seconds")
+@click.option("--retries", default=10, help="Maximum number of times to retry a broken FERRE process")
+@click.option("--include-previous", default=False, is_flag=True, help="Include outputs with modified times before the process started.")
+@click.option("-v", "--verbose", default=False, is_flag=True)
+@click.argument("pwds", nargs=-1)
+def ferre_chaos_monkey(
+    executable,
+    output_basename, 
+    wait, 
+    factor,
+    interval,
+    min_iter,
+    warn_to_kill,
+    retries,
+    include_previous,
+    verbose,
+    pwds
+):
+    import os
+    import sys
+    import numpy as np
+    from subprocess import check_output, Popen, PIPE
+    from time import time, sleep
+    from glob import glob
+    from itertools import count
+
+    click.echo(f"verbose: {verbose}")
+    click.echo(f"include previous: {include_previous}")
+
+    def wc(path):
+        return int(check_output(["wc", "-l", path]).split()[0])
+
+    def show_pwd(pwd):
+        rel_pwd = "/".join(pwd.split("/")[-2:])
+        return f"{rel_pwd: <20s}"
+
+    n_spectra_in_by_pwd = {}
+    if_no_execution_next_time_will_mark_as_done = []
+    pwd_by_pid = {}
+    restarted_process = {"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/mwm/spectro/astra/0.4.0/pipelines/aspcap/2023-08-28-c307e4dc-5f20-4f0c-ae51-2665595f5fa9-visit/abundances/Fd_c/": None}
+    awaiting_executable_by_pwd = [] + list(pwds)
+    ignore_pids = []
+
+    # Get PIDs 
+    for iteration in count(start=1):
+
+        n_await = len(awaiting_executable_by_pwd)
+
+        try:
+            pids = check_output(["pidof", executable]).decode("ascii").split()
+        except:
+            n_proc = 0
+            # No ferre executions.            
+            if verbose:
+                click.echo(f"iter={iteration} proc={n_proc} await={n_await} no processes. awaiting: {' '.join(map(show_pwd, awaiting_executable_by_pwd))}")
+
+            for pwd in ([] + if_no_execution_next_time_will_mark_as_done):
+                click.echo(f"iter={iteration} proc={n_proc} await={n_await} pwd={show_pwd(pwd)} marked as done")
+                if_no_execution_next_time_will_mark_as_done.remove(pwd)
+                awaiting_executable_by_pwd.remove(pwd)
+
+            for pwd in ([] + awaiting_executable_by_pwd):
+                if os.path.exists(f"{pwd}/stdout"):
+                    if_no_execution_next_time_will_mark_as_done.append(pwd)    
+                    click.echo(f"iter={iteration} proc={n_proc} await={n_await} pwd={show_pwd(pwd)} has stdout, will mark as next time if no executions exist")
+            
+            if n_await == 0:
+                click.echo(f"Fin.")
+                sys.exit(0)   
+        else:            
+            n_proc = len(pids) # todo: this includes procs we are ignoring (in ignore_pids)
+            for pid in map(int, pids):
+                if pid in ignore_pids:
+                    continue
+                n_await = len(awaiting_executable_by_pwd)
+
+                try:
+                    header, row = (
+                        check_output(
+                            f"ps -p {pid} -o etimes,%mem,%cpu,cmd".split()
+                        )
+                        .decode("ascii")
+                        .strip()
+                        .split("\n")
+                    )
+                    t_elapsed, mem, cpu, executable, *process_args = row.split()
+
+                    t_elapsed = int(t_elapsed)
+
+                    # todo: replace with a 'started' touch file
+                    started = time() - t_elapsed
+
+                    try:
+                        pwd = pwd_by_pid[pid]
+                    except KeyError:
+                        _, pwd = check_output(["pwdx", f"{pid}"]).decode("ascii").strip().split()
+                        pwd_by_pid[pid] = pwd
+                                    
+                    try:
+                        awaiting_executable_by_pwd.remove(pwd)
+                    except:
+                        None
+
+                    n_spectra_out_by_previous_proc = 0
+
+                    # Check if we are using the ferre.x -l mode.
+
+                    if len(process_args) == 2 and process_args[0] == "-l":
+                        is_abundance_mode = True
+                        # We are using the -l flag.
+                        try:
+                            n_spectra_in = n_spectra_in_by_pwd[pwd]
+                        except KeyError:
+                            n_input_files = wc(f"{pwd}/{process_args[-1]}")
+                            n_spectra_per_input_file = wc(f"{pwd}/flux.input")
+                            n_spectra_in = n_spectra_in_by_pwd[pwd] = n_input_files * n_spectra_per_input_file
+
+                        updated, n_spectra_out  = (None, 0)
+                        for output_path in glob(f"{pwd}/*/{output_basename}"):
+                            try:
+                                this_n_spectra_out = wc(output_path)
+                            except:
+                                continue
+                            else:
+                                mtime = os.path.getmtime(output_path)
+                                if mtime < started:
+                                    if pwd not in restarted_process and not include_previous:
+                                        # Output file must be from a previous run, don't count it.
+                                        if verbose:
+                                            click.echo(f"\toutput file {output_path} from previous run, ignoring it")
+                                        continue
+
+                                    else:
+                                        n_spectra_out_by_previous_proc += this_n_spectra_out
+
+                                else:
+                                    n_spectra_out += this_n_spectra_out
+                                        
+                                    if updated is None:
+                                        updated = mtime
+                                    else:
+                                        updated = max(updated, mtime)
+
+                    elif len(process_args) == 1 and process_args[0] == "input.nml":
+                        is_abundance_mode = False
+                        # We are not using the -l flag
+                        try:
+                            n_spectra_in = n_spectra_in_by_pwd[pwd]
+                        except KeyError:
+                            n_spectra_in = n_spectra_in_by_pwd[pwd] = wc(f"{pwd}/parameter.input")
+
+                        abs_output_path = f"{pwd}/{output_basename}"
+                        if os.path.exists(abs_output_path):
+                            try:
+                                n_spectra_out = wc(abs_output_path)
+                            except:
+                                n_spectra_out = 0                        
+                            updated = os.path.getmtime(abs_output_path)
+                        else:
+                            updated, n_spectra_out = (None, 0)
+
+                        if updated is not None and updated < started and pwd not in restarted_process and not include_previous:
+                            # The output file must be from a previous run.
+                            if verbose:
+                                click.echo(f"\toutput file {abs_output_path} looks to be from a previous run")
+                            continue
+                    else:
+                        if verbose:
+                            click.echo(f"\tignoring pid={pid} because proc_args={process_args}")
+                        ignore_pids.append(pid)
+                        continue
+                        
+                    updated = updated or np.nan
+
+                    t_proc = updated - started
+                    t_since_last_updated = time() - updated
+                    try:
+                        seconds_per_spectrum = t_proc / n_spectra_out
+                    except:
+                        seconds_per_spectrum = np.nan
+                    
+                    t_until_kill = max(
+                        wait - t_since_last_updated,
+                        (factor * seconds_per_spectrum) - t_since_last_updated
+                    )
+                    if t_since_last_updated > seconds_per_spectrum and t_until_kill < warn_to_kill:
+                        warn_text = f'[WARN]: t_until_kill={t_until_kill:.0f} s'
+                    else:
+                        warn_text = ""
+                    
+                    if verbose:
+                        click.echo(f"iter={iteration} proc={n_proc} await={n_await} pid={pid} pwd={show_pwd(pwd)} n_spectra={n_spectra_out + n_spectra_out_by_previous_proc: >4.0f}/{n_spectra_in: >4.0f} t_elapsed={t_elapsed: >5.0f} t_proc={t_proc: >5.0f} sec_since_update={t_since_last_updated:0>3.2f} sec/spec={seconds_per_spectrum:0>3.2f} {warn_text}")
+
+                    if n_spectra_out == 0:# or ((n_spectra_out + n_spectra_out_by_previous_proc) >= n_spectra_in):
+                        continue       
+
+                    if (
+                        (t_since_last_updated > (factor * seconds_per_spectrum))
+                    and (t_since_last_updated > wait)
+                    and (
+                        (min_iter is None)
+                    or  (iteration > min_iter)
+                    )
+                    ):
+                        click.echo(f"\tkilling process {pid}")
+                        check_output(["touch", f"{pwd}/killed"])
+                        ## If it's a -l situation, put them in all sub-directories?
+                        if len(process_args) == 2 and process_args[0] == "-l":
+                            for dir in glob(f"{pwd}/*/"):
+                                check_output(["touch", f"{dir}/killed"])
+                        check_output(["kill", "-9", f"{pid}"])
+
+                        if retries > 0:
+                            click.echo(f"\ttrying to restart process")
+
+                            # if it's abundance mode, we just need to see which it got up to
+                            # (eg if it has partial Mg results, just re-start from all Mg)
+                            if is_abundance_mode:
+                                input_list_path = f"{pwd}/{process_args[-1]}"
+                                                                
+                                try:
+                                    v = int(input_list_path.split(".")[-1])
+                                except:
+                                    v = 1
+                                    new_input_list_path = f"{input_list_path}.{v}"
+
+                                else:
+                                    v += 1
+                                    original_input_list_path = ".".join(input_list_path.split(".")[:-1])
+                                    new_input_list_path = f"{original_input_list_path}.{v}"
+
+                                if v > retries:
+                                    click.echo(f"reached max retries for {pwd}")
+                                
+                                else:       
+                                    with open(input_list_path, "r") as fp:
+                                        input_nml_paths = fp.readlines()
+                                    
+                                    for i, input_nml_path in enumerate(input_nml_paths):
+                                        output_path = os.path.join(pwd, os.path.dirname(input_nml_path), "parameter.output")
+                                        if os.path.exists(output_path):
+                                            continue         
+                                        else:
+                                            break
+
+                                    with open(new_input_list_path, "w") as fp:
+                                        fp.write("".join(input_nml_paths[max(0, i - 1):]))
+                                    
+                                    click.echo(f"retrying process {pid} in {pwd}")
+                                    
+                                    proc = restarted_process[pwd] = Popen(
+                                        ["ferre.x", "-l", os.path.basename(new_input_list_path)],
+                                        stdout=open(f"{pwd}/stdout.{v}", "w"),
+                                        stderr=open(f"{pwd}/stderr.{v}", "w"),
+                                        cwd=pwd
+                                    )
+
+                                    click.echo(f"new process: {proc}")
+
+                            else:
+                                # Not really done yet..
+                                # Need to find all input spectra not yet analysed, then randomise/sort backwards
+                                # would need to change the output files referenced in input.nml to be OUTPUT.1 etc
+                                click.echo("\trestarting non-abundance processes not yet implemented")
+
+                                None
+                        
+                except:
+                    print("unexpected exception")
+                    continue
+
+        finally:
+            sleep(interval)
+
+
+if __name__ == "__main__":
+    ferre_chaos_monkey()

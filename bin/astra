@@ -15,348 +15,355 @@ def cli(context, verbose):
 
 @cli.command()
 @click.option("--drop-tables", is_flag=True)
-def initdb(drop_tables):
+@click.option("--delay", default=10)
+def initdb(drop_tables, delay):
     """Initialize the database."""
-    from astra.database.astradb import create_tables
-
-    create_tables(
-        drop_existing_tables=drop_tables,
-        reuse_if_open=True,
-        insert_status_rows=True,
+    from time import sleep
+    from astra.utils import log
+    from astra.models import (
+        base,
+        apogee,
+        apogeenet,
+        #aspcap,
+        #boss,
+        #classifier,
+        #lineforest,
+        #madgics,
+        #mdwarftype,
+        #slam,
+        #snow_white,
+        source,
+        spectrum,
+        #the_payne
     )
+    
+    models = base.BaseModel.__subclasses__()
+    with base.database.atomic():
+        if drop_tables:
+            log.warning(f"Dropping database tables in {delay} seconds..")
+            sleep(delay)
+            base.database.drop_tables(models, cascade=True)
+        
+        base.database.create_tables(models)
+    log.info(f"Created {len(models)} database tables: {models}")
+    
     return None
+
+
+
+@cli.command(context_settings=dict(ignore_unknown_options=True))
+@click.option("--slurm", is_flag=True, default=False, help="Execute through Slurm (see --slurm-profile)")
+@click.option("--slurm-profile", default=None, help="Use Slurm profile specified in Astra config file. If None is given, it will default to the profile for the task name, or `default`.")
+@click.option("--slurm-dir", default=None)
+@click.option("--page", default=None, type=int)
+@click.option("--limit", default=None, type=int)
+@click.option("--kwargs-path")
+@click.argument("task")
+@click.argument("spectra", nargs=-1)
+def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spectra):
+    """
+    Execute a task on one or many spectra.
+    """
+    # Resolve spectrum ids.
+    if len(spectra) == 0:
+        raise click.UsageError("No spectral model or spectrum identifiers given.")
+
+    import os
+    import sys
+    from astra import config
+    from astra.utils import expand_path, log, callable
+
+    import pickle
+    from inspect import getfullargspec
+    from tqdm import tqdm
+    from peewee import chunked, JOIN
+
+    from astra import models
+    from astra.models.spectrum import Spectrum, SpectrumMixin
+
+    kwargs = {}
+    if kwargs_path is not None:
+        with open(kwargs_path, "rb") as fp:
+            kwargs = pickle.load(fp)
+
+    # Parse any additional keyword arguments which unfortunately get lumped into `spectra`.
+    # TODO: THere must be a nicer way to parse this using click.
+    _spectra = []
+    for arg in spectra:
+        if arg.startswith("--"):
+            k, *v = arg[2:].split("=")
+            k = k.replace("-", "_")
+            kwargs[k] = "=".join(v).strip('"')
+        else:
+            _spectra.append(arg)
+
+    
+    
+
+    # Do some cleverness about the task name.
+    for prefix in ("", "astra.", "astra.pipelines.", f"astra.pipelines.{task}."):
+        try:
+            resolved_task = f"{prefix}{task}"
+            f = callable(resolved_task)
+        except:
+            None
+        else:
+            if prefix:
+                log.info(f"Resolved '{task}' -> '{resolved_task}'")
+            break
+    else:
+        # Raise exception on the no-prefix case.
+        f = callable(task)
+
+    # TODO: This is all a bit of spaghetti code. Refactor
+
+    if slurm:
+        # Check that there is any work to do before submitting a job.
+
+        try:
+            spectrum_pks = list(map(int, _spectra))
+        except ValueError:
+            if len(_spectra) > 1:
+                raise NotImplementedError("Only one spectrum model allowed for now. This can be changed.")
+            
+            model_name, = _spectra
+            spectrum_model = getattr(models, model_name)
+            try:
+                output_model = getfullargspec(f).annotations["return"].__args__[0]
+            except:
+                raise ValueError(f"Cannot infer output model for task {f}, is it missing a type annotation?")
+
+            # Query for spectra that does not have a result in this output model
+            iterable = (
+                spectrum_model
+                .select()
+                .join(
+                    output_model,
+                    JOIN.LEFT_OUTER,
+                    on=(spectrum_model.spectrum_pk == output_model.spectrum_pk)
+                )
+                .where(output_model.spectrum_pk.is_null())
+                .limit(limit)
+            )
+            total = limit or iterable.count()
+            log.info(f"Found at least {total} {model_name} spectra that do not have results in {output_model}")
+
+        else:
+            total = len(spectrum_pks)
+
+        if total == 0:
+            # Nothing to do.
+            log.info(f"No spectra to process.")
+            sys.exit(0)
+    
+
+        from astra.utils.slurm import SlurmTask, SlurmJob
+
+        # Resolve slurm profile.
+        slurm_profile_config = config.get("slurm", dict(profiles={})).get("profiles", {})
+        if slurm_profile is not None:
+            if slurm_profile not in slurm_profile_config:
+                raise click.BadArgumentUsage(f"Cannot find Slurm profile '{slurm_profile}' in Astra config.")            
+        else:     
+            try_slurm_profile_names = (resolved_task, resolved_task.split(".")[-1], "default")
+            for slurm_profile in try_slurm_profile_names:
+                if slurm_profile in slurm_profile_config:
+                    log.info(f"Using Slurm profile '{slurm_profile}'")
+                    break
+            else:
+                raise click.BadOptionUsage(f"Cannot find any Slurm profile in Astra config. Use `--slurm-profile PROFILE` to specify. Tried: {', '.join(slurm_profile_config)}")
+            
+        slurm_kwds = slurm_profile_config[slurm_profile]
+
+        # Submit this job. #TODO: Is there a way for Click to reconstruct the command for us?
+        command = "astra execute "
+        if page:
+            command += f"--page {page} "
+        if limit:
+            command += f"--limit {limit} "
+        if kwargs_path:
+            command += f"--kwargs-path {kwargs_path} "
+        command += f"{resolved_task} "
+        command += " ".join(spectra)
+
+        if slurm_dir is None:
+            from datetime import datetime
+            from tempfile import mkdtemp
+            slurm_dir = mkdtemp(prefix=f"{datetime.now().strftime('%Y-%m-%d')}-{resolved_task.split('.')[-1]}-", dir=expand_path(f"$PBS/"))
+            os.chmod(slurm_dir, 0o755)
+            log.info(f"Using Slurm directory: {slurm_dir}")    
+            job_name = f"{os.path.basename(slurm_dir)}"
+        else:
+            os.makedirs(slurm_dir, exist_ok=True)
+            job_name = f"{resolved_task.split('.')[-1]}"
+
+        slurm_job = SlurmJob(
+            [
+                SlurmTask([command])
+            ],
+            job_name,
+            dir=slurm_dir,
+            **slurm_kwds,
+        )
+        slurm_job_pk = slurm_job.submit()
+
+        click.echo(f"{slurm_job_pk}")
+        sys.exit(0)
+
+
+
+    try:
+        spectrum_pks = list(map(int, _spectra))
+    except ValueError:
+        if len(_spectra) > 1:
+            raise NotImplementedError("Only one spectrum model allowed for now. This can be changed.")
+        
+        model_name, = _spectra
+        spectrum_model = getattr(models, model_name)
+        try:
+            output_model = getfullargspec(f).annotations["return"].__args__[0]
+        except:
+            raise ValueError(f"Cannot infer output model for task {f}, is it missing a type annotation?")
+
+        # Query for spectra that does not have a result in this output model
+        iterable = (
+            spectrum_model
+            .select()
+            .join(
+                output_model,
+                JOIN.LEFT_OUTER,
+                on=(spectrum_model.spectrum_pk == output_model.spectrum_pk)
+            )
+            .where(output_model.spectrum_pk.is_null())
+        )
+        if page:
+            iterable = (
+                iterable
+                .paginate(page, limit)
+            )
+        else:
+            iterable = iterable.limit(limit)
+        total = limit or iterable.count()
+    
+    else:            
+        if not spectrum_pks:
+            spectrum_pks.extend(kwargs.pop("spectra", []))
+        else:
+            if "spectra" in kwargs:
+                raise ValueError("`spectra` given in `kwargs_path` and in command line")
+    
+        # Figure out which model it is
+        if spectrum_pks:                
+            example = Spectrum.get(spectrum_pks[0])
+            spectrum_model = None
+            for expr, field in example.dependencies():
+                if SpectrumMixin not in field.model.__mro__:
+                    continue
+                try:
+                    q = list(field.model.select().where(expr))
+                except:
+                    continue
+                else:
+                    if q:
+                        spectrum_model = field.model
+                        log.info(f"Identified input spectra as type `{spectrum_model}`")
+                        break
+            
+            log.warning(f"All given spectrum identifiers should come from the same model type")
+
+            # SQLite has a limit on how many SQL variables can be used in a transaction.
+            def yield_spectrum_chunks():
+                for chunk in chunked(spectrum_pks, 10_000):
+                    yield from (
+                        spectrum_model
+                        .select()
+                        .where(spectrum_model.spectrum_pk.in_(chunk))
+                    )
+
+            iterable = yield_spectrum_chunks()
+            total = len(spectrum_pks)
+        else:
+            raise click.UsageError("Could not resolve spectrum identifiers.")
+
+    for result in tqdm(f(iterable, **kwargs), total=total, unit=" spectra"):
+        None
+    
+    return None
+
 
 
 @cli.command()
-@click.option("--dry-run", is_flag=True)
-def vacuum(dry_run):
-    """
-    Vacuum up the database.
-    """
-    from peewee import JOIN, fn
-    from time import sleep
-    from astra import log
-    from astra.database.astradb import (
-        Task,
-        Bundle,
-        TaskBundle,
-        TaskOutput,
-        TaskInputDataProducts,
-    )
-
-    if not dry_run:
-        log.warning(
-            "This is *not* a dry run. "
-            "We are about to delete things in the database! "
-            "You have 5 seconds to cancel."
-        )
-        sleep(5)
-    else:
-        log.info(f"This is a dry run.")
-
-    # Remove tasks that don't have outputs.
-    q_zombie_tasks = (
-        Task.select()
-        .join(TaskOutput, JOIN.LEFT_OUTER)
-        .group_by(Task.pk)
-        .having(fn.count(TaskOutput.pk) == 0)
-    )
-    grouped = {}
-    for task in q_zombie_tasks:
-        # log.debug(f"Task {task} (created {task.created}; {len(task.parameters)} parameters) has no outputs.")
-        grouped.setdefault(task.name, [])
-        grouped[task.name].append(task.pk)
-
-    for name, pks in grouped.items():
-        log.info(
-            f"There are {len(pks)} {name} tasks with no outputs that can be deleted."
-        )
-
-    for name, pks in grouped.items():
-        log.info(f"Deleting {name} tasks (N={len(pks)}) with no outputs.")
-
-        # Delete input data product references first.
-        rows = (
-            0
-            if dry_run
-            else (
-                TaskInputDataProducts.delete()
-                .where(TaskInputDataProducts.task_id.in_(pks))
-                .execute()
-            )
-        )
-        log.info(f"\tDeleted {rows} rows of task input data products")
-
-        # Delete any bundles.
-        rows = (
-            0
-            if dry_run
-            else (TaskBundle.delete().where(TaskBundle.task_id.in_(pks)).execute())
-        )
-        log.info(f"\tDeleted {rows} rows of task bundles")
-
-        # Delete the tasks.
-        rows = 0 if dry_run else (Task.delete().where(Task.pk.in_(pks)).execute())
-        log.info(f"\tDeleted {rows} rows of tasks")
-
-    # Any empty bundles?
-    q_empty_bundles = (
-        Bundle.select()
-        .join(TaskBundle, JOIN.LEFT_OUTER)
-        .group_by(Bundle)
-        .having(fn.count(TaskBundle) == 0)
-    )
-    log.info(f"There are {len(q_empty_bundles)} empty bundles.")
-    rows = (
-        0
-        if dry_run
-        else (
-            Bundle.delete()
-            .where(Bundle.pk.in_([bundle.pk for bundle in q_empty_bundles]))
-            .execute()
-        )
-    )
-    log.info(f"\tDeleted {rows} rows of empty bundles.")
-
-    # Find tasks with the same input data products, name, version, and parameters.
-    log.info(
-        f"Finding tasks with at least one output that have the same name, version, parameters, and input data"
-    )
-    q = (
-        Task.select(
-            fn.max(Task.pk),
-            Task.name,
-            Task.version,
-            Task.parameters,
-            TaskInputDataProducts.data_product_id,
-            fn.count(Task),
-        )
-        .join(TaskInputDataProducts)
-        .switch(Task)
-        .join(TaskOutput)
-        .group_by(
-            TaskInputDataProducts.data_product_id,
-            Task.name,
-            Task.version,
-            Task.parameters,
-        )
-        .having((fn.count(Task) > 1))
-        .order_by(fn.count(Task).desc())
-        .tuples()
-    )
-    for i, (eg_pk, name, version, parameters, data_product_id, count) in enumerate(q):
-        log.info(
-            f"{i}: {name} {version} on data_product_id={data_product_id} (eg task {eg_pk}) with {count} tasks and {len(parameters)} parameters"
-        )
-
-    log.warning(f"Not doing anything about these duplicates yet!")
-
-
-@cli.command(hidden=True)
-@click.argument("bundle_id", type=int, required=True)
-def more(bundle_id):
+@click.argument("paths", nargs=-1)
+def run(paths, **kwargs):
+    """Execute one or many tasks."""
     import os
-    from astra import log
-    from glob import glob
-    from astra.database.astradb import Bundle
+    import json
+    from importlib import import_module
+    from astra.utils import log, expand_path
+    from astra.database.astradb import DataProduct
+    from tqdm import tqdm
 
-    bundle = Bundle.get(bundle_id)
-
-    # bundle.
-    job_key = bundle.meta["slurm_job_key"]
-    label = bundle.meta["slurm_kwargs"]["label"]
-
-    dir = f"/scratch/general/nfs1/u6020307/pbs/{label}/{job_key}/"
-    """
-    found_path, expected_index = None, None
-    for path in glob(os.path.join(dir, "node*_proc*.slurm")):
+    for path in paths:
+        log.info(f"Running {path}")
         with open(path, "r") as fp:
-            content = fp.readlines()
-        for line in content:
-            if line.startswith("astra execute bundles ") and str(bundle_id) in line.split()[3:]:
-                found_path = path
-                expected_index = line.split()[3:].index(str(bundle_id))
-                break
-    if found_path is None:
-        log.exception(f"Cannot find '{bundle_id}' among slurm files in {dir}")
-        return None
-    """
-    import subprocess
+            content = json.load(fp)
+         
+        instructions = [content] if isinstance(content, dict) else content
+        N = len(instructions)
+        for i, instruction in enumerate(instructions, start=1):
+            log.info(f"Starting on instruction {i}/{N} in {path}")
 
-    output = subprocess.check_output(f'grep -n "id={bundle_id}$" {dir}/*.e', shell=True)
-    path, line, *_ = output.decode().split(":")
+            task_kwargs = instruction.get("task_kwargs", {})
 
-    os.system(f"more +{line} {path}")
+            # A couple of unfortunate hacks to fix instructions that were incomplete.
+            if (instruction["task_callable"] == "astra.contrib.aspcap.abundances.aspcap_abundances"):
+                if "pwd" not in task_kwargs:
+                    # This one will fail.
+                    log.warning(f"Skipping {i}-th (1-indexed) instruction because it's ASPCAP abundances without a pwd")
+                    continue
+                
+                # Check if outputs already exist.
+                pwd = task_kwargs["pwd"]
+                if os.path.exists(os.path.join(expand_path(pwd), "stdout")):
+                    log.warning(F"Skipping {i}-th (1-indexed) instruction because it's ASPCAP abundances and the outputs already exist")
+                    continue            
 
+            # Get the task executable.
+            module_name, function_name = instruction["task_callable"].rsplit(".", 1)
+            module = import_module(module_name)
+            task_callable = getattr(module, function_name)
 
-@cli.group()
-def status():
-    """Check the status of a task or bundle."""
-    pass
-
-
-@status.command()
-@click.argument("bundle_ids", type=int, nargs=-1, required=True)
-def bundles(bundle_ids):
-    """Check the status of bundles."""
-    from astra import log
-    from astra.utils import deserialize
-    from astra.database.astradb import Bundle
-
-    N_tasks, N_bundles = (0, 0)
-    statuses = {}
-    tasks_by_status = {}
-    for bundle in Bundle.select().where(Bundle.id.in_(bundle_ids)):
-        description = bundle.status.description
-
-        statuses.setdefault(description, [])
-        tasks_by_status.setdefault(description, 0)
-
-        T = len(bundle.tasks)
-
-        statuses[description].append(bundle)
-
-        N_bundles += 1
-        N_tasks += len(bundle.tasks)
-        tasks_by_status[description] += T
-
-    log.info(f"Summary:")
-    for status, bundles in statuses.items():
-        count_bundles = len(bundles)
-        count_tasks = tasks_by_status[status]
-        log.info(
-            f"    {count_bundles} {status} bundles ({100 * count_bundles / N_bundles:.0f}%); {count_tasks} tasks ({100 * count_tasks / N_tasks:.0f}%)"
-        )
-
-    log.debug(f"Bundles by status:")
-    for status, bundles in statuses.items():
-        desc = " ".join([f"{bundle.id:.0f}" for bundle in bundles])
-        log.debug(f"    {status}: {desc}")
-
-    return None
-
-
-@cli.group()
-def execute():
-    """Execute a task or bundle."""
-    pass
-
-def _execute_tasks(task_ids):
-    from astra import log
-    from astra.utils import deserialize
-    from astra.database.astradb import Task
-
-    for task in deserialize(task_ids, Task):
-        log.info(f"Executing task {task}")
-        try:
-            task.instance().execute()
-        except:
-            log.exception(f"Exception in executing task {task}:")
-        else:
-            log.info(f"Completed task {task}")
-    return None
-
-
-@execute.command(hidden=True)
-@click.argument("task_ids", type=int, nargs=-1, required=True)
-def tasks(task_ids):
-    """Execute multiple tasks"""
-    return _execute_tasks(task_ids)
-
-@execute.command()
-@click.argument("task_id", type=int, nargs=1, required=True)
-def task(task_id):
-    """Execute a single task"""
-    return _execute_tasks([task_id])
-    
-
-def _execute_bundles(bundle_ids, only_incomplete):
-    from astra import log
-    from astra.utils import deserialize
-    from astra.database.astradb import Bundle
-
-    for bundle in deserialize(bundle_ids, Bundle):
-        log.info(f"Executing {'incomplete' if only_incomplete else 'all'} tasks in bundle {bundle}")
-        try:
-            bundle.instance(only_incomplete=only_incomplete).execute()
-        except:
-            log.exception(f"Exception in executing bundle {bundle}:")
-        else:
-            log.info(f"Completed bundle {bundle}")
-    return None
-
-
-@execute.command(hidden=True)
-@click.option(
-    "--only-incomplete",
-    is_flag=True,
-    help="Only execute the incomplete tasks in the bundle"
-)
-@click.argument("bundle_ids", type=int, nargs=-1, required=True)
-def bundles(bundle_ids, only_incomplete):
-    """Execute bundles"""
-    _execute_bundles(bundle_ids, only_incomplete)
-
-
-@execute.command()
-@click.option(
-    "--only-incomplete",
-    is_flag=True,
-    help="Only execute the incomplete tasks in the bundle"
-)
-@click.argument("bundle_id", type=int, nargs=-1, required=True)
-def bundle(bundle_id, only_incomplete):
-    return _execute_bundles([bundle_id], only_incomplete)
-
-
-
-'''
-@execute.command()
-@click.option(
-    "--parallelism",
-    "-p",
-    type=int,
-    nargs=1,
-    default=1,
-    help="Number of parallel processes to use",
-)
-@click.option(
-    "--all",
-    "-a",
-    "all_tasks",
-    is_flag=True,
-    help="Execute all tasks in the bundle (even completed tasks)",
-)
-@click.argument("bundle_id", type=int, nargs=1, required=True)
-def bundle(bundle_id, parallelism, all_tasks):
-    """Execute a task bundle"""
-
-    if parallelism > 1:
-        from astra import log
-        from joblib import Parallel, delayed
-
-        from astra.database.astradb import Task, TaskBundle, Status
-
-        tasks = Task.select().join(TaskBundle).where(TaskBundle.bundle_id == bundle_id)
-        if not all_tasks:
-            description = "completed"
-            tasks = tasks.where(Task.status_id != Status.get(description=description).id)
-            log.info(f"Restricting to tasks that are not marked '{description}'")
-
-        def f(task):
+            has_data_products = "data_product" in task_kwargs # TODO: this special key should be defined elsewhere
+            if has_data_products:
+                # Resolve the data products
+                input_data_products = task_kwargs.pop("data_product", [])
+                if isinstance(input_data_products, str):
+                    input_data_products = json.loads(input_data_products)
+                # The same data product can appear in this list multiple times, and we want to preserve order.
+                q = DataProduct.select().where(DataProduct.id << input_data_products)
+                unique_data_products = { dp.id: dp for dp in q }
+                task_kwargs["data_product"] = [unique_data_products[dp_pk] for dp_pk in input_data_products]
+                
+            log.info(f"Executing..")
             try:
-                task.instance().execute()
+                results = task_callable(**task_kwargs)
+                for result in results:
+                    None
             except:
-                log.exception(f"Exception in executing task {task}:")
-            else:
-                log.info(f"Completed task {task}")
-                print(f"Completed task {task} (print)")
+                log.exception(f"Exception in {task_callable} with {task_kwargs}")
+                raise
+                continue
 
-        Parallel(parallelism, prefer="threads")(delayed(f)(task) for task in tasks)
 
-    else:
-        return do_work([bundle_id], True)
-'''
+    log.info(f"Done")
+    
+    # Remove the path now that we're done.
+    #try:
+    #    os.unlink(path)
+    #except:
+    #    None
+
+
 
 if __name__ == "__main__":
     cli(obj=dict())
