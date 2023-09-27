@@ -43,10 +43,8 @@ class Chebyshev(Continuum):
         _initialized_args = self._initialize(spectrum)
         N, P = self._get_shape(spectrum)
 
-        flux = spectrum.flux.value.reshape((N, P))
-        e_flux = spectrum.uncertainty.represent_as(StdDevUncertainty).array.reshape(
-            (N, P)
-        )
+        flux = np.nan_to_num(spectrum.flux).astype(np.float32).reshape((N, P))
+        e_flux = np.nan_to_num(spectrum.ivar**-0.5).astype(np.float32).reshape((N, P))
 
         self.theta = np.empty((N, self.num_regions, self.deg + 1))
         for i in range(N):
