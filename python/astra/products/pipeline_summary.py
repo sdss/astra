@@ -4,20 +4,22 @@ from astropy.io import fits
 from astra import __version__
 from astra.utils import log, expand_path
 from astra.models import Source, ApogeeVisitSpectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar, BossVisitSpectrum
-from astra.products.utils import (
-    get_fields, get_basic_header, get_binary_table_hdu, check_path,
-    resolve_model    
-)
+from astra.products.utils import (get_fields, get_basic_header, get_binary_table_hdu, check_path, resolve_model)
 
 get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
 
-def create_all_star_pipeline_product(
+DEFAULT_IGNORE_FIELD_NAMES = ("pk", "sdss5_target_flags", )
+
+def create_astra_all_star_product(
     pipeline_model,
-    boss_spectrum_model=None, 
-    apogee_spectrum_model=None,
     where=None,
     limit=None,
-    ignore_field_names=("sdss5_target_flags", ),
+    boss_where=None,
+    apogee_where=None,
+    boss_spectrum_model=BossVisitSpectrum,
+    apogee_spectrum_model=ApogeeCoaddedSpectrumInApStar,
+    output_template="astraAllStar-{pipeline}-{version}.fits",
+    ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
     name_conflict_strategy=None,
     upper=True,
     fill_values=None,
@@ -26,7 +28,7 @@ def create_all_star_pipeline_product(
 ):
     """
     Create an `astraAllStar<PIPELINE>` product containing the results from a `<PIPELINE>`
-    that was executed on co-added (star-level) spectra.
+    that was executed on co-added (star-level) spectra, but does NOT include the spectral data.
 
     :param pipeline_model:
         The pipeline database model to retrieve results from.
@@ -74,18 +76,10 @@ def create_all_star_pipeline_product(
         otherwise just return the path.        
     """
         
-    if boss_spectrum_model is None:
-        log.warning("Defaulting boss_spectrum_model in astra.products.pipeline_summary.create_all_star_pipeline_product")
-        boss_spectrum_model = BossVisitSpectrum
-    
-    if apogee_spectrum_model is None:
-        log.warning(f"Defaulting apogee_spectrum_model in astra.products.pipeline_summary.create_all_star_pipeline_product")
-        apogee_spectrum_model = ApogeeCoaddedSpectrumInApStar
-
     pipeline_model = resolve_model(pipeline_model)
     pipeline = pipeline_model.__name__
 
-    path = get_path(f"astraAllStar{pipeline}-{__version__}.fits")
+    path = get_path(output_template.format(pipeline=pipeline, version=__version__))
     check_path(path, overwrite)
 
     pipeline_model = resolve_model(pipeline_model)
@@ -99,16 +93,15 @@ def create_all_star_pipeline_product(
         fits.PrimaryHDU(header=get_basic_header(pipeline=pipeline, include_hdu_descriptions=True))
     ]
     
-    # TODO: Allow specification of `run2d` and `apred`
     struct = [
-        (boss_spectrum_model, "apo", "boss"),
-        (boss_spectrum_model, "lco", "boss"),
-        (apogee_spectrum_model, "apo", "apogee"),
-        (apogee_spectrum_model, "lco", "apogee"),
+        (boss_spectrum_model, "apo", "boss", boss_where),
+        (boss_spectrum_model, "lco", "boss", boss_where),
+        (apogee_spectrum_model, "apo", "apogee", apogee_where),
+        (apogee_spectrum_model, "lco", "apogee", apogee_where),
     ]
     
     all_fields = {}
-    for spectrum_model, observatory, instrument in struct:
+    for spectrum_model, observatory, instrument, instrument_where in struct:
 
         models = (Source, spectrum_model, pipeline_model)
         try:
@@ -132,6 +125,8 @@ def create_all_star_pipeline_product(
         )
         if where: # Need to check, otherwise it requires AND with previous where.
             q = q.where(where)
+        if instrument_where:
+            q = q.where(instrument_where)
         
         q = q.limit(limit).dicts()
 
@@ -149,14 +144,16 @@ def create_all_star_pipeline_product(
     return (path, hdu_list) if full_output else path    
 
 
-
-def create_all_visit_pipeline_product(
+def create_astra_all_visit_product(
     pipeline_model,
-    boss_spectrum_model=None, 
-    apogee_spectrum_model=None,
     where=None,
     limit=None,
-    ignore_field_names=("sdss5_target_flags", ),
+    boss_where=None,
+    apogee_where=None,
+    boss_spectrum_model=BossVisitSpectrum,
+    apogee_spectrum_model=ApogeeVisitSpectrumInApStar,
+    output_template="astraAllVisit-{pipeline}-{version}.fits",    
+    ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
     name_conflict_strategy=None,
     upper=True,
     fill_values=None,
@@ -165,7 +162,7 @@ def create_all_visit_pipeline_product(
 ):
     """
     Create an `astraAllVisit<PIPELINE>` product containing the results from a `<PIPELINE>`
-    that was executed on visit-level spectra.
+    that was executed on visit-level spectra, but does NOT include the spectral data.
 
     :param pipeline_model:
         The pipeline database model to retrieve results from.
@@ -212,9 +209,7 @@ def create_all_visit_pipeline_product(
         If `True`, return a two-length tuple containing the path and the HDU list,
         otherwise just return the path.        
     """
-    
-    # TODO: Allow run2d and apred
-    
+        
     if boss_spectrum_model is None:
         log.warning("Defaulting boss_spectrum_model in astra.products.pipeline_summary.create_all_star_pipeline_product")
         boss_spectrum_model = BossVisitSpectrum
@@ -226,7 +221,7 @@ def create_all_visit_pipeline_product(
     pipeline_model = resolve_model(pipeline_model)
     pipeline = pipeline_model.__name__
 
-    path = get_path(f"astraAllVisit{pipeline}-{__version__}.fits")
+    path = get_path(output_template.format(pipeline=pipeline, version=__version__))
     check_path(path, overwrite)
 
     pipeline_model = resolve_model(pipeline_model)
@@ -247,14 +242,14 @@ def create_all_visit_pipeline_product(
     
     # TODO: Allow specification of `run2d` and `apred`
     struct = [
-        (boss_spectrum_model, "apo", "boss"),
-        (boss_spectrum_model, "lco", "boss"),
-        (apogee_spectrum_model, "apo", "apogee"),
-        (apogee_spectrum_model, "lco", "apogee"),
+        (boss_spectrum_model, "apo", "boss", boss_where),
+        (boss_spectrum_model, "lco", "boss", boss_where),
+        (apogee_spectrum_model, "apo", "apogee", apogee_where),
+        (apogee_spectrum_model, "lco", "apogee", apogee_where),
     ]
     
     all_fields = {}
-    for spectrum_model, observatory, instrument in struct:
+    for spectrum_model, observatory, instrument, instrument_where in struct:
 
         drp_spectrum_model = drp_spectrum_models[spectrum_model]
         
@@ -294,6 +289,9 @@ def create_all_visit_pipeline_product(
         )
         if where: # Need to check, otherwise it requires AND with previous where.
             q = q.where(where)
+        
+        if instrument_where:
+            q = q.where(instrument_where)
         
         q = q.limit(limit).dicts()
 
