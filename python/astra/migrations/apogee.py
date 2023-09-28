@@ -1,25 +1,92 @@
 import concurrent
 import subprocess
-from peewee import chunked, fn, JOIN
+import numpy as np
+
+from collections import OrderedDict
+from peewee import chunked, Case, fn, JOIN, IntegrityError
 from typing import Optional
 from tqdm import tqdm
+from astropy.table import Table
 from astra.models.apogee import ApogeeVisitSpectrum, Spectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar
 from astra.models.source import Source
 from astra.models.base import database
 from astra.utils import expand_path, flatten, log
+
+from astra.migrations.utils import enumerate_new_spectrum_pks
+
+
+def copy_doppler_results_from_visit_to_coadd(batch_size: Optional[int] = 100, limit: Optional[int] = None):
+
+    q = (
+        ApogeeCoaddedSpectrumInApStar
+        .select()
+        .where(ApogeeCoaddedSpectrumInApStar.doppler_teff.is_null())
+    )
+
+    N_updated = 0
+    total = limit or q.count()
+    with tqdm(total=total, desc="Updating", unit="star") as pb:
+        for chunk in chunked(q.iterator(), batch_size):
+            sources = {}
+            for spectrum in chunk:
+                sources.setdefault(spectrum.source_pk, [])
+                sources[spectrum.source_pk].append(spectrum)
+
+            q_visit = (
+                ApogeeVisitSpectrum
+                .select()
+                .where(ApogeeVisitSpectrum.source_pk.in_([s.source_pk for s in chunk]))
+            )
+
+            updated = []
+            for visit in q_visit:
+                for spectrum in sources[visit.source_pk]:
+                    spectrum.doppler_teff   = float(visit.doppler_teff or np.nan)
+                    spectrum.doppler_e_teff = float(visit.doppler_e_teff or np.nan)
+                    spectrum.doppler_logg   = float(visit.doppler_logg  or np.nan)
+                    spectrum.doppler_e_logg = float(visit.doppler_e_logg or np.nan)
+                    spectrum.doppler_fe_h   = float(visit.doppler_fe_h  or np.nan)
+                    spectrum.doppler_e_fe_h = float(visit.doppler_e_fe_h or np.nan)
+                    spectrum.doppler_rchi2  = float(visit.doppler_rchi2  or np.nan)
+                    spectrum.doppler_flags  = visit.doppler_flags 
+                    updated.append(spectrum)
+            
+                        
+            N_updated += (
+                ApogeeCoaddedSpectrumInApStar
+                .bulk_update(
+                    updated,
+                    fields=[
+                        ApogeeCoaddedSpectrumInApStar.doppler_teff,
+                        ApogeeCoaddedSpectrumInApStar.doppler_e_teff,
+                        ApogeeCoaddedSpectrumInApStar.doppler_logg,
+                        ApogeeCoaddedSpectrumInApStar.doppler_e_logg,
+                        ApogeeCoaddedSpectrumInApStar.doppler_fe_h,
+                        ApogeeCoaddedSpectrumInApStar.doppler_e_fe_h,
+                        ApogeeCoaddedSpectrumInApStar.doppler_rchi2,
+                        ApogeeCoaddedSpectrumInApStar.doppler_flags,
+                    ]
+                )
+            )
+            
+            pb.update(min(len(chunk), batch_size))
+    return N_updated
+
+
 
 def migrate_apogee_obj_from_source(batch_size: Optional[int] = 100, limit: Optional[int] = None):
 
     q = (
         ApogeeVisitSpectrum
         .select(
-            ApogeeVisitSpectrum.spectrum_id,
-            Source.sdss4_dr17_apogee_id
+            ApogeeVisitSpectrum.spectrum_pk,
+            Source.sdss4_apogee_id
         )
         .join(Source, on=(ApogeeVisitSpectrum.source_id == Source.id))
         .where(
             ApogeeVisitSpectrum.obj.is_null()
-        &   Source.sdss4_dr17_apogee_id.is_null(False)
+        &   ApogeeVisitSpectrum.healpix.is_null() # don't overwrite the apogee_drp-computed healpix, even if it's wrong
+        &   Source.sdss4_apogee_id.is_null(False)
         )
         .tuples()
     )
@@ -27,15 +94,15 @@ def migrate_apogee_obj_from_source(batch_size: Optional[int] = 100, limit: Optio
     total = limit or q.count()
     with tqdm(total=total, desc="Updating", unit="spectra") as pb:        
         for chunk in chunked(q.iterator(), batch_size):
-            objs = { spectrum_id: obj for spectrum_id, obj in chunk }
+            objs = { spectrum_pk: obj for spectrum_pk, obj in chunk }
             q = (
                 ApogeeVisitSpectrum
                 .select()
-                .where(ApogeeVisitSpectrum.spectrum_id.in_(list(objs.keys())))
+                .where(ApogeeVisitSpectrum.spectrum_pk.in_(list(objs.keys())))
             )
             batch = list(q)
             for spectrum in batch:
-                spectrum.obj = objs[spectrum.spectrum_id]
+                spectrum.obj = objs[spectrum.spectrum_pk]
             
             pb.update(
                 ApogeeVisitSpectrum
@@ -48,7 +115,339 @@ def migrate_apogee_obj_from_source(batch_size: Optional[int] = 100, limit: Optio
     return pb.n
                   
 
-def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 100, limit: Optional[int] = None):
+def migrate_sdss4_dr17_member_flags():
+    """
+    Migrate cluster membership information from the DR17 AllStar FITS table, because it is not stored in the database.
+    """
+    allStar = Table.read(expand_path("$SAS_BASE_DIR/dr17/apogee/spectro/aspcap/dr17/synspec_rev1/allStar-dr17-synspec_rev1.fits"))
+
+    mask = (allStar["MEMBERFLAG"] > 0)
+
+    memberships = dict(zip(allStar["APOGEE_ID"][mask], allStar["MEMBERFLAG"][mask]))
+
+    sources = list(
+        Source
+        .select()
+        .where(
+            (Source.sdss4_apogee_id.in_(list(memberships.keys())))
+        )
+    )
+    for source in sources:
+        source.sdss4_apogee_member_flags = memberships[source.sdss4_apogee_id]
+    
+    
+    return 0 if len(sources) == 0 else (
+        Source
+        .bulk_update(
+            sources,
+            fields=[Source.sdss4_apogee_member_flags]
+        )
+    )
+    
+
+
+
+def migrate_sdss4_dr17_apstar_from_sdss5_catalogdb(batch_size: Optional[int] = 100, limit: Optional[int] = None, max_workers = 8):
+
+    # WARNING: THIS SHOULD ONLY BE RUN AFTER THE APVISITS ARE INGESTED
+    print("You better make sure you've done `migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb()` first..")
+
+    from astra.migrations.sdss5db.catalogdb import (
+        Catalog,
+        SDSS_DR17_APOGEE_Allvisits as Visit,
+        SDSS_DR17_APOGEE_Allstarmerge as Star,
+        CatalogToGaia_DR3,
+        CatalogToGaia_DR2,
+        CatalogdbModel
+    )
+
+    q = (
+        Star
+        .select(
+            Star.apogee_id.alias("obj"),
+            Star.fields,
+            Star.telescopes,
+            Star.nvisits.alias("n_visits"),
+            Star.nentries.alias("n_entries"),
+            # Anything below cannot be trusted if n_entries > 1, because allstarmerge is a frankenstein of means of means
+        )
+        .limit(limit)
+    )
+
+    # Need to get source_pks based on existing 
+    spectrum_data = []
+    for star in tqdm(q.iterator(), total=limit or q.count()):
+        for field, telescope in zip(star.fields.split(), star.telescopes.split()):
+            spectrum_data.append(
+                dict(
+                    release="dr17",
+                    filetype="apStar",
+                    apred="dr17",
+                    apstar="stars",
+                    obj=star.obj,
+                    telescope=telescope,
+                    field=field,
+                    prefix="ap" if telescope.startswith("apo") else "as",
+                )
+            )
+            
+    log.info(f"Getting source primary keys")
+    q = (
+        ApogeeVisitSpectrum
+        .select(
+            ApogeeVisitSpectrum.source_pk,
+            ApogeeVisitSpectrum.obj,
+        )
+        .distinct()
+        .tuples()
+        .iterator()
+    )
+    source_pks = {}
+    for source_pk, source_identifier in q:
+        source_pks[source_identifier] = source_pk
+
+    for each in spectrum_data:
+        each["source_pk"] = source_pks[each["obj"]]
+
+    # Upsert the spectra
+    pks = _upsert_many(
+        ApogeeCoaddedSpectrumInApStar,
+        ApogeeCoaddedSpectrumInApStar.pk,
+        spectrum_data,
+        batch_size,
+        desc="Upserting spectra"
+    )
+
+    # Assign spectrum_pk values to any spectra missing it.
+    N = len(pks)
+    if pks:
+        with tqdm(total=N, desc="Assigning primary keys to spectra") as pb:
+            N_assigned = 0
+            for batch in chunked(pks, batch_size):
+                B = (
+                    ApogeeCoaddedSpectrumInApStar
+                    .update(
+                        spectrum_pk=Case(None, (
+                            (ApogeeCoaddedSpectrumInApStar.pk == pk, spectrum_pk) for spectrum_pk, pk in enumerate_new_spectrum_pks(batch)
+                        ))
+                    )
+                    .where(ApogeeCoaddedSpectrumInApStar.pk.in_(batch))
+                    .execute()
+                )
+                pb.update(B)
+                N_assigned += B
+
+        log.info(f"There were {N} spectra inserted and we assigned {N_assigned} spectra with new spectrum_pk values")
+    else:
+        log.info(f"No new spectra inserted")
+
+    executor = concurrent.futures.ProcessPoolExecutor(max_workers)
+    q = (
+        ApogeeCoaddedSpectrumInApStar
+        .select()
+        .where(ApogeeCoaddedSpectrumInApStar.release == "dr17")
+        .iterator()
+    )
+
+    spectra, futures, total = ({}, [], 0)
+    with tqdm(total=limit or 0, desc="Retrieving metadata", unit="spectra") as pb:
+        for chunk in chunked(q, batch_size):
+            futures.append(executor.submit(_migrate_apstar_metadata, chunk))
+            for total, spectrum in enumerate(chunk, start=1 + total):
+                spectra[spectrum.spectrum_pk] = spectrum
+                pb.update()
+
+    visit_spectrum_data = []
+    with tqdm(total=total, desc="Collecting results", unit="spectra") as pb:
+        for future in concurrent.futures.as_completed(futures):
+            for spectrum_pk, metadata in future.result().items():
+
+                spectrum = spectra[spectrum_pk]
+
+                mjds = []
+                sfiles = [metadata[f"SFILE{i}"] for i in range(1, int(metadata["NVISITS"]) + 1)]
+                for sfile in sfiles:
+                    if spectrum.telescope == "apo1m":
+                        #"$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{mjd}/apVisit-{apred}-{mjd}-{reduction}.fits"
+                        # sometimes it is stored as a float AHGGGGHGGGGHGHGHGH
+                        mjds.append(int(float(sfile.split("-")[2])))
+                    else:
+                        mjds.append(int(float(sfile.split("-")[3])))
+                        # "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/{prefix}Visit-{apred}-{plate}-{mjd}-{fiber:0>3}.fits"
+
+                assert len(sfiles) == int(metadata["NVISITS"])
+                
+                spectrum.snr = float(metadata["SNR"])
+                spectrum.mean_fiber = float(metadata["MEANFIB"])
+                spectrum.std_fiber = float(metadata["SIGFIB"])
+                spectrum.n_good_visits = int(metadata["NVISITS"])
+                spectrum.n_good_rvs = int(metadata["NVISITS"])
+                spectrum.v_rad = float(metadata["VHELIO"])
+                spectrum.e_v_rad = float(metadata["VERR"])
+                spectrum.std_v_rad = float(metadata["VSCATTER"])
+                spectrum.median_e_v_rad = float(metadata["VERR_MED"])
+                spectrum.spectrum_flags = metadata["STARFLAG"]
+                spectrum.min_mjd = min(mjds)
+                spectrum.max_mjd = max(mjds)
+
+                star_kwds = dict(
+                    source_pk=spectrum.source_pk,
+                    release=spectrum.release,
+                    filetype=spectrum.filetype,
+                    apred=spectrum.apred,
+                    apstar=spectrum.apstar,
+                    obj=spectrum.obj,
+                    telescope=spectrum.telescope,
+                    field=spectrum.field,
+                    prefix=spectrum.prefix,
+                    reduction=spectrum.obj if spectrum.telescope == "apo1m" else None           
+                )
+                for i, (mjd, sfile) in enumerate(zip(mjds, sfiles), start=1):
+                    if spectrum.telescope != "apo1m":
+                        plate = sfile.split("-")[2]
+                    else:
+                        # plate not known..
+                        plate = metadata["FIELD"].strip()
+
+                    kwds = star_kwds.copy()
+                    kwds.update(
+                        mjd=mjd,
+                        fiber=int(metadata[f"FIBER{i}"]),
+                        plate=plate
+                    )
+                    visit_spectrum_data.append(kwds)
+                
+                pb.update()
+
+
+    with tqdm(total=total, desc="Updating", unit="spectra") as pb:     
+        for chunk in chunked(spectra.values(), batch_size):
+            pb.update(
+                ApogeeCoaddedSpectrumInApStar  
+                .bulk_update(
+                    chunk,
+                    fields=[
+                        ApogeeCoaddedSpectrumInApStar.snr,
+                        ApogeeCoaddedSpectrumInApStar.mean_fiber,
+                        ApogeeCoaddedSpectrumInApStar.std_fiber,
+                        ApogeeCoaddedSpectrumInApStar.n_good_visits,
+                        ApogeeCoaddedSpectrumInApStar.n_good_rvs,
+                        ApogeeCoaddedSpectrumInApStar.v_rad,
+                        ApogeeCoaddedSpectrumInApStar.e_v_rad,
+                        ApogeeCoaddedSpectrumInApStar.std_v_rad,
+                        ApogeeCoaddedSpectrumInApStar.median_e_v_rad,
+                        ApogeeCoaddedSpectrumInApStar.spectrum_flags,
+                        ApogeeCoaddedSpectrumInApStar.min_mjd,
+                        ApogeeCoaddedSpectrumInApStar.max_mjd
+                    ]
+                )
+            )
+
+
+    log.info(f"Creating visit spectra")
+    q = (
+        ApogeeVisitSpectrum
+        .select(
+            ApogeeVisitSpectrum.obj, # using this instead of source_pk because some apogee_ids have two different sources
+            ApogeeVisitSpectrum.spectrum_pk,
+            ApogeeVisitSpectrum.telescope,
+            ApogeeVisitSpectrum.plate,
+            ApogeeVisitSpectrum.mjd,
+            ApogeeVisitSpectrum.fiber
+        )
+        .tuples()
+    )
+    drp_spectrum_data = {}
+    for obj, spectrum_pk, telescope, plate, mjd, fiber in tqdm(q.iterator(), desc="Getting DRP spectrum data"):
+        drp_spectrum_data.setdefault(obj, {})
+        key = "_".join(map(str, (telescope, plate, mjd, fiber)))
+        drp_spectrum_data[obj][key] = spectrum_pk
+
+    log.info(f"Matching to DRP spectra")
+
+    for spectrum_pk, visit in enumerate_new_spectrum_pks(visit_spectrum_data):
+        key = "_".join(map(str, [visit[k] for k in ("telescope", "plate", "mjd", "fiber")]))
+        visit.update(
+            spectrum_pk=spectrum_pk,
+            drp_spectrum_pk=drp_spectrum_data[visit["obj"]][key]
+        )
+
+    with database.atomic():
+        with tqdm(desc="Upserting visit spectra", total=len(visit_spectrum_data)) as pb:
+            for chunk in chunked(visit_spectrum_data, batch_size):
+                (
+                    ApogeeVisitSpectrumInApStar
+                    .insert_many(chunk)
+                    .on_conflict_ignore()
+                    .execute()
+                )
+                pb.update(min(batch_size, len(chunk)))
+                pb.refresh()
+
+    return None
+
+
+def _migrate_apstar_metadata(
+        apstars,
+        keys=(
+            "NWAVE", 
+            "FIELD",
+            "MEANFIB", 
+            "SNR", 
+            "SIGFIB", 
+            "VSCATTER", 
+            "STARFLAG", 
+            "NVISITS", 
+            "VHELIO",
+            "VERR", 
+            "VERR_MED", 
+            "SFILE?",
+            "FIBER?"
+        ), 
+    ):
+
+    #keys = ("MEANFIB", "SNR", "SIGFIB", "STARFLAGS", "NVISITS", "VHELIO", "VERR", "VERR_MED", "SFILE?", "DATE?" )
+    K = len(keys)
+    keys_str = "|".join([f"({k})" for k in keys])
+
+    # 80 chars per line, 150 lines -> 12000
+    # (12 lines/visit * 100 visits + 100 lines typical header) * 80 -> 104,000
+    command_template = " | ".join([
+        'hexdump -n 100000 -e \'80/1 "%_p" "\\n"\' {path}',
+        f'egrep "{keys_str}"',
+        #f"head -n {K}"
+    ])
+    commands = ""
+    for apstar in apstars:
+        path = expand_path(apstar.path)
+        commands += f"{command_template.format(path=path)}\n"
+    
+    outputs = subprocess.check_output(commands, shell=True, text=True)
+    outputs = outputs.strip().split("\n")
+
+    p, all_metadata = (-1, {})
+    for line in outputs:
+        try:
+            key, value = line.split("=")
+            key, value = (key.strip(), value.split()[0].strip(" '"))
+        except (IndexError, ValueError): # binary data, probably
+            continue
+
+        
+        if key == "NWAVE":
+            p += 1
+        spectrum_pk = apstars[p].spectrum_pk
+        all_metadata.setdefault(spectrum_pk, {})
+        if key in all_metadata[spectrum_pk]:
+            log.warning(f"Multiple key `{key}` found in {apstars[p]}: {expand_path(apstars[p].path)}")
+        all_metadata[spectrum_pk][key] = value
+    
+    return all_metadata
+
+
+
+
+def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(where=None, batch_size: Optional[int] = 100, limit: Optional[int] = None):
     """
     Migrate all SDSS4 DR17 APOGEE visit information (`apVisit` files) stored in the SDSS-V database.
     
@@ -65,8 +464,19 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
         SDSS_DR17_APOGEE_Allvisits as Visit,
         SDSS_DR17_APOGEE_Allstarmerge as Star,
         CatalogToGaia_DR3,
-        CatalogToGaia_DR2
+        CatalogToGaia_DR2,
+        CatalogdbModel
     )
+
+    class SDSS_ID_Flat(CatalogdbModel):
+        class Meta:
+            table_name = "sdss_id_flat"
+            
+    class SDSS_ID_Stacked(CatalogdbModel):
+        class Meta:
+            table_name = "sdss_id_stacked"
+
+    log.info(f"Migrating SDSS4 DR17 apVisit spectra from SDSS5 catalog database")
 
     q = (
         Visit
@@ -83,18 +493,22 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
             Visit.ra.alias("input_ra"),
             Visit.dec.alias("input_dec"),
             Visit.snr,
-
             Visit.file,
 
             # Source information
+            SDSS_ID_Flat.sdss_id,
+            SDSS_ID_Flat.n_associated,
+            SDSS_ID_Stacked.catalogid21,
+            SDSS_ID_Stacked.catalogid25,
+            SDSS_ID_Stacked.catalogid31,
             Star.gaia_source_id.alias("gaia_dr3_source_id"),
             CatalogToGaia_DR2.target.alias("gaia_dr2_source_id"),
-            CatalogToGaia_DR3.catalog.alias("sdss5_catalogid_v1"),
             Catalog.ra,
             Catalog.dec,
+            Catalog.catalogid,
             Catalog.version_id.alias("version_id"),
             Catalog.lead,
-            Star.apogee_id.alias("sdss4_dr17_apogee_id"),
+            Visit.apogee_id.alias("sdss4_apogee_id"), # Don't get this from Star, in case there is no match to Star
             Visit.apogee_target1.alias("sdss4_apogee_target1_flags"),
             Visit.apogee_target2.alias("sdss4_apogee_target2_flags"),
             Visit.apogee2_target1.alias("sdss4_apogee2_target1_flags"),
@@ -112,7 +526,7 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
             Visit.xcorr_vrel.alias("xcorr_v_rel"),
             Visit.xcorr_vrelerr.alias("xcorr_e_v_rel"),
             Visit.xcorr_vhelio.alias("xcorr_v_rad"),
-            Visit.rv_chi2.alias("doppler_rchisq"),
+            Visit.rv_chi2.alias("doppler_rchi2"),
             Visit.ccfwhm,
             Visit.autofwhm,
             Visit.n_components,
@@ -122,38 +536,30 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
         .join(CatalogToGaia_DR3, JOIN.LEFT_OUTER, on=(Star.gaia_source_id == CatalogToGaia_DR3.target))
         .join(Catalog, JOIN.LEFT_OUTER, on=(Catalog.catalogid == CatalogToGaia_DR3.catalog))
         .join(CatalogToGaia_DR2, JOIN.LEFT_OUTER, on=(Catalog.catalogid == CatalogToGaia_DR2.catalog))
+        .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(CatalogToGaia_DR2.catalog == SDSS_ID_Flat.catalogid))
+        .join(SDSS_ID_Stacked, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
+        .order_by(SDSS_ID_Flat.sdss_id.asc()) # link duplicates to earlier SDSS ID 
+    )
+    if where:
+        q = q.where(where)
+
+    q = (
+        q
         .limit(limit)
         .dicts()
-    )
-
-    q = list(q)
-    
-    N = limit or len(q)    
-
-    spectrum_ids = []
-    with database.atomic():
-        # Need to chunk this to avoid SQLite limits.
-        with tqdm(desc="Assigning spectrum identifiers", unit="spectra", total=N) as pb:
-            for chunk in chunked([{"spectrum_type_flags": 0}] * N, batch_size):                
-                spectrum_ids.extend(
-                    flatten(
-                        Spectrum
-                        .insert_many(chunk)
-                        .returning(Spectrum.spectrum_id)
-                        .tuples()
-                        .execute()
-                    )
-                )
-                pb.update(min(batch_size, len(chunk)))
-                pb.refresh()
-
-    log.info(f"Spectrum IDs created. Preparing data for ingestion.")
-
+    )    
+    # The query above will return the same ApogeeVisit when it is associated with multiple sdss_id values,
+    # but the .on_conflict_ignore() when upserting will mean that the spectra are not duplicated in the database.
     source_only_keys = (
-        "sdss5_catalogid_v1",
+        "sdss_id",
+        "catalogid21",
+        "catalogid25",
+        "catalogid31",
+        "catalogid",
+        "n_associated",
         "gaia_dr3_source_id",
         "gaia_dr2_source_id",
-        "sdss4_dr17_apogee_id",
+        "sdss4_apogee_id",
         "ra",
         "dec",
         "version_id",
@@ -164,46 +570,45 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
         "sdss4_apogee2_target2_flags",
         "sdss4_apogee2_target3_flags",
     )
-    targeting_keys = [k for k in source_only_keys if k.startswith("sdss4_apogee")]
+    sdss4_apogee_targeting_flag_keys = [k for k in source_only_keys if k.startswith("sdss4_apogee") and k.endswith("_flags")]
 
-    source_data, spectrum_data = ({}, [])
-    for spectrum_id, row in zip(spectrum_ids, q):
+    source_data, spectrum_data = (OrderedDict(), [])
+    for row in tqdm(q.iterator(), total=limit or 1, desc="Retrieving spectra"):
         basename = row.pop("file")
         
-        apogee_id = row["sdss4_dr17_apogee_id"]
-
         if row["telescope"] == "apo1m":
-            row["reduction"] = row["sdss4_dr17_apogee_id"]
+            row["reduction"] = row["sdss4_apogee_id"]
         
-        # TODO: Should we just be using APOGEE_ID as a unique identifier?
-        unique_identifier = "_".join([apogee_id])
+        # Use sdss4_apogee_id because not everything will have a sdss_id (e.g., the Sun)
+        sdss4_apogee_id = row["sdss4_apogee_id"]
+        assert sdss4_apogee_id is not None
+        
         this_source_data = dict(zip(source_only_keys, [row.pop(k) for k in source_only_keys]))
 
-        for key in targeting_keys:        
+        for key in sdss4_apogee_targeting_flag_keys:        
             this_source_data[key] = max(0, this_source_data[key])
 
         # TODO: merge targeting flags together when they are different
-        if unique_identifier in source_data:
-            for k in targeting_keys:
+        if sdss4_apogee_id in source_data:
+            for k in sdss4_apogee_targeting_flag_keys:
                 # Bitwise OR on targeting flags
-                source_data[unique_identifier][k] |= this_source_data[k]
+                source_data[sdss4_apogee_id][k] |= this_source_data[k]
         else:
-            source_data[unique_identifier] = this_source_data
+            source_data[sdss4_apogee_id] = this_source_data
         
         row["plate"] = row["plate"].lstrip()
         
         spectrum_data.append({
-            "apogee_id": apogee_id, # Will be removed later, just for matching source_id.
+            "source_identifiers": (this_source_data["sdss_id"], sdss4_apogee_id), # Will be removed later, just for matching sources.
             "release": "dr17",
             "apred": "dr17",
-            "spectrum_id": spectrum_id,
             "prefix": basename.lstrip()[:2],
             **row
         })
 
     # Upsert the sources
     with database.atomic():
-        with tqdm(desc="Upserting source information", total=len(source_data)) as pb:
+        with tqdm(desc="Upserting sources", total=len(source_data)) as pb:
             for chunk in chunked(source_data.values(), batch_size):
                 (
                     Source
@@ -213,35 +618,242 @@ def migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(batch_size: Optional[int] = 
                 )
                 pb.update(min(batch_size, len(chunk)))
                 pb.refresh()
-    
+
     log.info(f"Getting data for sources")
     q = (
         Source
         .select(
-            Source.id,
-            Source.sdss4_dr17_apogee_id
+            Source.pk,
+            Source.sdss_id,
+            Source.sdss4_apogee_id,
         )
         .tuples()
         .iterator()
     )
-    source_ids = {}
-    for source_id, sdss4_dr17_apogee_id in q:
-        source_ids[sdss4_dr17_apogee_id] = source_id
+
+    source_pk_by_sdss_id, source_pk_by_sdss4_apogee_id = ({}, {})
+    for pk, sdss_id, sdss4_apogee_id in q:
+        if sdss_id is not None:
+            source_pk_by_sdss_id[sdss_id] = pk
+        if sdss4_apogee_id is not None:
+            source_pk_by_sdss4_apogee_id[sdss4_apogee_id] = pk
 
     for each in spectrum_data:
-        each["source_id"] = source_ids[each.pop("apogee_id")]
-    
+        sdss_id, sdss4_apogee_id = each.pop("source_identifiers")
+
+        try:
+            source_pk = source_pk_by_sdss_id[sdss_id]
+        except KeyError:
+            try:
+                source_pk = source_pk_by_sdss4_apogee_id[sdss4_apogee_id]
+            except KeyError:
+                # Usually this is because of something like AP00422506+4057177 vs AP00422506+4057178
+                # very annoying
+                for k, v in source_data.items():
+                    if v["sdss4_apogee_id"] == sdss4_apogee_id:
+                        source_pk = source_pk_by_sdss_id[v["sdss_id"]]
+            
+        each["source_pk"] = source_pk
+
     # Upsert the spectra
-    spectrum_ids = _upsert_many(
+    pks = _upsert_many(
         ApogeeVisitSpectrum,
-        ApogeeVisitSpectrum.spectrum_id,
+        ApogeeVisitSpectrum.pk,
         spectrum_data,
         batch_size,
         desc="Upserting spectra"
     )
-    log.info(f"Ingested {len(spectrum_ids)} spectra")
-    return len(spectrum_ids)
+
+    # Assign spectrum_pk values to any spectra missing it.
+    N = len(pks)
+    if pks:
+        with tqdm(total=N, desc="Assigning primary keys to spectra") as pb:
+            N_assigned = 0
+            for batch in chunked(pks, batch_size):
+                B =  (
+                    ApogeeVisitSpectrum
+                    .update(
+                        spectrum_pk=Case(None, (
+                            (ApogeeVisitSpectrum.pk == pk, spectrum_pk) for spectrum_pk, pk in enumerate_new_spectrum_pks(batch)
+                        ))
+                    )
+                    .where(ApogeeVisitSpectrum.pk.in_(batch))
+                    .execute()
+                )
+                pb.update(B)
+                N_assigned += B
+
+        log.info(f"There were {N} spectra inserted and we assigned {N_assigned} spectra with new spectrum_pk values")
+
+    # Sanity check
+    q = flatten(
+        ApogeeVisitSpectrum
+        .select(ApogeeVisitSpectrum.pk)
+        .where(ApogeeVisitSpectrum.spectrum_pk.is_null())
+        .tuples()
+    )
+    if q:
+        N_updated = 0
+        for batch in chunked(q, batch_size):
+            N_updated += (
+                ApogeeVisitSpectrum
+                .update(
+                    spectrum_pk=Case(None, [
+                        (ApogeeVisitSpectrum.pk == pk, spectrum_pk) for spectrum_pk, pk in enumerate_new_spectrum_pks(batch)
+                    ])
+                )
+                .where(ApogeeVisitSpectrum.pk.in_(batch))
+                .execute()            
+            )
+        log.warning(f"Assigned spectrum_pks to {N_updated} existing spectra")
+
+    assert not (
+        ApogeeVisitSpectrum
+        .select(ApogeeVisitSpectrum.pk)
+        .where(ApogeeVisitSpectrum.spectrum_pk.is_null())
+        .exists()
+    )
+
+
+    # Logic: 
+    # query TwoMASSPSC based on designation, then to catalog, then everything from there.
+    # TODO: This is slow because we are doing one-by-one. consider refactor
+    fix_apvisit_instances_of_invalid_gaia_dr3_source_id()
+    log.info(f"Ingested {N} spectra")
+    return N
     
+
+def fix_apvisit_instances_of_invalid_gaia_dr3_source_id(fuzz_ratio_min=75):
+
+    source_pks_up_for_deletion = []
+
+    from fuzzywuzzy import fuzz
+    from astra.migrations.sdss5db.catalogdb import (
+        Catalog,
+        SDSS_DR17_APOGEE_Allvisits as Visit,
+        SDSS_DR17_APOGEE_Allstarmerge as Star,
+        CatalogToGaia_DR3,
+        CatalogToGaia_DR2,
+        CatalogToTwoMassPSC,
+        TwoMassPSC,
+        CatalogdbModel
+    )
+
+    class SDSS_ID_Flat(CatalogdbModel):
+        class Meta:
+            table_name = "sdss_id_flat"
+            
+    class SDSS_ID_Stacked(CatalogdbModel):
+        class Meta:
+            table_name = "sdss_id_stacked"
+
+    # Fix any instances where gaia_dr3_source_id = 0
+    q = (
+        ApogeeVisitSpectrum
+        .select()
+        .join(Source, on=(ApogeeVisitSpectrum.source_pk == Source.pk))
+        .where(
+            (Source.gaia_dr3_source_id <= 0) | (Source.gaia_dr3_source_id.is_null())
+        )
+    )
+    N_broken = q.count()
+    log.warning(f"Trying to fix {N_broken} instances where gaia_dr3_source_id <= 0 or NULL. This could take a few minutes.")
+
+    N_fixed = 0
+    for record in tqdm(q.iterator(), total=N_broken):
+
+        sdss4_apogee_id = record.source.sdss4_apogee_id or record.obj
+        if sdss4_apogee_id.startswith("2M") or sdss4_apogee_id.startswith("AP"):
+            designation = sdss4_apogee_id[2:]
+        else:
+            designation = sdss4_apogee_id
+
+        q = (
+            CatalogToTwoMassPSC
+            .select(CatalogToTwoMassPSC.catalog)
+            .join(TwoMassPSC, on=(TwoMassPSC.pts_key == CatalogToTwoMassPSC.target))
+            .where(TwoMassPSC.designation == designation)
+            .tuples()
+            .first()
+        )
+        if q:
+            catalogid, = q
+            q_identifiers = (
+                Catalog
+                .select(
+                    Catalog.ra,
+                    Catalog.dec,
+                    Catalog.catalogid,
+                    Catalog.version_id.alias("version_id"),
+                    Catalog.lead,
+                    SDSS_ID_Flat.sdss_id,
+                    SDSS_ID_Flat.n_associated,
+                    SDSS_ID_Stacked.catalogid21,
+                    SDSS_ID_Stacked.catalogid25,
+                    SDSS_ID_Stacked.catalogid31,     
+                    CatalogToGaia_DR2.target.alias("gaia_dr2_source_id"),
+                    CatalogToGaia_DR3.target.alias("gaia_dr3_source_id"),
+                )
+                .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(Catalog.catalogid == SDSS_ID_Flat.catalogid))
+                .join(SDSS_ID_Stacked, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
+                .switch(Catalog)
+                .join(CatalogToGaia_DR3, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.catalogid31 == CatalogToGaia_DR3.catalog))
+                .switch(Catalog)
+                .join(CatalogToGaia_DR2, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.catalogid31 == CatalogToGaia_DR2.catalog))
+                .where(Catalog.catalogid == catalogid)
+                .dicts()
+                .first()
+            )
+
+            # Update this source
+            for key, value in q_identifiers.items():
+                setattr(record.source, key, value)
+
+            try:
+                record.source.sdss4_apogee_id = sdss4_apogee_id
+                record.source.save()
+
+            except IntegrityError as exception:
+                log.exception(f"Unable to update record {record} with source {record.source}: {exception}")
+
+                # In these situations, there are usually two different APOGEE_ID values which are nominally the same:
+                # e.g., 2M17204208+6538238 and J17204208+6538238
+                # and then we try to assign the same SDSS_ID value to two different APOGEE_ID values.
+
+                # If this is the case, let's assign things to the other source because it will have more information.
+                alt_source = Source.get(sdss_id=record.source.sdss_id)
+                alt_sdss4_apogee_id = alt_source.sdss4_apogee_id
+
+                fuzz_ratio = fuzz.ratio(sdss4_apogee_id, alt_sdss4_apogee_id)
+                if fuzz_ratio > fuzz_ratio_min:
+                    
+                    # Delete the alternative source>
+                    source_pks_up_for_deletion.append(record.source.pk)
+
+                    record.source_pk = alt_source.pk
+                    record.save()
+
+                    N_fixed += 1
+
+                else:
+                    raise RuntimeError(f"record {record} with source={record.source} not matched {sdss4_apogee_id} != {alt_sdss4_apogee_id} ({fuzz_ratio} > {fuzz_ratio_min})")
+            else:
+                N_fixed += 1
+
+    log.warning(f"Tried to fix {N_fixed} of {N_broken} examples")
+    if source_pks_up_for_deletion:
+        log.warning(f"Source primary keys up for deletion: {source_pks_up_for_deletion}")
+        N_deleted = (
+            Source
+            .delete()
+            .where(
+                Source.pk.in_(tuple(set(source_pks_up_for_deletion)))
+            )
+            .execute()
+        )
+        log.warning(f"Deleted {N_deleted} sources")
+
+    return (N_fixed, N_broken)
 
 
 def migrate_apvisit_from_sdss5_apogee_drpdb(
@@ -267,6 +879,8 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
         A tuple of new spectrum identifiers (`astra.models.apogee.ApogeeVisitSpectrum.spectrum_id`)
         that were inserted.
     """
+
+    raise ProgrammingError("not yet refactored to use spectrum_pk etc")
 
     from astra.migrations.sdss5db.apogee_drpdb import Visit, RvVisit
     from astra.migrations.sdss5db.catalogdb import (
@@ -353,14 +967,14 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
             Visit.on_target,
             Visit.valid,
             Visit.starflag.alias("spectrum_flags"),
-            Visit.catalogid.alias("input_catalogid"),
+            Visit.catalogid,
             Visit.ra.alias("input_ra"),
             Visit.dec.alias("input_dec"),
 
             # Source information,
             Visit.gaiadr2_sourceid.alias("gaia_dr2_source_id"),
             CatalogToGaia_DR3.target_id.alias("gaia_dr3_source_id"),
-            Catalog.catalogid.alias("sdss5_catalogid_v1"),
+            Catalog.catalogid.alias("catalogid"),
             Catalog.version_id.alias("version_id"),
             Catalog.lead,
             Catalog.ra,
@@ -370,7 +984,7 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
             cte.c.vrel.alias("v_rel"),
             cte.c.vrelerr.alias("e_v_rel"),
             cte.c.vrad.alias("v_rad"),
-            cte.c.chisq.alias("doppler_rchisq"),
+            cte.c.chisq.alias("doppler_rchi2"),
             cte.c.rv_teff.alias("doppler_teff"),
             cte.c.rv_tefferr.alias("doppler_e_teff"),
             cte.c.rv_logg.alias("doppler_logg"),
@@ -458,14 +1072,14 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
             Visit.on_target,
             Visit.valid,
             Visit.starflag.alias("spectrum_flags"),
-            Visit.catalogid.alias("input_catalogid"),
+            Visit.catalogid,
             Visit.ra.alias("input_ra"),
             Visit.dec.alias("input_dec"),
 
             # Source information,
             Visit.gaiadr2_sourceid.alias("gaia_dr2_source_id"),
             CatalogToGaia_DR3.target_id.alias("gaia_dr3_source_id"),
-            Catalog.catalogid.alias("sdss5_catalogid_v1"),
+            Catalog.catalogid.alias("catalogid"),
             Catalog.version_id.alias("version_id"),
             Catalog.lead,
             Catalog.ra,
@@ -481,7 +1095,7 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
             sq.c.vrel.alias("v_rel"),
             sq.c.vrelerr.alias("e_v_rel"),
             sq.c.vrad.alias("v_rad"),
-            sq.c.chisq.alias("doppler_rchisq"),
+            sq.c.chisq.alias("doppler_rchi2"),
             sq.c.rv_teff.alias("doppler_teff"),
             sq.c.rv_tefferr.alias("doppler_e_teff"),
             sq.c.rv_logg.alias("doppler_logg"),
@@ -497,7 +1111,7 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
         .join(sq, on=(Visit.pk == sq.c.visit_pk))
         .switch(Visit)
         # Need to join by Catalog on the visit catalogid (not gaia DR2) because sometimes Gaia DR2 value is 0
-        # Doing it like this means we might end up with some `sdss5_catalogid_v1` actually NOT being v1, but
+        # Doing it like this means we might end up with some `catalogid` actually NOT being v1, but
         # we will have to fix that afterwards. It will be indicated by the `version_id`.
         .join(Catalog, JOIN.LEFT_OUTER, on=(Catalog.catalogid == Visit.catalogid))
         .switch(Visit)
@@ -534,7 +1148,7 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
     log.info(f"Spectrum IDs created. Preparing data for ingestion.")
     
     source_only_keys = (
-        "sdss5_catalogid_v1",
+        "catalogid",
         "gaia_dr2_source_id",
         "gaia_dr3_source_id",
         "version_id",
@@ -548,24 +1162,24 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
         "k_mag",
         "e_k_mag",
     )
-    source_data, spectrum_data, sdss5_catalogid_v1s = ({}, [], [])
+    source_data, spectrum_data, catalogids = ({}, [], [])
     for spectrum_id, row in zip(spectrum_ids, tqdm(q.iterator(), total=N, desc="Extracting source data from spectra")):
-        sdss5_catalogid_v1 = row["sdss5_catalogid_v1"]
-        source_data.setdefault(sdss5_catalogid_v1, {})
+        catalogid = row["catalogid"]
+        source_data.setdefault(catalogid, {})
         source_kwds = dict(zip(source_only_keys, [row.pop(k) for k in source_only_keys]))
         if source_kwds["gaia_dr2_source_id"] == 0:
             source_kwds["gaia_dr2_source_id"] = None
 
         for k, v in source_kwds.items():
             if v is not None:
-                source_data[sdss5_catalogid_v1][k] = v
+                source_data[catalogid][k] = v
         
         spectrum_data.append({
             "spectrum_id": spectrum_id,
             "release": "sdss5",
             **row
         })
-        sdss5_catalogid_v1s.append(sdss5_catalogid_v1)
+        catalogids.append(catalogid)
     
     with database.atomic():
         with tqdm(desc="Upserting source information", total=len(source_data)) as pb:
@@ -579,24 +1193,24 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
                 pb.update(min(batch_size, len(chunk)))
                 pb.refresh()    
 
-    # Get corresponding source ids for each sdss5_catalogid_v1
+    # Get corresponding source ids for each catalogid
 
     q = (
         Source
         .select(
             Source.id,
-            Source.sdss5_catalogid_v1
+            Source.catalogid
         )
         .tuples()
         .iterator()
     )
     source_ids = {}
-    for source_id, sdss5_catalogid_v1 in tqdm(q, total=len(source_data), desc="Linking source and catalog identifiers"):
-        source_ids[sdss5_catalogid_v1] = source_id
+    for source_id, catalogid in tqdm(q, total=len(source_data), desc="Linking source and catalog identifiers"):
+        source_ids[catalogid] = source_id
     
     # Put the source identifier back in to the spectrum data row.
-    for sdss5_catalogid_v1, sd in zip(sdss5_catalogid_v1s, spectrum_data):
-        sd["source_id"] = source_ids[sdss5_catalogid_v1]
+    for catalogid, sd in zip(catalogids, spectrum_data):
+        sd["source_id"] = source_ids[catalogid]
 
     spectrum_ids = _upsert_many(
         ApogeeVisitSpectrum,
@@ -613,7 +1227,7 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
 
 def _migrate_apvisit_metadata(apVisits, raise_exceptions=False):
 
-    keys = ("NAXIS1", "SNR", "NCOMBINE")
+    keys = ("NAXIS1", "SNR", "NCOMBINE", "EXPTIME")
     K = len(keys)
     keys_str = "|".join([f"({k})" for k in keys])
 
@@ -647,7 +1261,7 @@ def _migrate_apvisit_metadata(apVisits, raise_exceptions=False):
             except OSError:
                 log.exception(f"Exception on {apVisit}:")
                 # Failure mode values.
-                all_metadata[apVisit.spectrum_id] = (False, -1, -1)
+                all_metadata[apVisit.spectrum_pk] = (False, -1, -1, None)
                 continue
             else:
                 all_metadata.update(this_metadata)    
@@ -670,15 +1284,16 @@ def _migrate_apvisit_metadata(apVisits, raise_exceptions=False):
             dithered = int(metadata["NAXIS1"]) == 4096
             snr = float(metadata["SNR"])
             n_frames = int(metadata["NCOMBINE"])
+            exptime = float(metadata["EXPTIME"])
 
-            all_metadata[apVisit.spectrum_id] = (dithered, snr, n_frames)
+            all_metadata[apVisit.spectrum_pk] = (dithered, snr, n_frames, exptime)
     
     return all_metadata
 
 
 
 def migrate_apvisit_metadata_from_image_headers(
-    where=(ApogeeVisitSpectrum.dithered.is_null() | ApogeeVisitSpectrum.snr.is_null()), 
+    where=(ApogeeVisitSpectrum.dithered.is_null() | ApogeeVisitSpectrum.snr.is_null() | ApogeeVisitSpectrum.exptime.is_null()), 
     max_workers: Optional[int] = 8, 
     batch_size: Optional[int] = 100, 
     limit: Optional[int] = None
@@ -719,15 +1334,17 @@ def migrate_apvisit_metadata_from_image_headers(
         for chunk in chunked(q, batch_size):
             futures.append(executor.submit(_migrate_apvisit_metadata, chunk))
             for total, apVisit in enumerate(chunk, start=1 + total):
-                apVisits[apVisit.spectrum_id] = apVisit
+                apVisits[apVisit.spectrum_pk] = apVisit
                 pb.update()
 
     with tqdm(total=total, desc="Collecting results", unit="spectra") as pb:
         for future in concurrent.futures.as_completed(futures):
-            for spectrum_id, (dithered, snr, n_frames) in future.result().items():
-                apVisits[spectrum_id].dithered = dithered
-                apVisits[spectrum_id].snr = snr
-                apVisits[spectrum_id].n_frames = n_frames
+            for spectrum_pk, (dithered, snr, n_frames, exptime) in future.result().items():
+                apVisits[spectrum_pk].dithered = dithered
+                apVisits[spectrum_pk].snr = snr
+                apVisits[spectrum_pk].n_frames = n_frames
+                apVisits[spectrum_pk].exptime = exptime
+                
                 pb.update()
 
     with tqdm(total=total, desc="Updating", unit="spectra") as pb:     
@@ -740,6 +1357,7 @@ def migrate_apvisit_metadata_from_image_headers(
                         ApogeeVisitSpectrum.dithered,
                         ApogeeVisitSpectrum.snr,
                         ApogeeVisitSpectrum.n_frames,
+                        ApogeeVisitSpectrum.exptime
                     ]
                 )
             )
@@ -749,13 +1367,15 @@ def migrate_apvisit_metadata_from_image_headers(
 
 def migrate_coadd_in_apstar_from_existing_apvisits(limit=None, batch_size=100):
 
+    raise ProgrammingError
+
     q = (
         ApogeeVisitSpectrum
         .select(
             ApogeeVisitSpectrum.source_id,
             ApogeeVisitSpectrum.release,
             ApogeeVisitSpectrum.apred,
-            ApogeeVisitSpectrum.apstar,
+            #ApogeeVisitSpectrum.apstar,
             ApogeeVisitSpectrum.obj,
             ApogeeVisitSpectrum.telescope,
             Source.healpix,
@@ -797,7 +1417,10 @@ def migrate_coadd_in_apstar_from_existing_apvisits(limit=None, batch_size=100):
 
     data = []
     for spectrum_id, result in zip(spectrum_ids, q):
-        result.update(spectrum_id=spectrum_id)
+        result.update(
+            apstar="stars",
+            spectrum_id=spectrum_id
+        )
         data.append(result)
     
     return _upsert_many(
@@ -820,6 +1443,8 @@ def migrate_apvisit_in_apstar_from_existing_apvisits(limit=None, batch_size=100)
         The batch size to use when upserting data.
     """
 
+    raise ProgrammingError
+
     q = (
         ApogeeVisitSpectrum
         .select(
@@ -830,7 +1455,7 @@ def migrate_apvisit_in_apstar_from_existing_apvisits(limit=None, batch_size=100)
             ApogeeVisitSpectrum.obj,
             ApogeeVisitSpectrum.telescope,
             Source.healpix,
-            Source.sdss4_dr17_apogee_id.alias("obj"),
+            Source.sdss4_apogee_id.alias("obj"),
             ApogeeVisitSpectrum.field,
             ApogeeVisitSpectrum.prefix,
             ApogeeVisitSpectrum.plate,
@@ -891,11 +1516,11 @@ def migrate_apvisit_in_apstar_from_existing_apvisits(limit=None, batch_size=100)
 
 
 def _upsert_many(model, returning, data, batch_size, desc="Upserting"):
-    new_ids = []
+    returned = []
     with database.atomic():
         with tqdm(desc=desc, total=len(data)) as pb:
             for chunk in chunked(data, batch_size):
-                new_ids.extend(
+                returned.extend(
                     flatten(
                         model
                         .insert_many(chunk)
@@ -908,7 +1533,7 @@ def _upsert_many(model, returning, data, batch_size, desc="Upserting"):
                 pb.update(min(batch_size, len(chunk)))
                 pb.refresh()
 
-    return tuple(new_ids)
+    return tuple(returned)
 
 
 """

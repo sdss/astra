@@ -1,3 +1,4 @@
+import numpy as np
 from peewee import (
     BitField as _BitField,
     VirtualField,
@@ -55,7 +56,7 @@ class BasePixelArrayAccessor(object):
     
     """A base pixel array accessor."""
 
-    def __init__(self, model, field, name, ext, column_name, transform=None, help_text=None):
+    def __init__(self, model, field, name, ext, column_name, pixels=None, transform=None, help_text=None):
         self.model = model
         self.field = field
         self.name = name
@@ -63,6 +64,8 @@ class BasePixelArrayAccessor(object):
         self.column_name = column_name 
         self.transform = transform
         self.help_text = help_text
+        self.pixels = pixels
+
     def __set__(self, instance, value):
         try:
             instance.__pixel_data__
@@ -99,6 +102,7 @@ class PixelArrayAccessorFITS(BasePixelArrayAccessor):
                         except:
                             value = data # image access
                         
+                        value = np.copy(value)
                         
                         if accessor.transform is not None:
                             value = accessor.transform(value, image, instance)
@@ -137,19 +141,23 @@ class PixelArrayAccessorHDF(BasePixelArrayAccessor):
 
 class PixelArray(VirtualField):
 
-    def __init__(self, ext=None, column_name=None, transform=None, accessor_class=PixelArrayAccessorFITS, help_text=None, **kwargs):
+    def __init__(self, ext=None, column_name=None, transform=None, accessor_class=PixelArrayAccessorFITS, help_text=None, pixels=None, **kwargs):
         super(PixelArray, self).__init__(**kwargs)
         self.ext = ext
         self.column_name = column_name
         self.transform = transform
         self.accessor_class = accessor_class
         self.help_text = help_text
+        self.pixels = pixels
 
     def bind(self, model, name, set_attribute=True):
         self.model
         self.name = self.safe_name = name
         self.column_name = self.column_name or name
-        attr = self.accessor_class(model, self, name, self.ext, self.column_name, self.transform, self.help_text)
+        attr = self.accessor_class(
+            model, self, name, self.ext, self.column_name, 
+            pixels=self.pixels, transform=self.transform, help_text=self.help_text
+        )        
         if set_attribute:
             setattr(model, name, attr)
         

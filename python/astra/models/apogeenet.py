@@ -1,10 +1,12 @@
 import numpy as np
+import datetime
 from peewee import (
     AutoField,
     FloatField,
     TextField,
     ForeignKeyField,
     BitField,
+    DateTimeField
 )
 from playhouse.hybrid import hybrid_property
 
@@ -15,54 +17,63 @@ from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
 
+from astra.glossary import Glossary
 
 class ApogeeNet(BaseModel, PipelineOutputMixin):
 
     """A result from the APOGEENet pipeline."""
 
-    source_id = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
-    spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
+    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
+    spectrum_pk = ForeignKeyField(
+        Spectrum, 
+        index=True, 
+        lazy_load=False,
+        help_text=Glossary.spectrum_pk
+    )
     
     #> Astra Metadata
-    task_id = AutoField()
-    v_astra = TextField(default=__version__)
-    t_elapsed = FloatField(null=True)
-    tag = TextField(default="", index=True)
+    task_pk = AutoField(help_text=Glossary.task_pk)
+    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
+    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
+    t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
+    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
+    tag = TextField(default="", index=True, help_text=Glossary.tag)
     
     #> Stellar Parameters
-    teff = FloatField(null=True)
-    e_teff = FloatField(null=True)
-    logg = FloatField(null=True)
-    e_logg = FloatField(null=True)
-    fe_h = FloatField(null=True)
-    e_fe_h = FloatField(null=True)
+    teff = FloatField(null=True, help_text=Glossary.teff)
+    e_teff = FloatField(null=True, help_text=Glossary.e_teff)
+    logg = FloatField(null=True, help_text=Glossary.logg)
+    e_logg = FloatField(null=True, help_text=Glossary.e_logg)
+    m_h = FloatField(null=True, help_text=Glossary.m_h)
+    e_m_h = FloatField(null=True, help_text=Glossary.e_m_h)
 
-    teff_sample_median = FloatField(help_text="Median effective temperature from random draws")
-    logg_sample_median = FloatField(help_text="Median surface gravity from random draws")
-    fe_h_sample_median = FloatField(help_text="Median metallicity from random draws")
-    result_flags = BitField(default=0)
+    teff_sample_median = FloatField(null=True, help_text="Median effective temperature of many draws [K]")
+    logg_sample_median = FloatField(null=True, help_text="Median surface gravity of many draws")
+    m_h_sample_median = FloatField(null=True, help_text="Median metallicity of many draws [dex]")
+    result_flags = BitField(default=0, help_text=Glossary.result_flags)
 
     #> Flag definitions
     flag_teff_unreliable = result_flags.flag(2**0, help_text="Effective temperature is unreliable")
     flag_logg_unreliable = result_flags.flag(2**1, help_text="Surface gravity is unreliable")
-    flag_fe_h_unreliable = result_flags.flag(2**2, help_text="Metallicity is unreliable")
+    flag_m_h_unreliable = result_flags.flag(2**2, help_text="Metallicity is unreliable")
     
     flag_e_teff_unreliable = result_flags.flag(2**3, help_text="Error on effective temperature is unreliable")
     flag_e_logg_unreliable = result_flags.flag(2**4, help_text="Error on surface gravity is unreliable")
-    flag_e_fe_h_unreliable = result_flags.flag(2**5, help_text="Error on metallicity is unreliable")
+    flag_e_m_h_unreliable = result_flags.flag(2**5, help_text="Error on metallicity is unreliable")
 
     flag_e_teff_large = result_flags.flag(2**6, help_text="Error on effective temperature is large")
     flag_e_logg_large = result_flags.flag(2**7, help_text="Error on surface gravity is large")
-    flag_e_fe_h_large = result_flags.flag(2**8, help_text="Error on metallicity is large")
+    flag_e_m_h_large = result_flags.flag(2**8, help_text="Error on metallicity is large")
     flag_missing_photometry = result_flags.flag(2**9, help_text="Missing photometry")
     flag_result_unreliable = result_flags.flag(2**10, help_text="Stellar parameters are knowingly unreliable")
+    flag_no_result = result_flags.flag(2**11, help_text="Exception raised when loading spectra")
 
     @hybrid_property
     def flag_warn(self):
         return (
             self.flag_e_teff_large |
             self.flag_e_logg_large |
-            self.flag_e_fe_h_large |
+            self.flag_e_m_h_large |
             self.flag_missing_photometry
         )
 
@@ -71,7 +82,7 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
         return (
             self.flag_e_teff_large |
             self.flag_e_logg_large |
-            self.flag_e_fe_h_large |
+            self.flag_e_m_h_large |
             self.flag_missing_photometry
         )
 
@@ -81,10 +92,11 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
             self.flag_result_unreliable |
             self.flag_teff_unreliable |
             self.flag_logg_unreliable |
-            self.flag_fe_h_unreliable |
+            self.flag_m_h_unreliable |
             self.flag_e_teff_unreliable |
             self.flag_e_logg_unreliable |
-            self.flag_e_fe_h_unreliable
+            self.flag_e_m_h_unreliable |
+            self.flag_no_result
         )
 
     @flag_bad.expression
@@ -93,10 +105,11 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
             self.flag_result_unreliable |
             self.flag_teff_unreliable |
             self.flag_logg_unreliable |
-            self.flag_fe_h_unreliable |
+            self.flag_m_h_unreliable |
             self.flag_e_teff_unreliable |
             self.flag_e_logg_unreliable |
-            self.flag_e_fe_h_unreliable
+            self.flag_e_m_h_unreliable |
+            self.flag_no_result
         )
     
 
@@ -115,8 +128,8 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
                 - k_mag
         """
     
-        if self.fe_h > 0.5 or self.fe_h < -2 or np.log10(self.teff) > 3.82:
-            self.flag_fe_h_unreliable = True
+        if self.m_h > 0.5 or self.m_h < -2 or np.log10(self.teff) > 3.82:
+            self.flag_m_h_unreliable = True
 
         if self.logg < -1.5 or self.logg > 6:
             self.flag_logg_unreliable = True
@@ -124,8 +137,8 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
         if np.log10(self.teff) < 3.1 or np.log10(self.teff) > 4.7:
             self.flag_teff_unreliable = True
 
-        if self.fe_h_sample_median > 0.5 or self.fe_h_sample_median < -2 or np.log10(self.teff_sample_median) > 3.82:
-            self.flag_e_fe_h_unreliable = True
+        if self.m_h_sample_median > 0.5 or self.m_h_sample_median < -2 or np.log10(self.teff_sample_median) > 3.82:
+            self.flag_e_m_h_unreliable = True
         
         if self.logg_sample_median < -1.5 or self.logg_sample_median > 6:
             self.flag_e_logg_unreliable = True
@@ -135,8 +148,8 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
 
         if self.e_logg > 0.3:
             self.flag_e_logg_large = True
-        if self.e_fe_h > 0.5:
-            self.flag_e_fe_h_large = True
+        if self.e_m_h > 0.5:
+            self.flag_e_m_h_large = True
         if np.log10(self.e_teff) > 2.7:
             self.flag_e_teff_large = True
 

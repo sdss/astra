@@ -7,6 +7,7 @@ import re
 import subprocess
 from typing import Optional
 from tqdm import tqdm
+from glob import glob
 from itertools import cycle
 from astra.utils import log, expand_path
 
@@ -21,6 +22,22 @@ TRANSLATE_LABELS = {
     "c_m": "C",
     "n_m": "N",
 }
+
+def get_input_spectrum_primary_keys(stage_dir):
+    """
+    Get all spectrum identifiers analyzed in a given stage.
+    
+    :param stage_dir:
+        The stage directory (e.g., ``/your/parent_folder/coarse``)
+    """
+    spectrum_pks = set()
+    for path in glob(f"{expand_path(stage_dir)}/*/parameter.input"):
+        for name in np.atleast_1d(np.loadtxt(path, usecols=(0, ), dtype=str)):
+            spectrum_pks.add(parse_ferre_spectrum_name(name)["spectrum_pk"])
+    return spectrum_pks
+
+
+
 
 def parse_control_kwds(input_nml_path):
     with open(expand_path(input_nml_path), "r") as fp:
@@ -132,14 +149,14 @@ def int_or_none(_):
         return None
 
 def parse_ferre_spectrum_name(name):
-    index, source_id, spectrum_id, initial_flags, upstream_id = map(int_or_none, name.split("_"))
+    index, source_pk, spectrum_pk, initial_flags, upstream_pk = map(int_or_none, name.split("_"))
 
     return dict(
         index=index,
-        source_id=source_id,
-        spectrum_id=spectrum_id,
+        source_pk=source_pk,
+        spectrum_pk=spectrum_pk,
         initial_flags=initial_flags,
-        upstream_id=upstream_id
+        upstream_pk=upstream_pk
     )
 
 
@@ -205,7 +222,7 @@ def parse_header_path(header_path):
 
         is_giant_grid = gd == "g"
 
-    short_grid_name = f"{spectral_type}{gd}_{lsf}"
+    short_grid_name = f"{lsf_telescope_model}_{lsf}_{spectral_type}{gd}"
 
     kwds = dict(
         radiative_transfer_code=radiative_transfer_code,
@@ -1184,173 +1201,104 @@ def sort_data_as_per_input_names(input_names, unsorted_names, unsorted_data):
 
 
 
-def get_processing_times(stdout):
+def get_processing_times(stdout_path_prefix, relative_path=None):
     """
     Get the time taken to analyse spectra and estimate the initial load time.
 
     :param stdout: (optional)
         The standard output from FERRE.
     """
-
-    if stdout is None or stdout == "":
-        return None
-
-    headers = re.finditer("-{65}\s+f e r r e", stdout)
-    start = next(headers)
-    try:
-        end = next(headers)
-    except:
-        None
-    else:
-        stdout = stdout[start.span()[1]:end.span()[0]]
     
+    for path in sorted(glob(f"{stdout_path_prefix}*"))[::-1]:
+        with open(path, "r") as fp:
+            stdout = fp.read()
+        
+        headers = list(re.finditer("-{65}\s+f e r r e", stdout))
 
-    #i = stdout[::-1].index(header[0][::-1])
-    #use_stdout = stdout[-(i + len(header)) :]
+        for h, header in enumerate(headers):
 
-    n_threads = int(re.findall("nthreads = \s+[0-9]+", stdout)[0].split()[-1])
-    n_obj = int(re.findall("nobj = \s+[0-9]+", stdout)[0].split()[-1])
+            si = header.span()[0]
+            try:
+                ei = headers[h + 1].span()[0]
+            except:
+                process_stdout = stdout[si:]
+            else:
+                process_stdout = stdout[si:ei]    
+            
+            relative_input_nml_path = re.findall("-{65}\n\s+(?P<rel_path>[\w|\_|/|\.]+).nml\s+", process_stdout)[0] + ".nml"
 
-    n_per_thread = n_obj // n_threads
-    n_mod = n_obj - n_per_thread * n_threads
+            if relative_path is not None:
+                # Get the relative path of the input file.
+                if relative_path != relative_input_nml_path:
+                    continue
 
-    si = 0
-    expected_indices = -1 * np.ones((n_threads, n_per_thread + 1), dtype=int)
-    for i in range(n_threads):
-        ei = n_per_thread + (1 if n_mod > i else 0)
-        expected_indices[i, :ei] = range(si, si + ei)
-        si += ei        
+            #i = process_stdout[::-1].index(header[0][::-1])
+            #use_process_stdout = stdout[-(i + len(header)) :]
 
-    # Find the obvious examples first.
-    elapsed_time_pattern = "ellapsed time:\s+(?P<time>[{0-9}|.]+)\s*s?\s*"
-    next_object_pattern = "next object #\s+(?P<index_plus_one>[0-9]+)"
+            n_threads = int(re.findall("nthreads\s?= \s+[0-9]+", process_stdout)[0].split()[-1])
+            n_obj = int(re.findall("nobj\s?= \s+[0-9]+", process_stdout)[0].split()[-1])
 
-    elapsed_times = np.nan * np.ones(expected_indices.shape)
+            n_per_thread = n_obj // n_threads
+            n_mod = n_obj - n_per_thread * n_threads
 
-    matcher = re.finditer(elapsed_time_pattern, stdout)
-    time_load, = next(matcher).groups()
-    elapsed_times[:, 0] = float(time_load)
+            n_items = min(n_threads, n_obj)
 
-    for match in matcher:
-        elapsed_time, = match.groups()
-        si, ei = match.span()
-        try:
-            oi = stdout[ei:].index("\n")
-        except ValueError:
-            continue
-        next_object_match = re.match(next_object_pattern, stdout[ei:ei+oi])
-        if next_object_match:
-            next_object, = next_object_match.groups()
-            i, j = np.where(expected_indices == (int(next_object) - 1 - 1)) # -1 for zero indexing, -1 to reference the object that was analysed
-            elapsed_times[i, j] = float(elapsed_time)
-        else:
-            log.warning(f"Unassigned elapsed time: {elapsed_time}")
+            si = 0
+            expected_indices = -1 * np.ones((n_items, n_per_thread + 1), dtype=int)
+            for i in range(n_items):
+                ei = n_per_thread + (1 if n_mod > i else 0)
+                expected_indices[i, :ei] = range(si, si + ei)
+                si += ei        
 
-            raise a
+            # Find the obvious examples first.
+            elapsed_time_pattern = "ellapsed time:\s+(?P<time>[{0-9}|.]+)\s*s?\s*"
+            next_object_pattern = "next object #\s+(?P<index_plus_one>[0-9]+)"
 
-    '''
-    
-In [74]: !grep None stdout | head -n 30 | grep None | awk '{print $1}' | sort
-1
-104
-109
-114
-119
-124
-129
-13
-139
-144
-149
-154
-159
-164
-19
-25
-31
-37
-43
-49
-59
-64
-69
-7
-74
-79
-84
-89
-94
-99
+            t_elapsed_per_thread = np.nan * np.ones(expected_indices.shape)
 
-In [75]: !grep next stdout | head -n 30 | awk '{print $4}' | sort
-1
-104
-109
-114
-119
-124
-129
-13
-134
-139
-144
-149
-154
-159
-164
-19
-25
-31
-37
-43
-49
-54
-59
-64
-69
-7
-74
-79
-89
-94
+            matcher = re.finditer(elapsed_time_pattern, process_stdout)
+            t_load_grid, = next(matcher).groups()
+            t_load_grid = float(t_load_grid)
 
-In [76]: !pwd
-/scratch/general/nfs1/u6020307/pbs/20230716_ipl3_1.1/ASPCAP-100/coarse/GKd_b
+            unassigned = []
+            for match in matcher:
+                elapsed_time, = match.groups()
+                si, ei = match.span()
+                try:
+                    oi = process_stdout[ei:].index("\n")
+                except ValueError:
+                    continue
+                next_object_match = re.match(next_object_pattern, process_stdout[ei:ei+oi])
+                if next_object_match:
+                    next_object, = next_object_match.groups()
+                    i, j = np.where(expected_indices == (int(next_object) - 1 - 1)) # -1 for zero indexing, -1 to reference the object that was analysed
+                    t_elapsed_per_thread[i, j] = float(elapsed_time)
+                else:
+                    # This usually happens when it is the last of an assigned set
+                    unassigned.append((si, ei, elapsed_time))            
 
-    '''
+            col = np.searchsorted(~np.isfinite(t_elapsed_per_thread[-1]), True)
+            row = np.searchsorted(~np.isfinite(t_elapsed_per_thread[:, col]), True)
 
-    raise a
+            for si, ei, elapsed_time in unassigned:
+                t_elapsed_per_thread[row, col] = elapsed_time
+                row += 1
+                if row >= n_items:
+                    row, col = (0, col + 1)
 
+            # We want to compute the time taken per spectrum, not the time elapsed.
+            t_elapsed_per_spectrum = np.nan * np.ones(n_obj)
+            for i in range(n_obj):
+                (j, ), (k, ) = np.where(expected_indices == i)
 
-    # There are many ways to match up the elapsed time per object. Some are more explicit
-    # than others, but to require a more explicit matching means always depending on less
-    # implicit circumstances anyways.
-    elapsed_time_per_spectrum = np.nan * np.ones(n_obj)
-    for index, elapsed_time in zip(object_indices, time_elapsed_unordered):
-        elapsed_time_per_spectrum[index] = elapsed_time
+                # Subtract the load time from the first time per thread, or the time since last spectrum 
+                offset = t_elapsed_per_thread[j, k - 1] if k > 0 else t_load_grid
+                t_elapsed_per_spectrum[i] = t_elapsed_per_thread[j, k] - offset
 
-    time_per_spectrum = np.nan * np.ones(n_obj)
-    idx = np.sort(object_indices[:n_threads])
-    for si, ei in np.hstack([0, np.repeat(idx[1:], 2), n_obj]).reshape((-1, 2)):
-        time_per_spectrum[si:ei] = np.diff(
-            np.hstack([time_load, elapsed_time_per_spectrum[si:ei]])
-        )
-
-    L, M = (len(time_elapsed_unordered), len(object_indices))
-    if M < n_obj:
-        log.warning(
-            f"Could not find all object indices from FERRE stdout: expected {n_obj} found {M}"
-        )
-    if L < n_obj:
-        log.warning(
-            f"Could not find all elapsed times from FERRE stdout: expected {n_obj} found {L}"
-        )
-
-    return dict(
-        ferre_time_load_grid=time_load,
-        ferre_time_elapsed=time_per_spectrum,
-        object_indices=object_indices,
-        time_elapsed_unordered=time_elapsed_unordered,
-        n_threads=n_threads,
-        n_obj=n_obj,
-    )
+            return dict(
+                t_load_grid=t_load_grid,
+                t_elapsed_per_spectrum=t_elapsed_per_spectrum,
+                n_threads=n_threads,
+                n_obj=n_obj,
+                relative_input_nml_path=relative_input_nml_path
+            )

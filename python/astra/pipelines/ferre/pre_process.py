@@ -25,7 +25,7 @@ def pre_process_ferre(
     initial_c_m: Iterable[float] = None,
     initial_n_m: Iterable[float] = None,
     initial_flags: Iterable[str] = None,
-    upstream_id: Iterable[int] = None,
+    upstream_pk: Iterable[int] = None,
     frozen_parameters: Optional[dict] = None,
     interpolation_order: int = 3,
     weight_path: Optional[str] = None,
@@ -46,7 +46,7 @@ def pre_process_ferre(
     f_access: int = 0,
     f_format: int = 1,
     ferre_kwds: Optional[dict] = None,
-    n_threads: int = 32,
+    n_threads: int = 42,
     bad_pixel_flux_value: float = 1e-4,
     bad_pixel_error_value: float = 1e10,
     skyline_sigma_multiplier: float = 100,
@@ -56,7 +56,7 @@ def pre_process_ferre(
     write_input_pixel_arrays=True,
     **kwargs
 ):
-
+    
     if kwargs:
         log.warning(f"astra.pipelines.ferre.pre_process.pre_process ignoring kwargs: {kwargs}")
 
@@ -98,16 +98,10 @@ def pre_process_ferre(
             control_kwds[key] = prefix + control_kwds[key]
 
     pwd = expand_path(pwd)
-    os.makedirs(pwd, exist_ok=True)
     log.info(f"FERRE working directory: {pwd}")
 
     control_kwds_formatted = utils.format_ferre_control_keywords(control_kwds)
     log.info(f"FERRE control keywords:\n{control_kwds_formatted}")
-
-
-    # Write the control file        
-    with open(os.path.join(pwd, "input.nml"), "w") as fp:
-        fp.write(control_kwds_formatted)       
 
     # Construct mask to match FERRE model grid.
     chip_wavelengths = tuple(map(utils.wavelength_array, segment_headers))
@@ -123,7 +117,7 @@ def pre_process_ferre(
         c_m=values_or_cycle_none(initial_c_m),
         n_m=values_or_cycle_none(initial_n_m),
         initial_flags=values_or_cycle_none(initial_flags),
-        upstream_id=values_or_cycle_none(upstream_id)
+        upstream_pk=values_or_cycle_none(upstream_pk)
     ))
 
     # Retrict to the pixels within the model wavelength grid.
@@ -155,7 +149,7 @@ def pre_process_ferre(
                 continue            
 
             try:
-                pixel_flags = spectrum.pixel_flags
+                pixel_flags = np.copy(spectrum.pixel_flags)
             except AttributeError:
                 warnings.warn(f"At least one spectrum has no pixel_flags attribute")
 
@@ -179,12 +173,16 @@ def pre_process_ferre(
             batch_flux.append(flux[mask])
             batch_e_flux.append(e_flux[mask])
 
-        initial_flags = initial_parameters.pop("initial_flags")
-        upstream_id = initial_parameters.pop("upstream_id")
+        # make the initial flags 0 if None is given
+        initial_flags = initial_parameters.pop("initial_flags") or 0
+        upstream_pk = initial_parameters.pop("upstream_pk")
 
-        batch_names.append(utils.get_ferre_spectrum_name(index, spectrum.source_id, spectrum.spectrum_id, initial_flags, upstream_id))
+        batch_names.append(utils.get_ferre_spectrum_name(index, spectrum.source_pk, spectrum.spectrum_pk, initial_flags, upstream_pk))
         batch_initial_parameters.append(initial_parameters)
         index += 1
+
+    if not batch_initial_parameters:
+        return (pwd, 0, skipped)
 
     # Convert list of dicts of initial parameters to array.
     batch_initial_parameters_array = utils.validate_initial_and_frozen_parameters(
@@ -194,6 +192,12 @@ def pre_process_ferre(
         clip_initial_parameters_to_boundary_edges=True,
         clip_epsilon_percent=1,
     )
+    # Create directory and write the control file        
+    os.makedirs(pwd, exist_ok=True)
+    with open(os.path.join(pwd, "input.nml"), "w") as fp:
+        fp.write(control_kwds_formatted)       
+
+
     # hack: we do basename here in case we wrote the prefix to PFILE for the abundances run
     with open(os.path.join(pwd, os.path.basename(control_kwds["pfile"])), "w") as fp:
         for name, point in zip(batch_names, batch_initial_parameters_array):

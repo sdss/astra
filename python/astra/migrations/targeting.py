@@ -9,6 +9,8 @@ def migrate_carton_assignments_to_bigbitfield(
 ):
     from astra.migrations.sdss5db.targetdb import Target, CartonToTarget, Carton
 
+    raise RuntimeError
+
     # Retrieve sources which have gaia identifiers but not astrometry
     q = (
         Source

@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from glob import glob
+from tqdm import tqdm
 from astra import task
 from astra.models.spectrum import Spectrum
 from astra.models.aspcap import FerreCoarse
@@ -10,6 +11,7 @@ from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
 from astra.pipelines.ferre.utils import (execute_ferre, parse_header_path, read_ferre_headers, clip_initial_guess)
 from astra.pipelines.aspcap.utils import (approximate_log10_microturbulence, get_input_nml_paths, yield_suitable_grids)
+from astra.pipelines.aspcap.initial import get_initial_guesses
 
 #from astra.tools.continuum import Continuum, Scalar
 
@@ -57,7 +59,7 @@ def coarse_stellar_parameters(
         weight_path,
         **kwargs
     )
-
+    
     # Execute ferre.
     job_ids, executions = (
         FerreOperator(
@@ -112,20 +114,24 @@ def pre_coarse_stellar_parameters(
     )
 
     # Create the FERRE files for each execution.
+    skipped_spectra = []
     for kwd in ferre_kwds:
         pwd, n_obj, skipped = pre_process_ferre(**kwd)
-        for spectrum in skipped:
-            yield FerreCoarse(
-                source_id=spectrum.source_id,
-                spectrum_id=spectrum.spectrum_id,
-                flag_spectrum_io_error=True
-            )
+        skipped_spectra.extend(skipped)
+    
+    yield ... # tell Astra that all the work up until now has been in overheads
+    for spectrum in skipped_spectra:
+        yield FerreCoarse(
+            source_pk=spectrum.source_pk,
+            spectrum_pk=spectrum.spectrum_pk,
+            flag_spectrum_io_error=True
+        )
 
     # Create database entries for those with no initial guess.
     for spectrum in spectra_with_no_initial_guess:
         yield FerreCoarse(
-            source_id=spectrum.source_id,
-            spectrum_id=spectrum.spectrum_id,
+            source_pk=spectrum.source_pk,
+            spectrum_pk=spectrum.spectrum_pk,
             flag_no_suitable_initial_guess=True,
         )
 
@@ -148,27 +154,39 @@ def post_coarse_stellar_parameters(parent_dir, **kwargs) -> Iterable[FerreCoarse
             yield result
 
 
-def penalize_coarse_stellar_parameter_result(result: FerreCoarse):
+def penalize_coarse_stellar_parameter_result(result: FerreCoarse, warn_multiplier=5, bad_multiplier=10, fail_multiplier=20, cool_star_in_gk_grid_multiplier=10):
     """
     Penalize the coarse stellar parameter result if it is not a good fit.
+
+    This follows the same logic from DR17 (see  https://github.com/sdss/apogee/blob/e134409dc14b20f69e68a0d4d34b2c1b5056a901/python/apogee/aspcap/aspcap.py#L655-L664 )
+    with additional penalties if FERRE actually failed (e.g., returned a -9999 error), which would usually only happen if the end result was actually on the very edge
+    of the grid.
     """
 
     # Penalize GK-esque things at cool temperatures.
-    result.penalized_r_chi_sq = 0 + result.r_chi_sq
+    result.penalized_rchi2 = 0 + result.rchi2
     if result.teff < 3900 and "GK_200921" in result.header_path:
-        result.penalized_r_chi_sq += np.log10(10)
-    
+        result.penalized_rchi2 *= cool_star_in_gk_grid_multiplier
+        
     if result.flag_logg_grid_edge_warn:
-        result.penalized_r_chi_sq += np.log10(5)
+        result.penalized_rchi2 *= warn_multiplier
 
     if result.flag_teff_grid_edge_warn:
-        result.penalized_r_chi_sq += np.log10(5)
+        result.penalized_rchi2 *= warn_multiplier
 
     if result.flag_logg_grid_edge_bad:
-        result.penalized_r_chi_sq += np.log10(5)
+        result.penalized_rchi2 *= bad_multiplier
 
     if result.flag_teff_grid_edge_bad:
-        result.penalized_r_chi_sq += np.log10(5)
+        result.penalized_rchi2 *= bad_multiplier
+
+    # Add penalization terms for if FERRE failed.
+    if result.flag_teff_ferre_fail:
+        result.penalized_rchi2 *= fail_multiplier
+    
+    if result.flag_logg_ferre_fail:
+        result.penalized_rchi2 *= fail_multiplier
+    
     return None
 
         
@@ -185,7 +203,7 @@ def plan_coarse_stellar_parameters(
     """
 
     if initial_guess_callable is None:
-        initial_guess_callable = initial_guesses
+        initial_guess_callable = get_initial_guesses
 
     all_headers = {}
     for header_path in read_ferre_header_paths(header_paths):
@@ -198,13 +216,13 @@ def plan_coarse_stellar_parameters(
     )
 
     all_kwds = []
-    spectrum_ids_with_at_least_one_initial_guess = set()
-    for spectrum, input_initial_guess in initial_guess_callable(spectra):
+    spectrum_primary_keys_with_at_least_one_initial_guess = set()
+    for spectrum, input_initial_guess in tqdm(initial_guess_callable(spectra), total=0, desc="Initial guesses"):
 
         n_initial_guesses = 0
         for strict in (True, False):
             for header_path, meta, headers in yield_suitable_grids(all_headers, strict=strict, **input_initial_guess):
-                spectrum_ids_with_at_least_one_initial_guess.add(spectrum.spectrum_id)
+                spectrum_primary_keys_with_at_least_one_initial_guess.add(spectrum.spectrum_pk)
 
                 initial_guess = clip_initial_guess(input_initial_guess, headers)
 
@@ -248,7 +266,7 @@ def plan_coarse_stellar_parameters(
                 centered_initial_guess.update(teff=teff, logg=logg)
 
                 for header_path, meta, headers in yield_suitable_grids(all_headers, strict=True, **centered_initial_guess):
-                    spectrum_ids_with_at_least_one_initial_guess.add(spectrum.spectrum_id)                    
+                    spectrum_primary_keys_with_at_least_one_initial_guess.add(spectrum.spectrum_pk)                    
                     initial_guess = clip_initial_guess(centered_initial_guess, headers)
 
                     frozen_parameters = dict()
@@ -278,7 +296,7 @@ def plan_coarse_stellar_parameters(
     # Anything that has no suitable initial guess?
     spectra_with_no_initial_guess = [
         s for s in spectra \
-            if s.spectrum_id not in spectrum_ids_with_at_least_one_initial_guess
+            if s.spectrum_pk not in spectrum_primary_keys_with_at_least_one_initial_guess
     ]
     if spectra_with_no_initial_guess:
         log.warning(
@@ -289,6 +307,8 @@ def plan_coarse_stellar_parameters(
         )
         for s in spectra_with_no_initial_guess:
             log.warning(f"\s{s} ({s.path})")
+
+    log.info(f"Processing {len(spectrum_primary_keys_with_at_least_one_initial_guess)} unique spectra")
 
     # Bundle them together into executables based on common header paths.
     header_paths = list(set([ea["header_path"] for ea in all_kwds]))
@@ -331,17 +351,3 @@ def read_ferre_header_paths(header_paths):
     return header_paths
             
 
-def initial_guesses(spectrum: Spectrum) -> List[dict]:
-    """
-    Return a list of initial guesses for a spectrum.
-    """
-
-    defaults = dict(
-        log10_v_sini=1.0,
-        c_m=0,
-        n_m=0,
-        alpha_m=0,
-        log10_v_micro=lambda logg, **_: 10**approximate_log10_microturbulence(logg)
-    )
-
-    raise NotImplementedError

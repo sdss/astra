@@ -1,13 +1,13 @@
-from inspect import isgeneratorfunction, getfullargspec
+from inspect import isgeneratorfunction
 from decorator import decorator
 from peewee import chunked, IntegrityError, SqliteDatabase
 from playhouse.sqlite_ext import SqliteExtDatabase
 from sdsstools.configuration import get_config
 
-from astra.utils import log, Timer, flatten
+from astra.utils import log, Timer
 
 NAME = "astra"
-__version__ = "0.4.0"
+__version__ = "0.4.3"
 
 @decorator
 def task(function, *args, **kwargs):
@@ -26,28 +26,54 @@ def task(function, *args, **kwargs):
     :Keyword Arguments:
         * *frequency* (``int``) --
           The number of seconds to wait before saving the results to the database (default: 300).        
+        * *result_frequency* (``int``) --
+          The number of results  to wait before saving the results to the database (default: 300).        
         * *batch_size* (``int``) --
           The number of rows to insert per batch (default: 1000).
         * *re_raise_exceptions* (``bool``) -- 
           If `True` (default), exceptions raised in the task will be raised. Otherwise, they will be logged and ignored.
     """
-    
+
     if not isgeneratorfunction(function):
         raise TypeError("Tasks must be generators that `yield` results.")
 
     frequency = kwargs.pop("frequency", 300)
-    batch_size = kwargs.pop("batch_size", 999)
+    result_frequency = kwargs.pop("result_frequency", 100_000)
+    batch_size = kwargs.pop("batch_size", 1000)
     re_raise_exceptions = kwargs.pop("re_raise_exceptions", True)
 
-    f = function(*args, **kwargs)
-
-    results = []
-    with Timer(f, frequency=frequency, attribute_name="t_elapsed") as timer:
+    n_results, n_results_since_last_check_point, results = (0, 0, [])
+    with Timer(
+        function(*args, **kwargs), 
+        frequency=frequency, 
+        attr_t_elapsed="t_elapsed",
+        attr_t_overhead="t_overhead",
+    ) as timer:
         while True:
             try:
                 result = next(timer)
-                results.append(result)
+                # `Ellipsis` has a special meaning to Astra tasks.
+                # It is a marker that tells the Astra timer that the interval spent so far is related
+                # to common overheads, not specifically to the calculations of one result.
+                if result is Ellipsis:
+                    continue
 
+                try:
+                    pk = getattr(result, result._meta.primary_key.name, None)
+                except:
+                    None
+                else:
+                    if pk is not None:
+                        # already saved from downstream task wrapper
+                        # TODO: should we save this?
+                        #result.save()
+
+                        yield result                        
+                    else:
+                        results.append(result)
+                        n_results += 1
+                        n_results_since_last_check_point += 1
+            
             except StopIteration:
                 break
 
@@ -57,18 +83,39 @@ def task(function, *args, **kwargs):
                     raise
             
             else:
-                if timer.check_point:
+                if timer.check_point or n_results_since_last_check_point >= result_frequency:
                     with timer.pause():
-                        _bulk_insert(results, batch_size, re_raise_exceptions)
+
+                        # Add estimated overheads to each result.
+                        timer.add_overheads(results)
+                        try:
+                            _bulk_insert(results, batch_size, re_raise_exceptions)
+                        except:
+                            log.exception(f"Exception trying to insert results to database:")
+                            if re_raise_exceptions:
+                                raise 
+
                         # We yield here (instead of earlier) because in SQLite the result won't have a
                         # returning ID if we yield earlier. It's fine in PostgreSQL, but we want to 
                         # have consistent behaviour across backends.
                         yield from results
                         log.debug(f"Yielded {len(results)} results")
-                        results = [] # avoid memory leak
+                        results = [] # avoid memory leak, which can happen if we are running
+                        n_results_since_last_check_point = 0
 
-    # Write any remaining results to the database.
-    _bulk_insert(results, batch_size, re_raise_exceptions)
+    # It is only at this point that we know:
+    # - how many results were created
+    # - what the total time elapsed was
+    # - what the true cost of overhead time was (before and after yielding results)
+    timer.add_overheads(results)
+    try:
+        # Write any remaining results to the database.
+        _bulk_insert(results, batch_size, re_raise_exceptions)
+    except:
+        log.exception(f"Exception trying to insert results to database:")
+        if re_raise_exceptions:
+            raise
+
     yield from results
 
 
@@ -83,10 +130,11 @@ def _bulk_insert(results, batch_size, re_raise_exceptions=False):
     :param batch_size:
         The batch size to use when creating results.
     """
-    log.debug(f"Bulk inserting {len(results)} into the database with batch size {batch_size}")
     if not results:
         return None
-    
+
+    log.info(f"Bulk inserting {len(results)} into the database with batch size {batch_size}")
+
     from astra.models.base import database
 
     model = results[0].__class__
@@ -103,9 +151,13 @@ def _bulk_insert(results, batch_size, re_raise_exceptions=False):
                 if _result.is_dirty():
                     results[i] = model.create(**_result.__data__)
         else:
-            with database.atomic():
-                model.bulk_create(results, batch_size=batch_size)
+            try:
+                with database.atomic():
+                    model.bulk_create(results, batch_size)
+            except:
+                raise
 
+                    
     except IntegrityError:
         log.exception(f"Integrity error when saving results to database.")
         # Save the entries to a pickle file so we can figure out what went wrong.
@@ -130,3 +182,25 @@ try:
     
 except FileNotFoundError:
     log.exception(f"No configuration file found for {NAME}:")
+
+
+'''
+class Foobar:
+
+    def __init__(self, i):
+        self.i = i
+
+@task
+def long_task(spectra):
+    log.info("in long_task")
+    from time import sleep
+    sleep(10)
+    yield ... 
+    for i in range(len(spectra)):
+        log.info(f"starting {i}")
+        sleep(i)
+        yield Foobar(i=i)
+    
+    yield ... 
+    sleep(5)
+'''

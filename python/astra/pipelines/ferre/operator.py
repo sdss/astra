@@ -2,6 +2,7 @@ import os
 import re
 import numpy as np
 import warnings
+import json
 from subprocess import Popen, PIPE
 from glob import glob
 from subprocess import check_output
@@ -48,7 +49,7 @@ CORE_TIME_COEFFICIENTS = {
 }
 
 
-def predict_ferre_core_time(grid, N, nov, pre_factor=2):
+def predict_ferre_core_time(grid, N, nov, pre_factor=1):
     """
     Predict the core-seconds required to analyze $N$ spectra with FERRE using the given grid.
 
@@ -78,6 +79,10 @@ def predict_ferre_core_time(grid, N, nov, pre_factor=2):
         - `sdGK`: 7 dimensions
         - `sdM`: 7 dimensions
     
+    :pre_factor: [optional]
+        An optional scaling term to use for time estimates. The true time can vary depending on
+        which nodes FERRE is executed on, and which directories are used to read or write to.
+        
     :returns:
         The estimated core-seconds needed to analyze the spectra.
     """
@@ -95,7 +100,6 @@ def has_partial_results(pwd, control_kwds=None):
         - a bool indicating whether partial results exist already;
         - a tuple of paths identified which indicate there are partial results.
     """
-
     pwd = expand_path(pwd)
     if control_kwds is None:
         control_kwds = parse_control_kwds(f"{pwd}/input.nml")
@@ -114,7 +118,7 @@ def has_partial_results(pwd, control_kwds=None):
     return (has_partial_results, paths)
     
 
-def partition(items, K, return_indices=False):
+def partition_items(items, K, return_indices=False):
     """
     Partition items into K semi-equal groups.
     """
@@ -190,57 +194,483 @@ def post_execution_interpolation(pwd, n_threads=128, f_access=1, epsilon=0.001):
     return None
 
 
-class FerreChaosMonkeyOperator:
+def load_balancer(
+    stage_dir,
+    job_name="ferre",
+    input_nml_wildmask="*/input*.nml",
+    slurm_kwds=None,
+    post_interpolate_model_flux=True,
+    partition=True,
+    overwrite=True,
+    n_threads=42,
+    max_nodes=0,
+    max_tasks_per_node=3,
+    balance_threads=False,
+    cpus_per_node=128,
+    t_load_estimate=300, # 5 minutes est to load grid
+    chaos_monkey=True,
+    full_output=False,
+):
 
-    def __init__(self, job_ids, executable="ferre_chaos_monkey", **kwargs):
-        # TODO: super
-        self.executable = executable
-        self.job_ids = tuple(map(int, flatten(job_ids)))
-        return None
+    slurm_kwds = slurm_kwds or DEFAULT_SLURM_KWDS
 
-    def feed(self):
+    input_basename = "input.nml"
+    stage_dir = expand_path(stage_dir)
 
-        processes = dict()
-        while True:            
-            queue = get_queue()
+    # Find all executable directories.
+    all_input_paths = glob(
+        os.path.join(
+        stage_dir,
+        input_nml_wildmask
+        )
+    )
+    nodes = max_nodes if max_nodes > 0 else 1
 
-            for jobid in set(self.job_ids).difference(processes):
-                job = queue[jobid]
-                if job["status"] == "R":
-                    log.info(f"Running FERRE chaos monkey on Slurm job {jobid}")
-                    processes[jobid] = Popen(
-                        ["srun", f"--jobid={jobid}", self.executable],
-                        stdin=PIPE,
-                        stdout=PIPE,
-                        stderr=PIPE
-                    )
+    is_input_list = lambda p: os.path.basename(p).lower() == "input_list.nml"
+
+    input_paths, spectra, core_seconds = ([], [], [])
+    for input_path in all_input_paths:
+
+        if is_input_list(input_path):
+            warnings.warn(f"No clever load balancing implemented for the abundance stage yet!")
+            log.info(f"Found list of executable FERRE input files: {input_path}")
+            with open(input_path, "r") as fp:
+                content = fp.readlines()
+                A = len(content)
+                rel_input_path = content[0].strip()                    
             
-            if len(processes) == len(self.job_ids):
-                break
-            sleep(5)
+            pwd = os.path.dirname(input_path)
+            rel_input_path = os.path.join(pwd, rel_input_path)
+            control_kwds = parse_control_kwds(rel_input_path)
 
-        return processes
+            N = A * wc(f"{pwd}/{control_kwds['FFILE']}")
+            nov, synthfile = (control_kwds["NOV"], control_kwds["SYNTHFILE(1)"])
+            grid = synthfile.split("/")[-2].split("_")[0]
+            t = predict_ferre_core_time(grid, N, nov)
 
-    def wait_until_finished(self, processes):
+        else:
+            log.info(f"Found executable FERRE input file: {input_path}")    
+            control_kwds = parse_control_kwds(input_path)
 
-        outputs = dict()
-        for jobid, process in processes.items():
-            outputs[jobid] = process.communicate()
-        return outputs
-
-    def execute(self, context=None):
-
-        log.info(f"Launching Ferre chaos monkey on slurm jobs {self.job_ids}")
+            # Check whether there are partial results
+            pwd = os.path.dirname(input_path)
+            partial_results, partial_result_paths = has_partial_results(pwd, control_kwds)
+            if partial_results:
+                if overwrite:
+                    log.warning(f"Partial results exist in {pwd}. Moving existing result files:")
+                    for path in partial_result_paths:
+                        os.rename(path, f"{path}.backup")
+                        log.info(f"\t{path} -> {path}.backup")
+                else:
+                    log.warning(f"Skipping over {pwd} because partial results exist in: {', '.join(partial_result_paths)}")
+                    continue
+            
+            N = wc(f"{pwd}/{control_kwds['PFILE']}")
+            nov, synthfile = (control_kwds["NOV"], control_kwds["SYNTHFILE(1)"])
+            grid = synthfile.split("/")[-2].split("_")[0]
+            t = predict_ferre_core_time(grid, N, nov)
         
-        monkey = self.wait_until_finished(self.feed())
+        input_paths.append(input_path)
+        spectra.append(N)
+        # Set the grid load time as a minimum estimate so that we don't get all small jobs partitioned to one node
+        core_seconds.append(max(t, t_load_estimate))
 
-        for jobid, (stdout, stderr) in monkey.items():
-            log.info(f"Job={jobid} stdout:\n{stdout}")
-            log.warning(f"Job={jobid} stderr:\n{stderr}")
-        
+    # Spread the approximate core-seconds over N nodes
+    core_seconds = np.array(core_seconds)
+    core_seconds_per_task = int(np.sum(core_seconds) / (nodes * max_tasks_per_node))
+
+    # Limit nodes to the number of spectra
+    tasks_needed = np.clip(np.round(core_seconds / core_seconds_per_task), 1, spectra).astype(int)
+
+    # if things have n_nodes_per_process > 1, split them:
+    total_spectra = np.sum(spectra)
+    if total_spectra == 0:
+        log.info(f"Found no spectra needing execution.")
+        log.info(f"Operator out.")
         return None
 
+    log.info(f"Found {total_spectra} spectra total for {nodes} nodes ({core_seconds_per_task/60:.0f} min/task)")
 
+    
+    parent_partitions, partitioned_input_paths, partitioned_core_seconds = ({}, [], [])
+    for n_tasks, input_path, n_spectra, n_core_seconds in zip(tasks_needed, input_paths, spectra, core_seconds):
+
+        if not partition or n_tasks == 1 or is_input_list(input_path): # don't partition the abundances.. too complex
+            log.info(f"Keeping FERRE job in {input_path} (with {n_spectra} spectra) as is")
+            partitioned_input_paths.append(input_path)
+            partitioned_core_seconds.append(n_core_seconds)
+
+        else:
+            # This is where we check if we can split by spectra, or just split by input nml files for abundances
+            log.info(f"Partitioning FERRE job in {input_path} into {n_tasks} tasks")
+            pwd = os.path.dirname(input_path)
+
+            # Partition it.
+            spectra_per_task = int(np.ceil(n_spectra / n_tasks))
+
+            # Split up each of the files.
+            basenames = ("flux.input", "e_flux.input", "parameter.input")
+            for basename in basenames:
+                check_output(["split", "-l", f"{spectra_per_task}", "-d", f"{pwd}/{basename}", f"{pwd}/{basename}"])
+            
+            actual_n_tasks = int(np.ceil(n_spectra / spectra_per_task))
+            for k in range(actual_n_tasks):
+                partitioned_pwd = os.path.join(f"{pwd}/partition_{k:0>2.0f}")
+                os.makedirs(partitioned_pwd, exist_ok=True)
+
+                # copy file
+                partitioned_input_path = f"{partitioned_pwd}/{input_basename}"
+                copyfile(f"{pwd}/{input_basename}", partitioned_input_path)
+
+                # move the relevant basename files
+                for basename in basenames:
+                    os.rename(f"{pwd}/{basename}{k:0>2.0f}", f"{partitioned_pwd}/{basename}")
+
+                if k == (actual_n_tasks - 1):
+                    f = (n_spectra % spectra_per_task) / n_spectra
+                else:
+                    f = spectra_per_task / n_spectra
+                
+                parent_partitions.setdefault(pwd, [])
+                parent_partitions[pwd].append(partitioned_pwd)
+                partitioned_input_paths.append(partitioned_input_path)
+                partitioned_core_seconds.append(f * n_core_seconds)
+    
+    # Partition by tasks, but chunk by node.
+    partitioned_core_seconds = np.array(partitioned_core_seconds)        
+    
+    if balance_threads:
+        longest_job_index = np.argmax(partitioned_core_seconds)
+        fractional_core_seconds = partitioned_core_seconds / np.sum(partitioned_core_seconds)
+        use_n_nodes = int(np.ceil(1/fractional_core_seconds[longest_job_index]))
+
+        node_indices = partition_items(
+            partitioned_core_seconds,
+            use_n_nodes,
+            return_indices=True
+        )
+        # Now sort each node chunk into tasks.
+        chunks = []
+        for node_index in node_indices:
+            task_indices = partition_items(
+                partitioned_core_seconds[node_index],
+                max_tasks_per_node,
+                return_indices=True
+            )
+            chunks.append([])
+            for task_index in task_indices:
+                chunks[-1].append(np.array(node_index)[task_index])
+
+    else:
+        chunks = chunked(
+            partition_items(
+                partitioned_core_seconds, 
+                nodes * max_tasks_per_node, 
+                return_indices=True,
+            ),
+            max_tasks_per_node
+        )
+
+    # For merging partitions afterwards
+    partitioned_pwds = flatten(parent_partitions.values())
+    output_basenames = ["stdout", "stderr", "rectified_model_flux.output", "parameter.output", "rectified_flux.output"]
+    if post_interpolate_model_flux:
+        output_basenames.append("model_flux.output")
+
+    slurm_jobs, executions, t_longest = ([], [], 0)
+    for i, node_indices in enumerate(chunks, start=1):
+        
+        log.info(f"Node {i}: {len(node_indices)} tasks")
+        
+        # TODO: set the number of threads by proportion of how many spectra in this task compared to others on this node
+        denominator = np.sum(partitioned_core_seconds[flatten(node_indices)])
+        
+        if balance_threads:
+            t_tasks = np.array([np.sum(partitioned_core_seconds[ni]) for ni in node_indices])
+            use_n_threads = np.ceil(np.clip(cpus_per_node * t_tasks / np.sum(t_tasks), 1, cpus_per_node)).astype(int)
+        else:
+            use_n_threads = [n_threads] * len(node_indices)
+
+        expect_ferre_executions_in_these_pwds, slurm_tasks, est_times = ([], [], [])
+        for j, (task_indices, n_threads) in enumerate(zip(node_indices, use_n_threads), start=1):
+
+            #int(max(
+            #    1,
+            #    (cpus_per_node * np.sum(partitioned_core_seconds[st_indices]) / denominator)
+            #))
+
+            est_time = np.clip(np.sum(partitioned_core_seconds[task_indices]) / n_threads, t_load_estimate, np.inf)
+
+            log.info(f"  {i}.{j}: {len(task_indices)} executions with {n_threads} threads. Estimated time is {est_time/60:.0f} min")
+
+            task_commands = []
+            for k, index in enumerate(task_indices, start=1):
+                
+                execution_commands = []
+
+                input_path = partitioned_input_paths[index]
+                cwd = os.path.dirname(input_path)
+                    
+                if is_input_list(input_path):
+                    flags = "-l "
+                    N = wc(f"{cwd}/flux.input")
+                    with open(input_path, "r") as fp:
+                        for rel_input_path in fp.readlines():
+                            if balance_threads:
+                                update_control_kwds(f"{cwd}/{rel_input_path}".rstrip(), "NTHREADS", n_threads)
+                                
+                            rel_pwd = os.path.dirname(f"{cwd}/{rel_input_path}")
+                            executions.append([
+                                f"{rel_pwd}/parameter.output",
+                                N, 
+                                0
+                            ])
+                else:
+                    flags = ""
+                    executions.append([
+                        f"{cwd}/parameter.output",
+                        wc(f"{cwd}/parameter.input"),
+                        0
+                    ])
+
+                    # Be sure to update the NTHREADS, just in case it was set at some dumb value (eg 1)
+                    update_control_kwds(f"{cwd}/input.nml", "NTHREADS", n_threads)
+                
+                command = f"ferre.x {flags}{os.path.basename(input_path)}"
+                expect_ferre_executions_in_these_pwds.append(cwd)
+                
+                execution_commands.append(f"cd {cwd}")
+                execution_commands.append(f"{command} > stdout 2> stderr")
+                execution_commands.append(f"ferre_timing . > timing.csv")
+                
+                if post_interpolate_model_flux:
+                    execution_commands.append(f"ferre_interpolate_unnormalized_model_flux {cwd} > post_execute_stdout 2> post_execute_stderr")
+                
+                # If it's a partition result, then append the results to the parent directory
+                if cwd in partitioned_pwds:
+                    # the parent directory is probably the ../, but let's check for sure
+                    for parent_dir, partition_dirs in parent_partitions.items():
+                        if cwd in partition_dirs:
+                            break
+                    else:
+                        raise RuntimeError(f"no parent dir found for {cwd}?")
+                    
+                    for basename in output_basenames:
+                        execution_commands.append(f"cat {cwd}/{basename} >> {parent_dir}/{basename}")
+
+                for command in execution_commands:
+                    log.info(f"    {i}.{j}.{k}: {command}")
+                task_commands.extend(execution_commands)
+                            
+            slurm_tasks.append(SlurmTask(task_commands))
+            est_times.append(est_time)
+
+
+        if chaos_monkey:
+            command = f"ferre_chaos_monkey -v {' '.join(expect_ferre_executions_in_these_pwds)}"
+            command += f" > {stage_dir}/monkey_{i:0>2.0f}.out 2> {stage_dir}/monkey_{i:0>2.0f}.err"
+            
+            slurm_tasks.append(SlurmTask([command]))
+            log.info(f"    {i}.{j+1}.1: {command}")
+
+
+        # Time for the node is the worst of individual tasks
+        t_node = np.max(est_times)
+        log.info(f"Node {i} estimated time is {t_node/60:.0f} min")
+        if t_node > t_longest:
+            t_longest = t_node
+            
+
+        slurm_job = SlurmJob(
+            slurm_tasks,
+            job_name,
+            node_index=i,
+            dir=stage_dir,
+            **slurm_kwds
+        )                
+        slurm_job.write()
+        slurm_jobs.append(slurm_job)
+
+
+    t_longest_no_balance = (t_load_estimate + np.max(core_seconds) / 32) # TODO
+    speedup = t_longest_no_balance/t_longest
+    log.info(f"Estimated time without load balancing: {t_longest_no_balance/60:.0f} min")
+    log.info(f"Estimated time for all jobs to complete: {t_longest/60:.0f} min (speedup {speedup:.0f}x), excluding wait time for jobs to start")
+
+    # Submit the slurm jobs.
+    if max_nodes == 0:
+        log.warning(f"Not using Slurm job submission system because `max_nodes` is 0!")
+        log.warning(f"Waiting 5 seconds before starting,...")
+        sleep(5)
+
+    log.info(f"Submitting jobs")
+    job_ids = []
+    for i, slurm_job in enumerate(slurm_jobs, start=1):
+        slurm_path = slurm_job.write()
+        if max_nodes == 0:
+            pid = Popen(["sh", slurm_path])
+            log.info(f"Started job {i} (process={pid}) at {slurm_path}")
+        else:
+            output = check_output(["sbatch", slurm_path]).decode("ascii")
+            job_id = int(output.split()[3])
+            log.info(f"Submitted slurm job {i} (jobid={job_id}) for {slurm_path}")
+            job_ids.append(job_id)
+
+    if max_nodes == 0:
+        log.warning(f"FERRE chaos monkey not set up to run on this node. Please run it yourself.")            
+
+    if full_output:
+        return (tuple(job_ids), executions)
+    else:
+        return tuple(job_ids)
+
+
+
+def monitor(
+    job_ids,
+    planned_executions,
+    show_progress=True,
+    refresh_interval=10,
+    chaos_monkey=False,    
+):
+
+    # Check progress.
+    log.info(f"Monitoring progress of the following FERRE execution directories:")
+
+    n_spectra, executions = (0, [])
+    for n_executions, e in enumerate(planned_executions, start=1):
+        executions.append(e)
+        n_spectra += e[1]
+        log.info(f"\t{os.path.dirname(e[0])}")
+
+    n_executions_done, last_updated = (0, time())
+    desc = lambda n_executions_done, n_executions, last_updated: f"FERRE ({n_executions_done}/{n_executions}; {(time() - last_updated)/60:.0f} min ago)"
+
+    tqdm_kwds = dict(
+        desc=desc(n_executions_done, n_executions, last_updated),
+        total=n_spectra, 
+        unit=" spectra", 
+        mininterval=refresh_interval
+    )
+    if not show_progress:
+        tqdm_kwds.update(disable=True)
+
+    # Get a parent folder from the executions so that we can put the FERRE chaos monkey logs somewhere.
+
+    dead_processes, warn_on_dead_processes, chaos_monkey_processes = ([], [], {})
+    with tqdm(**tqdm_kwds) as pb:
+        while True:
+            
+            # FLY MY PRETTIES!!!1
+            if chaos_monkey and len(chaos_monkey_processes) < len(job_ids):
+                queue = get_queue()
+                for job_id in set(job_ids).difference(chaos_monkey_processes):
+                    try:
+                        job = queue[job_id]                        
+                    except:
+                        log.warning(f"Job {job_id} does not appear in queue! Cannot launch FERRE chaos monkey.")
+                    else:
+                        if job["status"] == "R":
+                            log.info(f"Slurm job {job_id} has started. Launching FERRE chaos monkey on job {job_id}")
+                            # The `nohup` here *should* make sure the chaos monkey keeps running, even if the SSH
+                            # connection between the operator and the Slurm job is disconnected. But we need to
+                            # test this a bit more!
+                            chaos_monkey_processes[job_id] = Popen(
+                                ["srun", f"--jobid={job_id}", "nohup", "ferre_chaos_monkey"],
+                                stdin=PIPE,
+                                stdout=PIPE,
+                                stderr=PIPE
+                            )                        
+            
+            n_done_this_iteration = 0
+            for i, (output_path, n_input, n_done) in enumerate(executions):
+                if n_done >= n_input or output_path in dead_processes:
+                    continue
+                
+                absolute_path = expand_path(output_path)
+                if os.path.exists(absolute_path):
+                    n_now_done = wc(absolute_path)
+                else:
+                    n_now_done = 0
+                n_new = n_now_done - n_done
+                n_done_this_iteration += n_new
+                
+                if n_new > 0:
+                    last_updated = time()
+                    pb.update(n_new)
+                    executions[i][-1] = n_now_done
+                    pb.set_description(desc(n_executions_done, n_executions, last_updated))
+                    pb.refresh()
+                
+                else:
+                    # Check for evidence of the chaos monkey
+                    if os.path.exists(os.path.join(os.path.dirname(absolute_path), "killed")):
+                        dead_processes.append(output_path)
+                        n_executions_done += 1
+                        last_updated = time()
+                        pb.set_description(desc(n_executions_done, n_executions, last_updated))
+                        pb.refresh()
+                    else:
+                        # Check stderr for segmentation faults.
+                        stderr_path = os.path.join(os.path.dirname(absolute_path), "stderr")
+                        try:
+                            with open(stderr_path, "r") as fp:
+                                stderr = fp.read()
+                        except:
+                            None
+                        else:
+                            # Don't die on deaths.. we expect the chaos monkey to restart it.
+                            if ("error" in stderr or "Segmentation fault" in stderr):
+                                warn_on_dead_processes.append(output_path)
+                            '''
+                                dead_processes.append(output_path)
+                                n_executions_done += 1
+                                last_updated = time()
+                                pb.set_description(desc(n_executions_done, n_executions, last_updated))
+                                pb.refresh()
+                            '''
+
+                if n_now_done >= n_input:
+                    last_updated = time()
+                    n_executions_done += 1
+                    pb.set_description(desc(n_executions_done, n_executions, last_updated))
+                    pb.refresh()
+                                
+            if n_executions_done == n_executions:
+                pb.refresh()
+                break
+
+            # If FERRE is being executed by Slurm jobs, then they should already be in the queue before we start.
+            if n_done_this_iteration == 0 and job_ids:
+                jobs_in_queue = set(job_ids).intersection(get_queue())
+                if len(jobs_in_queue) == 0:
+                    log.warning(f"No Slurm jobs left in queue ({job_ids}). Finishing.")
+                    break                
+
+            sleep(refresh_interval)
+
+    if warn_on_dead_processes:
+        log.warning(f"Segmentation faults or chaos monkey deaths detected in following executions (these may have been restarted):")
+        for output_path in warn_on_dead_processes:
+            log.warning(f"\t{os.path.dirname(output_path)}")
+
+    if job_ids:# and pb.n >= n_spectra:
+        log.info(f"Checking that all Slurm jobs are complete")
+        while True:
+            queue = get_queue()
+            for job_id in job_ids:
+                if job_id in queue:
+                    log.info(f"\tJob {job_id} has status {queue[job_id]['status']}")
+                    break
+            else:
+                log.info("All Slurm jobs complete.")
+                break
+
+            sleep(5)
+        
+    log.info(f"Operator out.")
+    return None
+    
 
 class FerreOperator:
     def __init__(
@@ -299,270 +729,19 @@ class FerreOperator:
 
 
     def execute(self, context=None):
-
-        t_load_estimate = 5 * 60 # 5 minutes est to load grid
-
-        input_basename = "input.nml"
-
-        # Find all executable directories.
-        all_input_paths = glob(
-            os.path.join(
-            expand_path(self.stage_dir),
-            self.input_nml_wildmask
-            )
+        return load_balancer(
+            self.stage_dir,
+            slurm_kwds=self.slurm_kwds,
+            job_name=self.job_name,
+            input_nml_wildmask=self.input_nml_wildmask,
+            post_interpolate_model_flux=self.post_interpolate_model_flux,
+            overwrite=self.overwrite,
+            n_threads=self.n_threads,
+            max_nodes=self.max_nodes,
+            max_tasks_per_node=self.max_tasks_per_node,
+            cpus_per_node=self.cpus_per_node,
+            full_output=True         
         )
-        nodes = self.max_nodes if self.max_nodes > 0 else 1
-
-        is_input_list = lambda p: os.path.basename(p).lower() == "input_list.nml"
-
-        input_paths, spectra, core_seconds = ([], [], [])
-        for input_path in all_input_paths:
-
-            if is_input_list(input_path):
-                warnings.warn(f"No clever load balancing implemented for the abundance stage yet!")
-                log.info(f"Found list of executable FERRE input files: {input_path}")
-                with open(input_path, "r") as fp:
-                    content = fp.readlines()
-                    A = len(content)
-                    rel_input_path = content[0].strip()                    
-                
-                pwd = os.path.dirname(input_path)
-                rel_input_path = os.path.join(pwd, rel_input_path)
-                control_kwds = parse_control_kwds(rel_input_path)
-
-                N = A * wc(f"{pwd}/{control_kwds['FFILE']}")
-                nov, synthfile = (control_kwds["NOV"], control_kwds["SYNTHFILE(1)"])
-                grid = synthfile.split("/")[-2].split("_")[0]
-                t = predict_ferre_core_time(grid, N, nov)
-
-            else:
-                log.info(f"Found executable FERRE input file: {input_path}")    
-                control_kwds = parse_control_kwds(input_path)
-
-                # Check whether there are partial results
-                pwd = os.path.dirname(input_path)
-                partial_results, partial_result_paths = has_partial_results(pwd, control_kwds)
-                if partial_results:
-                    if self.overwrite:
-                        log.warning(f"Partial results exist in {pwd}. Moving existing result files:")
-                        for path in partial_result_paths:
-                            os.rename(path, f"{path}.backup")
-                            log.info(f"\t{path} -> {path}.backup")
-                    else:
-                        log.warning(f"Skipping over {pwd} because partial results exist in: {', '.join(partial_result_paths)}")
-                        continue
-                
-                N = wc(f"{pwd}/{control_kwds['PFILE']}")
-                nov, synthfile = (control_kwds["NOV"], control_kwds["SYNTHFILE(1)"])
-                grid = synthfile.split("/")[-2].split("_")[0]
-                t = predict_ferre_core_time(grid, N, nov)
-            
-            input_paths.append(input_path)
-            spectra.append(N)
-            core_seconds.append(t)
-
-        # Spread the approximate core-seconds over N nodes
-        core_seconds = np.array(core_seconds)
-        core_seconds_per_task = int(np.sum(core_seconds) / (nodes * self.max_tasks_per_node))
-
-        # Limit nodes to the number of spectra
-        tasks_needed = np.clip(np.round(core_seconds / core_seconds_per_task), 1, spectra).astype(int)
-
-        # if things have n_nodes_per_process > 1, split them:
-        total_spectra = np.sum(spectra)
-        if total_spectra == 0:
-            log.info(f"Found no spectra needing execution.")
-            log.info(f"Operator out.")
-            return None
-
-        log.info(f"Found {total_spectra} spectra total for {nodes} nodes ({core_seconds_per_task/60:.0f} min/task)")
-
-        parent_partitions, partitioned_input_paths, partitioned_core_seconds = ({}, [], [])
-        for n_tasks, input_path, n_spectra, n_core_seconds in zip(tasks_needed, input_paths, spectra, core_seconds):
-
-            if n_tasks == 1 or is_input_list(input_path): # don't partition the abundances.. too complex
-                log.info(f"Keeping FERRE job in {input_path} (with {n_spectra} spectra) as is")
-                partitioned_input_paths.append(input_path)
-                partitioned_core_seconds.append(n_core_seconds)
-
-            else:
-                # This is where we check if we can split by spectra, or just split by input nml files for abundances
-                log.info(f"Partitioning FERRE job in {input_path} into {n_tasks} tasks")
-                pwd = os.path.dirname(input_path)
-
-                # Partition it.
-                spectra_per_task = int(np.ceil(n_spectra / n_tasks))
-
-                # Split up each of the files.
-                basenames = ("flux.input", "e_flux.input", "parameter.input")
-                for basename in basenames:
-                    check_output(["split", "-l", f"{spectra_per_task}", "-d", f"{pwd}/{basename}", f"{pwd}/{basename}"])
-                
-                actual_n_tasks = int(np.ceil(n_spectra / spectra_per_task))
-                for k in range(actual_n_tasks):
-                    partitioned_pwd = os.path.join(f"{pwd}/partition_{k:0>2.0f}")
-                    os.makedirs(partitioned_pwd, exist_ok=True)
-
-                    # copy file
-                    partitioned_input_path = f"{partitioned_pwd}/{input_basename}"
-                    copyfile(f"{pwd}/{input_basename}", partitioned_input_path)
-
-                    # move the relevant basename files
-                    for basename in basenames:
-                        os.rename(f"{pwd}/{basename}{k:0>2.0f}", f"{partitioned_pwd}/{basename}")
-
-                    if k == (actual_n_tasks - 1):
-                        f = (n_spectra % spectra_per_task) / n_spectra
-                    else:
-                        f = spectra_per_task / n_spectra
-                    
-                    parent_partitions.setdefault(pwd, [])
-                    parent_partitions[pwd].append(partitioned_pwd)
-                    partitioned_input_paths.append(partitioned_input_path)
-                    partitioned_core_seconds.append(f * n_core_seconds)
-        
-        # Partition by tasks, but chunk by node.
-        partitioned_core_seconds = np.array(partitioned_core_seconds)        
-        
-        chunks = chunked(
-            partition(
-                partitioned_core_seconds, 
-                nodes * self.max_tasks_per_node, 
-                return_indices=True,
-            ),
-            self.max_tasks_per_node
-        )
-
-        # For merging partitions afterwards
-        partitioned_pwds = flatten(parent_partitions.values())
-        output_basenames = ["stdout", "stderr", "rectified_model_flux.output", "parameter.output", "rectified_flux.output"]
-        if self.post_interpolate_model_flux:
-            output_basenames.append("model_flux.output")
-
-        slurm_jobs, executions, t_longest = ([], [], 0)
-        for i, node_indices in enumerate(chunks, start=1):
-            
-            log.info(f"Node {i}: {len(node_indices)} tasks")
-            
-            # TODO: set the number of threads by proportion of how many spectra in this task compared to others on this node
-            denominator = np.sum(partitioned_core_seconds[flatten(node_indices)])
-            
-            slurm_tasks, est_times = ([], [])
-            for j, task_indices in enumerate(node_indices, start=1):
-
-                #int(max(
-                #    1,
-                #    (self.cpus_per_node * np.sum(partitioned_core_seconds[st_indices]) / denominator)
-                #))
-                est_time = np.sum(partitioned_core_seconds[task_indices]) / self.n_threads + t_load_estimate
-
-                log.info(f"  {i}.{j}: {len(task_indices)} executions with {self.n_threads} threads. Estimated time is {est_time/60:.0f} min")
-
-                task_commands = []
-                for k, index in enumerate(task_indices, start=1):
-                    
-                    execution_commands = []
-
-                    input_path = partitioned_input_paths[index]
-                    cwd = os.path.dirname(input_path)
-                        
-                    if is_input_list(input_path):
-                        flags = "-l "
-                        N = wc(f"{cwd}/flux.input")
-                        with open(input_path, "r") as fp:
-                            for rel_input_path in fp.readlines():
-                                rel_pwd = os.path.dirname(f"{cwd}/{rel_input_path}")
-                                executions.append([
-                                    f"{rel_pwd}/parameter.output",
-                                    N, 
-                                    0
-                                ])
-                    else:
-                        flags = ""
-                        executions.append([
-                            f"{cwd}/parameter.output",
-                            wc(f"{cwd}/parameter.input"),
-                            0
-                        ])
-                        # Be sure to update the NTHREADS, just in case it was set at some dumb value (eg 1)
-                        update_control_kwds(f"{cwd}/input.nml", "NTHREADS", self.n_threads)
-                    
-                    command = f"ferre.x {flags}{os.path.basename(input_path)}"
-                    execution_commands.append(f"cd {cwd}")
-                    execution_commands.append(f"{command} > stdout 2> stderr")
-                    if self.post_interpolate_model_flux:
-                        execution_commands.append(f"ferre_interpolate_unnormalized_model_flux {cwd} > post_execute_stdout 2> post_execute_stderr")
-                    
-                    # If it's a partition result, then append the results to the parent directory
-                    if cwd in partitioned_pwds:
-                        # the parent directory is probably the ../, but let's check for sure
-                        for parent_dir, partition_dirs in parent_partitions.items():
-                            if cwd in partition_dirs:
-                                break
-                        else:
-                            raise RuntimeError(f"no parent dir found for {cwd}?")
-                        
-                        for basename in output_basenames:
-                            execution_commands.append(f"cat {cwd}/{basename} >> {parent_dir}/{basename}")
-
-                    for command in execution_commands:
-                        log.info(f"    {i}.{j}.{k}: {command}")
-                    task_commands.extend(execution_commands)
-                                
-                slurm_tasks.append(SlurmTask(task_commands))
-                est_times.append(est_time)
-
-            #if self.feed_chaos_monkey:
-            #    execution_commands = ["ferre_chaos_monkey"]
-            #    slurm_tasks.append(SlurmTask(execution_commands))
-            #    for k, command in enumerate(execution_commands, start=1):
-            #        log.info(f"    {i}.{1+j}.{k}: {command}")
-
-            # Time for the node is the worst of individual tasks
-            t_node = np.max(est_times)
-            log.info(f"Node {i} estimated time is {t_node/60:.0f} min")
-            if t_node > t_longest:
-                t_longest = t_node
-
-            slurm_job = SlurmJob(
-                slurm_tasks,
-                self.job_name,
-                node_index=i,
-                dir=self.stage_dir,
-                **self.slurm_kwds
-            )                
-            slurm_job.write()
-            slurm_jobs.append(slurm_job)
-
-
-        t_longest_no_balance = (t_load_estimate + np.max(core_seconds) / 32) # TODO
-        speedup = t_longest_no_balance/t_longest
-        log.info(f"Estimated time without load balancing: {t_longest_no_balance/60:.0f} min")
-        log.info(f"Estimated time for all jobs to complete: {t_longest/60:.0f} min (speedup {speedup:.0f}x), excluding wait time for jobs to start")
-
-        # Submit the slurm jobs.
-        if self.max_nodes == 0:
-            log.warning(f"Not using Slurm job submission system because `max_nodes` is 0!")
-            log.warning(f"Waiting 5 seconds before starting,...")
-            sleep(5)
-
-        log.info(f"Submitting jobs")
-        job_ids = []
-        for i, slurm_job in enumerate(slurm_jobs):
-            slurm_path = slurm_job.write()
-            if self.max_nodes == 0:
-                pid = Popen(["sh", slurm_path])
-                log.info(f"Started job {i} (process={pid}) at {slurm_path}")
-            else:
-                output = check_output(["sbatch", slurm_path]).decode("ascii")
-                job_id = int(output.split()[3])
-                log.info(f"Submitted slurm job {i} (jobid={job_id}) for {slurm_path}")
-                job_ids.append(job_id)
-
-        if self.max_nodes == 0:
-            log.warning(f"FERRE chaos monkey not set up to run on this node. Please run it yourself.")            
-
-        return (tuple(job_ids), executions)
 
 
 class FerreMonitoringOperator:
@@ -573,7 +752,7 @@ class FerreMonitoringOperator:
         executions,
         show_progress=True,
         refresh_interval=10,
-        chaos_monkey=True,
+        chaos_monkey=False,
         **kwargs
     ):
         self.job_ids = job_ids
@@ -585,128 +764,4 @@ class FerreMonitoringOperator:
 
     def execute(self, context=None):
 
-        # Check progress.
-        log.info(f"Monitoring progress of the following FERRE execution directories:")
-
-        n_spectra, executions = (0, [])
-        for n_executions, e in enumerate(self.executions, start=1):
-            executions.append(e)
-            n_spectra += e[1]
-            log.info(f"\t{os.path.dirname(e[0])}")
-
-        n_executions_done, last_updated = (0, time())
-        desc = lambda n_executions_done, n_executions, last_updated: f"FERRE ({n_executions_done}/{n_executions}; {(time() - last_updated)/60:.0f} min ago)"
-
-        tqdm_kwds = dict(
-            desc=desc(n_executions_done, n_executions, last_updated),
-            total=n_spectra, 
-            unit=" spectra", 
-            mininterval=self.refresh_interval
-        )
-        if not self.show_progress:
-            tqdm_kwds.update(disable=True)
-
-        dead_processes, chaos_monkey_processes = ([], {})
-        with tqdm(**tqdm_kwds) as pb:
-            while True:
-                
-                # FLY MY PRETTIES!!!1
-                if self.chaos_monkey and len(chaos_monkey_processes) < len(self.job_ids):
-                    queue = get_queue()
-                    for job_id in set(self.job_ids).difference(chaos_monkey_processes):
-                        job = queue[job_id]                        
-                        if job["status"] == "R":
-                            log.info(f"Slurm job {job_id} has started. Launching FERRE chaos monkey on job {job_id}")
-                            chaos_monkey_processes[job_id] = Popen(
-                                ["srun", f"--jobid={job_id}", "ferre_chaos_monkey"],
-                                stdin=PIPE,
-                                stdout=PIPE,
-                                stderr=PIPE
-                            )                        
-                
-                n_done_this_iteration = 0
-                for i, (output_path, n_input, n_done) in enumerate(executions):
-                    if n_done >= n_input or output_path in dead_processes:
-                        continue
-                    
-                    absolute_path = expand_path(output_path)
-                    if os.path.exists(absolute_path):
-                        n_now_done = wc(absolute_path)
-                    else:
-                        n_now_done = 0
-                    n_new = n_now_done - n_done
-                    n_done_this_iteration += n_new
-                    
-                    if n_new > 0:
-                        last_updated = time()
-                        pb.update(n_new)
-                        executions[i][-1] = n_now_done
-                        pb.set_description(desc(n_executions_done, n_executions, last_updated))
-                        pb.refresh()
-                    
-                    else:
-                        # Check for evidence of the chaos monkey
-                        if os.path.exists(os.path.join(os.path.dirname(absolute_path), "killed")):
-                            dead_processes.append(output_path)
-                            n_executions_done += 1
-                            last_updated = time()
-                            pb.set_description(desc(n_executions_done, n_executions, last_updated))
-                            pb.refresh()
-                        else:
-                            # Check stderr for segmentation faults.
-                            stderr_path = os.path.join(os.path.dirname(absolute_path), "stderr")
-                            try:
-                                with open(stderr_path, "r") as fp:
-                                    stderr = fp.read()
-                            except:
-                                None
-                            else:
-                                if "error" in stderr or "Segmentation fault" in stderr:
-                                    dead_processes.append(output_path)
-                                    n_executions_done += 1
-                                    last_updated = time()
-                                    pb.set_description(desc(n_executions_done, n_executions, last_updated))
-                                    pb.refresh()
-
-                    if n_now_done >= n_input:
-                        last_updated = time()
-                        n_executions_done += 1
-                        pb.set_description(desc(n_executions_done, n_executions, last_updated))
-                        pb.refresh()
-                                    
-                if n_executions_done == n_executions:
-                    pb.refresh()
-                    break
-
-                # If FERRE is being executed by Slurm jobs, then they should already be in the queue before we start.
-                if n_done_this_iteration == 0 and self.job_ids:
-                    queue = get_queue()
-                    n_jobs_in_queue = [job_id in queue for job_id in self.job_ids]
-                    if n_jobs_in_queue == 0:
-                        log.warning(f"No Slurm jobs left in queue ({self.job_ids}). Finishing.")
-                        break                
-
-                sleep(self.refresh_interval)
-
-        if dead_processes:
-            log.warning(f"Segmentation faults or chaos monkey deaths detected in following executions:")
-            for output_path in dead_processes:
-                log.warning(f"\t{os.path.dirname(output_path)}")
-
-        if self.job_ids and pb.n >= n_spectra:
-            log.info(f"Checking that all Slurm jobs are complete")
-            while True:
-                queue = get_queue()
-                for job_id in self.job_ids:
-                    if job_id in queue:
-                        log.info(f"Job {job_id} has status {queue[job_id]['status']}")
-                        break
-                else:
-                    log.info("All Slurm jobs complete.")
-                    break
-
-                sleep(5)
-            
-        log.info(f"Operator out.")
-        return None
-    
+        return monitor(self.job_ids, self.executions, self.show_progress, self.refresh_interval, self.chaos_monkey)

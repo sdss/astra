@@ -1,0 +1,16 @@
+'LAMBDA_MIN:'  '{lambda_min:.3f}'
+'LAMBDA_MAX:'  '{lambda_max:.3f}'
+'LAMBDA_STEP:' '{lambda_delta:.3f}'
+'PURE-LTE:' '.true.'
+'SCATTFRAC:' '0.000'
+'MODELINPUT:' '{modelinput_basename}'
+'MARCS-FILE:' '{marcs_file_flag}'
+'MODELOPAC:' '{modelopac_basename}'
+'METALLICITY:'    '{metallicity:.3f}'
+'ALPHA/Fe   :'    '{alpha_fe:.3f}'
+'HELIUM     :'    '{helium_abundance:.2f}'
+'R-PROCESS  :'    '{r_process_abundance:.2f}'
+'S-PROCESS  :'    '{s_process_abundance:.2f}'
+'INDIVIDUAL ABUNDANCES:'   '{num_individual_abundances}'{individual_abundances_formatted}
+'XIFIX:' 'T'
+{microturbulence:.3f}
