@@ -1,10 +1,12 @@
 import numpy as np
+import datetime
 from peewee import (
     AutoField,
     FloatField,
     TextField,
     ForeignKeyField,
     BitField,
+    DateTimeField
 )
 
 from astra import __version__
@@ -14,24 +16,27 @@ from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
 
+from astra.glossary import Glossary
 
 class AstroNN(BaseModel, PipelineOutputMixin):
 
     """A result from the AstroNN pipeline."""
 
-    source_id = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
-    spectrum_id = ForeignKeyField(
+    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
+    spectrum_pk = ForeignKeyField(
         Spectrum, 
         index=True, 
         lazy_load=False,
-        help_text = "Spectrum identifier"
-        )
+        help_text=Glossary.spectrum_pk
+    )
     
     #> Astra Metadata
-    task_id = AutoField(help_text="Task identifier")
-    v_astra = TextField(default=__version__, help_text="Astra version")
-    t_elapsed = FloatField(null=True, help_text="Estimated task elapsed time [s]")
-    tag = TextField(default="", index=True, help_text="Tag name to segment Astra experiments")
+    task_pk = AutoField(help_text=Glossary.task_pk)
+    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
+    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
+    t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
+    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
+    tag = TextField(default="", index=True, help_text=Glossary.tag)
 
     #> Task Parameters
 
