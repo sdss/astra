@@ -1,9 +1,11 @@
+import datetime
 from peewee import (
     AutoField,
     FloatField,
     TextField,
     ForeignKeyField,
     BitField,
+    DateTimeField
 )
 
 from astra import __version__
@@ -13,24 +15,27 @@ from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
 
+from astra.glossary import Glossary
 
 class ThePayne(BaseModel, PipelineOutputMixin):
 
     """A result from The Payne."""
     
-    source_id = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
-    spectrum_id = ForeignKeyField(
+    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
+    spectrum_pk = ForeignKeyField(
         Spectrum, 
         index=True, 
         lazy_load=False,
-        help_text="Spectrum identifier"
+        help_text=Glossary.spectrum_pk
     )
     
     #> Astra Metadata
-    task_id = AutoField(help_text="Task identifier")
-    v_astra = TextField(default=__version__, help_text="Astra version")
-    t_elapsed = FloatField(null=True, help_text="Estimated task elapsed time [s]")
-    tag = TextField(default="", index=True, help_text="Tag name to segment Astra experiments")
+    task_pk = AutoField(help_text=Glossary.task_pk)
+    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
+    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
+    t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
+    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
+    tag = TextField(default="", index=True, help_text=Glossary.tag)
     
     #> Task Parameters
     model_path = TextField(default="")
@@ -96,6 +101,70 @@ class ThePayne(BaseModel, PipelineOutputMixin):
     chi_sq = FloatField(null=True)
     reduced_chi_sq = FloatField(null=True)
     result_flags = BitField(default=0, help_text="Flags describing the results")    
+
+    #> chi-square, reduced chi-sqaure and error of elem mask of each element
+    chi_sq_c_h = FloatField(null=True)
+    chi_sq_n_h = FloatField(null=True)
+    chi_sq_o_h = FloatField(null=True)
+    chi_sq_na_h = FloatField(null=True)
+    chi_sq_mg_h = FloatField(null=True)
+    chi_sq_al_h = FloatField(null=True)
+    chi_sq_si_h = FloatField(null=True)
+    chi_sq_p_h = FloatField(null=True)
+    chi_sq_s_h = FloatField(null=True)
+    chi_sq_k_h = FloatField(null=True)
+    chi_sq_ca_h = FloatField(null=True)
+    chi_sq_ti_h = FloatField(null=True)
+    chi_sq_v_h = FloatField(null=True)
+    chi_sq_cr_h = FloatField(null=True)
+    chi_sq_mn_h = FloatField(null=True)
+    chi_sq_fe_h = FloatField(null=True)
+    chi_sq_co_h = FloatField(null=True)
+    chi_sq_ni_h = FloatField(null=True)
+    chi_sq_cu_h = FloatField(null=True)
+    chi_sq_ge_h = FloatField(null=True)
+
+    reduced_chi_sq_c_h = FloatField(null=True)
+    reduced_chi_sq_n_h = FloatField(null=True)
+    reduced_chi_sq_o_h = FloatField(null=True)
+    reduced_chi_sq_na_h = FloatField(null=True)
+    reduced_chi_sq_mg_h = FloatField(null=True)
+    reduced_chi_sq_al_h = FloatField(null=True)
+    reduced_chi_sq_si_h = FloatField(null=True)
+    reduced_chi_sq_p_h = FloatField(null=True)
+    reduced_chi_sq_s_h = FloatField(null=True)
+    reduced_chi_sq_k_h = FloatField(null=True)
+    reduced_chi_sq_ca_h = FloatField(null=True)
+    reduced_chi_sq_ti_h = FloatField(null=True)
+    reduced_chi_sq_v_h = FloatField(null=True)
+    reduced_chi_sq_cr_h = FloatField(null=True)
+    reduced_chi_sq_mn_h = FloatField(null=True)
+    reduced_chi_sq_fe_h = FloatField(null=True)
+    reduced_chi_sq_co_h = FloatField(null=True)
+    reduced_chi_sq_ni_h = FloatField(null=True)
+    reduced_chi_sq_cu_h = FloatField(null=True)
+    reduced_chi_sq_ge_h = FloatField(null=True)
+
+    std_elem_mask_c_h = FloatField(null=True)
+    std_elem_mask_n_h = FloatField(null=True)
+    std_elem_mask_o_h = FloatField(null=True)
+    std_elem_mask_na_h = FloatField(null=True)
+    std_elem_mask_mg_h = FloatField(null=True)
+    std_elem_mask_al_h = FloatField(null=True)
+    std_elem_mask_si_h = FloatField(null=True)
+    std_elem_mask_p_h = FloatField(null=True)
+    std_elem_mask_s_h = FloatField(null=True)
+    std_elem_mask_k_h = FloatField(null=True)
+    std_elem_mask_ca_h = FloatField(null=True)
+    std_elem_mask_ti_h = FloatField(null=True)
+    std_elem_mask_v_h = FloatField(null=True)
+    std_elem_mask_cr_h = FloatField(null=True)
+    std_elem_mask_mn_h = FloatField(null=True)
+    std_elem_mask_fe_h = FloatField(null=True)
+    std_elem_mask_co_h = FloatField(null=True)
+    std_elem_mask_ni_h = FloatField(null=True)
+    std_elem_mask_cu_h = FloatField(null=True)
+    std_elem_mask_ge_h = FloatField(null=True)
 
     #> Correlation Coefficients
     rho_teff_logg = FloatField(null=True)

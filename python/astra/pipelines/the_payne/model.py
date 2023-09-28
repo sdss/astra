@@ -3,11 +3,12 @@ from scipy.optimize import curve_fit
 from astropy.constants import c
 from astropy import units as u
 
-from astra.utils import log
+from astra.utils import log, expand_path
 from astra.models.spectrum import Spectrum
 from astra.models.the_payne import ThePayne
+from astra.pipelines.the_payne.utils import calc_weighted_chi_square, calc_weighted_reduced_chi_square, calc_error_of_weighted_mean
 
-from typing import Union, Tuple, Optional
+from typing import Union, Tuple, Optional, Dict
 
 SPEED_OF_LIGHT = c.to("km/s").value
 
@@ -21,6 +22,7 @@ def estimate_labels(
     model_wavelength: Tuple[np.ndarray],
     label_names: Tuple[str],
     mask: Optional[np.array] = None,
+    elems_mask: Optional[Dict] = None,
     initial_labels: Optional[np.array] = None,
     continuum: Optional[np.array] = None,
     v_rad_tolerance: Optional[Union[float, int]] = None,
@@ -82,20 +84,19 @@ def estimate_labels(
         ), "Mask and model wavelengths do not have the same shape"
 
     '''
-    source_id = spectrum.meta.get("CAT_ID", None)        
-    if source_id is None and data_product is not None:
+    source_pk = spectrum.meta.get("CAT_pk", None)        
+    if source_pk is None and data_product is not None:
         try:
-            source_id = data_product.sources[0].catalogid
+            source_pk = data_product.sources[0].catalogid
         except:
             None
-    parent_data_product_id = spectrum.meta.get("DATA_PRODUCT_ID", None)
-    if (parent_data_product_id is None or len(parent_data_product_id) == 0) and data_product is not None:
-        parent_data_product_id = [data_product.id] * N
+    parent_data_product_pk = spectrum.meta.get("DATA_PRODUCT_pk", None)
+    if (parent_data_product_pk is None or len(parent_data_product_pk) == 0) and data_product is not None:
+        parent_data_product_pk = [data_product.id] * N
     '''
     #results = []
     #meta_results = []
     kwds = kwargs.copy()
-    print(N)
     for i in range(N):
 
         # Interpolate data onto model wavelengths -- not The Right Thing to do!
@@ -128,8 +129,8 @@ def estimate_labels(
         )
 
         result = dict(
-            #sdss_id=spectrum.source_id,
-            spectrum_id=spectrum.spectrum_id,
+            source_pk=spectrum.source_pk,
+            spectrum_pk=spectrum.spectrum_pk,
             #model_path=model_path,
             opt_tolerance=opt_tolerance,
             v_rad_tolerance=v_rad_tolerance,
@@ -191,7 +192,21 @@ def estimate_labels(
             #results.append(result)
             #meta_results.append(meta)
 
-        print(result)
+            ##### calculate the weighted unbiased reduced chi-square statistic
+            if elems_mask is not None:
+                for elem in label_names:
+                    if len(elem.split('_'))>1 and elem.split('_')[1] == 'h':
+                        elem_temp = elem.split('_')[0].capitalize()
+                        weight_mask = elems_mask[elem_temp]
+                        if weight_mask is not None:
+                            result[f"chi_sq_{elem}"] = calc_weighted_chi_square(flux, model_flux, e_flux, weight_mask)
+                            result[f"reduced_chi_sq_{elem}"] = calc_weighted_reduced_chi_square(flux, model_flux, e_flux, weight_mask, num_params=1)
+                            result[f"std_elem_mask_{elem}"] = calc_error_of_weighted_mean(e_flux, weight_mask)
+                        else:
+                            result[f"chi_sq_{elem}"] = np.nan
+                            result[f"reduced_chi_sq_{elem}"] = np.nan
+                            result[f"std_elem_mask_{elem}"] = np.nan
+
         return result
 
         #output = ThePayne()
