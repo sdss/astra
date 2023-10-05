@@ -34,3 +34,24 @@ def enumerate_new_spectrum_pks(iter, batch_size=100):
             )
             for spectrum_pk, item in zip(spectrum_pks, chunk):
                 yield (spectrum_pk, item)
+
+
+def upsert_many(model, returning, data, batch_size, desc="Upserting"):
+    returned = []
+    with database.atomic():
+        with tqdm(desc=desc, total=len(data)) as pb:
+            for chunk in chunked(data, batch_size):
+                returned.extend(
+                    flatten(
+                        model
+                        .insert_many(chunk)
+                        .on_conflict_ignore()
+                        .returning(returning)
+                        .tuples()
+                        .execute()
+                    )
+                )
+                pb.update(min(batch_size, len(chunk)))
+                pb.refresh()
+
+    return tuple(returned)

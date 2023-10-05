@@ -118,6 +118,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         lazy_load=False,
     )
     catalogid = BigIntegerField(index=True, null=True, help_text="SDSS input catalog identifier")
+    #star_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `star` primary key")
     visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `visit` primary key")
     rv_visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `rv_visit` primary key")
 

@@ -14,7 +14,9 @@ from astra.models.spectrum import (Spectrum, SpectrumMixin)
 from astra.models.fields import PixelArray, BitField
 
 from astra.glossary import Glossary
+from astra.utils import log
 
+from playhouse.postgres_ext import ArrayField
 
 class BossVisitSpectrum(BaseModel, SpectrumMixin):
 
@@ -32,13 +34,13 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
         backref="boss_visit_spectra"
     )
 
-    #> Spectrum identifier
+    #> Identifiers
     spectrum_pk = ForeignKeyField(
         Spectrum,
-        index=True, 
+        null=True,
+        index=True,
         unique=True,
         lazy_load=False,
-        help_text=Glossary.spectrum_pk,
     )
 
     #> Spectral data
@@ -61,26 +63,23 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     mjd = IntegerField(help_text=Glossary.mjd)
     fieldid = IntegerField(help_text=Glossary.fieldid)
     catalogid = BigIntegerField(help_text=Glossary.catalogid)
+    healpix = IntegerField(help_text=Glossary.healpix) # This should be the same as the Source-level field.
 
-    #> Software Version Information
-    v_boss = TextField(null=True, help_text=Glossary.v_boss)    
-    v_jaeger = TextField(null=True, help_text=Glossary.v_jaeger)    
-    v_kaiju = TextField(null=True, help_text=Glossary.v_kaiju)    
-    v_coord = TextField(null=True, help_text=Glossary.v_coord)    
-    v_calibs = TextField(null=True, help_text=Glossary.v_calibs)    
-    v_idl = TextField(null=True, help_text=Glossary.v_idl)    
-    v_util = TextField(null=True, help_text=Glossary.v_util)    
-    v_read = TextField(null=True, help_text=Glossary.v_read)    
-    v_2d = TextField(null=True, help_text=Glossary.v_2d)    
-    v_comb = TextField(null=True, help_text=Glossary.v_comb)    
-    v_log = TextField(null=True, help_text=Glossary.v_log)    
-    v_flat = TextField(null=True, help_text=Glossary.v_flat)  
+    #> Exposure Information
+    n_exp = IntegerField(null=True, help_text=Glossary.n_exp)    
+    exptime = FloatField(null=True, help_text=Glossary.exptime)
+
+    #> Field/Plate Information
+    plateid = IntegerField(null=True, help_text=Glossary.plateid)
+    cartid = IntegerField(null=True, help_text=Glossary.cartid)
+    mapid = IntegerField(null=True, help_text=Glossary.mapid)
+    slitid = IntegerField(null=True, help_text=Glossary.slitid)
 
     #> BOSS Data Reduction Pipeline
-    didflush = BooleanField(null=True, help_text=Glossary.didflush)    
-    cartid = TextField(null=True, help_text=Glossary.cartid)    
     psfsky = IntegerField(null=True, help_text=Glossary.psfsky)    
     preject = FloatField(null=True, help_text=Glossary.preject)    
+    n_std = IntegerField(null=True, help_text=Glossary.n_std)
+    n_gal = IntegerField(null=True, help_text=Glossary.n_gal)
     lowrej = IntegerField(null=True, help_text=Glossary.lowrej)    
     highrej = IntegerField(null=True, help_text=Glossary.highrej)    
     scatpoly = IntegerField(null=True, help_text=Glossary.scatpoly)    
@@ -88,37 +87,44 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     nfitpoly = IntegerField(null=True, help_text=Glossary.nfitpoly)    
     skychi2 = FloatField(null=True, help_text=Glossary.skychi2)    
     schi2min = FloatField(null=True, help_text=Glossary.schi2min)    
-    schi2max = FloatField(null=True, help_text=Glossary.schi2max)    
-    rdnoise0 = FloatField(null=True, help_text=Glossary.rdnoise0)    
+    schi2max = FloatField(null=True, help_text=Glossary.schi2max)
 
     #> Observing Conditions
-    telescope = TextField(null=True, help_text=Glossary.telescope) # This is not a data product keyword, it is only stored in the headers.
     alt = FloatField(null=True, help_text=Glossary.alt)    
     az = FloatField(null=True, help_text=Glossary.az)    
-    seeing = FloatField(null=True, help_text=Glossary.seeing)    
+    telescope = TextField(null=True, help_text=Glossary.telescope) # This is not a data product keyword, it is only stored in the headers.
+    seeing = FloatField(null=True, help_text=Glossary.seeing)
     airmass = FloatField(null=True, help_text=Glossary.airmass)    
     airtemp = FloatField(null=True, help_text=Glossary.airtemp)    
     dewpoint = FloatField(null=True, help_text=Glossary.dewpoint)    
     humidity = FloatField(null=True, help_text=Glossary.humidity)    
     pressure = FloatField(null=True, help_text=Glossary.pressure)    
+    dust_a = FloatField(null=True, help_text=Glossary.dust_a)
+    dust_b = FloatField(null=True, help_text=Glossary.dust_b)    
     gust_direction = FloatField(null=True, help_text=Glossary.gust_direction)    
     gust_speed = FloatField(null=True, help_text=Glossary.gust_speed)    
     wind_direction = FloatField(null=True, help_text=Glossary.wind_direction)    
     wind_speed = FloatField(null=True, help_text=Glossary.wind_speed)    
     moon_dist_mean = FloatField(null=True, help_text=Glossary.moon_dist_mean)    
     moon_phase_mean = FloatField(null=True, help_text=Glossary.moon_phase_mean)    
-    n_exp = IntegerField(null=True, help_text=Glossary.n_exp)    
     n_guide = IntegerField(null=True, help_text=Glossary.n_guide)    
-    tai_beg = DateTimeField(null=True, help_text=Glossary.tai_beg)    
-    tai_end = DateTimeField(null=True, help_text=Glossary.tai_end)    
-    fiber_offset = BooleanField(null=True, help_text=Glossary.fiber_offset)    
-    delta_ra = FloatField(null=True, help_text=Glossary.delta_ra)    
-    delta_dec = FloatField(null=True, help_text=Glossary.delta_dec) 
+    tai_beg = BigIntegerField(null=True, help_text=Glossary.tai_beg)    
+    tai_end = BigIntegerField(null=True, help_text=Glossary.tai_end)       
+    plug_ra = FloatField(null=True, help_text=Glossary.plug_ra)
+    plug_dec = FloatField(null=True, help_text=Glossary.plug_dec)
+    fiber_offset = BooleanField(null=True, help_text=Glossary.fiber_offset)
+
+    try:
+        delta_ra = ArrayField(FloatField, null=True, help_text=Glossary.delta_ra)    
+        delta_dec = ArrayField(FloatField, null=True, help_text=Glossary.delta_dec) 
+    except:
+        log.warning(f"Cannot create delta_ra and delta_dec fields for {__name__}.")
 
     #> Metadata Flags
-    gri_gaia_transform = BitField(default=0, help_text="Flags to track provenance of ugriz photometry") # TODO: should these be _flags?
-    zwarning = BitField(default=0, help_text="BOSS DRP warning flags") # TODO: rename to _flags?
-
+    snr = FloatField(null=True, help_text=Glossary.snr)
+    gri_gaia_transform_flags = BitField(default=0, help_text="Flags to track provenance of ugriz photometry")
+    zwarning_flags = BitField(default=0, help_text="BOSS DRP warning flags") 
+    
     #> XCSAO
     xcsao_v_rad = FloatField(null=True, help_text=Glossary.v_rad)
     xcsao_e_v_rad = FloatField(null=True, help_text=Glossary.e_v_rad)
@@ -131,39 +137,39 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     xcsao_rxc = FloatField(null=True, help_text="Cross-correlation R-value (1979AJ.....84.1511T)")
 
     # gri_gaia_transform
-    flag_u_gaia_transformed = gri_gaia_transform.flag(2**0, "u photometry provided for plate design is transformed from Gaia mags.")
-    flag_u_gaia_outside = gri_gaia_transform.flag(2**1, "u photometry cannot be calculated from Gaia photometry as it lies outside range of colors for which transforms are defined")
-    flag_u_gaia_none = gri_gaia_transform.flag(2**2, "u photometry cannot be calculated for this source")
-    flag_g_gaia_transformed = gri_gaia_transform.flag(2**3, "g photometry provided for plate design is transformed from Gaia mags.")
-    flag_g_gaia_outside = gri_gaia_transform.flag(2**4, "g photometry cannot be calculated from Gaia photometry as it lies outside range of colors for which transforms are defined")
-    flag_g_gaia_none = gri_gaia_transform.flag(2**5, "g photometry cannot be calculated for this source")
-    flag_r_gaia_transformed = gri_gaia_transform.flag(2**6, "r photometry provided for plate design is transformed from Gaia mags.")
-    flag_r_gaia_outside = gri_gaia_transform.flag(2**7, "r photometry cannot be calculated from Gaia photometry as it lies outside range of colors for which transforms are defined")
-    flag_r_gaia_none = gri_gaia_transform.flag(2**8, "r photometry cannot be calculated for this source")
-    flag_i_gaia_transformed = gri_gaia_transform.flag(2**9, "i photometry provided for plate design is transformed from Gaia mags.")
-    flag_i_gaia_outside = gri_gaia_transform.flag(2**10, "i photometry cannot be calculated from Gaia photometry as it lies outside range of colors for which transforms are defined")
-    flag_i_gaia_none = gri_gaia_transform.flag(2**11, "i photometry cannot be calculated for this source")
-    flag_z_gaia_transformed = gri_gaia_transform.flag(2**12, "z photometry provided for plate design is transformed from Gaia mags.")
-    flag_z_gaia_outside = gri_gaia_transform.flag(2**13, "z photometry cannot be calculated from Gaia photometry as it lies outside range of colors for which transforms are defined")
-    flag_z_gaia_none = gri_gaia_transform.flag(2**14, "z photometry cannot be calculated for this source")
-    flag_gaia_neighbor = gri_gaia_transform.flag(2**15, "bright gaia neighbor close to the star")
-    flag_g_panstarrs = gri_gaia_transform.flag(2**16, "g photometry provided by PanSTARRS")
-    flag_r_panstarrs = gri_gaia_transform.flag(2**17, "r photometry provided by PanSTARRS")
-    flag_i_panstarrs = gri_gaia_transform.flag(2**18, "i photometry provided by PanSTARRS")
-    flag_z_panstarrs = gri_gaia_transform.flag(2**19, "z photometry provided by PanSTARRS")
-    flag_position_offset = gri_gaia_transform.flag(2**20, "position shifted with respect to center of star (catalogid corresponds to GAIA id)")
+    flag_u_gaia_transformed = gri_gaia_transform_flags.flag(2**0, "u photometry provided for plate design is transformed from Gaia mags.")
+    flag_u_gaia_outside = gri_gaia_transform_flags.flag(2**1, "u photometry cannot be calculated from Gaia photometry as it lies outside range of colors for which transforms are defined")
+    flag_u_gaia_none = gri_gaia_transform_flags.flag(2**2, "u photometry cannot be calculated for this source")
+    flag_g_gaia_transformed = gri_gaia_transform_flags.flag(2**3, "g photometry provided for plate design is transformed from Gaia mags.")
+    flag_g_gaia_outside = gri_gaia_transform_flags.flag(2**4, "g photometry cannot be calculated from Gaia photometry as it lies outside range of colors for which transforms are defined")
+    flag_g_gaia_none = gri_gaia_transform_flags.flag(2**5, "g photometry cannot be calculated for this source")
+    flag_r_gaia_transformed = gri_gaia_transform_flags.flag(2**6, "r photometry provided for plate design is transformed from Gaia mags.")
+    flag_r_gaia_outside = gri_gaia_transform_flags.flag(2**7, "r photometry cannot be calculated from Gaia photometry as it lies outside range of colors for which transforms are defined")
+    flag_r_gaia_none = gri_gaia_transform_flags.flag(2**8, "r photometry cannot be calculated for this source")
+    flag_i_gaia_transformed = gri_gaia_transform_flags.flag(2**9, "i photometry provided for plate design is transformed from Gaia mags.")
+    flag_i_gaia_outside = gri_gaia_transform_flags.flag(2**10, "i photometry cannot be calculated from Gaia photometry as it lies outside range of colors for which transforms are defined")
+    flag_i_gaia_none = gri_gaia_transform_flags.flag(2**11, "i photometry cannot be calculated for this source")
+    flag_z_gaia_transformed = gri_gaia_transform_flags.flag(2**12, "z photometry provided for plate design is transformed from Gaia mags.")
+    flag_z_gaia_outside = gri_gaia_transform_flags.flag(2**13, "z photometry cannot be calculated from Gaia photometry as it lies outside range of colors for which transforms are defined")
+    flag_z_gaia_none = gri_gaia_transform_flags.flag(2**14, "z photometry cannot be calculated for this source")
+    flag_gaia_neighbor = gri_gaia_transform_flags.flag(2**15, "bright gaia neighbor close to the star")
+    flag_g_panstarrs = gri_gaia_transform_flags.flag(2**16, "g photometry provided by PanSTARRS")
+    flag_r_panstarrs = gri_gaia_transform_flags.flag(2**17, "r photometry provided by PanSTARRS")
+    flag_i_panstarrs = gri_gaia_transform_flags.flag(2**18, "i photometry provided by PanSTARRS")
+    flag_z_panstarrs = gri_gaia_transform_flags.flag(2**19, "z photometry provided by PanSTARRS")
+    flag_position_offset = gri_gaia_transform_flags.flag(2**20, "position shifted with respect to center of star (catalogid corresponds to GAIA id)")
 
     # zwarning
-    flag_sky_fiber = zwarning.flag(2**0, "Sky fiber")
-    flag_little_wavelength_coverage = zwarning.flag(2**1, "Too little wavelength coverage (WCOVERAGE < 0.18)")
-    flag_small_delta_chi2 = zwarning.flag(2**2, "Chi-squared of best fit is too close to that of second best (< 0.01 in reduced chi-squared)")
-    flag_negative_model = zwarning.flag(2**3, "Synthetic spectrum is negative (only set for stars and QSOs)")
-    flag_many_outliers = zwarning.flag(2**4, "Fraction of points more than 5 sigma away from best model is too large (> 0.05)")
-    flag_z_fit_limit = zwarning.flag(2**5, "Chi-squared minimum at edge of the redshift fitting range (Z_ERR set to -1)")
-    flag_negative_emission = zwarning.flag(2**6, "A QSO line exhibits negative emission, triggered only in QSO spectra, if C_IV, C_III, Mg_II, H_beta, or H_alpha has LINEAREA + 3 * LINEAREA_ERR < 0")
-    flag_unplugged = zwarning.flag(2**7, "The fiber was unplugged or damaged, and the location of any spectrum is unknown")
-    flag_bad_target = zwarning.flag(2**8, "Catastrophically bad targeting data (e.g. bad astrometry)")
-    flag_no_data = zwarning.flag(2**9, "No data for this fiber, e.g. because spectrograph was broken during this exposure (ivar=0 for all pixels)")
+    flag_sky_fiber = zwarning_flags.flag(2**0, "Sky fiber")
+    flag_little_wavelength_coverage = zwarning_flags.flag(2**1, "Too little wavelength coverage (WCOVERAGE < 0.18)")
+    flag_small_delta_chi2 = zwarning_flags.flag(2**2, "Chi-squared of best fit is too close to that of second best (< 0.01 in reduced chi-squared)")
+    flag_negative_model = zwarning_flags.flag(2**3, "Synthetic spectrum is negative (only set for stars and QSOs)")
+    flag_many_outliers = zwarning_flags.flag(2**4, "Fraction of points more than 5 sigma away from best model is too large (> 0.05)")
+    flag_z_fit_limit = zwarning_flags.flag(2**5, "Chi-squared minimum at edge of the redshift fitting range (Z_ERR set to -1)")
+    flag_negative_emission = zwarning_flags.flag(2**6, "A QSO line exhibits negative emission, triggered only in QSO spectra, if C_IV, C_III, Mg_II, H_beta, or H_alpha has LINEAREA + 3 * LINEAREA_ERR < 0")
+    flag_unplugged = zwarning_flags.flag(2**7, "The fiber was unplugged or damaged, and the location of any spectrum is unknown")
+    flag_bad_target = zwarning_flags.flag(2**8, "Catastrophically bad targeting data (e.g. bad astrometry)")
+    flag_no_data = zwarning_flags.flag(2**9, "No data for this fiber, e.g. because spectrograph was broken during this exposure (ivar=0 for all pixels)")
 
     class Meta:
         indexes = ((("release", "run2d", "fieldid", "mjd", "catalogid"), True),)
