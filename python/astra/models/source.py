@@ -64,6 +64,8 @@ class Source(BaseModel):
     if isinstance(database, PostgresqlDatabase):
         sdss5_target_flags = BigBitField(null=True, help_text=Glossary.sdss5_target_flags)
 
+    # https://www.sdss4.org/dr17/irspec/targets/
+    # https://www.sdss4.org/dr17/irspec/apogee-bitmasks/#APOGEE_TARGET2:APOGEE1targetingbitmask(2of2)
     sdss4_apogee_target1_flags = BitField(default=0, help_text="SDSS4 APOGEE1 targeting flags (1/2)")
     sdss4_apogee_target2_flags = BitField(default=0, help_text="SDSS4 APOGEE1 targeting flags (2/2)")
     sdss4_apogee2_target1_flags = BitField(default=0, help_text="SDSS4 APOGEE2 targeting flags (1/3)")
@@ -106,7 +108,6 @@ class Source(BaseModel):
     flag_sdss4_apogee_segue_overlap = sdss4_apogee_target1_flags.flag(2**30, help_text="SEGUE overlap")
 
     # sdss4_apogee_target2_flags
-    # TODO: Check flag definitions, because it seems off-by-one for apogee_1m_targets!
     flag_sdss4_apogee_light_trap = sdss4_apogee_target2_flags.flag(2**0, help_text="Light trap")
     flag_sdss4_apogee_flux_standard = sdss4_apogee_target2_flags.flag(2**1, help_text="Flux standard")
     flag_sdss4_apogee_standard_star = sdss4_apogee_target2_flags.flag(2**2, help_text="Stellar abundance/parameters standard")
@@ -123,12 +124,13 @@ class Source(BaseModel):
     flag_sdss4_apogee_embedded_cluster_star = sdss4_apogee_target2_flags.flag(2**13, help_text="Young nebulous clusters (Covey, Tan)")
     flag_sdss4_apogee_long_bar = sdss4_apogee_target2_flags.flag(2**14, help_text="Milky Way Long Bar (Zasowski)")
     flag_sdss4_apogee_emission_star = sdss4_apogee_target2_flags.flag(2**15, help_text="Be Emission Line Stars (Chojnowski, Whelan)")
-    flag_sdss4_apogee_mir_cluster_star = sdss4_apogee_target2_flags.flag(2**16, help_text="Outer Disk MIR Clusters (Beaton)")
-    flag_sdss4_apogee_rv_monitor_ic348 = sdss4_apogee_target2_flags.flag(2**17, help_text="RV Variability in IC348 (Nidever, Covey)")
-    flag_sdss4_apogee_rv_monitor_kepler = sdss4_apogee_target2_flags.flag(2**18, help_text="RV Variability for Kepler Planet Hosts and Binaries (Deshpande, Fleming, Mahadevan)")
-    flag_sdss4_apogee_ges_calibrate = sdss4_apogee_target2_flags.flag(2**19, help_text="Gaia-ESO calibration targets")
-    flag_sdss4_apogee_bulge_rv_verify = sdss4_apogee_target2_flags.flag(2**20, help_text="RV Verification (Nidever)")
-    flag_sdss4_apogee_1m_target = sdss4_apogee_target2_flags.flag(2**21, help_text="Selected as a 1-m target (Holtzman)")
+    flag_sdss4_apogee_kepler_cool_dwarf = sdss4_apogee_target2_flags.flag(2**16, help_text="Kepler Cool Dwarfs (van Saders)")
+    flag_sdss4_apogee_mir_cluster_star = sdss4_apogee_target2_flags.flag(2**17, help_text="Outer Disk MIR Clusters (Beaton)")
+    flag_sdss4_apogee_rv_monitor_ic348 = sdss4_apogee_target2_flags.flag(2**18, help_text="RV Variability in IC348 (Nidever, Covey)")
+    flag_sdss4_apogee_rv_monitor_kepler = sdss4_apogee_target2_flags.flag(2**19, help_text="RV Variability for Kepler Planet Hosts and Binaries (Deshpande, Fleming, Mahadevan)")
+    flag_sdss4_apogee_ges_calibrate = sdss4_apogee_target2_flags.flag(2**20, help_text="Gaia-ESO calibration targets")
+    flag_sdss4_apogee_bulge_rv_verify = sdss4_apogee_target2_flags.flag(2**21, help_text="RV Verification (Nidever)")
+    flag_sdss4_apogee_1m_target = sdss4_apogee_target2_flags.flag(2**22, help_text="Selected as a 1-m target (Holtzman)")
 
     # sdss4_apogee2_target1_flags
     flag_sdss4_apogee2_onebit_gt_0_5 = sdss4_apogee2_target1_flags.flag(2**0, help_text="Selected in single (J-Ks)o > 0.5 color bin")
@@ -454,6 +456,7 @@ class Source(BaseModel):
     # See https://zenodo.org/record/7811871
  
     #> Reddening
+    print("ANDY REMOVE THIS WARNING AND ADD REDDENING COLUMNS")
     '''
     ebv = FloatField(null=True, help_text="E(B-V) [mag]")
     e_ebv = FloatField(null=True, help_text="Error on E(B-V) [mag]")
@@ -469,19 +472,17 @@ class Source(BaseModel):
 
     ebv_zhang_2023 = FloatField(null=True, help_text="E(B-V) from Zhang et al. (2023) [mag]")
     e_ebv_zhang_2023 = FloatField(null=True, help_text="Error on E(B-V) from Zhang et al. (2023) [mag]")
-    ebv_edenhofer_2023 = FloatField(null=True, help_text="E(B-V) from Edenhofer et al. (2023) [mag]")
-    e_ebv_edenhofer_2023 = FloatField(null=True, help_text="Error on E(B-V) from Edenhofer et al. (2023) [mag]")
-    flag_ebv_edenhofer_2023_upper_limit = BooleanField(default=False, help_text="E(B-V) from Edenhofer et al. (2023) is an upper limit")
-
     ebv_sfd = FloatField(null=True, help_text="E(B-V) from SFD [mag]")
-    e_ebv_sfd = FloatField(null=True, help_text="Error on E(B-V) from SFD [mag]")
-    
+    e_ebv_sfd = FloatField(null=True, help_text="Error on E(B-V) from SFD [mag]")    
     ebv_rjce_glimpse = FloatField(null=True, help_text="E(B-V) from RJCE GLIMPSE [mag]")
     e_ebv_rjce_glimpse = FloatField(null=True, help_text="Error on E(B-V) from RJCE GLIMPSE [mag]")
     ebv_rjce_allwise = FloatField(null=True, help_text="E(B-V) from RJCE AllWISE [mag]")
     e_ebv_rjce_allwise = FloatField(null=True, help_text="Error on E(B-V) from RJCE AllWISE [mag]")
     ebv_bayestar_2019 = FloatField(null=True, help_text="E(B-V) from Bayestar 2019 [mag]")
     e_ebv_bayestar_2019 = FloatField(null=True, help_text="Error on E(B-V) from Bayestar 2019 [mag]")
+    ebv_edenhofer_2023 = FloatField(null=True, help_text="E(B-V) from Edenhofer et al. (2023) [mag]")
+    e_ebv_edenhofer_2023 = FloatField(null=True, help_text="Error on E(B-V) from Edenhofer et al. (2023) [mag]")
+    flag_ebv_edenhofer_2023_upper_limit = BooleanField(default=False, help_text="E(B-V) from Edenhofer et al. (2023) is an upper limit")
     '''
 
     @property
@@ -560,7 +561,7 @@ class Source(BaseModel):
         return self.assigned_to_carton_attribute("mapper", mapper)
     
     @hybrid_method
-    def assigned_to_alt_program(self, alt_program):
+    def assigned_to_carton_with_alt_program(self, alt_program):
         """
         An expression to evaluate whether this source is assigned to any carton with the given alternate program.
 
@@ -571,7 +572,7 @@ class Source(BaseModel):
         return self.assigned_to_carton_attribute("alt_program", alt_program)
 
     @hybrid_method
-    def assigned_to_alt_name(self, alt_name):
+    def assigned_to_carton_with_alt_name(self, alt_name):
         """
         An expression to evaluate whether this source is assigned to any carton with the given alternate name.
         
@@ -581,7 +582,7 @@ class Source(BaseModel):
         return self.assigned_to_carton_attribute("alt_name", alt_name)
 
     @hybrid_method
-    def assigned_to_name(self, name):
+    def assigned_to_carton_with_name(self, name):
         """
         An expression to evaluate whether this source is assigned to any carton with the given name.
         
