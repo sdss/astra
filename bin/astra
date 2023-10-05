@@ -59,6 +59,7 @@ def migrate(apred, run2d, limit, include_dr17):
     """Migrate data from the SDSS5 database."""
 
     from astra.utils import log
+    from astra.models.source import Source
 
     from astra.migrations.apogee import (
         migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb, 
@@ -80,35 +81,65 @@ def migrate(apred, run2d, limit, include_dr17):
         migrate_gaia_dr3_astrometry_and_photometry,
         migrate_zhang_stellar_parameters,
     )
+    from astra.migrations.targeting import migrate_carton_assignments_to_bigbitfield
 
     log.info("Starting ingestion. This will take a long time.")
 
     if include_dr17:
         log.info(f"Ingesting DR17 APOGEE spectra")
         migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(limit=limit)
-        migrate_sdss4_dr17_apstar_from_sdss5_catalogdb()
-        
+
+        log.info(f"Migrating apStar data from sdss5 catalogdb")
+        migrate_sdss4_dr17_apstar_from_sdss5_catalogdb()    
 
     if apred:
         log.info(f"Ingesting SDSS5 APOGEE spectra with apred={apred}")
         migrate_apvisit_from_sdss5_apogee_drpdb(apred, limit=limit)
+
+        log.info(f"Migrating apVisit metadata from image headers")
         migrate_apvisit_metadata_from_image_headers()
 
     if run2d:
         log.info(f"Ingesting SDSS5 BOSS spectra with run2d={run2d}")
         migrate_spectra_from_spall_file(run2d, limit=limit)
+
+        log.info(f"Migrating BOSS metadata from headers")
         migrate_specfull_metadata_from_image_headers()
 
+    log.info(f"Migrating carton assignments")
+    migrate_carton_assignments_to_bigbitfield()
+
+    log.info(f"Migrating SDSS4 DR17 membership flags")
     migrate_sdss4_dr17_member_flags()
+
+    log.info(f"Migrating HEALPix")
     migrate_healpix()
 
+    log.info(f"Migrating Gaia astrometry and photometry")
     migrate_gaia_dr3_astrometry_and_photometry()
+    
+    log.info(f"Migrating Zhang et al stellar parameters")
     migrate_zhang_stellar_parameters()
 
+    log.info(f"Migrating 2MASS photometry")
     migrate_twomass_photometry()
+
+    log.info(f"Migrating unWISE photometry")
     migrate_unwise_photometry()
+
+    log.info(f"Migrating GLIMPSE photometry")
     migrate_glimpse_photometry()
+
+    log.info(f"Migrating TIC v8 identifiers")
     migrate_tic_v8_identifier()
+
+    log.info(f"Setting the Sun to have sdss_id=0 because it's very special to me")
+    (
+        Source
+        .update(sdss_id=0)
+        .where(Source.sdss4_apogee_id == "VESTA")
+        .execute()
+    )
 
     log.info("Done")
         
