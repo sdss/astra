@@ -6,7 +6,11 @@ from astropy.table import Table
 from astropy.table import join
 
 def get_carton_to_bit_mapping():
+    return Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_1_with_groups.csv"))
 
+
+def merge_carton_to_bit_mapping_and_meta():
+    
     targets = Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_1.csv"))
     meta = Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_1_groups.csv"))
 
@@ -22,7 +26,8 @@ def get_carton_to_bit_mapping():
     bit_mapping.sort(["bit"])
     bit_mapping.rename_column("Carton_pk", "carton_pk")
     
-    return bit_mapping
+    bit_mapping.write(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_1_with_groups.csv"))
+
 
 
 def migrate_carton_assignments_to_bigbitfield(

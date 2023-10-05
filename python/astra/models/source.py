@@ -13,12 +13,25 @@ from peewee import (
     BooleanField,
     fn,
 )
+import numpy as np
 from playhouse.hybrid import hybrid_method
 from astra.models.base import database, BaseModel
 from astra.models.fields import BitField
 from astra.models.spectrum import Spectrum
 
 from astra.glossary import Glossary
+from functools import cache
+
+from astropy.table import Table
+from astra.utils import expand_path
+
+
+@cache
+def get_carton_to_bit_mapping():
+    t = Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_1_with_groups.csv"))
+    t.sort("bit")
+    return t
+
 
 class Source(BaseModel):
 
@@ -287,8 +300,6 @@ class Source(BaseModel):
     flag_sdss4_apogee_member_sculptor = sdss4_apogee_member_flags.flag(2**60, help_text="Likely member of Sculptor")
     flag_sdss4_apogee_member_carina = sdss4_apogee_member_flags.flag(2**61, help_text="Likely member of Carina")
 
-
-
     #> Astrometry
     ra = FloatField(null=True, help_text="Right ascension [deg]")
     dec = FloatField(null=True, help_text="Declination [deg]")
@@ -473,51 +484,139 @@ class Source(BaseModel):
     e_ebv_bayestar_2019 = FloatField(null=True, help_text="Error on E(B-V) from Bayestar 2019 [mag]")
     '''
 
+    @property
+    def sdss5_cartons(self):
+        """Return the cartons that this source is assigned."""
+        mapping = get_carton_to_bit_mapping()
+        indices = np.searchsorted(mapping["bit"], self.sdss5_target_bits)
+        return mapping[indices]
 
     @property
-    def cartons(self):
-        """ Return the cartons that this source is assigned. """
-        return (
-            Carton
-            .select()
-            .where(Carton.pk << self.carton_primary_keys)
-        )
-    
-
-    @property
-    def carton_primary_keys(self):
-        """ Return the primary keys of the cartons that this source is assigned. """
-        i, carton_pks, cur_size = (0, [], len(self.carton_flags._buffer))
+    def sdss5_target_bits(self):
+        """Return the bit positions of targeting flags that this source is assigned."""
+        i, bits, cur_size = (0, [], len(self.sdss5_target_flags._buffer))
         while True:
             byte_num, byte_offset = divmod(i, 8)
             if byte_num >= cur_size:
                 break
-            if bool(self.carton_flags._buffer[byte_num] & (1 << byte_offset)):
-                carton_pks.append(i)
+            if bool(self.sdss5_target_flags._buffer[byte_num] & (1 << byte_offset)):
+                bits.append(i)
             i += 1
-        return tuple(carton_pks)
-
+        return tuple(bits)
 
     @hybrid_method
-    def in_carton(self, carton):
+    def assigned_to_carton_attribute(self, name, value):
+        """
+        An expression to evaluate whether this source is assigned to a carton with the given attribute name and value.
+
+        :param name:
+            The name of the attribute to check.
+        
+        :param value:
+            The value of the attribute to check.
+        """
+        mapping = get_carton_to_bit_mapping()
+        bits = np.array(mapping["bit"][mapping[name] == value], dtype=int)
+        return self.is_any_sdss5_target_bit_set(*bits)
+
+    @hybrid_method
+    def assigned_to_carton_pk(self, pk):
         """
         An expression to evaluate whether this source is assigned to the given carton.
-        
-        :param carton:
-            A `Carton` or carton primary key.
+
+        :param pk:
+            The primary key of the carton.
         """
-        carton_pk = carton.pk if isinstance(carton, Carton) else carton
-        return (
-            (fn.length(self.carton_flags) > int(carton_pk / 8))
-        &   (fn.get_bit(self.carton_flags, carton_pk) > 0)
-        )
-    
+        return self.assigned_to_carton_attribute("carton_pk", pk)
 
     @hybrid_method
-    def in_any_carton(self, *cartons):
-        """An expression to evaluate whether this source is assigned to any of the given cartons."""
-        return fn.OR(*[self.in_carton(carton) for carton in cartons])
+    def assigned_to_carton_label(self, label):
+        """
+        An expression to evaluate whether this source is assigned to the given carton.
 
+        :param label:
+            The label of the carton.
+        """
+        return self.assigned_to_carton_attribute("label", label)
+
+    @hybrid_method
+    def assigned_to_program(self, program):
+        """
+        An expression to evaluate whether this source is assigned to any carton in the given program.
+
+        :param program:
+            The program name.
+        """
+        return self.assigned_to_carton_attribute("program", program)
+
+    @hybrid_method
+    def assigned_to_mapper(self, mapper):
+        """
+        An expression to evaluate whether this source is assigned to any carton in the given mapper.
+
+        :param mapper:
+            The mapper name.
+        """
+        return self.assigned_to_carton_attribute("mapper", mapper)
+    
+    @hybrid_method
+    def assigned_to_alt_program(self, alt_program):
+        """
+        An expression to evaluate whether this source is assigned to any carton with the given alternate program.
+
+        :param alt_program:
+            The alternate program name.
+        """
+    
+        return self.assigned_to_carton_attribute("alt_program", alt_program)
+
+    @hybrid_method
+    def assigned_to_alt_name(self, alt_name):
+        """
+        An expression to evaluate whether this source is assigned to any carton with the given alternate name.
+        
+        :param alt_name:
+            The alternate name.
+        """
+        return self.assigned_to_carton_attribute("alt_name", alt_name)
+
+    @hybrid_method
+    def assigned_to_name(self, name):
+        """
+        An expression to evaluate whether this source is assigned to any carton with the given name.
+        
+        :param name:
+            The carton name.
+        """
+        return self.assigned_to_carton_attribute("name", name)
+
+    @hybrid_method
+    def is_sdss5_target_bit_set(self, bit):
+        """
+        An expression to evaluate whether this source is assigned to the carton with the given bit position.
+        
+        :param bit:
+            The carton bit position.
+        """
+        return (
+            (fn.length(self.sdss5_target_flags) > int(bit / 8))
+        &   (fn.get_bit(self.sdss5_target_flags, int(bit)) > 0)
+        )
+    
+    @hybrid_method
+    def is_any_sdss5_target_bit_set(self, *bits):
+        """
+        An expression to evaluate whether this source is assigned to any carton with the given bit positions.
+        
+        :param bits:
+            The carton bit positions.
+        """
+        expression = self.is_sdss5_target_bit_set(bits[0])
+        if len(bits) > 1:
+            for bit in bits[1:]:
+                expression = expression | self.is_sdss5_target_bit_set(bit)
+        return expression
+    
 
     @property
     def spectra(self):
