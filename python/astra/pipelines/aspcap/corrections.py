@@ -60,20 +60,20 @@ def apply_dr16_parameter_corrections(batch_size: int = 500):
         return r.raw_teff + 610.81 - 4.275 * m_h_atm_prime - 0.116 * teff_prime # Eq (1)
 
     def e_stellar_param_correction(r, theta):
-        X = np.array([1, (r.raw_teff - 4500), np.clip(r.snr, 100, None), r.raw_m_h_atm])
+        X = np.array([1, (r.raw_teff - 4500), np.clip(r.snr - 100, 100, None), r.raw_m_h_atm])
         return np.exp(np.atleast_2d(theta) @ X)
 
     def e_teff_correction(r):
-        return e_stellar_param_correction(r, [4.583, 2.965e-4, -2.177e-3, 98])
+        return e_stellar_param_correction(r, [4.583, 2.965e-4, -2.177e-3, -0.117])#, 98])
 
     def e_logg_correction_dwarf(r):
-        return e_stellar_param_correction(r, [-2.327, -1.349e-4, 2.269e-4, -0.306, 0.10])
+        return e_stellar_param_correction(r, [-2.327, -1.349e-4, 2.269e-4, -0.306])#, 0.10])
         
     def e_logg_correction_red_clump(r):
-        return e_stellar_param_correction(r, [-3.444, 9.584e-4, -5.617e-4, -0.181, 0.03])
+        return e_stellar_param_correction(r, [-3.444, 9.584e-4, -5.617e-4, -0.181])#, 0.03])
     
     def e_logg_correction_rgb(r):
-        return e_stellar_param_correction(r, [-2.923, 2.296e-4, 6.900e-4, -0.277, 0.05])
+        return e_stellar_param_correction(r, [-2.923, 2.296e-4, 6.900e-4, -0.277])#, 0.05])
 
     updated = []
     for r in tqdm(q, desc="Applying corrections"):
