@@ -164,6 +164,15 @@ class Glossary(BaseGlossary):
     sdss5_target_flags = "Targeting flags"
     n_associated = "SDSS_IDs associated with this CATALOGID"
 
+    plateid = "Plate identifier"
+    tileid = "C"
+    cartid = "Cartridge used for plugging"
+    mapid = "Mapping version of the loaded plate"
+    n_std = "Number of (good) standard stars"
+
+    dust_a = "0.3mu-sized dust particle count [particles m^-3 s^-1]"
+    dust_b = "1.0mu-sized dust particle count [particles m^-3 s^-1]"
+    
     # Pixel arrays
     wavelength = "Wavelength (vacuum) [Angstrom]"
     flux = "Flux [10^-17 erg/s/cm^2/Angstrom]"
@@ -184,7 +193,7 @@ class Glossary(BaseGlossary):
     alt = "Telescope altitude [deg]"
     az = "Telescope azimuth [deg]"
     exptime = "Total exposure time [s]"
-    n_exp = "Number of exposures taken"
+    n_exp = "Number of co-added exposures"
     airmass = "Mean airmass"
     airtemp = "Air temperature [C]"
     dewpoint = "Dew point temperature [C]"

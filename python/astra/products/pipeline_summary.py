@@ -8,7 +8,7 @@ from astra.products.utils import (get_fields, get_basic_header, get_binary_table
 
 get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
 
-DEFAULT_IGNORE_FIELD_NAMES = ("pk", "sdss5_target_flags", )
+DEFAULT_IGNORE_FIELD_NAMES = ("pk", )
 
 def create_astra_all_star_product(
     pipeline_model,

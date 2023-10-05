@@ -14,8 +14,14 @@ from peewee import (
     ForeignKeyField,
     DateTimeField,
     FieldAccessor,
+    BigBitField,
     JOIN
 )
+try:
+    from playhouse.postgres_ext import ArrayField
+except:
+    ArrayField = ...
+
 from collections import OrderedDict
 
 from astropy.io import fits
@@ -288,7 +294,7 @@ def fits_column_kwargs(field, values, upper, name=None, warn_comment_length=47, 
         # We are assuming here that all foreign key fields are big integers
         ForeignKeyField: lambda v: dict(format="K"),
         BitField: lambda v: dict(format="J"), # integer
-        DateTimeField: lambda v: dict(format="A26")
+        DateTimeField: lambda v: dict(format="A26"),
     }
     if isinstance(field, BasePixelArrayAccessor):
         def callable(v):
@@ -296,6 +302,16 @@ def fits_column_kwargs(field, values, upper, name=None, warn_comment_length=47, 
             if P == 0:
                 P = getattr(field, "pixels", None) or P # try to get the expected number of pixels if we have none
             return dict(format=f"{P:.0f}E", dim=f"({P})")
+        
+    elif isinstance(field, ArrayField):
+        def callable(v):
+            V, P = np.atleast_2d(v).shape
+            format_code = "E" if field.field_type == "FLOAT" else "J"
+            return dict(format=f"{P:.0f}{format_code}", dim=f"({P})")    
+    elif isinstance(field, BigBitField):
+        def callable(v):
+            V, P = np.atleast_2d(v).shape
+            return dict(format=f"{P:.0f}B", dim=f"({P})")
     else:
         callable = mappings[type(field)]
 
@@ -306,6 +322,15 @@ def fits_column_kwargs(field, values, upper, name=None, warn_comment_length=47, 
                 array.append(value.isoformat())
             except:
                 array.append(value)
+    elif isinstance(field, BigBitField):
+        N = len(values)
+        if N > 0:
+            F = max(len(item) for item in values)
+        else:
+            F = 0
+        array = np.zeros((N, F), dtype=np.uint8)
+        for i, item in enumerate(values):
+            array[i, :len(item)] = np.frombuffer(item.tobytes(), dtype=np.uint8)
     else:
         array = values
 
@@ -316,7 +341,7 @@ def fits_column_kwargs(field, values, upper, name=None, warn_comment_length=47, 
         array=array,
         unit=None,
     )
-    kwds.update(callable(values))
+    kwds.update(callable(array))
     return kwds
 
 
