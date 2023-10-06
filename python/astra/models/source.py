@@ -447,6 +447,16 @@ class Source(BaseModel):
     zgr_quality_flags = BitField(default=0, help_text="Quality flags")
     # See https://zenodo.org/record/7811871
  
+    #> Bailer-Jones Distance Estimates (EDR3; 2021)
+    r_med_geo = FloatField(null=True, help_text="Median geometric distance estimate [pc]")
+    r_lo_geo = FloatField(null=True, help_text="16th percentile of geometric distance estimate [pc]")
+    r_hi_geo = FloatField(null=True, help_text="84th percentile of geometric distance estimate [pc]")
+    r_med_photogeo = FloatField(null=True, help_text="50th percentile of photogeometric distance estimate [pc]")
+    r_lo_photogeo = FloatField(null=True, help_text="16th percentile of photogeometric distance estimate [pc]")
+    r_hi_photogeo = FloatField(null=True, help_text="84th percentile of photogeometric distance estimate [pc]")
+    bailer_jones_flags = TextField(null=True, help_text="Bailer-Jones quality flags") # TODO: omg change this to a bitfield and give flag definitions
+    # See https://dc.zah.uni-heidelberg.de/tableinfo/gedr3dist.main#note-f
+
     #> Reddening
     ebv = FloatField(null=True, help_text="E(B-V) [mag]")
     e_ebv = FloatField(null=True, help_text="Error on E(B-V) [mag]")

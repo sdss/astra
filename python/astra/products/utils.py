@@ -203,7 +203,7 @@ def get_fields(models, name_conflict_strategy=None, ignore_field_names=None):
 
 
 def get_binary_table_hdu(q, models, fields, limit=None, header=None, upper=True, fill_values=None):
-    column_fill_values = {}
+    column_fill_values = {"sdss5_target_flags": np.zeros((0, 0), dtype=np.uint8)}
     for field in fields.values():
         try:
             column_fill_values[field.name] = get_fill_value(field, fill_values)

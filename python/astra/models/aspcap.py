@@ -283,7 +283,6 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     v_h_flags = BitField(default=0, help_text=Glossary.v_h_flags)
     v_h_rchi2 = FloatField(null=True, help_text=Glossary.v_h_rchi2)
 
-
     #> FERRE Settings
     short_grid_name = TextField(default="", help_text="Short name describing the FERRE grid used")
     continuum_order = IntegerField(default=-1, help_text="Continuum order used in FERRE")

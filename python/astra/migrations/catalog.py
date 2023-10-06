@@ -8,6 +8,7 @@ from astra.utils import log, flatten
 import numpy as np
 
 
+
 def migrate_healpix(
     where=(
             Source.healpix.is_null()
@@ -64,6 +65,82 @@ def migrate_healpix(
 
     log.info(f"Updated {updated} records")
     return updated
+
+
+def migrate_bailer_jones_distances(
+    where=(Source.r_med_geo.is_null() & Source.gaia_dr3_source_id.is_null(False) & (Source.gaia_dr3_source_id > 0)), 
+    batch_size=500, 
+    limit=None
+):
+
+    from astra.migrations.sdss5db.catalogdb import BailerJonesEDR3
+
+    q = (
+        Source
+        .select()
+    )
+    if where:
+        q = q.where(where)
+        
+    q = (
+        q
+        .order_by(Source.gaia_dr3_source_id.asc())
+        .limit(limit)
+    )
+
+    n_updated = 0
+    with tqdm(total=1, desc="Upserting") as pb:
+        for chunk in chunked(q.iterator(), batch_size):
+
+            q_bj = (
+                BailerJonesEDR3
+                .select(
+                    BailerJonesEDR3.source_id,
+                    BailerJonesEDR3.r_med_geo,
+                    BailerJonesEDR3.r_lo_geo,
+                    BailerJonesEDR3.r_hi_geo,
+                    BailerJonesEDR3.r_med_photogeo,
+                    BailerJonesEDR3.r_lo_photogeo,
+                    BailerJonesEDR3.r_hi_photogeo,
+                    BailerJonesEDR3.flag.alias("bailer_jones_flags"),
+                )
+                .where(BailerJonesEDR3.source_id.in_([s.gaia_dr3_source_id for s in chunk]))
+                .dicts()
+            )
+
+            sources = { s.gaia_dr3_source_id: s for s in chunk }
+            update = []
+            for record in q_bj:
+                source_id = record.pop("source_id")
+                source = sources[source_id]
+
+                for key, value in record.items():
+                    setattr(source, key, value)
+                
+                update.append(source)
+            
+            n_updated += (
+                Source
+                .bulk_update(
+                    update,
+                    fields=[
+                        Source.r_med_geo,
+                        Source.r_lo_geo,
+                        Source.r_hi_geo,
+                        Source.r_med_photogeo,
+                        Source.r_lo_photogeo,
+                        Source.r_hi_photogeo,
+                        Source.bailer_jones_flags,
+                    ]
+                )
+            )
+
+            pb.update(batch_size)
+    
+    return n_updated
+
+
+    
 
 
 def migrate_zhang_stellar_parameters(where=None, batch_size: Optional[int] = 500, limit: Optional[int] = None):

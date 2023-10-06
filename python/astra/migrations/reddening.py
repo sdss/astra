@@ -8,8 +8,10 @@ from tqdm import tqdm
 
 # dust-maps data directory: $MWM_ASTRA/aux/dust-maps/
 from dustmaps.sfd import SFDQuery
+from dustmaps.edenhofer2023 import Edenhofer2023Query
 
 sfd = SFDQuery()
+edenhofer2023 = Edenhofer2023Query()
 
 
 def update_reddening(where=Source.ebv.is_null(), batch_size=1000):
@@ -84,21 +86,17 @@ def update_reddening_on_source(source):
     # We store unWISE (not ALLWISE) and we have only w2 fluxes, not w2 magnitudes.
     # See https://catalog.unwise.me/catalogs.html (Flux Scale) for justification of 32 mmag offset
     w2_mag_vega = -2.5 * np.log10(source.w2_flux) + 22.5 - 32 * 1e-3 # Vega
-
-    #TODO: e_w2mag
-
+    e_w2_mag_vega = (2.5 / np.log(10)) * source.w2_dflux / source.w2_flux
     source.ebv_rjce_allwise = ebv_ehw2 * (source.h_mag - w2_mag_vega - 0.08)
-    #source.e_ebv_rjce_allwise = ebv_ehw2 * np.sqrt(source.e_h_mag**2 + )
+    source.e_ebv_rjce_allwise = ebv_ehw2 * np.sqrt(source.e_h_mag**2 + e_w2_mag_vega**2)
 
     # SFD
     e_sfd = sfd(coord)
     source.ebv_sfd = 0.884 * e_sfd
     source.e_ebv_sfd = np.sqrt(0.01**2 + (0.1 * e_sfd)**2)
-    
 
 
-    # poorly compute distance
-    d = source.plx # [kpc]
+    d = source.r_med_geo # [pc]
 
     # Logic to decide preferred reddening value
 
@@ -108,12 +106,23 @@ def update_reddening_on_source(source):
         source.ebv = source.ebv_zhang_2023
         source.e_ebv = source.e_ebv_zhang_2023
 
-    elif source.gaia_dr3_source_id is not None and (0.069 < d < 1.25):
+    elif d is not None and (69 < d < 1_250):
         # Edenhofer et al. (2023)
         source.flag_ebv_from_edenhofer_2023 = True
+
+        n_draws = 20
+
+        mean, sigma = (source.r_med_geo, 0.5 * (source.r_hi_geo - source.r_lo_geo))
+        
+        #for draw in np.random.normal(mean, sigma, n_draws):
+        #edenhofer2023(coord,)
+        raise a
+
+
+
         raise NotImplementedError("awaiting advice on how to sample distance PDFs")
 
-    elif source.gaia_dr3_source_id is not None and (0 < d < 0.069):
+    elif d is not None and d < 69:
         # Edenhofer et al. (2023) using inner integrated 69 pc
         source.flag_ebv_from_edenhofer_2023 = True
 

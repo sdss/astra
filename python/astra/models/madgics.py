@@ -2,6 +2,7 @@ import numpy as np
 import h5py
 import concurrent
 from peewee import (
+    AutoField,
     ForeignKeyField,
     IntegerField,
     TextField
@@ -10,27 +11,53 @@ from tqdm import tqdm
 from astra.models.base import BaseModel
 from astra.models.source import Source
 from astra.models.spectrum import (Spectrum, SpectrumMixin)
-from astra.models.fields import PixelArray, PixelArrayAccessorHDF
+from astra.models.fields import PixelArray, PixelArrayAccessorHDF, LogLambdaArrayAccessor
 from astra.specutils.resampling import wave_to_pixel, sincint
 
+from astra.glossary import Glossary
+from astra.models.apogee import ApogeeVisitSpectrum
 
 
-
-
-
-class ApogeeMADGICSSpectrum(BaseModel, SpectrumMixin):
+class ApogeeMADGICSVisitSpectrum(BaseModel, SpectrumMixin):
 
     """An APOGEE spectrum from the MADGICS pipeline."""
 
-    # TODO: We set the referencing up like this so that we can do analysis without *requiring* the lazy loading to Source (and that source exists)
-    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
-    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
+    pk = AutoField()
     
-    # TODO: replace this with something that is recognised as a field?
-    @property
-    def wavelength(self):
-        return 10**(4.179 + 6e-6 * np.arange(8575))
+    #> Identifiers
+    spectrum_pk = ForeignKeyField(
+        Spectrum,
+        null=True,
+        index=True,
+        unique=True,
+        lazy_load=False,
+    )
+    drp_spectrum_pk = ForeignKeyField(
+        ApogeeVisitSpectrum,
+        index=True,
+        unique=True,
+        lazy_load=False,
+        field=ApogeeVisitSpectrum.spectrum_pk,
+        help_text=Glossary.drp_spectrum_pk
+    )    
+    source = ForeignKeyField(
+        Source, 
+        null=True, 
+        index=True,
+        column_name="source_pk",
+        backref="apogee_madgics_spectra",
+    )
 
+    wavelength = PixelArray(
+        accessor_class=LogLambdaArrayAccessor,
+        accessor_kwargs=dict(
+            crval=4.179,
+            cdelt=6e-6,
+            naxis=8575,
+        ),
+        help_text=Glossary.wavelength
+    )
+    '''
     flux = PixelArray(
         column_name="x_starLines_v0",
         transform=lambda x: 1 + x[125:]
@@ -43,6 +70,8 @@ class ApogeeMADGICSSpectrum(BaseModel, SpectrumMixin):
 
     row_index = IntegerField(index=True)
     v_rad_pixel = PixelArray(column_name="RV_pixoff_final", accessor_class=PixelArrayAccessorHDF)
+    '''
+
 
     release = TextField()
     telescope = TextField()
@@ -50,212 +79,6 @@ class ApogeeMADGICSSpectrum(BaseModel, SpectrumMixin):
     plate = IntegerField()
     mjd = IntegerField()
     fiber = IntegerField()
-
-
-    @property
-    def path(self):
-        return "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6039752/working/2023_03_24/outdir_wu/apMADGICS_out.h5"
-
-class ApogeeMADGICSRestFrameSpectrum20230721Konventional(BaseModel, SpectrumMixin):
-
-    """A rest-frame resampled APOGEE MADGICS spectrum."""
-
-    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
-    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
-
-    #release = TextField()
-    #telescope = TextField()
-    #field = TextField()
-    #plate = IntegerField()
-    #mjd = IntegerField()
-    #fiber = IntegerField()
-    index = IntegerField(index=True)
-
-    @property
-    def wavelength(self):
-        return 10**(4.179 + 6e-6 * np.arange(8575))
-
-    flux = PixelArray(ext=1)
-    ivar = PixelArray(ext=1)
-
-
-    @property
-    def path(self):
-        return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230721_Konventional/apMADGICS-20230721-{self.index}.fits"
-
-
-
-class ApogeeMADGICSRestFrameSpectrum20230721(BaseModel, SpectrumMixin):
-
-    """A rest-frame resampled APOGEE MADGICS spectrum."""
-
-    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
-    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
-
-    #release = TextField()
-    #telescope = TextField()
-    #field = TextField()
-    #plate = IntegerField()
-    #mjd = IntegerField()
-    #fiber = IntegerField()
-    index = IntegerField(index=True)
-
-    @property
-    def wavelength(self):
-        return 10**(4.179 + 6e-6 * np.arange(8575))
-
-    flux = PixelArray(ext=1)
-    ivar = PixelArray(ext=1)
-
-
-    @property
-    def path(self):
-        return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230721/apMADGICS-20230721-{self.index}.fits"
-
-
-
-
-class ApogeeMADGICSRestFrameSpectrum20230720(BaseModel, SpectrumMixin):
-
-    """A rest-frame resampled APOGEE MADGICS spectrum."""
-
-    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
-    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
-
-    #release = TextField()
-    #telescope = TextField()
-    #field = TextField()
-    #plate = IntegerField()
-    #mjd = IntegerField()
-    #fiber = IntegerField()
-    index = IntegerField(index=True)
-
-    @property
-    def wavelength(self):
-        return 10**(4.179 + 6e-6 * np.arange(8575))
-
-    flux = PixelArray(ext=1)
-    ivar = PixelArray(ext=1)
-
-
-    @property
-    def path(self):
-        return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230720/apMADGICS-20230720-{self.index}.fits"
-
-
-
-class ApogeeMADGICSRestFrameSpectrum20230713(BaseModel, SpectrumMixin):
-
-    """A rest-frame resampled APOGEE MADGICS spectrum."""
-
-    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
-    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
-
-    #release = TextField()
-    #telescope = TextField()
-    #field = TextField()
-    #plate = IntegerField()
-    #mjd = IntegerField()
-    #fiber = IntegerField()
-    index = IntegerField(index=True)
-
-    @property
-    def wavelength(self):
-        return 10**(4.179 + 6e-6 * np.arange(8575))
-
-    flux = PixelArray(ext=1)
-    ivar = PixelArray(ext=1)
-
-
-    @property
-    def path(self):
-        return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230713/apMADGICS-20230713-{self.index}.fits"
-
-
-
-class ApogeeMADGICSRestFrameSpectrum20230712(BaseModel, SpectrumMixin):
-
-    """A rest-frame resampled APOGEE MADGICS spectrum."""
-
-    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
-    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
-
-    #release = TextField()
-    #telescope = TextField()
-    #field = TextField()
-    #plate = IntegerField()
-    #mjd = IntegerField()
-    #fiber = IntegerField()
-    index = IntegerField(index=True)
-
-    @property
-    def wavelength(self):
-        return 10**(4.179 + 6e-6 * np.arange(8575))
-
-    flux = PixelArray(ext=1)
-    ivar = PixelArray(ext=1)
-
-
-    @property
-    def path(self):
-        return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230712/apMADGICS-20230712-{self.index}.fits"
-
-
-
-class ApogeeMADGICSRestFrameSpectrum20230706(BaseModel, SpectrumMixin):
-
-    """A rest-frame resampled APOGEE MADGICS spectrum."""
-
-    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
-    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
-
-    #release = TextField()
-    #telescope = TextField()
-    #field = TextField()
-    #plate = IntegerField()
-    #mjd = IntegerField()
-    #fiber = IntegerField()
-    index = IntegerField(index=True)
-
-    @property
-    def wavelength(self):
-        return 10**(4.179 + 6e-6 * np.arange(8575))
-
-    flux = PixelArray(ext=1)
-    ivar = PixelArray(ext=1)
-
-
-    @property
-    def path(self):
-        return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230706/apMADGICS-20230706-{self.index}.fits"
-
-
-
-class ApogeeMADGICSRestFrameSpectrum20230625(BaseModel, SpectrumMixin):
-
-    """A rest-frame resampled APOGEE MADGICS spectrum."""
-
-    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
-    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
-
-    release = TextField()
-    telescope = TextField()
-    field = TextField()
-    plate = IntegerField()
-    mjd = IntegerField()
-    fiber = IntegerField()
-
-    @property
-    def wavelength(self):
-        return 10**(4.179 + 6e-6 * np.arange(8575))
-
-    flux = PixelArray(ext=1)
-    ivar = PixelArray(ext=1)
-
-
-    @property
-    def path(self):
-        return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230625/apMADGICS-20230625-dr17-{self.telescope}-{self.field}-{self.plate}-{self.mjd}-{self.fiber:0>3.0f}.fits"
 
     class Meta:
         indexes = (
@@ -272,174 +95,11 @@ class ApogeeMADGICSRestFrameSpectrum20230625(BaseModel, SpectrumMixin):
             ),
         )
 
-class ApogeeMADGICSRestFrameSpectrum20230620(BaseModel, SpectrumMixin):
-
-    """A rest-frame resampled APOGEE MADGICS spectrum."""
-
-    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
-    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
-
-    release = TextField()
-    telescope = TextField()
-    field = TextField()
-    plate = IntegerField()
-    mjd = IntegerField()
-    fiber = IntegerField()
-
-    @property
-    def wavelength(self):
-        return 10**(4.179 + 6e-6 * np.arange(8575))
-
-    flux = PixelArray(ext=1)
-    ivar = PixelArray(ext=1)
-
 
     @property
     def path(self):
-        return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230620/apMADGICS-20230620-dr17-{self.telescope}-{self.field}-{self.plate}-{self.mjd}-{self.fiber:0>3.0f}.fits"
-
-    class Meta:
-        indexes = (
-            (
-                (
-                    "release",
-                    "telescope",
-                    "field",
-                    "plate",
-                    "mjd",
-                    "fiber",
-                ),
-                True,
-            ),
-        )
-
-class ApogeeMADGICSRestFrameSpectrum20230618FluxErr(BaseModel, SpectrumMixin):
-
-    """A rest-frame resampled APOGEE MADGICS spectrum."""
-
-    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
-    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
-
-    release = TextField()
-    telescope = TextField()
-    field = TextField()
-    plate = IntegerField()
-    mjd = IntegerField()
-    fiber = IntegerField()
-
-    @property
-    def wavelength(self):
-        return 10**(4.179 + 6e-6 * np.arange(8575))
-
-    flux = PixelArray(ext=1)
-    ivar = PixelArray(ext=1)
-
-
-    @property
-    def path(self):
-        return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230618_stddev/apMADGICS-20230618-stddev-dr17-{self.telescope}-{self.field}-{self.plate}-{self.mjd}-{self.fiber:0>3.0f}.fits"
-
-    class Meta:
-        indexes = (
-            (
-                (
-                    "release",
-                    "telescope",
-                    "field",
-                    "plate",
-                    "mjd",
-                    "fiber",
-                ),
-                True,
-            ),
-        )
-
+        raise a
     
-class ApogeeMADGICSRestFrameSpectrum20230618FluxVar(BaseModel, SpectrumMixin):
-
-    """A rest-frame resampled APOGEE MADGICS spectrum."""
-
-    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
-    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
-
-    release = TextField()
-    telescope = TextField()
-    field = TextField()
-    plate = IntegerField()
-    mjd = IntegerField()
-    fiber = IntegerField()
-
-    @property
-    def wavelength(self):
-        return 10**(4.179 + 6e-6 * np.arange(8575))
-
-    flux = PixelArray(ext=1)
-    ivar = PixelArray(ext=1)
-
-
-    @property
-    def path(self):
-        return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_20230618_fluxvar/aapMADGICS-20230618-fluxvar-dr17-{self.telescope}-{self.field}-{self.plate}-{self.mjd}-{self.fiber:0>3.0f}.fits"
-
-    class Meta:
-        indexes = (
-            (
-                (
-                    "release",
-                    "telescope",
-                    "field",
-                    "plate",
-                    "mjd",
-                    "fiber",
-                ),
-                True,
-            ),
-        )
-
-
-class ApogeeMADGICSRestFrameSpectrum(BaseModel, SpectrumMixin):
-
-    """A rest-frame resampled APOGEE MADGICS spectrum."""
-
-    source_id = ForeignKeyField(Source, lazy_load=False, index=True, backref="apogee_madgics_spectra")
-    spectrum_id = ForeignKeyField(Spectrum, lazy_load=False, index=True)
-
-    release = TextField()
-    telescope = TextField()
-    field = TextField()
-    plate = IntegerField()
-    mjd = IntegerField()
-    fiber = IntegerField()
-
-    @property
-    def wavelength(self):
-        return 10**(4.179 + 6e-6 * np.arange(8575))
-
-    flux = PixelArray(ext=1)
-    ivar = PixelArray(ext=1)
-
-    #@property
-    #def path(self):
-    #    return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS/apMADGICS-2023_06_04-wu_50-dr17-{self.telescope}-{self.field}-{self.plate}-{self.mjd}-{self.fiber:0>3.0f}.fits"
-    
-    @property
-    def path(self):
-        return f"/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6020307/apMADGICS_2023_06_04_wu_50_indexbugfixed/apMADGICS-2023_06_04-wu_50-dr17-{self.telescope}-{self.field}-{self.plate}-{self.mjd}-{self.fiber:0>3.0f}.fits"
-
-    class Meta:
-        indexes = (
-            (
-                (
-                    "release",
-                    "telescope",
-                    "field",
-                    "plate",
-                    "mjd",
-                    "fiber",
-                ),
-                True,
-            ),
-        )
 
 
 
@@ -491,26 +151,39 @@ def _shift_and_resample_to_rest_frame(index, v_rad, flux, flux_var, n_res=4.25):
     return (index, resampled_flux, resampled_ivar)
 
 
-def shift_and_resample_to_rest_frame(flux_path, flux_err_path, rv_pixoff_path, n_res=4.25):
+def shift_and_resample_to_rest_frame(flux_path, flux_err_path, rv_pixoff_path, n_res=4.25, max_workers=4):
     import os
+    print("loading flux")
     flux_fp = h5py.File(flux_path, "r")
+    print("loading err")
     flux_err_fp = h5py.File(flux_err_path, "r")
+    print("loading rv")
     rv_pixoff_fp = h5py.File(rv_pixoff_path, "r")
     get_key = lambda x: os.path.basename(x).split(".")[0][14:] 
 
-    v_rads = rv_pixoff_fp[get_key(rv_pixoff_path)][:]
-    fluxs = 1 + flux_fp[get_key(flux_path)][:]
-    flux_vars = flux_err_fp[get_key(flux_err_path)][:]**2
+    print("parsing vrads")
+    v_rads = rv_pixoff_fp[get_key(rv_pixoff_path)]
+    print("parsing fluxes")
+    fluxes = flux_fp[get_key(flux_path)]
+    print("parsing vars")
+    e_fluxes = flux_err_fp[get_key(flux_err_path)]
+    print("done")
 
-    N, P = fluxs.shape
+    N, P = flux_fp[get_key(flux_path)].shape
     
-    executor = concurrent.futures.ProcessPoolExecutor(4)
+    executor = concurrent.futures.ProcessPoolExecutor(max_workers)
 
-    all_args = [(i, v_rad, flux, flux_var, n_res) for i, (v_rad, flux, flux_var) in enumerate(zip(v_rads, fluxs, flux_vars))]
-    futures = [executor.submit(_shift_and_resample_to_rest_frame, *args) for args in all_args]
+    futures = []
+    for i, (v_rad, flux, e_flux) in enumerate(tqdm(zip(v_rads, fluxes, e_fluxes), total=N, desc="Submitting")):
+        futures.append(
+            executor.submit(_shift_and_resample_to_rest_frame, i, v_rad, 1 + flux, e_flux**2, n_res)
+        )
 
+    print("preparing flux array")
     resampled_fluxs = np.zeros((N, P), dtype=float)
+    print("prepareing ivar array")
     resampled_ivars = np.zeros((N, P), dtype=float)
+    print("ok")
 
     with tqdm(total=N, desc="Resampling in parallel") as pb:
         for future in concurrent.futures.as_completed(futures):
@@ -518,8 +191,7 @@ def shift_and_resample_to_rest_frame(flux_path, flux_err_path, rv_pixoff_path, n
             resampled_fluxs[index] = resampled_flux
             resampled_ivars[index] = resampled_ivar
             pb.update()
-            
-    
+                
     return resampled_fluxs, resampled_ivars
 
 

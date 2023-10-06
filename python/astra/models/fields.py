@@ -89,11 +89,15 @@ class PixelArrayAccessorFITS(BasePixelArrayAccessor):
                 instance.__pixel_data__ = {}
                 with fits.open(expand_path(instance.path)) as image:
                     for name, accessor in instance._meta.pixel_fields.items():
-                        
+
                         if callable(accessor.ext):
                             ext = accessor.ext(instance)
                         else:
                             ext = accessor.ext
+
+                        if ext is None:
+                            # non-FITSy looking thing
+                            continue
                     
                         data = image[ext].data
                         
@@ -181,7 +185,8 @@ class PixelArray(VirtualField):
         self.name = self.safe_name = name
         self.column_name = self.column_name or name
         attr = self.accessor_class(
-            model, self, name, self.ext, self.column_name, 
+            model, self, name, 
+            ext=self.ext, column_name=self.column_name, 
             transform=self.transform, help_text=self.help_text,
             **(self.accessor_kwargs or {})
         )        

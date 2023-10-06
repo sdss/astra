@@ -1,5 +1,6 @@
 """"Functions for creating summary products (e.g., mwmAllStar, mwmAllVisit)."""
 
+from peewee import JOIN
 from astropy.io import fits
 from astra import __version__
 from astra.utils import expand_path
@@ -233,9 +234,10 @@ def _create_summary_product(
         q = (
             model
             .select(*tuple(fields.values()))
-            .join(Source, on=(Source.pk == model.source_pk))
+            .join(Source, JOIN.LEFT_OUTER, on=(Source.pk == model.source_pk))
             .where(model.telescope.startswith(observatory))
-        )
+        )        
+
         if hdu_where is not None:
             q = q.where(hdu_where)
 
