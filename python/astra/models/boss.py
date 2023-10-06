@@ -22,17 +22,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
 
     """A BOSS visit spectrum, where a visit is defined by spectra taken on a single MJD."""
 
-    PIXELS = 4648
-
     pk = AutoField()
-
-    source = ForeignKeyField(
-        Source,
-        null=True,
-        index=True,
-        column_name="source_pk",
-        backref="boss_visit_spectra"
-    )
 
     #> Identifiers
     spectrum_pk = ForeignKeyField(
@@ -42,19 +32,25 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
         unique=True,
         lazy_load=False,
     )
+    source = ForeignKeyField(
+        Source,
+        null=True,
+        index=True,
+        column_name="source_pk",
+        backref="boss_visit_spectra"
+    )    
 
     #> Spectral data
     wavelength = PixelArray(
         ext=1, 
         column_name="loglam", 
         transform=lambda v, *a: 10**v,
-        pixels=PIXELS,
         help_text=Glossary.wavelength
     )
-    flux = PixelArray(ext=1, pixels=PIXELS, help_text=Glossary.flux)
-    ivar = PixelArray(ext=1, pixels=PIXELS, help_text=Glossary.ivar)
-    wresl = PixelArray(ext=1, pixels=PIXELS, help_text=Glossary.wresl)
-    pixel_flags = PixelArray(ext=1, column_name="or_mask", pixels=PIXELS, help_text=Glossary.pixel_flags)
+    flux = PixelArray(ext=1, help_text=Glossary.flux)
+    ivar = PixelArray(ext=1, help_text=Glossary.ivar)
+    wresl = PixelArray(ext=1, help_text=Glossary.wresl)
+    pixel_flags = PixelArray(ext=1, column_name="or_mask", help_text=Glossary.pixel_flags)
 
     #> Data Product Keywords
     release = TextField(help_text=Glossary.release)
@@ -122,7 +118,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
 
     #> Metadata Flags
     snr = FloatField(null=True, help_text=Glossary.snr)
-    gri_gaia_transform_flags = BitField(default=0, help_text="Flags to track provenance of ugriz photometry")
+    gri_gaia_transform_flags = BitField(default=0, help_text="Flags for provenance of ugriz photometry")
     zwarning_flags = BitField(default=0, help_text="BOSS DRP warning flags") 
     
     #> XCSAO

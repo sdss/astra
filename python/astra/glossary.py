@@ -135,6 +135,15 @@ class Glossary(BaseGlossary):
     mf_4_5 = "Flux calculationi method flag 4.5um IRAC (Band 2)"
     #csf # TODO
 
+    # Wavelength information
+    crval = "Reference vacuum wavelength [Angstrom]"
+    cdelt = "Vacuum wavelength step [Angstrom]"
+    crpix = "Reference pixel (1-indexed)"
+    npixels = "Number of pixels in the spectrum"
+    ctype = "Wavelength axis type"
+    cunit = "Wavelength axis unit"
+    dc_flag = "Linear wavelength axis (0) or logarithmic"    
+
     # Targeting
     carton = "Carton name"
     carton_id = "Simplified carton identifier, NOT the same as `targetdb.carton.pk`"
@@ -168,7 +177,9 @@ class Glossary(BaseGlossary):
     tileid = "C"
     cartid = "Cartridge used for plugging"
     mapid = "Mapping version of the loaded plate"
+    slitid = "Slit identifier"
     n_std = "Number of (good) standard stars"
+    n_gal = "Number of (good) galaxies in field"
 
     dust_a = "0.3mu-sized dust particle count [particles m^-3 s^-1]"
     dust_b = "1.0mu-sized dust particle count [particles m^-3 s^-1]"
@@ -184,7 +195,9 @@ class Glossary(BaseGlossary):
     spectrum_flags = "Data reduction pipeline flags for this spectrum"
     result_flags = "Flags describing the results"
     
-
+    plug_ra = "Right ascension of plug position [deg]"
+    plug_dec = "Declination of plug position [deg]"
+    
     input_ra = "Input right ascension [deg]"
     input_dec = "Input declination [deg]"
     

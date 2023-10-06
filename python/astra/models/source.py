@@ -26,28 +26,21 @@ from astropy.table import Table
 from astra.utils import expand_path
 
 
-@cache
-def get_carton_to_bit_mapping():
-    t = Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_1_with_groups.csv"))
-    t.sort("bit")
-    return t
-
-
 class Source(BaseModel):
 
     """ An astronomical source. """
 
-    #> Identifiers
     pk = AutoField(primary_key=True, help_text=Glossary.pk)
-    
-    healpix = IntegerField(null=True, help_text="HEALPix (128 side)")
+
+    #> Identifiers    
+    sdss_id = BigIntegerField(index=True, unique=True, null=True, help_text="SDSS-5 unique identifier")
     # The following identifiers are usually unique, but let's not base our integrity on it because
     # there will be things with n_associated > 1.
-    sdss_id = BigIntegerField(index=True, unique=True, null=True, help_text="SDSS-5 unique identifier")
     sdss4_apogee_id = TextField(index=True, unique=True, null=True, help_text="SDSS-4 DR17 APOGEE identifier")
     gaia_dr2_source_id = BigIntegerField(null=True, help_text="Gaia DR2 source identifier")
     gaia_dr3_source_id = BigIntegerField(null=True, help_text="Gaia DR3 source identifier")
     tic_v8_id = BigIntegerField(null=True, help_text="TESS Input Catalog (v8) identifier")
+    healpix = IntegerField(null=True, help_text="HEALPix (128 side)")
     
     #> Targeting provenance 
     carton_0 = TextField(default="", help_text="Highest priority carton name")
@@ -64,8 +57,7 @@ class Source(BaseModel):
     if isinstance(database, PostgresqlDatabase):
         sdss5_target_flags = BigBitField(null=True, help_text=Glossary.sdss5_target_flags)
 
-    # https://www.sdss4.org/dr17/irspec/targets/
-    # https://www.sdss4.org/dr17/irspec/apogee-bitmasks/#APOGEE_TARGET2:APOGEE1targetingbitmask(2of2)
+    # https://www.sdss4.org/dr17/irspec/apogee-bitmasks/
     sdss4_apogee_target1_flags = BitField(default=0, help_text="SDSS4 APOGEE1 targeting flags (1/2)")
     sdss4_apogee_target2_flags = BitField(default=0, help_text="SDSS4 APOGEE1 targeting flags (2/2)")
     sdss4_apogee2_target1_flags = BitField(default=0, help_text="SDSS4 APOGEE2 targeting flags (1/3)")
@@ -456,7 +448,6 @@ class Source(BaseModel):
     # See https://zenodo.org/record/7811871
  
     #> Reddening
-    print("ANDY REMOVE THIS WARNING AND ADD REDDENING COLUMNS")
     '''
     ebv = FloatField(null=True, help_text="E(B-V) [mag]")
     e_ebv = FloatField(null=True, help_text="Error on E(B-V) [mag]")
@@ -484,7 +475,8 @@ class Source(BaseModel):
     e_ebv_edenhofer_2023 = FloatField(null=True, help_text="Error on E(B-V) from Edenhofer et al. (2023) [mag]")
     flag_ebv_edenhofer_2023_upper_limit = BooleanField(default=False, help_text="E(B-V) from Edenhofer et al. (2023) is an upper limit")
     '''
-
+    print("ANDY REMOVE THIS WARNING AND ADD REDDENING COLUMNS")
+    
     @property
     def sdss5_cartons(self):
         """Return the cartons that this source is assigned."""
@@ -625,3 +617,11 @@ class Source(BaseModel):
         for expr, column in self.dependencies():
             if Spectrum in column.model.__mro__[1:]:
                 yield from column.model.select().where(expr)
+
+
+@cache
+def get_carton_to_bit_mapping():
+    t = Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_1_with_groups.csv"))
+    t.sort("bit")
+    return t
+

@@ -13,7 +13,7 @@ from peewee import (
 import numpy as np
 import os
 from playhouse.hybrid import hybrid_property
-from astra.models.fields import PixelArray, BitField
+from astra.models.fields import PixelArray, BitField, LogLambdaArrayAccessor
 from astra.models.base import BaseModel
 from astra.models.spectrum import (Spectrum, SpectrumMixin)
 from astra.models.source import Source
@@ -75,17 +75,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
 
     pk = AutoField()
     
-    # Won't appear in a header group because it is first referenced in `Source`.
-    source = ForeignKeyField(
-        Source, 
-        # We want to allow for spectra to be unassociated with a source so that 
-        # we can test with fake spectra, etc, but any pipeline should run their
-        # own checks to make sure that spectra and sources are linked.
-        null=True, 
-        index=True,
-        column_name="source_pk",
-        backref="apogee_visit_spectra",
-    )
+
 
     # A decision was made here.
 
@@ -117,7 +107,20 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         unique=True,
         lazy_load=False,
     )
+    # Won't appear in a header group because it is first referenced in `Source`.
+    source = ForeignKeyField(
+        Source, 
+        # We want to allow for spectra to be unassociated with a source so that 
+        # we can test with fake spectra, etc, but any pipeline should run their
+        # own checks to make sure that spectra and sources are linked.
+        null=True, 
+        index=True,
+        column_name="source_pk",
+        backref="apogee_visit_spectra",
+    )
+        
     catalogid = BigIntegerField(index=True, null=True, help_text="SDSS input catalog identifier")
+    print("Andy uncomment star_pk in apogee")
     #star_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `star` primary key")
     visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `visit` primary key")
     rv_visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `rv_visit` primary key")
@@ -316,28 +319,29 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
     )    
 
     #> Spectral Data
-    @property
-    def wavelength(self):
-        # TODO: Do I need to store this as a PixelArray?
-        return 10**(4.179 + 6e-6 * np.arange(8575))
-
+    wavelength = PixelArray(
+        accessor_class=LogLambdaArrayAccessor,
+        accessor_kwargs=dict(
+            crval=4.179,
+            cdelt=6e-6,
+            naxis=8575,
+        ),
+        help_text=Glossary.wavelength
+    )
     flux = PixelArray(
         ext=1,
         transform=transform,
         help_text=Glossary.flux,
-        pixels=8575
     )
     ivar = PixelArray(
         ext=2,
         transform=lambda *a, **k: _transform_err_to_ivar(transform(*a, **k)),
         help_text=Glossary.ivar,
-        pixels=8575
     )
     pixel_flags = PixelArray(
         ext=3,
         transform=transform,
         help_text=Glossary.pixel_flags,
-        pixels=8575
     )
 
     #> Data Product Keywords
@@ -455,19 +459,21 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     field = TextField(null=True, help_text=Glossary.field) # not used in SDSS-V
     prefix = TextField(null=True, help_text=Glossary.prefix) # not used in SDSS-V    
 
+    #> Observing Span
     min_mjd = IntegerField(null=True, help_text="Minimum MJD of visits")
     max_mjd = IntegerField(null=True, help_text="Maximum MJD of visits")
 
+    #> Number and Quality of Visits
     n_entries = IntegerField(null=True, help_text="apStar entries for this SDSS4_APOGEE_ID") # Only present in DR17
     n_visits = IntegerField(null=True, help_text="Number of APOGEE visits")
     n_good_visits = IntegerField(null=True, help_text="Number of 'good' APOGEE visits")
     n_good_rvs = IntegerField(null=True, help_text="Number of 'good' APOGEE radial velocities")
 
+    #> Summary Statistics
     snr = FloatField(null=True, help_text=Glossary.snr)
-    spectrum_flags = BitField(default=0, help_text=Glossary.spectrum_flags)
-
     mean_fiber = FloatField(null=True, help_text="S/N-weighted mean visit fiber number")
     std_fiber = FloatField(null=True, help_text="Standard deviation of visit fiber numbers")
+    spectrum_flags = BitField(default=0, help_text=Glossary.spectrum_flags)
 
     #> Radial Velocity (Doppler)
     v_rad = FloatField(null=True, help_text=Glossary.v_rad)
@@ -493,32 +499,32 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     n_components = IntegerField(null=True, help_text=Glossary.n_components)    
 
     #> Spectral Data
-    @property
-    def wavelength(self):
-        # TODO: Do I need to store this as a PixelArray?
-        return 10**(4.179 + 6e-6 * np.arange(8575))
-
+    wavelength = PixelArray(
+        accessor_class=LogLambdaArrayAccessor,
+        accessor_kwargs=dict(
+            crval=4.179,
+            cdelt=6e-6,
+            naxis=8575,
+        ),
+        help_text=Glossary.wavelength
+    )
     flux = PixelArray(
         ext=1,
         transform=_transform_coadded_spectrum,
-        pixels=8575,
         help_text=Glossary.flux
     )
     ivar = PixelArray(
         ext=2,
         transform=lambda *a, **k: _transform_err_to_ivar(_transform_coadded_spectrum(*a, **k)),
-        pixels=8575,
         help_text=Glossary.ivar
     )
     pixel_flags = PixelArray(
         ext=3,
         transform=_transform_coadded_spectrum,
-        pixels=8575,
         help_text=Glossary.pixel_flags
     )
 
-    # Other stuff we need
-    mean_fiber = FloatField(null=True)
+
 
 
     @property

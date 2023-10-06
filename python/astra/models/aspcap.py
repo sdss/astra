@@ -14,7 +14,7 @@ import numpy as np
 
 from astra import __version__
 from astra.models.base import BaseModel
-from astra.models.fields import BitField, PixelArray, BasePixelArrayAccessor
+from astra.models.fields import BitField, PixelArray, BasePixelArrayAccessor, LogLambdaArrayAccessor
 from astra.models.ferre import FerreCoarse, FerreStellarParameters, FerreChemicalAbundances
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
@@ -72,14 +72,13 @@ class ChemicalAbundancePixelAccessor(BasePixelArrayAccessor):
 
 class ChemicalAbundanceModelFluxArray(PixelArray):
     
-    def __init__(self, ext=None, column_name=None, transform=None, accessor_class=ChemicalAbundancePixelAccessor, help_text=None, pixels=None, **kwargs):
+    def __init__(self, ext=None, column_name=None, transform=None, accessor_class=ChemicalAbundancePixelAccessor, help_text=None, **kwargs):
         super(ChemicalAbundanceModelFluxArray, self).__init__(
             ext=ext,
             column_name=column_name,
             transform=transform,
             accessor_class=accessor_class,
             help_text=help_text,
-            pixels=pixels,
             **kwargs
         )
         
@@ -87,9 +86,10 @@ class ChemicalAbundanceModelFluxArray(PixelArray):
 class ASPCAP(BaseModel, PipelineOutputMixin):
 
     """ APOGEE Stellar Parameter and Chemical Abundances Pipeline (ASPCAP) """
-
-    source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
+    
+    #> Identifiers
     spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False, help_text=Glossary.spectrum_pk)    
+    source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
     
     #> Astra Metadata
     task_pk = AutoField(help_text=Glossary.task_pk)
@@ -100,6 +100,15 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     tag = TextField(default="", index=True, help_text=Glossary.tag)
     
     #> Spectral Data
+    wavelength = PixelArray(
+        accessor_class=LogLambdaArrayAccessor,
+        accessor_kwargs=dict(
+            crval=4.179,
+            cdelt=6e-6,
+            naxis=8575,
+        ),
+        help_text=Glossary.wavelength
+    )    
     model_flux = PixelArray(
         accessor_class=StellarParameterPixelAccessor, 
         help_text="Model flux at optimized stellar parameters"
@@ -110,30 +119,30 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     )
 
     #> Model Fluxes from Chemical Abundance Fits
-    model_flux_al_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Al/H] and stellar parameters")
-    model_flux_c_12_13 = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized C12/13 and stellar parameters")
-    model_flux_ca_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ca/H] and stellar parameters")
-    model_flux_ce_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ce/H] and stellar parameters")
-    model_flux_c_1_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [C 1/H] and stellar parameters")
-    model_flux_c_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [C/H] and stellar parameters")
-    model_flux_co_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Co/H] and stellar parameters")
-    model_flux_cr_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Cr/H] and stellar parameters")
-    model_flux_cu_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Cu/H] and stellar parameters")
-    model_flux_fe_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Fe/H] and stellar parameters")
-    model_flux_k_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [K/H] and stellar parameters")
-    model_flux_mg_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Mg/H] and stellar parameters")
-    model_flux_mn_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Mn/H] and stellar parameters")
-    model_flux_na_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Na/H] and stellar parameters")
-    model_flux_nd_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Nd/H] and stellar parameters")
-    model_flux_ni_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ni/H] and stellar parameters")
-    model_flux_n_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [N/H] and stellar parameters")
-    model_flux_o_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [O/H] and stellar parameters")
-    model_flux_p_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [P/H] and stellar parameters")
-    model_flux_si_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Si/H] and stellar parameters")
-    model_flux_s_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [S/H] and stellar parameters")
-    model_flux_ti_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ti/H] and stellar parameters")
-    model_flux_ti_2_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ti 2/H] and stellar parameters")
-    model_flux_v_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [V/H] and stellar parameters")
+    model_flux_al_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Al/H]")
+    model_flux_c_12_13 = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized C12/13")
+    model_flux_ca_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ca/H]")
+    model_flux_ce_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ce/H]")
+    model_flux_c_1_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [C 1/H]")
+    model_flux_c_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [C/H]")
+    model_flux_co_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Co/H]")
+    model_flux_cr_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Cr/H]")
+    model_flux_cu_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Cu/H]")
+    model_flux_fe_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Fe/H]")
+    model_flux_k_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [K/H]")
+    model_flux_mg_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Mg/H]")
+    model_flux_mn_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Mn/H]")
+    model_flux_na_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Na/H]")
+    model_flux_nd_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Nd/H]")
+    model_flux_ni_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ni/H]")
+    model_flux_n_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [N/H]")
+    model_flux_o_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [O/H]")
+    model_flux_p_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [P/H]")
+    model_flux_si_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Si/H]")
+    model_flux_s_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [S/H]")
+    model_flux_ti_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ti/H]")
+    model_flux_ti_2_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ti 2/H]")
+    model_flux_v_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [V/H]")
 
     #> Stellar Parameters
     teff = FloatField(null=True, help_text=Glossary.teff)

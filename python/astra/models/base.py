@@ -166,6 +166,8 @@ class BaseModel(Model):
         #> New category header
         """
 
+
+
         pattern = '\s{4}#>\s*(.+)\n\s{4}([\w|\d|_]+)\s*='
         source_code = getsource(cls)
         category_headers = []
@@ -173,6 +175,7 @@ class BaseModel(Model):
             if hasattr(cls, field_name) and isinstance(getattr(cls, field_name), Field):
                 category_headers.append((header, field_name))
             else:
+                raise a
                 log.warning(
                     f"Found category header '{header}', starting above '{field_name}' in {cls}, "
                     f"but {cls}.{field_name} is not an attribute of type `peewee.Field`."

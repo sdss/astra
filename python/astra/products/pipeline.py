@@ -8,16 +8,16 @@ from astra import __version__
 from astra.glossary import Glossary
 from astra.utils import log, expand_path
 from astra.models import Source, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar, BossVisitSpectrum
-from astra.products.source import create_source_primary_hdu
 from astra.products.utils import (
     BLANK_CARD,
+    create_source_primary_hdu,
     get_fields_and_pixel_arrays, get_basic_header, fits_column_kwargs, get_fill_value, check_path, resolve_model,
     add_category_headers, add_category_comments, dispersion_array
 )
 
 ASTRA_STAR_TEMPLATE = "astraStar-{pipeline}-{version}-{sdss_id}.fits"
 ASTRA_VISIT_TEMPLATE = "astraVisit-{pipeline}-{version}-{sdss_id}.fits"
-DEFAULT_IGNORE_FIELD_NAMES = ("pk", "sdss5_target_flags", "source", "flux", "ivar", "pixel_flags")
+DEFAULT_IGNORE_FIELD_NAMES = ("pk", "sdss5_target_flags", "source", "wresl", "flux", "ivar", "pixel_flags")
 
 def create_star_pipeline_products_for_all_sources(
     pipeline_model,
@@ -252,7 +252,7 @@ def create_star_pipeline_product(
         apogee_where=apogee_where,    
         ignore_field_names=ignore_field_names,
         name_conflict_strategy=name_conflict_strategy,
-        include_wavelength_column_before_column_name="flux",
+        include_dispersion_cards=True,
         upper=upper,
         fill_values=fill_values,
         limit=limit,
@@ -361,7 +361,6 @@ def _create_pipeline_product(
     ignore_field_names,
     name_conflict_strategy,
     include_dispersion_cards,
-    include_wavelength_column_before_column_name,
     upper,
     fill_values,
     limit,
@@ -444,13 +443,12 @@ def _create_pipeline_product(
                 ignore_field_names=ignore_field_names
             )
 
-        # TODO: Put log-lambda dispersion header cards in.
         header = get_basic_header(observatory=observatory, instrument=instrument, include_dispersion_cards=include_dispersion_cards)
 
         q = (
             pipeline_model
             .select(*models)
-            .distinct(pipeline_model.spectrum_pk)
+            #.distinct(pipeline_model.spectrum_pk) # Require distinct per spectrum_pk? if so also update order_by
             .join(spectrum_model, on=(pipeline_model.spectrum_pk == spectrum_model.spectrum_pk), attr="__spectrum")
             .switch(pipeline_model)
             .join(Source, on=(pipeline_model.source_pk == Source.pk), attr="__source")
@@ -489,20 +487,12 @@ def _create_pipeline_product(
             kwds = fits_column_kwargs(field, data[name], upper=upper)
             # Keep track of field-to-HDU names so that we can add help text.
             original_names[kwds['name']] = name
-            if include_wavelength_column_before_column_name is not None and name == include_wavelength_column_before_column_name:
-                # Add a dispersion column first.
-                dispersion_kwds = fits_column_kwargs(FloatField(), dispersion_array(instrument), upper=upper, name="Wavelength")
-                columns.append(fits.Column(**dispersion_kwds))
-
             columns.append(fits.Column(**kwds))    
 
         hdu = fits.BinTableHDU.from_columns(columns, header=header)
         for i, name in enumerate(hdu.data.dtype.names, start=1):
-            if name == "Wavelength" and include_wavelength_column_before_column_name:
-                hdu.header.comments[f"TTYPE{i}"] = Glossary.wavelength
-            else:
-                field = fields[original_names[name]]
-                hdu.header.comments[f"TTYPE{i}"] = field.help_text
+            field = fields[original_names[name]]
+            hdu.header.comments[f"TTYPE{i}"] = field.help_text
 
         # Add category groupings.
         add_category_headers(hdu, models, original_names, upper)
@@ -533,7 +523,6 @@ def _create_pipeline_products_for_all_sources(
     ignore_field_names,
     name_conflict_strategy,
     include_dispersion_cards,
-    include_wavelength_column_before_column_name,
     upper,
     fill_values,
     limit,
@@ -573,7 +562,6 @@ def _create_pipeline_products_for_all_sources(
                 ignore_field_names=ignore_field_names,
                 name_conflict_strategy=name_conflict_strategy,
                 include_dispersion_cards=include_dispersion_cards,
-                include_wavelength_column_before_column_name=include_wavelength_column_before_column_name,
                 upper=upper,
                 fill_values=fill_values,
                 limit=limit,

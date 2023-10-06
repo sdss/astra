@@ -66,7 +66,12 @@ def create_source_primary_hdu(
         "SDSS4_APOGEE_ID": "APOGEEID",
         "TIC_V8_ID": "TIC_ID",
         "VERSION_ID": "VER_ID",
-        "SDSS5_CATALOGID_V1": "CAT_ID",
+        "CATALOGID": "CAT_ID",
+        "CATALOGID21": "CAT_ID21",
+        "CATALOGID25": "CAT_ID25",
+        "CATALOGID31": "CAT_ID31",
+        "N_ASSOCIATED": "N_ASSOC",
+        "N_NEIGHBORHOOD": "N_NEIGH",
         "GAIA_V_RAD": "V_RAD",
         "GAIA_E_V_RAD": "E_V_RAD",
         "ZGR_TEFF": "Z_TEFF",
@@ -82,6 +87,7 @@ def create_source_primary_hdu(
         "ZGR_TEFF_CONFIDENCE": "Z_TEFF_C",
         "ZGR_LOGG_CONFIDENCE": "Z_LOGG_C",
         "ZGR_FE_H_CONFIDENCE": "Z_FE_H_C",
+        "ZGR_LN_PRIOR": "Z_LPRIOR",
         "ZGR_QUALITY_FLAGS": "Z_FLAGS",
     }
 
@@ -140,13 +146,23 @@ def resolve_model(model_or_model_name):
         return model_or_model_name
 
 def get_fields_and_pixel_arrays(models, name_conflict_strategy=None, ignore_field_names=None):
+    
+    if name_conflict_strategy is None:
+        def default_conflict_strategy(fields, name, field, model):
+            # Overwrite the previous field, since the hierarchy of models is usually
+            # Source -> spectrum_level -> pipeline_level
+            del fields[name]
+            fields[name] = field
+            return None
+
+        name_conflict_strategy = default_conflict_strategy
+
     fields = OrderedDict([])
     for model in models:
         for name, field in model.__dict__.items():
             if (
                 (ignore_field_names is not None and name in ignore_field_names)
             or  (not isinstance(field, (FieldAccessor, BasePixelArrayAccessor)))
-            or  (name in fields and name_conflict_strategy is None)
             ):
                 continue
 
@@ -154,10 +170,11 @@ def get_fields_and_pixel_arrays(models, name_conflict_strategy=None, ignore_fiel
                 field = model._meta.fields.get(name, field)
 
             if name in fields:
-                name_conflict_strategy(fields, name, field, model)
+                name_conflict_strategy(fields, name, field, model)                
             else:
                 fields[name] = field
-                warn_on_long_name_or_comment(field)
+            
+            warn_on_long_name_or_comment(field)
     
     return fields
 
@@ -282,7 +299,7 @@ def add_category_headers(hdu, models, original_names, upper, use_ttype=True):
     return None
 
 
-def fits_column_kwargs(field, values, upper, name=None, warn_comment_length=47, warn_total_length=65):
+def fits_column_kwargs(field, values, upper, name=None, default_n_pixels=0, warn_comment_length=47, warn_total_length=65):
     mappings = {
         # Require at least one character for text fields
         TextField: lambda v: dict(format="A{}".format(max(1, max(len(_) for _ in v)) if len(v) > 0 else 1)),
@@ -300,7 +317,9 @@ def fits_column_kwargs(field, values, upper, name=None, warn_comment_length=47, 
         def callable(v):
             V, P = np.atleast_2d(v).shape
             if P == 0:
-                P = getattr(field, "pixels", None) or P # try to get the expected number of pixels if we have none
+                P = default_n_pixels
+                # TODO: it would be nice to have the expected number of pixels, but this is a lot of hack to make that happen
+                #P = getattr(field, "pixels", None) or P # try to get the expected number of pixels if we have none
             return dict(format=f"{P:.0f}E", dim=f"({P})")
         
     elif isinstance(field, ArrayField):
@@ -367,13 +386,16 @@ def wavelength_cards(
     return [
         BLANK_CARD,
         (" ", "WAVELENGTH INFORMATION (VACUUM)", None),
-        ("CRVAL", np.round(crval, decimals), None),
-        ("CDELT", np.round(cdelt, decimals), None),
-        ("CTYPE", "LOG-LINEAR", None),
-        ("CUNIT", "Angstrom (Vacuum)", None),
-        ("CRPIX", 1, None),
-        ("DC-FLAG", 1, None),
-        ("NPIXELS", num_pixels, "Number of pixels per spectrum"),
+        BLANK_CARD,
+        ("CRVAL", np.round(crval, decimals), Glossary.crval),
+        ("CDELT", np.round(cdelt, decimals), Glossary.cdelt),
+        ("CTYPE", "LOG-LINEAR", Glossary.ctype),
+        ("CUNIT", "Angstrom (Vacuum)", Glossary.cunit),
+        ("CRPIX", 1, Glossary.crpix),
+        ("DC-FLAG", 1, Glossary.dc_flag),
+        # We can't use NAXIS because it is a reserved keyword when we use a binary table,
+        # and there is just NO way around this because NAXIS[...] are used to set the table size.
+        ("NPIXELS", num_pixels, Glossary.npixels),
     ]
 
 def dispersion_array(instrument):
@@ -414,7 +436,7 @@ def get_basic_header(
 
     if include_dispersion_cards:
         try:
-            cards.extend(wavelength_cards(INSTRUMENT_COMMON_DISPERSION_VALUES[instrument.lower().strip()]))
+            cards.extend(wavelength_cards(*INSTRUMENT_COMMON_DISPERSION_VALUES[instrument.lower().strip()]))
         except KeyError:
             raise ValueError(f"Unknown instrument '{instrument}': not among {', '.join(INSTRUMENT_COMMON_DISPERSION_VALUES.keys())}")
 
