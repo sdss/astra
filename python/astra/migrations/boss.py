@@ -339,7 +339,7 @@ def _migrate_specfull_metadata(spectra, fields, raise_exceptions=False, full_out
 
 
 def migrate_specfull_metadata_from_image_headers(
-    where=(BossVisitSpectrum.alt.is_null()),
+    where=(BossVisitSpectrum.alt.is_null() & (BossVisitSpectrum.catalogid > 0)),
     max_workers: Optional[int] = 8,
     limit: Optional[int] = None,
     batch_size: Optional[int] = 100,
