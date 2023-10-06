@@ -1,9 +1,5 @@
-import pickle
-import os
-from tqdm import tqdm
-from tempfile import mkstemp
-from astra.utils import expand_path, log, callable
-from astra.utils.slurm import SlurmJob, SlurmTask
+from astra import models
+from astra.utils import log, callable
 from inspect import getfullargspec
 from peewee import JOIN
 
@@ -38,7 +34,6 @@ class Operator(BaseOperator):
 
     def execute(self, context=None):
 
-        from astra import models
 
         kwds = self.task_kwargs.copy()
 
@@ -54,10 +49,10 @@ class Operator(BaseOperator):
                 .join(
                     output_model,
                     JOIN.LEFT_OUTER,
-                    on=(input_model.spectrum_id == output_model.spectrum_id)
+                    on=(input_model.spectrum_pk == output_model.spectrum_pk)
                 )
             )
-            where = output_model.spectrum_id.is_null()
+            where = output_model.spectrum_pk.is_null()
             for k, v in (self.where or {}).items():
                 where = where & (getattr(input_model, k) == v)
     
@@ -77,7 +72,7 @@ class Operator(BaseOperator):
 # astra operator  
 
 
-
+'''
 class AstraTaskOperator(BaseOperator):
 
 
@@ -155,15 +150,15 @@ class AstraTaskOperator(BaseOperator):
         # Resolve the spectra, store IDs
         log.info(f"Getting spectra IDs")
 
-        spectrum_ids = []
+        spectrum_pks = []
         if self.spectra_callable is not None:
             for spectrum in self.spectra_callable(context):
-                spectrum_ids.append(spectrum.spectrum_id)
-        spectrum_ids = tuple(spectrum_ids)
+                spectrum_pks.append(spectrum.spectrum_pk)
+        spectrum_pks = tuple(spectrum_pks)
 
         # pickle the task kwargs and spectra (by their IDS)
         task_kwds = self.task_kwargs.copy()
-        task_kwds["spectra"] = spectrum_ids
+        task_kwds["spectra"] = spectrum_pks
 
         slurm_kwds = self.get_slurm_kwargs()
         slurm_kwds.setdefault("job_name", self.python_task_name.split(".")[-1])
@@ -204,6 +199,7 @@ class AstraTaskOperator(BaseOperator):
         return job_id
 
 
+'''
 
 '''
 if __name__ == "__main__":

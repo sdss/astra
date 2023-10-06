@@ -24,9 +24,10 @@ def initdb(drop_tables, delay):
         base,
         apogee,
         apogeenet,
-        #aspcap,
+        aspcap,
         #boss,
         #classifier,
+        ferre,
         #lineforest,
         #madgics,
         #mdwarftype,
@@ -80,6 +81,7 @@ def migrate(apred, run2d, limit, include_dr17):
         migrate_glimpse_photometry,
         migrate_gaia_dr3_astrometry_and_photometry,
         migrate_zhang_stellar_parameters,
+        migrate_bailer_jones_distances
     )
     from astra.migrations.targeting import migrate_carton_assignments_to_bigbitfield
 
@@ -133,6 +135,9 @@ def migrate(apred, run2d, limit, include_dr17):
     log.info(f"Migrating TIC v8 identifiers")
     migrate_tic_v8_identifier()
 
+    log.info(f"Migrating Bailer-Jones distances")
+    migrate_bailer_jones_distances()
+
     log.info(f"Setting the Sun to have sdss_id=0 because it's very special to me")
     (
         Source
@@ -175,6 +180,7 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
     from peewee import chunked, JOIN
 
     from astra import models
+    from astra.models.source import Source
     from astra.models.spectrum import Spectrum, SpectrumMixin
 
     kwargs = {}
