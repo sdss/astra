@@ -181,8 +181,8 @@ class Glossary(BaseGlossary):
     n_std = "Number of (good) standard stars"
     n_gal = "Number of (good) galaxies in field"
 
-    dust_a = "0.3mu-sized dust particle count [particles m^-3 s^-1]"
-    dust_b = "1.0mu-sized dust particle count [particles m^-3 s^-1]"
+    dust_a = "0.3mu-sized dust count [particles m^-3 s^-1]"
+    dust_b = "1.0mu-sized dust count [particles m^-3 s^-1]"
     
     # Pixel arrays
     wavelength = "Wavelength (vacuum) [Angstrom]"
@@ -197,7 +197,7 @@ class Glossary(BaseGlossary):
     
     plug_ra = "Right ascension of plug position [deg]"
     plug_dec = "Declination of plug position [deg]"
-    
+
     input_ra = "Input right ascension [deg]"
     input_dec = "Input declination [deg]"
     

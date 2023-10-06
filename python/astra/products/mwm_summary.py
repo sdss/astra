@@ -8,7 +8,7 @@ from astra.products.utils import (get_fields, get_basic_header, get_binary_table
 
 get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
 
-DEFAULT_IGNORE_FIELD_NAMES = ("pk", "sdss5_target_flags", )
+DEFAULT_IGNORE_FIELD_NAMES = ("pk", )
 
 def create_mwm_all_star_product(
     where=None,
@@ -191,7 +191,7 @@ def _create_summary_product(
     apogee_where=None,
     boss_spectrum_model=BossVisitSpectrum,
     apogee_spectrum_model=ApogeeVisitSpectrum,
-    ignore_field_names=("pk", "sdss5_target_flags", ),
+    ignore_field_names=None,
     name_conflict_strategy=None,
     upper=True,
     fill_values=None,

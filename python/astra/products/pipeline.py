@@ -21,8 +21,8 @@ DEFAULT_IGNORE_FIELD_NAMES = ("pk", "sdss5_target_flags", "source", "wresl", "fl
 
 def create_star_pipeline_products_for_all_sources(
     pipeline_model,
-    boss_spectrum_model,
-    apogee_spectrum_model,
+    boss_spectrum_model=BossVisitSpectrum,
+    apogee_spectrum_model=ApogeeCoaddedSpectrumInApStar,
     boss_where=None,
     apogee_where=None,
     ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
@@ -97,8 +97,8 @@ def create_star_pipeline_products_for_all_sources(
 
 def create_visit_pipeline_products_for_all_sources(
     pipeline_model,
-    boss_spectrum_model,
-    apogee_spectrum_model,
+    boss_spectrum_model=BossVisitSpectrum,
+    apogee_spectrum_model=ApogeeVisitSpectrumInApStar,
     boss_where=None,
     apogee_where=None,
     ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,

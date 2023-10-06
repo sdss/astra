@@ -228,7 +228,20 @@ def get_binary_table_hdu(q, models, fields, limit=None, header=None, upper=True,
     # Create the columns.
     original_names, columns = ({}, [])
     for name, field in fields.items():
-        kwds = fits_column_kwargs(field, data[name], upper=upper)
+        if isinstance(field, ArrayField):
+            # Do a hack to deal with delta_ra, delta_dec
+            if len(data[name]) > 0:
+                P = max(map(len, data[name]))
+                # TODO: we are assuming floats here for this ArrayField
+                assert field.field_type == "FLOAT"
+                value = np.nan * np.ones((len(data[name]), P), dtype=np.float32)
+                for i, item in enumerate(data[name]):
+                    value[i, :len(item)] = item
+            else:
+                value = np.ones((0, 0), dtype=np.float32)
+        else:
+            value = data[name]
+        kwds = fits_column_kwargs(field, value, upper=upper)
         # Keep track of field-to-HDU names so that we can add help text.
         original_names[kwds['name']] = name
         columns.append(fits.Column(**kwds))    
@@ -489,7 +502,14 @@ def _resolve_model(model_name):
         return model_name
 
 def _get_extname(instrument, observatory):
-    return f"{instrument.upper().strip()}/{observatory.upper().strip()}"
+    # parse instrument
+    if instrument.strip().lower().startswith("apogee"):
+        instrument_str = "APOGEE"
+    elif instrument.strip().lower().startswith("boss"):
+        instrument_str = "BOSS"
+    else:
+        raise ValueError(f"Unknown instrument '{instrument}'")
+    return f"{instrument_str}/{observatory.upper().strip()}"
 
 
 def check_path(path, overwrite):

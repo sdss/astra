@@ -448,7 +448,6 @@ class Source(BaseModel):
     # See https://zenodo.org/record/7811871
  
     #> Reddening
-    '''
     ebv = FloatField(null=True, help_text="E(B-V) [mag]")
     e_ebv = FloatField(null=True, help_text="Error on E(B-V) [mag]")
     flag_ebv_upper_limit = BooleanField(default=False, help_text="E(B-V) is an upper limit")
@@ -474,8 +473,7 @@ class Source(BaseModel):
     ebv_edenhofer_2023 = FloatField(null=True, help_text="E(B-V) from Edenhofer et al. (2023) [mag]")
     e_ebv_edenhofer_2023 = FloatField(null=True, help_text="Error on E(B-V) from Edenhofer et al. (2023) [mag]")
     flag_ebv_edenhofer_2023_upper_limit = BooleanField(default=False, help_text="E(B-V) from Edenhofer et al. (2023) is an upper limit")
-    '''
-    print("ANDY REMOVE THIS WARNING AND ADD REDDENING COLUMNS")
+    #print("ANDY REMOVE THIS WARNING AND ADD REDDENING COLUMNS")
     
     @property
     def sdss5_cartons(self):
