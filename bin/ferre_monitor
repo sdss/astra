@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+import click
+
+@click.command()
+@click.argument("stage_dir", type=str, help="The FERRE 'stage' directory (e.g., 2023-10-06/coarse).")
+@click.option("--refresh-interval", default=10)
+def ferre_monitor(stage_dir, refresh_interval):
+
+    import os
+    from astra.utils import log, expand_path
+    from time import time, sleep
+    from glob import glob
+    from tqdm import tqdm
+    from astra.pipelines.ferre.utils import wc
+
+    dirs = list(map(os.path.dirname, glob(f"{stage_dir}/*/partition_*/input.nml")))
+    parent_dirs = list(map(os.path.dirname, dirs))
+    for dir in map(os.path.dirname, glob(f"{stage_dir}/*/input.nml")):
+        if dir in parent_dirs: # it's partitioned
+            continue
+        dirs.append(dir)
+    
+    planned_executions = []
+    for dir in dirs:
+        planned_executions.append([f"{dir}/parameter.output", wc(f"{dir}/parameter.input"), 0])
+
+    # Check progress.
+    print(f"Monitoring progress of the following FERRE execution directories:")
+
+    n_spectra, executions = (0, [])
+    for n_executions, e in enumerate(planned_executions, start=1):
+        executions.append(e)
+        n_spectra += e[1]
+        print(f"\t{os.path.dirname(e[0])}")
+
+    n_executions_done, last_updated = (0, time())
+    desc = lambda n_executions_done, n_executions, last_updated: f"FERRE ({n_executions_done}/{n_executions}; {(time() - last_updated)/60:.0f} min ago)"
+
+    tqdm_kwds = dict(
+        desc=desc(n_executions_done, n_executions, last_updated),
+        total=n_spectra, 
+        unit=" spectra", 
+        mininterval=refresh_interval
+    )
+
+    dead_processes, warn_on_dead_processes = ([], [])
+    with tqdm(**tqdm_kwds) as pb:
+        while True:
+            
+            n_done_this_iteration = 0
+            for i, (output_path, n_input, n_done) in enumerate(executions):
+                if n_done >= n_input or output_path in dead_processes:
+                    continue
+                
+                absolute_path = expand_path(output_path)
+                if os.path.exists(absolute_path):
+                    n_now_done = wc(absolute_path)
+                else:
+                    n_now_done = 0
+                n_new = n_now_done - n_done
+                n_done_this_iteration += n_new
+                
+                if n_new > 0:
+                    last_updated = time()
+                    pb.update(n_new)
+                    executions[i][-1] = n_now_done
+                    pb.set_description(desc(n_executions_done, n_executions, last_updated))
+                    pb.refresh()
+                
+                else:
+                    # Check for evidence of the chaos monkey
+                    if os.path.exists(os.path.join(os.path.dirname(absolute_path), "killed")):
+                        dead_processes.append(output_path)
+                        n_executions_done += 1
+                        last_updated = time()
+                        pb.set_description(desc(n_executions_done, n_executions, last_updated))
+                        pb.refresh()
+                    else:
+                        # Check stderr for segmentation faults.
+                        stderr_path = os.path.join(os.path.dirname(absolute_path), "stderr")
+                        try:
+                            with open(stderr_path, "r") as fp:
+                                stderr = fp.read()
+                        except:
+                            None
+                        else:
+                            # Don't die on deaths.. we expect the chaos monkey to restart it.
+                            if ("error" in stderr or "Segmentation fault" in stderr):
+                                warn_on_dead_processes.append(output_path)
+                            '''
+                                dead_processes.append(output_path)
+                                n_executions_done += 1
+                                last_updated = time()
+                                pb.set_description(desc(n_executions_done, n_executions, last_updated))
+                                pb.refresh()
+                            '''
+
+                if n_now_done >= n_input:
+                    last_updated = time()
+                    n_executions_done += 1
+                    pb.set_description(desc(n_executions_done, n_executions, last_updated))
+                    pb.refresh()
+                                
+            if n_executions_done == n_executions:
+                pb.refresh()
+                break
+
+
+            sleep(refresh_interval)
+
+    if warn_on_dead_processes:
+        print(f"Segmentation faults or chaos monkey deaths detected in following executions (these may have been restarted):")
+        for output_path in warn_on_dead_processes:
+            print(f"\t{os.path.dirname(output_path)}")
+
+    print("Done")
+    return None
+
+
+if __name__ == "__main__":
+    ferre_monitor()        
