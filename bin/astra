@@ -48,6 +48,12 @@ def initdb(drop_tables, delay):
         base.database.create_tables(models)
     log.info(f"Created {len(models)} database tables: {models}")
     
+    schema = source._meta.schema
+    if isinstance(base.database, base.PostgresqlDatabase):
+        log.info(f"Granting permissions on schema {schema} to role 'sdss'")
+        base.database.execute_sql(f"GRANT ALL PRIVILEGES ON SCHEMA {schema} TO GROUP sdss;")
+        base.database.execute_sql(f"GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA {schema} to sdss;")
+
     return None
 
 
@@ -74,6 +80,7 @@ def migrate(apred, run2d, limit, include_dr17):
         migrate_specfull_metadata_from_image_headers
     )
     from astra.migrations.catalog import (
+        migrate_gaia_source_ids,
         migrate_healpix,
         migrate_tic_v8_identifier,
         migrate_twomass_photometry,
@@ -117,6 +124,9 @@ def migrate(apred, run2d, limit, include_dr17):
 
     log.info(f"Migrating HEALPix")
     migrate_healpix()
+
+    log.info(f"Migrating Gaia source identifiers")
+    migrate_gaia_source_ids()
 
     log.info(f"Migrating Gaia astrometry and photometry")
     migrate_gaia_dr3_astrometry_and_photometry()
