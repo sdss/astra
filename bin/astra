@@ -83,6 +83,7 @@ def migrate(apred, run2d, limit, include_dr17):
         migrate_zhang_stellar_parameters,
         migrate_bailer_jones_distances
     )
+    from astra.migrations.misc import compute_f_night_time_for_boss_visits, compute_f_night_time_for_apogee_visits
     from astra.migrations.targeting import migrate_carton_assignments_to_bigbitfield
 
     log.info("Starting ingestion. This will take a long time.")
@@ -137,6 +138,14 @@ def migrate(apred, run2d, limit, include_dr17):
 
     log.info(f"Migrating Bailer-Jones distances")
     migrate_bailer_jones_distances()
+
+    #todo: extinction
+
+    log.info(f"Computing f_night_fraction for BOSS visits")
+    compute_f_night_time_for_boss_visits()
+
+    log.info(f"Computing f_night_fraction for APOGEE visits")
+    compute_f_night_time_for_apogee_visits()
 
     log.info(f"Setting the Sun to have sdss_id=0 because it's very special to me")
     (

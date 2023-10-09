@@ -33,6 +33,8 @@ def ferre_chaos_monkey(
     from time import time, sleep
     from glob import glob
     from itertools import count
+    from astra.utils import log
+
 
     click.echo(f"verbose: {verbose}")
     click.echo(f"include previous: {include_previous}")
@@ -51,15 +53,23 @@ def ferre_chaos_monkey(
     awaiting_executable_by_pwd = [] + list(pwds)
     ignore_pids = []
 
+    clean_up_after_proc = set()
+
     # Get PIDs 
     for iteration in count(start=1):
 
         n_await = len(awaiting_executable_by_pwd)
-
+        pwds_now = []
+            
         try:
             pids = check_output(["pidof", executable]).decode("ascii").split()
         except:
             n_proc = 0
+            if clean_up_after_proc:
+                for pwd in clean_up_after_proc:
+                    if os.path.exists(f"{pwd}/wait_for_clean_up"):
+                        os.unlink(f"{pwd}/wait_for_clean_up")
+
             # No ferre executions.            
             if verbose:
                 click.echo(f"iter={iteration} proc={n_proc} await={n_await} no processes. awaiting: {' '.join(map(show_pwd, awaiting_executable_by_pwd))}")
@@ -105,7 +115,9 @@ def ferre_chaos_monkey(
                     except KeyError:
                         _, pwd = check_output(["pwdx", f"{pid}"]).decode("ascii").strip().split()
                         pwd_by_pid[pid] = pwd
-                                    
+
+                    pwds_now.append(pwd)
+
                     try:
                         awaiting_executable_by_pwd.remove(pwd)
                     except:
@@ -126,7 +138,7 @@ def ferre_chaos_monkey(
                             n_spectra_in = n_spectra_in_by_pwd[pwd] = n_input_files * n_spectra_per_input_file
 
                         updated, n_spectra_out  = (None, 0)
-                        for output_path in glob(f"{pwd}/*/{output_basename}"):
+                        for output_path in glob(f"{pwd}/*/{output_basename}*"):
                             try:
                                 this_n_spectra_out = wc(output_path)
                             except:
@@ -151,7 +163,7 @@ def ferre_chaos_monkey(
                                     else:
                                         updated = max(updated, mtime)
 
-                    elif len(process_args) == 1 and process_args[0] == "input.nml":
+                    elif len(process_args) == 1 and process_args[0].startswith("input.nml"):
                         is_abundance_mode = False
                         # We are not using the -l flag
                         try:
@@ -159,7 +171,38 @@ def ferre_chaos_monkey(
                         except KeyError:
                             n_spectra_in = n_spectra_in_by_pwd[pwd] = wc(f"{pwd}/parameter.input")
 
-                        abs_output_path = f"{pwd}/{output_basename}"
+                        #abs_output_path = f"{pwd}/{output_basename}"
+                        updated, n_spectra_out = (None, 0)
+                        for output_path in glob(f"{pwd}/{output_basename}*"):
+                            try:
+                                this_n_spectra_out = wc(output_path)
+                            except:
+                                continue
+                            else:
+                                mtime = os.path.getmtime(output_path)
+                                if mtime < started:
+                                    if pwd not in restarted_process and not include_previous:
+                                        # Output file must be from a previous run, don't count it.
+                                        if verbose:
+                                            click.echo(f"\toutput file {output_path} from previous run, ignoring it")
+                                        continue
+
+                                    else:
+                                        n_spectra_out_by_previous_proc += this_n_spectra_out
+
+                                else:
+                                    n_spectra_out += this_n_spectra_out
+                                        
+                                    if updated is None:
+                                        updated = mtime
+                                    else:
+                                        updated = max(updated, mtime)                            
+                        '''
+                            try:
+                                this_n_spectra_out = wc(output_path)
+                            except:
+                                continue
+
                         if os.path.exists(abs_output_path):
                             try:
                                 n_spectra_out = wc(abs_output_path)
@@ -174,6 +217,7 @@ def ferre_chaos_monkey(
                             if verbose:
                                 click.echo(f"\toutput file {abs_output_path} looks to be from a previous run")
                             continue
+                        '''
                     else:
                         if verbose:
                             click.echo(f"\tignoring pid={pid} because proc_args={process_args}")
@@ -203,29 +247,39 @@ def ferre_chaos_monkey(
 
                     if n_spectra_out == 0:# or ((n_spectra_out + n_spectra_out_by_previous_proc) >= n_spectra_in):
                         continue       
-
+                    
+                    off_with_her_head_path = f"{pwd}/off-with-her-head"
                     if (
-                        (t_since_last_updated > (factor * seconds_per_spectrum))
-                    and (t_since_last_updated > wait)
-                    and (
-                        (min_iter is None)
-                    or  (iteration > min_iter)
-                    )
+                        (
+                            (t_since_last_updated > (factor * seconds_per_spectrum))
+                        and (t_since_last_updated > wait)
+                        and (
+                                (min_iter is None)
+                            or  (iteration > min_iter)
+                            )
+                        )   
+                        or
+                        os.path.exists(off_with_her_head_path)
                     ):
-                        click.echo(f"\tkilling process {pid}")
-                        check_output(["touch", f"{pwd}/killed"])
-                        ## If it's a -l situation, put them in all sub-directories?
-                        if len(process_args) == 2 and process_args[0] == "-l":
-                            for dir in glob(f"{pwd}/*/"):
-                                check_output(["touch", f"{dir}/killed"])
-                        check_output(["kill", "-9", f"{pid}"])
+
+                        if os.path.exists(off_with_her_head_path):
+                            click.echo(f"\tOFF WITH HER HEAD {pid}")
+                            os.unlink(off_with_her_head_path)
 
                         if retries > 0:
-                            click.echo(f"\ttrying to restart process")
-
+                            
                             # if it's abundance mode, we just need to see which it got up to
                             # (eg if it has partial Mg results, just re-start from all Mg)
                             if is_abundance_mode:
+
+                                click.echo(f"\tkilling process {pid}")
+                                check_output(["touch", f"{pwd}/killed"])
+                                ## If it's a -l situation, put them in all sub-directories?
+                                if len(process_args) == 2 and process_args[0] == "-l":
+                                    for dir in glob(f"{pwd}/*/"):
+                                        check_output(["touch", f"{dir}/killed"])
+                                check_output(["kill", "-9", f"{pid}"])       
+
                                 input_list_path = f"{pwd}/{process_args[-1]}"
                                                                 
                                 try:
@@ -266,20 +320,99 @@ def ferre_chaos_monkey(
                                     )
 
                                     click.echo(f"new process: {proc}")
-
                             else:
-                                # Not really done yet..
-                                # Need to find all input spectra not yet analysed, then randomise/sort backwards
-                                # would need to change the output files referenced in input.nml to be OUTPUT.1 etc
-                                click.echo("\trestarting non-abundance processes not yet implemented")
 
-                                None
+                                check_output(["touch", f"{pwd}/wait_for_clean_up"])
+                                clean_up_after_proc.add(pwd)
+
+                                click.echo(f"\tkilling process {pid}")
+                                check_output(["kill", "-9", f"{pid}"])     
+                                
+                                input_nml_path = process_args[-1]
+                                
+                                click.echo(f"input nml path: {input_nml_path}")
+
+                                if input_nml_path.endswith(".nml"):
+                                    restart_number, existing_suffix = (1, "")
+                                else:
+                                    existing_suffix = "." + input_nml_path.split(".nml.")[1]
+                                    restart_number = 1 + int(existing_suffix)
+
+                                click.echo(f"suffix, restart = {existing_suffix} and {restart_number}")
+
+                                # Just get the input/output names from this execution.
+                                input_names = np.loadtxt(f"{pwd}/parameter.input{existing_suffix}", usecols=(0, ), dtype=str)
+                                output_names = np.loadtxt(f"{pwd}/parameter.output{existing_suffix}", usecols=(0, ), dtype=str)
+                                
+                                incomplete_names = np.setdiff1d(input_names, output_names)
+
+                                intersect, input_indices, incomplete_indices = np.intersect1d(input_names, incomplete_names, return_indices=True)
+
+                                # Only restart the process if the number of spectra is more than the number of threads
+                                with open(f"{pwd}/input.nml", "r") as fp:
+                                    input_nml_contents = fp.readlines()
+                                
+                                nthreads = -1
+                                for line in input_nml_contents:
+                                    if line.startswith("NTHREADS"):
+                                        nthreads = int(line.split("=")[-1])
+                                        break
+                                    
+                                if len(input_indices) < nthreads:
+                                    click.echo(f"not enough incomplete spectra to restart {pid} in {pwd}")
+                                    os.unlink(f"{pwd}/wait_for_clean_up")
+                                    continue
+
+                                else:                                
+                                    # Randomize
+                                    np.random.shuffle(input_indices)
+
+                                    # Create a new parameter.input file, new flux.input file, and new e_flux.input file.
+                                    for prefix in ("flux.input", "e_flux.input", "parameter.input"):
+                                        with open(f"{pwd}/{prefix}{existing_suffix}", "r") as fp:
+                                            content = fp.readlines()
+                                            new_content = [content[index] for index in input_indices]
+                                            with open(f"{pwd}/{prefix}.{restart_number}", "w") as fp_new:
+                                                fp_new.write("".join(new_content))
+                                        
+                                    with open(f"{pwd}/input.nml", "r") as fp:
+                                        new_content = []
+                                        for line in fp.readlines():
+                                            if line.startswith(("PFILE", "ERFILE", "FFILE", "OPFILE", "OFFILE", "SFFILE")):
+                                                key, value = line.split(" = ")
+                                                value = value.strip("'\n")
+                                                new_content.append(f"{key} = '{value}.{restart_number}'\n")
+                                            else:
+                                                new_content.append(line)
+                                        
+                                        with open(f"{pwd}/input.nml.{restart_number}", "w") as fp_new:
+                                            fp_new.write("".join(new_content))                                
+
+                                    click.echo(f"retrying process {pid} in {pwd} as restart number {restart_number}")
+
+                                    # Re-start the process.
+                                    proc = restarted_process[pwd] = Popen(
+                                        ["ferre.x", f"input.nml.{restart_number}"],
+                                        stdout=open(f"{pwd}/stdout.{restart_number}", "w"),
+                                        stderr=open(f"{pwd}/stderr.{restart_number}", "w"),
+                                        cwd=pwd
+                                    )
+
+                                    click.echo(f"new process: {proc}")                                
                         
                 except:
                     print("unexpected exception")
+                    log.exception("unexpected exception")
                     continue
+                
 
         finally:
+            for pwd in clean_up_after_proc:
+                if pwd not in pwds_now and os.path.exists(f"{pwd}/wait_for_clean_up"):
+                    os.unlink(f"{pwd}/wait_for_clean_up")
+                    clean_up_after_proc.remove(pwd)
+                    
+
             sleep(interval)
 
 

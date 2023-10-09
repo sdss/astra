@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+import click
+
+@click.command()
+@click.argument("pwd")
+def ferre_wait_for_clean_up(pwd):
+
+    import os
+    from time import sleep
+    needs_clean_up = False
+    while os.path.exists(f"{pwd}/wait_for_clean_up"):
+        needs_clean_up = True
+        sleep(5)
+    
+    if needs_clean_up:
+        # Merge the results
+        basenames = ("parameter.output", "rectified_model_flux.output", "rectified_flux.output")
+        for basename in basenames:
+            os.system(f"cat {pwd}/{basename}* > {pwd}/merged_{basename}")
+            os.system(f"mv {pwd}/merged_{basename} {pwd}/{basename}")
+    
+
+if __name__ == "__main__":
+    ferre_wait_for_clean_up()        

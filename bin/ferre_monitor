@@ -2,7 +2,7 @@
 import click
 
 @click.command()
-@click.argument("stage_dir", type=str, help="The FERRE 'stage' directory (e.g., 2023-10-06/coarse).")
+@click.argument("stage_dir", type=str)
 @click.option("--refresh-interval", default=10)
 def ferre_monitor(stage_dir, refresh_interval):
 
@@ -33,11 +33,11 @@ def ferre_monitor(stage_dir, refresh_interval):
         n_spectra += e[1]
         print(f"\t{os.path.dirname(e[0])}")
 
-    n_executions_done, last_updated = (0, time())
-    desc = lambda n_executions_done, n_executions, last_updated: f"FERRE ({n_executions_done}/{n_executions}; {(time() - last_updated)/60:.0f} min ago)"
+    n_executions_done = 0
+    desc = lambda n_executions_done, n_executions: f"FERRE ({n_executions_done}/{n_executions})"
 
     tqdm_kwds = dict(
-        desc=desc(n_executions_done, n_executions, last_updated),
+        desc=desc(n_executions_done, n_executions),
         total=n_spectra, 
         unit=" spectra", 
         mininterval=refresh_interval
@@ -64,7 +64,7 @@ def ferre_monitor(stage_dir, refresh_interval):
                     last_updated = time()
                     pb.update(n_new)
                     executions[i][-1] = n_now_done
-                    pb.set_description(desc(n_executions_done, n_executions, last_updated))
+                    pb.set_description(desc(n_executions_done, n_executions))
                     pb.refresh()
                 
                 else:
@@ -72,8 +72,7 @@ def ferre_monitor(stage_dir, refresh_interval):
                     if os.path.exists(os.path.join(os.path.dirname(absolute_path), "killed")):
                         dead_processes.append(output_path)
                         n_executions_done += 1
-                        last_updated = time()
-                        pb.set_description(desc(n_executions_done, n_executions, last_updated))
+                        pb.set_description(desc(n_executions_done, n_executions))
                         pb.refresh()
                     else:
                         # Check stderr for segmentation faults.
@@ -96,9 +95,8 @@ def ferre_monitor(stage_dir, refresh_interval):
                             '''
 
                 if n_now_done >= n_input:
-                    last_updated = time()
                     n_executions_done += 1
-                    pb.set_description(desc(n_executions_done, n_executions, last_updated))
+                    pb.set_description(desc(n_executions_done, n_executions))
                     pb.refresh()
                                 
             if n_executions_done == n_executions:
