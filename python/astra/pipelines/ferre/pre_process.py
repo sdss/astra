@@ -7,6 +7,7 @@ from typing import Optional, Iterable
 from astra.pipelines.ferre import utils
 from astra.models.spectrum import Spectrum
 from astra.utils import log, dict_to_list, expand_path
+from tqdm import tqdm
 import warnings
 
 # FERRE v4.8.8 src trunk : /uufs/chpc.utah.edu/common/home/sdss09/software/apogee/Linux/apogee/trunk/external/ferre/src
@@ -97,14 +98,14 @@ def pre_process_ferre(
         for key in ("pfile", "opfile", "offile", "sffile"):
             control_kwds[key] = prefix + control_kwds[key]
 
-    pwd = expand_path(pwd)
-    log.info(f"FERRE working directory: {pwd}")
+    absolute_pwd = expand_path(pwd)
+    log.info(f"FERRE working directory: {absolute_pwd}")
 
     control_kwds_formatted = utils.format_ferre_control_keywords(control_kwds)
     log.info(f"FERRE control keywords:\n{control_kwds_formatted}")
 
     # Construct mask to match FERRE model grid.
-    chip_wavelengths = tuple(map(utils.wavelength_array, segment_headers))
+    #chip_wavelengths = tuple(map(utils.wavelength_array, segment_headers))
     
     values_or_cycle_none = lambda x: x if (x is not None and len(x) > 0) else cycle([None])
     all_initial_parameters = dict_to_list(dict(
@@ -122,14 +123,14 @@ def pre_process_ferre(
 
     # Retrict to the pixels within the model wavelength grid.
     # TODO: Assuming all spectra are the same.
-    mask = _get_ferre_chip_mask(spectra[0].wavelength, chip_wavelengths)
+    #mask = _get_ferre_chip_mask(spectra[0].wavelength, chip_wavelengths)
 
     # TODO: use mask2
-    mask2 = utils.get_apogee_pixel_mask()
-    assert np.all(mask == mask2)
+    mask = utils.get_apogee_pixel_mask()
+    #assert np.all(mask == mask2)
 
     index, skipped, batch_names, batch_initial_parameters, batch_flux, batch_e_flux = (0, [], [], [], [], [])
-    for (spectrum, initial_parameters) in zip(spectra, all_initial_parameters):
+    for (spectrum, initial_parameters) in tqdm(zip(spectra, all_initial_parameters), total=1, desc="Preparing spectra"):
 
         if spectrum in skipped:
             continue
@@ -185,6 +186,7 @@ def pre_process_ferre(
         return (pwd, 0, skipped)
 
     # Convert list of dicts of initial parameters to array.
+    log.info(f"Validating initial and frozen parameters")
     batch_initial_parameters_array = utils.validate_initial_and_frozen_parameters(
         headers,
         batch_initial_parameters,
@@ -193,28 +195,30 @@ def pre_process_ferre(
         clip_epsilon_percent=1,
     )
     # Create directory and write the control file        
-    os.makedirs(pwd, exist_ok=True)
-    with open(os.path.join(pwd, "input.nml"), "w") as fp:
+    os.makedirs(absolute_pwd, exist_ok=True)
+    log.info(f"Writing control file")
+    with open(os.path.join(absolute_pwd, "input.nml"), "w") as fp:
         fp.write(control_kwds_formatted)       
 
-
     # hack: we do basename here in case we wrote the prefix to PFILE for the abundances run
-    with open(os.path.join(pwd, os.path.basename(control_kwds["pfile"])), "w") as fp:
+    log.info(f"Writing input parameters")
+    with open(os.path.join(absolute_pwd, os.path.basename(control_kwds["pfile"])), "w") as fp:
         for name, point in zip(batch_names, batch_initial_parameters_array):
             fp.write(utils.format_ferre_input_parameters(*point, name=name))
 
     if write_input_pixel_arrays:
+        log.info(f"Writing input pixel arrays")
         LARGE = 1e10
 
         batch_flux = np.array(batch_flux)
         batch_e_flux = np.array(batch_e_flux)
 
         if reference_pixel_arrays_for_abundance_run:
-            flux_path = os.path.join(pwd, "../", control_kwds["ffile"])
-            e_flux_path = os.path.join(pwd, "../", control_kwds["erfile"])
+            flux_path = os.path.join(absolute_pwd, "../", control_kwds["ffile"])
+            e_flux_path = os.path.join(absolute_pwd, "../", control_kwds["erfile"])
         else:
-            flux_path = os.path.join(pwd, control_kwds["ffile"])
-            e_flux_path = os.path.join(pwd, control_kwds["erfile"])
+            flux_path = os.path.join(absolute_pwd, control_kwds["ffile"])
+            e_flux_path = os.path.join(absolute_pwd, control_kwds["erfile"])
 
         non_finite_flux = ~np.isfinite(batch_flux)
         batch_flux[non_finite_flux] = 0.0

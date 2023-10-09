@@ -120,7 +120,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     )
         
     catalogid = BigIntegerField(index=True, null=True, help_text="SDSS input catalog identifier")
-    print("Andy uncomment star_pk in apogee")
+    print("Andy uncomment star_pk in apogee, and night_fraction")
     #star_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `star` primary key")
     visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `visit` primary key")
     rv_visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `rv_visit` primary key")
@@ -177,6 +177,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     jd = FloatField(null=True, help_text=Glossary.jd)
     exptime = FloatField(null=True, help_text=Glossary.exptime)
     dithered = BooleanField(null=True, help_text=Glossary.dithered)
+    f_night_time = FloatField(null=True, help_text=Glossary.f_night_time)
     
     #> Telescope Pointing
     input_ra = FloatField(null=True, help_text=Glossary.input_ra)

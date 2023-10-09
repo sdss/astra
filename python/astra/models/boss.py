@@ -52,6 +52,12 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     wresl = PixelArray(ext=1, help_text=Glossary.wresl)
     pixel_flags = PixelArray(ext=1, column_name="or_mask", help_text=Glossary.pixel_flags)
 
+    @property
+    def e_flux(self):
+        return self.ivar**-0.5
+
+
+
     #> Data Product Keywords
     release = TextField(help_text=Glossary.release)
     filetype = TextField(default="specFull", help_text=Glossary.filetype)
@@ -109,6 +115,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     #plug_ra = FloatField(null=True, help_text=Glossary.plug_ra)
     #plug_dec = FloatField(null=True, help_text=Glossary.plug_dec)
     fiber_offset = BooleanField(null=True, help_text=Glossary.fiber_offset)
+    f_night_time = FloatField(null=True, help_text=Glossary.f_night_time)
 
     try:
         delta_ra = ArrayField(FloatField, null=True, help_text=Glossary.delta_ra)    

@@ -3,11 +3,13 @@ from peewee import (
     FloatField,
     TextField,
     ForeignKeyField,
+    DateTimeField
 )
-
+import datetime
 from playhouse.postgres_ext import ArrayField
 
 from astra import __version__
+from astra.glossary import Glossary
 from astra.models.base import BaseModel
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
@@ -17,15 +19,22 @@ from astra.models.pipeline import PipelineOutputMixin
 class LineForest(BaseModel, PipelineOutputMixin):
 
     """A result from the LineForest pipeline."""
-    
-    sdss_id = ForeignKeyField(Source, index=True)
-    spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
+
+    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
+    spectrum_pk = ForeignKeyField(
+        Spectrum, 
+        index=True, 
+        lazy_load=False,
+        help_text=Glossary.spectrum_pk
+    )
     
     #> Astra Metadata
-    task_id = AutoField()
-    v_astra = TextField(default=__version__)
-    t_elapsed = FloatField(null=True)
-    tag = TextField(default="", index=True)
+    task_pk = AutoField(help_text=Glossary.task_pk)
+    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
+    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
+    t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
+    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
+    tag = TextField(default="", index=True, help_text=Glossary.tag)
     
     #> H-alpha (6562.8 +/- 200A)
     eqw_h_alpha = FloatField(null=True)

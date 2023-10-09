@@ -44,8 +44,8 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
         In these cases, the thing you want is `post_process_ferre('abundances/GKg_b/Al', 'abundances/GKg_b')`.
     """
     
-    dir = expand_path(dir)
-    ref_dir = pwd or dir 
+    absolute_dir = expand_path(dir)
+    ref_dir = pwd or absolute_dir 
 
     # When finding paths, if the path is in the input.nml file, we should use `ref_dir`, otherwise `dir`.
     timing = {}
@@ -121,7 +121,7 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
             names_with_missing_rectified_flux = input_names
             rectified_flux = np.nan * np.ones_like(flux)
 
-        model_flux_output_path = os.path.join(dir, "model_flux.output")
+        model_flux_output_path = os.path.join(absolute_dir, "model_flux.output") # TODO: Should this be ref_dir?
         if os.path.exists(model_flux_output_path):
             model_flux, *_ = read_and_sort_output_data_file(
                 model_flux_output_path,
@@ -129,7 +129,7 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
             )            
             write_pixel_array_with_names(model_flux_output_path, input_names, model_flux)
         else:
-            log.warn(f"Cannot find model_flux output in {dir} ({model_flux_output_path})")
+            log.warn(f"Cannot find model_flux output in {absolute_dir} ({model_flux_output_path})")
             model_flux = np.nan * np.ones_like(flux)
                         
         if len(names_with_missing_rectified_model_flux) > 0:

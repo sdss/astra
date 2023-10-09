@@ -1,13 +1,16 @@
 from astra import models
 from astra.utils import log, callable
 from inspect import getfullargspec
-from peewee import JOIN
+from peewee import fn, JOIN
+from astropy.time import Time
 
 try:
     from airflow.models.baseoperator import BaseOperator
 except ImportError:
     log.warning(f"Cannot import `airflow`: this functionality will not be available")
     BaseOperator = object
+
+
 
 
 class Operator(BaseOperator):
@@ -21,6 +24,7 @@ class Operator(BaseOperator):
         task_kwargs=None,
         where=None,
         limit=None,
+        modulate_spectra=False,
         **kwargs
     ):
         super(Operator, self).__init__(**kwargs)
@@ -29,16 +33,17 @@ class Operator(BaseOperator):
         self.task_kwargs = task_kwargs or {}
         self.where = where
         self.limit = limit
+        self.modulate_spectra = modulate_spectra
         return None
     
 
-    def execute(self, context=None):
-
-
+    def execute(self, context):
+        
         kwds = self.task_kwargs.copy()
 
         task = callable(self.task_name) 
         if self.model_name is not None:
+
             # Query for spectra that does not have a result in this output model
             # translate `-> Iterable[OutputModel]` annotation
             output_model = getfullargspec(task).annotations["return"].__args__[0]
@@ -56,6 +61,19 @@ class Operator(BaseOperator):
             for k, v in (self.where or {}).items():
                 where = where & (getattr(input_model, k) == v)
     
+            # If the DAG has many active runs, then we will add a clause to modulate the spectra
+            # so DAG executions do not try executing the same spectra at once.
+            if self.modulate_spectra and context["dag"].max_active_runs > 1:                
+                max_active_runs = context["dag"].max_active_runs
+                remainder = int(Time(context["dag_run"].logical_date).mjd % max_active_runs)
+
+                log.info(f"Modulating spectra because there are {max_active_runs} active runs.")
+                log.info(f"Requiring spectra with spectrum_pk % {max_active_runs} == {remainder}")
+                
+                q = q.where(
+                    fn.mod(input_model.spectrum_pk, max_active_runs) == remainder
+                )
+
             q = (
                 q
                 .where(where)

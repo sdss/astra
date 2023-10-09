@@ -173,6 +173,8 @@ class Glossary(BaseGlossary):
     sdss5_target_flags = "Targeting flags"
     n_associated = "SDSS_IDs associated with this CATALOGID"
 
+    f_night_time = "DATE-OBS as a fraction between local sunset and sunrise"
+
     plateid = "Plate identifier"
     tileid = "C"
     cartid = "Cartridge used for plugging"

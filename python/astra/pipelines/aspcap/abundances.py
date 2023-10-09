@@ -186,7 +186,7 @@ def plan_abundances(
             fn.MIN(Alias.penalized_rchi2).alias("min_penalized_rchi2"),
         )
         .where(Alias.spectrum_pk << spectrum_pks)
-        .where(Alias.pwd.startswith(parent_dir))
+        .where(Alias.pwd.startswith(expand_path(parent_dir)))
         .group_by(Alias.spectrum_pk)
         .alias("sq")
     )        
@@ -202,7 +202,7 @@ def plan_abundances(
         &   (~FerreStellarParameters.flag_spectrum_io_error)
         &   (~FerreStellarParameters.flag_no_suitable_initial_guess)
         &   (~FerreStellarParameters.flag_missing_model_flux)
-        &   (FerreStellarParameters.pwd.startswith(parent_dir))
+        &   (FerreStellarParameters.pwd.startswith(expand_path(parent_dir)))
         )
         .join(
             sq, 

@@ -46,6 +46,7 @@ class MedianFilter(Continuum):
         self.non_finite_err_value = non_finite_err_value
         self.valid_continuum_correction_range = valid_continuum_correction_range
         self.mode = mode
+        self.mask = get_apogee_pixel_mask()
         return None
 
 
@@ -60,13 +61,13 @@ class MedianFilter(Continuum):
             The database entry for the coarse FERRE result (from `astra.models.pipelines.FerreCoarse`).
         """
         
-        mask = get_apogee_pixel_mask()
-        flux = np.nan * np.ones(mask.shape, dtype=float)
-        model_flux = np.nan * np.ones(mask.shape, dtype=float)
+
+        flux = np.nan * np.ones(self.mask.shape, dtype=float)
+        model_flux = np.nan * np.ones(self.mask.shape, dtype=float)
 
         # We will use FERRE-rectified fluxes here (model + data)
-        flux[mask] = coarse_result.rectified_flux
-        model_flux[mask] = coarse_result.rectified_model_flux
+        flux[self.mask] = coarse_result.rectified_flux
+        model_flux[self.mask] = coarse_result.rectified_model_flux
         
         continuum = self.fill_value * np.ones_like(spectrum.flux)
         for si, ei in self._get_region_slices(spectrum):

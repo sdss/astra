@@ -33,19 +33,19 @@ def update_control_kwds(input_nml_path, key, value):
 
 
 CORE_TIME_COEFFICIENTS = {
-    'sBA': np.array([-0.11225854,  0.91822257,  0.        ]),
-    'sgGK': np.array([2.11366749, 0.94762965, 0.0215653 ]),
-    'sgM': np.array([ 2.07628319,  0.83709908, -0.00974312]),
-    'sdF': np.array([ 2.36062644e+00,  7.88815732e-01, -1.47683420e-03]),
-    'sdGK': np.array([ 2.84815701,  0.88390584, -0.05891258]),
-    'sdM': np.array([ 2.83218967,  0.76324445, -0.05566659]),
+    'sBA': np.array([-0.11225854,  0.91822257,  0.        ,             1]),
+    'sgGK': np.array([2.11366749, 0.94762965, 0.0215653,                1]),
+    'sgM': np.array([ 2.07628319,  0.83709908, -0.00974312,             1]),
+    'sdF': np.array([ 2.36062644e+00, 7.88815732e-01, -1.47683420e-03,  5]),
+    'sdGK': np.array([ 2.84815701,  0.88390584, -0.05891258,            5]),
+    'sdM': np.array([ 2.83218967,  0.76324445, -0.05566659,             5]),
     # copied for turbospectrum #TODO
-    'tBA': np.array([-0.11225854,  0.91822257,  0.        ]),
-    'tgGK': np.array([2.11366749, 0.94762965, 0.0215653 ]),
-    'tgM': np.array([ 2.07628319,  0.83709908, -0.00974312]),
-    'tdF': np.array([ 2.36062644e+00,  7.88815732e-01, -1.47683420e-03]),
-    'tdGK': np.array([ 2.84815701,  0.88390584, -0.05891258]),
-    'tdM': np.array([ 2.83218967,  0.76324445, -0.05566659])    
+    'tBA': np.array([-0.11225854,  0.91822257,  0.        ,             1]),
+    'tgGK': np.array([2.11366749, 0.94762965, 0.0215653 ,               1]),
+    'tgM': np.array([ 2.07628319,  0.83709908, -0.00974312,             1]),
+    'tdF': np.array([ 2.36062644e+00,  7.88815732e-01, -1.47683420e-03, 5]),
+    'tdGK': np.array([ 2.84815701,  0.88390584, -0.05891258,            5]),
+    'tdM': np.array([ 2.83218967,  0.76324445, -0.05566659,             5])    
 }
 
 
@@ -86,8 +86,8 @@ def predict_ferre_core_time(grid, N, nov, pre_factor=1):
     :returns:
         The estimated core-seconds needed to analyze the spectra.
     """
-    intercept, N_coef, nov_coef = CORE_TIME_COEFFICIENTS[grid]
-    return pre_factor * 10**(N_coef * np.log10(N) + nov_coef * np.log10(nov) + intercept)
+    intercept, N_coef, nov_coef, this_pre_factor = CORE_TIME_COEFFICIENTS[grid]
+    return pre_factor * this_pre_factor * 10**(N_coef * np.log10(N) + nov_coef * np.log10(nov) + intercept)
     
 
 
@@ -441,6 +441,7 @@ def load_balancer(
                 
                 execution_commands.append(f"cd {cwd}")
                 execution_commands.append(f"{command} > stdout 2> stderr")
+                execution_commands.append(f"ferre_wait_for_clean_up .")
                 execution_commands.append(f"ferre_timing . > timing.csv")
                 
                 if post_interpolate_model_flux:
@@ -471,6 +472,7 @@ def load_balancer(
             command += f" > {stage_dir}/monkey_{i:0>2.0f}.out 2> {stage_dir}/monkey_{i:0>2.0f}.err"
             
             slurm_tasks.append(SlurmTask([command]))
+            log.info(f"  {i}.{j+1}: 1 execution")
             log.info(f"    {i}.{j+1}.1: {command}")
 
 
