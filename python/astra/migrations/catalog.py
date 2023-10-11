@@ -612,6 +612,86 @@ def migrate_glimpse_photometry(catalogid_field_name="catalogid31", batch_size: O
     return updated
 
 
+def migrate_gaia_source_ids(
+    where=(
+        (Source.gaia_dr3_source_id.is_null())
+    |   (Source.gaia_dr3_source_id == 0)
+    |   (Source.gaia_dr2_source_id.is_null())
+    |   (Source.gaia_dr2_source_id == 0)
+    ),
+    limit: Optional[int] = None,
+    batch_size: Optional[int] = 500
+):
+    """
+    Migrate Gaia source IDs for anything that we might have missed.
+    """
+    
+    from astra.migrations.sdss5db.catalogdb import CatalogToGaia_DR3, CatalogToGaia_DR2
+
+    q = (
+        Source
+        .select()
+        .where(where)
+        .limit(limit)
+    )
+
+    updated = []
+    with tqdm(total=1) as pb:
+        for chunk in chunked(q, batch_size):
+
+            source_by_catalogid = {}
+            for source in chunk:
+                for key in ("catalogid", "catalogid21", "catalogid25", "catalogid31"):
+                    if getattr(source, key) is not None:
+                        source_by_catalogid[getattr(source, key)] = source
+
+            q = (
+                CatalogToGaia_DR3
+                .select(
+                    CatalogToGaia_DR3.catalogid,
+                    CatalogToGaia_DR3.target_id.alias("gaia_dr3_source_id")
+                )
+                .where(CatalogToGaia_DR3.catalogid.in_(list(source_by_catalogid.keys())))
+                .tuples()
+            )
+            for catalogid, gaia_dr3_source_id in q:
+                source = source_by_catalogid[catalogid]
+                source.gaia_dr3_source_id = gaia_dr3_source_id
+                updated.append(source)
+
+            q = (
+                CatalogToGaia_DR2
+                .select(
+                    CatalogToGaia_DR2.catalogid,
+                    CatalogToGaia_DR2.target_id.alias("gaia_dr2_source_id")
+                )
+                .where(CatalogToGaia_DR2.catalogid.in_(list(source_by_catalogid.keys())))
+                .tuples()
+            )
+            for catalogid, gaia_dr2_source_id in q:
+                source = source_by_catalogid[catalogid]
+                source.gaia_dr2_source_id = gaia_dr2_source_id
+                updated.append(source)            
+    
+        pb.update(batch_size)
+    
+    n_updated, updated = (0, list(set(updated)))
+    for chunk in chunked(updated, batch_size):
+        n_updated += (
+            Source
+            .bulk_update(
+                chunk,
+                fields=[
+                    Source.gaia_dr2_source_id,
+                    Source.gaia_dr3_source_id
+                ]
+            )
+        )
+        
+    return n_updated
+        
+        
+
 
 def migrate_gaia_dr3_astrometry_and_photometry(where = None, limit: Optional[int] = None, batch_size: Optional[int] = 500):
     """

@@ -34,7 +34,7 @@ def migrate_carton_assignments_to_bigbitfield(
     where=None,
     batch_size=500,
     limit=None,
-    from_cache=True
+    from_cache=False
 ):
 
     bit_mapping = {}
@@ -90,7 +90,7 @@ def migrate_carton_assignments_to_bigbitfield(
         sources[source.sdss_id] = source
 
     n_skipped, n_applied = (0, 0)
-    for sdss_id, carton_pk in tqdm(q_cartons, desc="Assiging cartons to sources"):
+    for sdss_id, carton_pk in tqdm(q_cartons, total=len(q_cartons) if from_cache else 1, desc="Assiging cartons to sources"):
         try:
             s = sources[sdss_id]
         except:

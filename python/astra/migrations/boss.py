@@ -10,9 +10,7 @@ from astra.utils import log, expand_path
 from astra.models.base import database
 from astra.models.boss import BossVisitSpectrum
 from astra.models.source import Source
-
 from astra.migrations.utils import enumerate_new_spectrum_pks, upsert_many
-
 
 from peewee import (
     chunked,
@@ -85,8 +83,6 @@ def migrate_spectra_from_spall_file(
         "MJD": "mjd",
         "CATALOGID": "catalogid",
         "HEALPIX": "healpix",
-        #"PLUG_RA": "plug_ra",
-        #"PLUG_DEC": "plug_dec",
         "DELTA_RA_LIST": ("delta_ra", lambda x: np.array(x.split(), dtype=float)),
         "DELTA_DEC_LIST": ("delta_dec", lambda x: np.array(x.split(), dtype=float)),
         "SN_MEDIAN_ALL": "snr",
@@ -95,18 +91,15 @@ def migrate_spectra_from_spall_file(
 
         "CATALOGID_V0": "catalogid_v0",
         "CATALOGID_V0P5": "catalogid_v0p5",
-        "SDSS_ID": "sdss_id"
+        "SDSS_ID": "sdss_id",
+        "GAIA_ID": "gaia_dr2_source_id",
     }
-    source_keys_only = ("catalogid_v0", "catalogid_v0p5", "sdss_id") 
+    source_keys_only = ("catalogid_v0", "catalogid_v0p5", "sdss_id", "gaia_dr2_source_id") 
 
     spectrum_data = []
     for i, row in enumerate(tqdm(spAll)):
 
         row_data = dict(zip(row.keys(), row.values()))
-
-        # Exclude things with PROGRAMNAME starting with 'OFFSET' because these catalogids are NOT real
-        #if row_data["PROGRAMNAME"].lower().strip().startswith("offset"):
-        #    continue
         
         sanitised_row_data = {
             "release": "sdss5",
@@ -130,6 +123,7 @@ def migrate_spectra_from_spall_file(
         for chunk in chunked(spectrum_data, batch_size):
 
             chunk_catalogids = []
+            gaia_dr2_source_id_given_catalogid = {}
             for row in chunk:
                 for key in ("catalogid", "catalogid_v0", "catalogid_v0p5"):
                     try:
@@ -137,6 +131,7 @@ def migrate_spectra_from_spall_file(
                             continue
                     except:
                         chunk_catalogids.append(row[key])
+                        gaia_dr2_source_id_given_catalogid[row[key]] = row["gaia_dr2_source_id"]
 
             q = (
                 Catalog
@@ -146,7 +141,6 @@ def migrate_spectra_from_spall_file(
                     Catalog.catalogid,
                     Catalog.version_id.alias("version_id"),
                     Catalog.lead,
-                    CatalogToGaia_DR2.target.alias("gaia_dr2_source_id"),
                     CatalogToGaia_DR3.target.alias("gaia_dr3_source_id"),
                     SDSS_ID_Flat.sdss_id,
                     SDSS_ID_Flat.n_associated,
@@ -156,23 +150,31 @@ def migrate_spectra_from_spall_file(
                 )
                 .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(Catalog.catalogid == SDSS_ID_Flat.catalogid))
                 .join(SDSS_ID_Stacked, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
-                .switch(Catalog)
-                .join(CatalogToGaia_DR3, JOIN.LEFT_OUTER, on=(Catalog.catalogid == CatalogToGaia_DR3.target))
-                .switch(Catalog)
-                .join(CatalogToGaia_DR2, JOIN.LEFT_OUTER, on=(Catalog.catalogid == CatalogToGaia_DR2.catalog))
+                .join(CatalogToGaia_DR3, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.catalogid31 == CatalogToGaia_DR3.catalog))
                 .where(Catalog.catalogid.in_(chunk_catalogids))
-                .order_by(SDSS_ID_Flat.sdss_id.asc()) # link duplicates to earlier SDSS ID 
+                #.order_by(SDSS_ID_Flat.sdss_id.asc()) # link duplicates to earlier SDSS ID 
                 .dicts()
             )
                     
             for row in q:
                 if row["sdss_id"] in source_data:
+                    for key, value in row.items():
+                        if source_data[row["sdss_id"]][key] is None and value is not None:
+                            if key == "sdss_id":
+                                source_data[row["sdss_id"]][key] = min(source_data[row["sdss_id"]][key], value)
+                            else:
+                                source_data[row["sdss_id"]][key] = value
                     continue
 
                 source_data[row["sdss_id"]] = row
-
+                gaia_dr2_source_id = gaia_dr2_source_id_given_catalogid[row["catalogid"]]
+                if gaia_dr2_source_id < 0:
+                    gaia_dr2_source_id = None
+                source_data[row["sdss_id"]]["gaia_dr2_source_id"] = gaia_dr2_source_id
+            
             pb.update(batch_size)
     
+
     # Upsert the sources
     with database.atomic():
         with tqdm(desc="Upserting sources", total=len(source_data)) as pb:

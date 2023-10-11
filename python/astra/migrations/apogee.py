@@ -421,7 +421,13 @@ def _migrate_apstar_metadata(
         path = expand_path(apstar.path)
         commands += f"{command_template.format(path=path)}\n"
     
-    outputs = subprocess.check_output(commands, shell=True, text=True)
+    try:
+        outputs = subprocess.check_output(commands, shell=True, text=True)
+    except subprocess.CalledProcessError:
+        log.exception(f"Exception on spectra {apstars}")
+        
+        return {}
+    
     outputs = outputs.strip().split("\n")
 
     p, all_metadata = (-1, {})
@@ -431,7 +437,6 @@ def _migrate_apstar_metadata(
             key, value = (key.strip(), value.split()[0].strip(" '"))
         except (IndexError, ValueError): # binary data, probably
             continue
-
         
         if key == "NWAVE":
             p += 1
@@ -439,6 +444,7 @@ def _migrate_apstar_metadata(
         all_metadata.setdefault(spectrum_pk, {})
         if key in all_metadata[spectrum_pk]:
             log.warning(f"Multiple key `{key}` found in {apstars[p]}: {expand_path(apstars[p].path)}")
+            raise a
         all_metadata[spectrum_pk][key] = value
     
     return all_metadata
@@ -1012,7 +1018,7 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
             sq.c.pk.alias("rv_visit_pk"),
             sq.c.star_pk.alias("star_pk")
         )
-        .join(sq, on=(Visit.pk == sq.c.visit_pk))
+        .join(sq, on=(Visit.pk == sq.c.visit_pk)) #
         .switch(Visit)
         # Need to join by Catalog on the visit catalogid (not gaia DR2) because sometimes Gaia DR2 value is 0
         # Doing it like this means we might end up with some `catalogid` actually NOT being v1, but
@@ -1050,33 +1056,123 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
         "k_mag",
         "e_k_mag",
     )
+    
 
     source_data, spectrum_data, matched_sdss_ids = (OrderedDict(), [], {})
     for row in tqdm(q.iterator(), total=limit or 1, desc="Retrieving spectra"):
         basename = row.pop("file")
 
-        assert row["catalogid"] is not None
+        catalogid = row["catalogid"]        
         
         this_source_data = dict(zip(source_only_keys, [row.pop(k) for k in source_only_keys]))
 
-        source_identifier = row["star_pk"]
-        
-        if source_identifier in source_data:
+        if catalogid in source_data:
             # make sure the only difference is SDSS_ID
-            matched_sdss_ids[source_identifier] = min(this_source_data["sdss_id"], source_data[source_identifier]["sdss_id"])
+            matched_sdss_ids[catalogid] = min(this_source_data["sdss_id"], source_data[catalogid]["sdss_id"])
         else:
-            source_data[source_identifier] = this_source_data
-            matched_sdss_ids[source_identifier] = this_source_data["sdss_id"]
+            source_data[catalogid] = this_source_data
+            matched_sdss_ids[catalogid] = this_source_data["sdss_id"]
         
         row["plate"] = row["plate"].lstrip()
         
         spectrum_data.append({
-            #"source_identifiers": source_identifier, # Will be removed later, just for matching sources.
+            "catalogid": catalogid,
             "release": "sdss5",
             "apred": apred,
             "prefix": basename.lstrip()[:2],
             **row
         })
+
+    q_without_rvs = (
+        Visit.select(
+            Visit.apred,
+            Visit.mjd,
+            Visit.plate,
+            Visit.telescope,
+            Visit.field,
+            Visit.fiber,
+            Visit.file,
+            #Visit.prefix,
+            Visit.obj,
+            Visit.pk.alias("visit_pk"),
+            Visit.dateobs.alias("date_obs"),
+            Visit.jd,
+            Visit.exptime,
+            Visit.nframes.alias("n_frames"),
+            Visit.assigned,
+            Visit.on_target,
+            Visit.valid,
+            Visit.starflag.alias("spectrum_flags"),
+            Visit.catalogid,
+            Visit.ra.alias("input_ra"),
+            Visit.dec.alias("input_dec"),
+
+            # Source information,
+            Visit.gaiadr2_sourceid.alias("gaia_dr2_source_id"),
+            CatalogToGaia_DR3.target_id.alias("gaia_dr3_source_id"),
+            #Catalog.catalogid.alias("catalogid"),
+            Catalog.version_id.alias("version_id"),
+            Catalog.lead,
+            Catalog.ra,
+            Catalog.dec,
+            SDSS_ID_Flat.sdss_id,
+            SDSS_ID_Flat.n_associated,
+            SDSS_ID_Stacked.catalogid21,
+            SDSS_ID_Stacked.catalogid25,
+            SDSS_ID_Stacked.catalogid31,
+            Visit.jmag.alias("j_mag"),
+            Visit.jerr.alias("e_j_mag"),            
+            Visit.hmag.alias("h_mag"),
+            Visit.herr.alias("e_h_mag"),
+            Visit.kmag.alias("k_mag"),
+            Visit.kerr.alias("e_k_mag"),        
+        )
+        .join(RvVisit, JOIN.LEFT_OUTER, on=(Visit.pk == RvVisit.visit_pk))
+        .switch(Visit)
+        # Need to join by Catalog on the visit catalogid (not gaia DR2) because sometimes Gaia DR2 value is 0
+        # Doing it like this means we might end up with some `catalogid` actually NOT being v1, but
+        # we will have to fix that afterwards. It will be indicated by the `version_id`.
+        .join(Catalog, JOIN.LEFT_OUTER, on=(Catalog.catalogid == Visit.catalogid))
+        .switch(Visit)
+        .join(CatalogToGaia_DR2, JOIN.LEFT_OUTER, on=(Visit.gaiadr2_sourceid == CatalogToGaia_DR2.target_id))
+        .join(CatalogToGaia_DR3, JOIN.LEFT_OUTER, on=(CatalogToGaia_DR2.catalogid == CatalogToGaia_DR3.catalogid))
+        .switch(Catalog)
+        .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(Catalog.catalogid == SDSS_ID_Flat.catalogid))
+        .join(SDSS_ID_Stacked, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
+        .where(RvVisit.pk.is_null() & (Visit.apred_vers == apred) & (Visit.catalogid > 0))
+        .where(Visit.pk == 8497870)
+        .dicts()
+    )
+
+
+    for row in tqdm(q_without_rvs.iterator(), total=limit or 1, desc="Retrieving bad spectra"):
+        basename = row.pop("file")
+
+        assert row["catalogid"] is not None
+        catalogid = row["catalogid"]        
+        
+        this_source_data = dict(zip(source_only_keys, [row.pop(k) for k in source_only_keys]))
+
+        if catalogid in source_data:
+            # make sure the only difference is SDSS_ID
+            if this_source_data["sdss_id"] is None or source_data[catalogid]["sdss_id"] is None:
+                matched_sdss_ids[catalogid] = (this_source_data["sdss_id"] or source_data[catalogid]["sdss_id"])
+            else:    
+                matched_sdss_ids[catalogid] = min(this_source_data["sdss_id"], source_data[catalogid]["sdss_id"])
+        else:
+            source_data[catalogid] = this_source_data
+            matched_sdss_ids[catalogid] = this_source_data["sdss_id"]
+        
+        row["plate"] = row["plate"].lstrip()
+        
+        spectrum_data.append({
+            "catalogid": catalogid, # Will be removed later, just for matching sources.
+            "release": "sdss5",
+            "apred": apred,
+            "prefix": basename.lstrip()[:2],
+            **row
+        })
+
 
     # Upsert the sources
     with database.atomic():
@@ -1097,23 +1193,33 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
         .select(
             Source.pk,
             Source.sdss_id,
+            Source.catalogid,
+            Source.catalogid21,
+            Source.catalogid25,
+            Source.catalogid31
         )
         .tuples()
         .iterator()
     )
 
     source_pk_by_sdss_id = {}
-    for pk, sdss_id in q:
+    source_pk_by_catalogid = {}
+    for pk, sdss_id, *catalogids in q:
         if sdss_id is not None:
             source_pk_by_sdss_id[sdss_id] = pk
+        for catalogid in catalogids:
+            if catalogid is not None:
+                source_pk_by_catalogid[catalogid] = pk
         
-    print("POPPING STAR_PK OUT, REMOVE THIS AFTER NEXT DB INIT")
     for each in spectrum_data:
+        catalogid = each["catalogid"]
+        try:
+            matched_sdss_id = matched_sdss_ids[catalogid]
+            source_pk = source_pk_by_sdss_id[matched_sdss_id]            
+        except:
+            source_pk = source_pk_by_catalogid[catalogid]
+            log.warning(f"No SDSS_ID found for catalogid={catalogid}, assigned to source_pk={source_pk}: {each}")
 
-        matched_sdss_id = matched_sdss_ids[each.pop("star_pk")]
-        
-        source_pk = source_pk_by_sdss_id[matched_sdss_id]
-            
         each["source_pk"] = source_pk
 
     # Upsert the spectra
@@ -1185,10 +1291,19 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
         
 
 def _migrate_apvisit_metadata(apVisits, raise_exceptions=False):
-
-    keys = ("NAXIS1", "SNR", "NCOMBINE", "EXPTIME")
-    K = len(keys)
-    keys_str = "|".join([f"({k})" for k in keys])
+    def float_or_nan(x):
+        try:
+            return float(x)
+        except:
+            return np.nan
+    keys_dtypes = {
+        "NAXIS1": int,
+        "SNR": float_or_nan,
+        "NCOMBINE": int, 
+        "EXPTIME": float_or_nan,
+    }
+    K = len(keys_dtypes)
+    keys_str = "|".join([f"({k})" for k in keys_dtypes.keys()])
 
     # 80 chars per line, 150 lines -> 12000
     command_template = " | ".join([
@@ -1204,6 +1319,21 @@ def _migrate_apvisit_metadata(apVisits, raise_exceptions=False):
     outputs = subprocess.check_output(commands, shell=True, text=True)
     outputs = outputs.strip().split("\n")
 
+    index, all_metadata = (0, {})
+    for line in outputs:
+        all_metadata.setdefault(apVisits[index].spectrum_pk, {})
+        key, value = line.split("=")
+        key, value = (key.strip(), value.split()[0].strip(" '"))
+        value = keys_dtypes[key](value)
+        if key == "NAXIS1":
+            # @Nidever: "if there’s 2048 then it hasn’t been dithered, if it’s 4096 then it’s dithered."
+            all_metadata[apVisits[index].spectrum_pk]["dithered"] = (value == 4096)
+            index += 1            
+        else:
+            all_metadata[apVisits[index].spectrum_pk][key.lower()] = value
+            
+        
+    '''
     if len(outputs) != (K * len(apVisits)):
 
         if raise_exceptions:
@@ -1221,6 +1351,8 @@ def _migrate_apvisit_metadata(apVisits, raise_exceptions=False):
                 log.exception(f"Exception on {apVisit}:")
                 # Failure mode values.
                 all_metadata[apVisit.spectrum_pk] = (False, -1, -1, None)
+                if raise_exceptions:
+                    raise
                 continue
             else:
                 all_metadata.update(this_metadata)    
@@ -1236,6 +1368,7 @@ def _migrate_apvisit_metadata(apVisits, raise_exceptions=False):
                 key, value = (key.strip(), value.split()[0].strip(" '"))
                 if key in metadata:
                     log.warning(f"Multiple key `{key}` found in {apVisit}: {expand_path(apVisit.path)}")
+                    raise a
                 else:
                     metadata[key] = value
 
@@ -1246,6 +1379,7 @@ def _migrate_apvisit_metadata(apVisits, raise_exceptions=False):
             exptime = float(metadata["EXPTIME"])
 
             all_metadata[apVisit.spectrum_pk] = (dithered, snr, n_frames, exptime)
+    '''
     
     return all_metadata
 
@@ -1298,12 +1432,9 @@ def migrate_apvisit_metadata_from_image_headers(
 
     with tqdm(total=total, desc="Collecting results", unit="spectra") as pb:
         for future in concurrent.futures.as_completed(futures):
-            for spectrum_pk, (dithered, snr, n_frames, exptime) in future.result().items():
-                apVisits[spectrum_pk].dithered = dithered
-                apVisits[spectrum_pk].snr = snr
-                apVisits[spectrum_pk].n_frames = n_frames
-                apVisits[spectrum_pk].exptime = exptime
-                
+            for spectrum_pk, meta in future.result().items():
+                for key, value in meta.items():
+                    setattr(apVisits[spectrum_pk], key, value)                
                 pb.update()
 
     with tqdm(total=total, desc="Updating", unit="spectra") as pb:     
@@ -1343,10 +1474,18 @@ def migrate_apstar_from_sdss5_database(apred, where=None, limit=None, batch_size
         Source
         .select(
             Source.pk,
-            Source.sdss_id
+            Source.catalogid,
+            Source.catalogid21,
+            Source.catalogid25,
+            Source.catalogid31
         )        
     )
-    source_pks_by_sdss_id = { sdss_id: pk for pk, sdss_id in q.tuples().iterator() }
+    source_pks_by_catalogid = {}
+    for pk, *catalogids in q.tuples().iterator():
+        for catalogid in catalogids:
+            if catalogid is not None and catalogid > 0:
+                source_pks_by_catalogid[catalogid] = pk
+            
 
     q = (
         Star
@@ -1379,21 +1518,24 @@ def migrate_apstar_from_sdss5_database(apred, where=None, limit=None, batch_size
             Star.rv_ccpfwhm.alias("ccfwhm"),
             Star.rv_autofwhm.alias("autofwhm"),
             Star.pk.alias("star_pk"),
-            #Star.catalogid,
-            SDSS_ID_Flat.sdss_id,
+            Star.catalogid,
+            #SDSS_ID_Flat.sdss_id,
         )
-        .join(SDSS_ID_Flat, on=(Star.catalogid == SDSS_ID_Flat.catalogid))
-        .order_by(SDSS_ID_Flat.sdss_id.asc())
+        #.join(SDSS_ID_Flat, on=(Star.catalogid == SDSS_ID_Flat.catalogid))
+        .where(Star.apred_vers == apred)
     )
     if where is not None:
         q = q.where(where)
     if limit is not None:
         q = q.limit(limit)
 
+    # q = q.order_by(SDSS_ID_Flat.sdss_id.asc())
     
     spectrum_data = {}
+    unknown_stars = []
     for star in tqdm(q.dicts().iterator(), total=1, desc="Getting spectra"):
         if star["star_pk"] in spectrum_data:
+            raise a
             continue
 
         star.update(
@@ -1402,11 +1544,27 @@ def migrate_apstar_from_sdss5_database(apred, where=None, limit=None, batch_size
             apstar="stars",
             apred=apred,
         )
-        sdss_id = star.pop("sdss_id")
-        star["source_pk"] = source_pks_by_sdss_id[sdss_id]
+        # This part assumes that we have already ingested everything from the visits, but that might not be true (e.g., when testing things).
+        # TODO: create sources if we dont have them
+        #sdss_id = star.pop("sdss_id")
+        
+        # Sometimes we can get here and there is a source catalogid that we have NEVER seen before, even if we have ingested
+        # ALL the visits. The rason is because there are "no good visits". That's fucking annoying, because even if they aren't
+        # "good visits", they should appear in the visit table.
+        catalogid = star["catalogid"]
+        try:
+            star["source_pk"] = source_pks_by_catalogid[catalogid]
+        except KeyError:
+            unknown_stars.append(star)
+        else:        
+            star.pop("catalogid")
+            spectrum_data[star["star_pk"]] = star
 
-        spectrum_data[star["star_pk"]] = star
-
+    if len(unknown_stars) > 0:
+        log.warning(f"There were {len(unknown_stars)} unknown stars")
+        for star in unknown_stars:
+            if star["n_good_visits"] != 0:
+                log.warning(f"Star {star['obj']} (catalogid={star['catalogid']}; star_pk={star['star_pk']} has {star['n_good_visits']} good visits but we've never seen it before")
 
     # Upsert the spectra
     pks = upsert_many(
@@ -1450,6 +1608,10 @@ def migrate_apstar_from_sdss5_database(apred, where=None, limit=None, batch_size
         .where(ApogeeCoaddedSpectrumInApStar.release == "sdss5")
         .iterator()
     )
+    for spectrum in tqdm(q, total=1):
+        _migrate_apstar_metadata([spectrum])
+    # TODO: test this again when we have data. see if we can do 1 hexdump per file so we don't have to worry about munging keywords from different places.
+    raise a
 
     spectra, futures, total = ({}, [], 0)
     with tqdm(total=limit or 0, desc="Retrieving metadata", unit="spectra") as pb:
