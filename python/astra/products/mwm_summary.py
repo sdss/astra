@@ -11,6 +11,101 @@ get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
 
 DEFAULT_IGNORE_FIELD_NAMES = ("pk", )
 
+def create_mwm_targets_product(
+    where=(
+        Source.assigned_to_mapper("mwm")
+    |   Source.sdss4_apogee_id.is_null(False)
+    ),
+    limit=None,
+    output_template="mwmTargets-{version}.fits",
+    ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
+    upper=True,
+    fill_values=None,
+    overwrite=False,
+    full_output=False
+):
+    """
+    Create an `mwmTargets` product containing a single HDU with source-level information about all targets,
+    excluding any data reduction information (NOT including data reduction results).
+    
+    :param where: [optional]
+        A `where` clause for the `Source.select()` query.
+    
+    :param limit: [optional]
+        Specify an optional limit on the number of rows.
+        
+    :param output_template: [optional]
+        The output basename template to use for this product.
+
+    :param ignore_field_names: [optional]
+        Ignore the given field names.
+
+    :param name_conflict_strategy: [optional]
+        A callable that expects
+
+            `name_conflict_strategy(fields, name, field, model)`
+
+        where:
+    
+        - `fields` is a dictionary with field names as keys and fields as values,
+        - `name` is the conflicting field name (e.g., it appears already in `fields`),
+        - `field` is the conflicting field,
+        - `model` is the model where the conflicting `field` is bound to.
+    
+        This callable should update `fields` (or not).
+    
+    :param upper: [optional]
+        Specify all field names to be in upper case.
+    
+    :param fill_values: [optional]
+        Specify a fill value for each kind of column type.
+    
+    :param overwrite: [optional]
+        Overwrite the path if it already exists.
+    
+    :param full_output: [optional]
+        If `True`, return a two-length tuple containing the path and the HDU list,
+        otherwise just return the path.      
+    """
+    path = get_path(output_template.format(version=__version__))
+    check_path(path, overwrite)
+
+    fields = get_fields(
+        (Source, ),
+        name_conflict_strategy=None,
+        ignore_field_names=ignore_field_names
+    )
+    
+    q = (
+        Source
+        .select(*tuple(fields.values()))
+    )
+    if where is not None:
+        q = q.where(where)
+    q = (
+        q
+        .limit(limit)
+        .dicts()
+    )
+    
+    hdus = [
+        fits.PrimaryHDU(header=get_basic_header()),
+        get_binary_table_hdu(
+            q,
+            header=get_basic_header(),
+            models=(Source, ),
+            fields=fields,
+            upper=upper,
+            fill_values=fill_values,
+            limit=limit
+        )
+    ]
+
+    hdu_list = fits.HDUList(hdus)
+    hdu_list.writeto(path, overwrite=overwrite)
+    return (path, hdu_list) if full_output else path    
+
+
 def create_mwm_all_star_product(
     where=None,
     limit=None,
