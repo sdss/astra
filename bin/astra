@@ -16,7 +16,9 @@ def cli(context, verbose):
 @cli.command()
 @click.option("--drop-tables", is_flag=True)
 @click.option("--delay", default=10)
-def initdb(drop_tables, delay):
+# default to grant permissions
+@click.option("--no-grant-permissions", is_flag=True, default=False)
+def initdb(drop_tables, delay, no_grant_permissions):
     """Initialize the database."""
     from time import sleep
     from astra.utils import log
@@ -48,8 +50,8 @@ def initdb(drop_tables, delay):
         base.database.create_tables(models)
     log.info(f"Created {len(models)} database tables: {models}")
     
-    schema = source._meta.schema
-    if isinstance(base.database, base.PostgresqlDatabase):
+    if not no_grant_permissions:
+        schema = base.BaseModel._meta.schema
         log.info(f"Granting permissions on schema {schema} to role 'sdss'")
         base.database.execute_sql(f"GRANT ALL PRIVILEGES ON SCHEMA {schema} TO GROUP sdss;")
         base.database.execute_sql(f"GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA {schema} to sdss;")
@@ -69,9 +71,7 @@ def migrate(apred, run2d, limit, include_dr17):
     from astra.models.source import Source
 
     from astra.migrations.apogee import (
-        migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb, 
-        migrate_sdss4_dr17_apstar_from_sdss5_catalogdb,
-        migrate_sdss4_dr17_member_flags,
+        migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb, 
         migrate_apvisit_metadata_from_image_headers,
         migrate_apvisit_from_sdss5_apogee_drpdb
     )
@@ -97,17 +97,13 @@ def migrate(apred, run2d, limit, include_dr17):
 
     if include_dr17:
         log.info(f"Ingesting DR17 APOGEE spectra")
-        migrate_sdss4_dr17_apvisit_from_sdss5_catalogdb(limit=limit)
-
-        log.info(f"Migrating apStar data from sdss5 catalogdb")
-        migrate_sdss4_dr17_apstar_from_sdss5_catalogdb()    
-
+        migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(limit=limit)
+        
     if apred:
         log.info(f"Ingesting SDSS5 APOGEE spectra with apred={apred}")
         migrate_apvisit_from_sdss5_apogee_drpdb(apred, limit=limit)
-
-        log.info(f"Migrating apVisit metadata from image headers")
-        migrate_apvisit_metadata_from_image_headers()
+        
+        log.warning(f"NEED TO MIGRATE apSTAR IFORMATION")
 
     if run2d:
         log.info(f"Ingesting SDSS5 BOSS spectra with run2d={run2d}")
@@ -118,9 +114,6 @@ def migrate(apred, run2d, limit, include_dr17):
 
     log.info(f"Migrating carton assignments")
     migrate_carton_assignments_to_bigbitfield()
-
-    log.info(f"Migrating SDSS4 DR17 membership flags")
-    migrate_sdss4_dr17_member_flags()
 
     log.info(f"Migrating HEALPix")
     migrate_healpix()
@@ -156,14 +149,10 @@ def migrate(apred, run2d, limit, include_dr17):
 
     log.info(f"Computing f_night_fraction for APOGEE visits")
     compute_f_night_time_for_apogee_visits()
-
-    log.info(f"Setting the Sun to have sdss_id=0 because it's very special to me")
-    (
-        Source
-        .update(sdss_id=0)
-        .where(Source.sdss4_apogee_id == "VESTA")
-        .execute()
-    )
+    
+    log.info(f"Migrating apVisit metadata from image headers")
+    migrate_apvisit_metadata_from_image_headers()
+    
 
     log.info("Done")
         
