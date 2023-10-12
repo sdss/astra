@@ -34,8 +34,7 @@ class Source(BaseModel):
 
     #> Identifiers    
     sdss_id = BigIntegerField(index=True, unique=True, null=True, help_text="SDSS-5 unique identifier")
-    # The following identifiers are usually unique, but let's not base our integrity on it because
-    # there will be things with n_associated > 1.
+    # These identifiers are usually unique, but let's not use integrity constraints because there will be things with n_associated > 1.
     sdss4_apogee_id = TextField(index=True, unique=True, null=True, help_text="SDSS-4 DR17 APOGEE identifier")
     gaia_dr2_source_id = BigIntegerField(null=True, help_text="Gaia DR2 source identifier")
     gaia_dr3_source_id = BigIntegerField(null=True, help_text="Gaia DR3 source identifier")
@@ -53,7 +52,7 @@ class Source(BaseModel):
     n_associated = IntegerField(null=True, help_text=Glossary.n_associated)
     n_neighborhood = IntegerField(default=-1, help_text="Sources within 3\" and G_MAG > G_MAG_source + 5")
     
-    # Only do carton_flags if we have a postgresql database.
+    # Only do sdss5_target_flags if we are using a PostgreSQL database, as SQLite does not support it.
     if isinstance(database, PostgresqlDatabase):
         sdss5_target_flags = BigBitField(null=True, help_text=Glossary.sdss5_target_flags)
 
@@ -320,7 +319,7 @@ class Source(BaseModel):
 
     # Neither avenue is clearly better, so we make a decision, document it, and live with it.
     # For Gaia, we use `_mag`. For 2MASS we use `_mag`. 
-    # 
+    
     # For unWISE they report fluxes, so we keep their naming convention where it fits within 
     # 8 characters, and document when the name differs from the original catalog.
 
@@ -446,14 +445,14 @@ class Source(BaseModel):
     zgr_chi2 = FloatField(null=True, help_text=Glossary.chi2)
     zgr_quality_flags = BitField(default=0, help_text="Quality flags")
     # See https://zenodo.org/record/7811871
- 
+
     #> Bailer-Jones Distance Estimates (EDR3; 2021)
-    r_med_geo = FloatField(null=True, help_text="Median geometric distance estimate [pc]")
-    r_lo_geo = FloatField(null=True, help_text="16th percentile of geometric distance estimate [pc]")
-    r_hi_geo = FloatField(null=True, help_text="84th percentile of geometric distance estimate [pc]")
-    r_med_photogeo = FloatField(null=True, help_text="50th percentile of photogeometric distance estimate [pc]")
-    r_lo_photogeo = FloatField(null=True, help_text="16th percentile of photogeometric distance estimate [pc]")
-    r_hi_photogeo = FloatField(null=True, help_text="84th percentile of photogeometric distance estimate [pc]")
+    r_med_geo = FloatField(null=True, help_text="Median geometric distance [pc]")
+    r_lo_geo = FloatField(null=True, help_text="16th percentile of geometric distance [pc]")
+    r_hi_geo = FloatField(null=True, help_text="84th percentile of geometric distance [pc]")
+    r_med_photogeo = FloatField(null=True, help_text="50th percentile of photogeometric distance [pc]")
+    r_lo_photogeo = FloatField(null=True, help_text="16th percentile of photogeometric distance [pc]")
+    r_hi_photogeo = FloatField(null=True, help_text="84th percentile of photogeometric distance [pc]")
     bailer_jones_flags = TextField(null=True, help_text="Bailer-Jones quality flags") # TODO: omg change this to a bitfield and give flag definitions
     # See https://dc.zah.uni-heidelberg.de/tableinfo/gedr3dist.main#note-f
 
@@ -473,17 +472,18 @@ class Source(BaseModel):
     ebv_zhang_2023 = FloatField(null=True, help_text="E(B-V) from Zhang et al. (2023) [mag]")
     e_ebv_zhang_2023 = FloatField(null=True, help_text="Error on E(B-V) from Zhang et al. (2023) [mag]")
     ebv_sfd = FloatField(null=True, help_text="E(B-V) from SFD [mag]")
+    # In these help_texts they vary a little in format from convention (e.g., "Error on X E(B-V)" instead of "Error on E(B-V) from X")
+    # but that's because they are too long to fit in the FITS header. We'll see if anyone ever notices.
     e_ebv_sfd = FloatField(null=True, help_text="Error on E(B-V) from SFD [mag]")    
     ebv_rjce_glimpse = FloatField(null=True, help_text="E(B-V) from RJCE GLIMPSE [mag]")
-    e_ebv_rjce_glimpse = FloatField(null=True, help_text="Error on E(B-V) from RJCE GLIMPSE [mag]")
+    e_ebv_rjce_glimpse = FloatField(null=True, help_text="Error on RJCE GLIMPSE E(B-V) [mag]")
     ebv_rjce_allwise = FloatField(null=True, help_text="E(B-V) from RJCE AllWISE [mag]")
-    e_ebv_rjce_allwise = FloatField(null=True, help_text="Error on E(B-V) from RJCE AllWISE [mag]")
+    e_ebv_rjce_allwise = FloatField(null=True, help_text="Error on RJCE AllWISE E(B-V)[mag]")
     ebv_bayestar_2019 = FloatField(null=True, help_text="E(B-V) from Bayestar 2019 [mag]")
-    e_ebv_bayestar_2019 = FloatField(null=True, help_text="Error on E(B-V) from Bayestar 2019 [mag]")
+    e_ebv_bayestar_2019 = FloatField(null=True, help_text="Error on Bayestar 2019 E(B-V) [mag]")
     ebv_edenhofer_2023 = FloatField(null=True, help_text="E(B-V) from Edenhofer et al. (2023) [mag]")
-    e_ebv_edenhofer_2023 = FloatField(null=True, help_text="Error on E(B-V) from Edenhofer et al. (2023) [mag]")
-    flag_ebv_edenhofer_2023_upper_limit = BooleanField(default=False, help_text="E(B-V) from Edenhofer et al. (2023) is an upper limit")
-    #print("ANDY REMOVE THIS WARNING AND ADD REDDENING COLUMNS")
+    e_ebv_edenhofer_2023 = FloatField(null=True, help_text="Error on Edenhofer et al. (2023) E(B-V) [mag]")
+    flag_ebv_edenhofer_2023_upper_limit = BooleanField(default=False, help_text="Upper limit on Edenhofer E(B-V)")
     
     @property
     def sdss5_cartons(self):

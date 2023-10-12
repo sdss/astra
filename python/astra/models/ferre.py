@@ -22,6 +22,11 @@ from astra.models.pipeline import PipelineOutputMixin
 from astra.glossary import Glossary
 
 
+from astra.pipelines.ferre.utils import (get_apogee_pixel_mask, parse_ferre_spectrum_name)
+
+APOGEE_FERRE_MASK = get_apogee_pixel_mask()
+
+
 class FerreOutputMixin(PipelineOutputMixin):
         
     @cached_property
@@ -51,10 +56,8 @@ class FerreOutputMixin(PipelineOutputMixin):
         return self.ferre_e_flux / continuum
 
     def unmask(self, array, fill_value=np.nan):
-        from astra.pipelines.ferre.utils import get_apogee_pixel_mask
-        mask = get_apogee_pixel_mask()
-        unmasked_array = fill_value * np.ones(mask.shape)
-        unmasked_array[mask] = array
+        unmasked_array = fill_value * np.ones(APOGEE_FERRE_MASK.shape)
+        unmasked_array[APOGEE_FERRE_MASK] = array
         return unmasked_array
 
         
@@ -67,7 +70,6 @@ class FerreOutputMixin(PipelineOutputMixin):
 
 
     def _get_output_pixel_array(self, basename, P=7514):
-        from astra.pipelines.ferre.utils import parse_ferre_spectrum_name, get_ferre_spectrum_name
         
         #assert self.ferre_input_index >= 0
 
@@ -103,7 +105,6 @@ class FerreOutputMixin(PipelineOutputMixin):
 
             name, = np.atleast_1d(np.loadtxt(usecols=(0, ), dtype=str, **kwds))
             array = np.loadtxt(usecols=range(1, 1+P), **kwds)
-
         '''
         name, = np.atleast_1d(np.loadtxt(usecols=(0, ), dtype=str, **kwds))
         array = np.loadtxt(usecols=range(1, 1+P), **kwds)

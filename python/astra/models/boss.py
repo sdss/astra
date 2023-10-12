@@ -112,8 +112,6 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     n_guide = IntegerField(null=True, help_text=Glossary.n_guide)    
     tai_beg = BigIntegerField(null=True, help_text=Glossary.tai_beg)    
     tai_end = BigIntegerField(null=True, help_text=Glossary.tai_end)       
-    #plug_ra = FloatField(null=True, help_text=Glossary.plug_ra)
-    #plug_dec = FloatField(null=True, help_text=Glossary.plug_dec)
     fiber_offset = BooleanField(null=True, help_text=Glossary.fiber_offset)
     f_night_time = FloatField(null=True, help_text=Glossary.f_night_time)
 

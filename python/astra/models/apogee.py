@@ -120,8 +120,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     )
         
     catalogid = BigIntegerField(index=True, null=True, help_text="SDSS input catalog identifier")
-    print("Andy uncomment star_pk in apogee, and night_fraction")
-    #star_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `star` primary key")
+    star_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `star` primary key")
     visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `visit` primary key")
     rv_visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `rv_visit` primary key")
 
@@ -380,8 +379,6 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
             **kwds
         )
 
-    
-
 
     class Meta:
         indexes = (
@@ -524,8 +521,6 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
         transform=_transform_coadded_spectrum,
         help_text=Glossary.pixel_flags
     )
-
-
 
 
     @property
