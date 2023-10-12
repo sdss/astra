@@ -5,6 +5,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import interpolate
+import os
+
+from astra.utils import expand_path
+
+PIPELINE_DATA_DIR = expand_path(f"$MWM_ASTRA/pipelines/snow_white")
 
 
 def norm_spectra(spectra,model=True,add_infinity=False):
@@ -128,8 +133,8 @@ def fit_grid(specn,l_crop):
     #load normalised models and linearly interp models onto spectrum wave
     specn = specn[(specn[:,0]>3500)& (specn[:,0]<7500)]
     m_wave=np.arange(3000,8000,0.5)
-    m_flux_n=np.load("da_flux_cube.npy")
-    m_param=np.load("da_param_cube.npy")
+    m_flux_n=np.load(os.path.join(PIPELINE_DATA_DIR, "da_flux_cube.npy"))
+    m_param=np.load(os.path.join(PIPELINE_DATA_DIR, "da_param_cube.npy"))
     sn_w = specn[:,0]
     m_flux_n_i = interpolate.interp1d(m_wave,m_flux_n,kind='linear')(sn_w)
     #Crops models and spectra in a line region, renorms models, calculates chi2
@@ -294,7 +299,7 @@ def synthG(spectrum_w,spectrum_f):
     #spec=np.stack((spectrum_w, spectrum_f),axis=-1)
     fmin=3320.
     fmax=10828.
-    filter_w,filter_r=np.loadtxt("GAIA_GAIA3.G.dat",usecols=(0,1),unpack=True)    
+    filter_w,filter_r=np.loadtxt(os.path.join(PIPELINE_DATA_DIR, "GAIA_GAIA3.G.dat"),usecols=(0,1),unpack=True)    
     ifT = np.interp(spectrum_w, filter_w,filter_r, left=0., right=0.)
     nonzero = np.where(ifT > 0)[0]
     nonzero_start = max(0, min(nonzero) - 5)
@@ -321,9 +326,9 @@ def R_from_Teff_logg(Teff, logg,atm="thick"):
     from scipy import interpolate
     if atm=="thick":
         #MGRID=pd.read_csv("CO_thickH_processed.csv")
-        MGRID=pd.read_csv("new_MR_H.csv")
+        MGRID=pd.read_csv(os.path.join(PIPELINE_DATA_DIR, "new_MR_H.csv"))
     elif atm=="thin":
-        MGRID=pd.read_csv("CO_thinH_processed.csv")
+        MGRID=pd.read_csv(os.path.join(PIPELINE_DATA_DIR, "CO_thinH_processed.csv"))
     logT = np.log10(Teff)
     #logR=np.log10(R)
     #logR= interpolate.griddata((MGRID['logT'], MGRID['logg']), MGRID['logR'],(logT, logg))

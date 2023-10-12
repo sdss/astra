@@ -6,7 +6,11 @@ from scipy.interpolate import splrep,splev
 import scipy.interpolate
 from scipy.optimize import curve_fit
 from scipy.integrate import quad
+import os
 
+from astra.utils import expand_path
+
+PIPELINE_DATA_DIR = expand_path(f"$MWM_ASTRA/pipelines/snow_white")
 
 
 def bb(l,T,scale):
@@ -28,7 +32,10 @@ def line_info(wave,flux,err):
     edata=[]
     for i in range(0,(np.size(wave)-binsize),binsize):
         xdata.append(np.median(wave[i:i+binsize]))
-        ydata.append(np.average(flux[i:i+binsize],weights=1/((err[i:i+binsize])**2)))
+        try:
+            ydata.append(np.average(flux[i:i+binsize],weights=1/((err[i:i+binsize])**2)))
+        except:
+            ydata.append(np.mean(flux[i:i+binsize]))
         edata.append(np.median(err[i:i+binsize]))
     wave_a=np.array(xdata)
     flux_a=np.array(ydata)
@@ -191,7 +198,7 @@ def line_info(wave,flux,err):
     for elem in feature_list:
         type=elem.rstrip('.features')
         features=[]
-        start,end=np.loadtxt(elem,skiprows=1,delimiter='-', usecols=(0,1),unpack=True)
+        start,end=np.loadtxt(os.path.join(PIPELINE_DATA_DIR, elem),skiprows=1,delimiter='-', usecols=(0,1),unpack=True)
         for xxx in range(np.size(start)):
             if type=="WDMS":
                 f_s=flux[np.logical_and(wave>start[xxx],wave<end[xxx])]

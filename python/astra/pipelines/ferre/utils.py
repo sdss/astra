@@ -1105,7 +1105,21 @@ def read_and_sort_output_data_file(path, input_names, n_data_columns=None, dtype
         with open(path, "r") as fp:
             n_data_columns = len(fp.readline().strip().split()) - 1
 
-    data = np.atleast_2d(np.loadtxt(path, usecols=range(1, 1 + n_data_columns), dtype=dtype))
+    try:
+        data = np.atleast_2d(np.loadtxt(path, usecols=range(1, 1 + n_data_columns), dtype=dtype))
+    except ValueError:
+        # 1 in a million times FERRE won't write a \n...
+        data = np.nan * np.ones((len(names), n_data_columns), dtype=float)
+        def float_or_nan(x):
+            try:
+                return float(x)
+            except:
+                return np.nan
+        with open(path, "r") as fp:
+            for i, line in enumerate(fp.readlines()):
+                for j, v in enumerate(line.split()[1:1+n_data_columns]):
+                    data[i, j] = float_or_nan(v)
+
     return sort_data_as_per_input_names(input_names, names, data)
 
 

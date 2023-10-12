@@ -28,12 +28,19 @@ def mdwarftype(
 
     futures = []
     batch_size = batch_size or int(np.ceil(len(spectra) / max_workers))
-    for chunk in chunked(spectra, batch_size):
+    for chunk in tqdm(chunked(spectra, batch_size), total=1, desc="Submitting work"):
+        #checked_chunk = []
+        #for spectrum in chunk:
+        #    if "yso" not in set(spectrum.source.sdss5_cartons["alt_program"]):
+        #        continue
+        #    checked_chunk.append(spectrum)
+        #if len(checked_chunk) > 0:
+        #    futures.append(executor.submit(_mdwarf_type, checked_chunk, template_flux, template_type))
         futures.append(executor.submit(_mdwarf_type, chunk, template_flux, template_type))
 
     with tqdm(total=len(futures), desc="Collecting futures") as pb:
         for future in concurrent.futures.as_completed(futures):
-            yield future.result()
+            yield from future.result()
             pb.update()
 
 

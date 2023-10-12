@@ -3,6 +3,8 @@ import numpy as np
 from typing import Iterable, Optional
 from peewee import fn
 from glob import glob
+from tqdm import tqdm
+from time import time
 
 from astra import task
 from astra.utils import expand_path, log, list_to_dict
@@ -11,10 +13,11 @@ from astra.models.aspcap import FerreStellarParameters, FerreChemicalAbundances
 from astra.pipelines.ferre.operator import FerreOperator, FerreMonitoringOperator
 from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
-from astra.pipelines.ferre.utils import (read_ferre_headers, parse_header_path, get_input_spectrum_primary_keys)
+from astra.pipelines.ferre.utils import (get_apogee_pixel_mask, parse_ferre_spectrum_name, read_ferre_headers, parse_header_path, get_input_spectrum_primary_keys)
 from astra.pipelines.aspcap.utils import (get_input_nml_paths, get_abundance_keywords, sanitise_parent_dir)
 
 STAGE = "abundances"
+
 
 @task
 def abundances(
@@ -158,8 +161,9 @@ def plan_abundances(
     with open(expand_path(element_weight_paths), "r") as fp:
         weight_paths = list(map(str.strip, fp.readlines()))
 
-
     if spectra is None:
+        log.info(f"Retrieving spectra")
+
         # Get spectrum ids from params stage in parent dir.
         spectrum_pks = list(get_input_spectrum_primary_keys(f"{parent_dir}/params"))
         if len(spectrum_pks) == 0:
@@ -178,6 +182,7 @@ def plan_abundances(
 
     parent_dir = sanitise_parent_dir(parent_dir)
 
+    '''
     Alias = FerreStellarParameters.alias()
     sq = (
         Alias
@@ -214,13 +219,43 @@ def plan_abundances(
         # We will only get one result per spectrum, but we'll do it by recency.
         .order_by(FerreStellarParameters.task_pk.desc())
     )
+    '''
+
+    q = (
+        FerreStellarParameters
+        .select()
+        .where(
+            FerreStellarParameters.penalized_rchi2.is_null(False)
+            # Don't calculate abundances for things that failed SPECTACULARLY
+        &   (~FerreStellarParameters.flag_ferre_fail)
+        &   (~FerreStellarParameters.flag_spectrum_io_error)
+        &   (~FerreStellarParameters.flag_no_suitable_initial_guess)
+        &   (~FerreStellarParameters.flag_missing_model_flux)
+        &   (FerreStellarParameters.pwd.startswith(expand_path(parent_dir)))
+        )
+    )
+
+    # You can do this by a SQL join, but it gets heavy and we kind of want to know about duplicate results.
+    all_results = {}
+    for result in q:
+        all_results.setdefault(result.spectrum_pk, [])
+        all_results[result.spectrum_pk].append(result)
+
+    best_results = {}
+    for spectrum_pk, results in all_results.items():
+        best_results[spectrum_pk] = sorted(results, key=lambda r: r.penalized_rchi2)[0]
 
     # Load abundance keywords on demand.
     ferre_headers, abundance_keywords = ({}, {})
     lookup_spectrum_by_primary_key = { s.spectrum_pk: s for s in spectra }
 
+    
+    mask = get_apogee_pixel_mask()
+    continuum_cache, continuum_cache_names = ({}, {})
+
+
     done, group_task_kwds, pre_computed_continuum = ([], {}, {})
-    for result in q:
+    for result in tqdm(best_results.values(), total=len(best_results), desc="Planning for abundances"):
         if result.spectrum_pk in done:
             # We have a more recent FerreStellarParameters result which we will use instead of this one.
             log.warning(f"Ignoring stellar parameter result {result} because we have a more recent result for this spectrum_pk={result.spectrum_pk}")
@@ -228,17 +263,21 @@ def plan_abundances(
 
         done.append(result.spectrum_pk)
         group_task_kwds.setdefault(result.header_path, [])
-
         if result.header_path not in abundance_keywords:
             abundance_keywords[result.header_path] = {}
-            headers, *segment_headers = ferre_headers[result.header_path] = read_ferre_headers(result.header_path)
+            try:
+                headers, *segment_headers = ferre_headers[result.header_path]
+            except KeyError:
+                headers, *segment_headers = ferre_headers[result.header_path] = read_ferre_headers(result.header_path)
+
             for weight_path in weight_paths:
                 species = get_species(weight_path)
                 frozen_parameters, ferre_kwds = get_abundance_keywords(species, headers["LABEL"])
                 abundance_keywords[result.header_path][species] = (weight_path, frozen_parameters, ferre_kwds)
-                
+
         spectrum = lookup_spectrum_by_primary_key[result.spectrum_pk]
 
+        """
         # Apply continuum normalization, where we are just going to fix the observed
         # spectrum to the best-fitting model spectrum from the upstream task.
         try:
@@ -248,6 +287,38 @@ def plan_abundances(
                 (result.rectified_model_flux/result.model_flux)
             /   (result.rectified_flux/result.ferre_flux)
             )
+        """
+
+        # This does the same as the intent above, but it's faster.
+        # TODO: Consider rewriting the FerreOutputMixin to cache flux arrays and then only return index
+        #       as it is called. That would be the same as the intent above, but it would be faster.
+        try:
+            continuum_cache[result.pwd]
+        except:
+            P = 7514
+            rectified_model_flux = np.atleast_2d(np.loadtxt(f"{result.pwd}/rectified_model_flux.output", usecols=range(1, 1+P)))
+            model_flux = np.atleast_2d(np.loadtxt(f"{result.pwd}/model_flux.output", usecols=range(1, 1+P)))
+            rectified_flux = np.atleast_2d(np.loadtxt(f"{result.pwd}/rectified_flux.output", usecols=range(1, 1+P)))
+            ferre_flux = np.atleast_2d(np.loadtxt(f"{result.pwd}/flux.input", usecols=range(P)))
+
+            continuum = (rectified_model_flux/model_flux) / (rectified_flux/ferre_flux)
+            continuum_cache[result.pwd] = np.nan * np.ones((continuum.shape[0], 8575))
+            continuum_cache[result.pwd][:, mask] = continuum
+
+            # Check names
+            continuum_cache_names[result.pwd] = [
+                np.atleast_1d(np.loadtxt(f"{result.pwd}/model_flux.output", usecols=(0, ), dtype=str)),
+                np.atleast_1d(np.loadtxt(f"{result.pwd}/rectified_flux.output", usecols=(0, ), dtype=str)),
+                np.atleast_1d(np.loadtxt(f"{result.pwd}/rectified_model_flux.output", usecols=(0, ), dtype=str)),
+            ]    
+
+        finally:
+            pre_computed_continuum[result.spectrum_pk] = continuum_cache[result.pwd][int(result.ferre_output_index)]
+            for each in continuum_cache_names[result.pwd]:
+                meta = parse_ferre_spectrum_name(each[int(result.ferre_output_index)])
+                assert int(meta["source_pk"]) == result.source_pk
+                assert int(meta["spectrum_pk"]) == result.spectrum_pk
+                assert int(meta["index"]) == result.ferre_input_index
         
         group_task_kwds[result.header_path].append(
             dict(
