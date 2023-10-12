@@ -15,8 +15,8 @@ from astra.products.utils import (
     add_category_headers, add_category_comments, dispersion_array
 )
 
-ASTRA_STAR_TEMPLATE = "astraStar-{pipeline}-{version}-{sdss_id}.fits"
-ASTRA_VISIT_TEMPLATE = "astraVisit-{pipeline}-{version}-{sdss_id}.fits"
+ASTRA_STAR_TEMPLATE = "astraStar{pipeline}-{version}-{sdss_id}.fits"
+ASTRA_VISIT_TEMPLATE = "astraVisit{pipeline}-{version}-{sdss_id}.fits"
 DEFAULT_IGNORE_FIELD_NAMES = ("pk", "sdss5_target_flags", "source", "wresl", "flux", "ivar", "pixel_flags")
 
 def create_star_pipeline_products_for_all_sources(
