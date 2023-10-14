@@ -226,7 +226,7 @@ def get_binary_table_hdu(q, models, fields, limit=None, header=None, upper=True,
                 data[name].append(value)
     
     # Create the columns.
-    original_names, columns = ({}, [])
+    original_names, columns, = ({}, [])
     for name, field in fields.items():
         if isinstance(field, ArrayField):
             # Do a hack to deal with delta_ra, delta_dec
@@ -357,16 +357,20 @@ def fits_column_kwargs(field, values, upper, name=None, default_n_pixels=0, warn
     elif isinstance(field, BigBitField):
         N = len(values)
         if N > 0:
-            F = max(len(item) for item in values)
+            F = max(1, max(len(item) for item in values))
         else:
-            F = 0
+            F = 1 # otherwise this doesn't play well with the FITS standard
+        
         array = np.zeros((N, F), dtype=np.uint8)
         for i, item in enumerate(values):
             array[i, :len(item)] = np.frombuffer(item.tobytes(), dtype=np.uint8)
     else:
         array = values
 
-    name = name or field.name
+    if isinstance(field, BasePixelArrayAccessor):
+        name = name or field.name
+    else:
+        name = name or field.column_name or field.name
 
     kwds = dict(
         name=name.upper() if upper else name,

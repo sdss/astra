@@ -1,23 +1,163 @@
 import numpy as np
+import os
 from astra.utils import log, expand_path
 from astra.models.source import Source
 from peewee import chunked
 from astropy.coordinates import SkyCoord
 from astropy import units as u
 from tqdm import tqdm
+import concurrent.futures
 
 # dust-maps data directory: $MWM_ASTRA/aux/dust-maps/
 from dustmaps.sfd import SFDQuery
 from dustmaps.edenhofer2023 import Edenhofer2023Query
+from dustmaps.bayestar import BayestarQuery
 
-sfd = SFDQuery()
-edenhofer2023 = Edenhofer2023Query()
+#sfd = SFDQuery()
+#edenhofer2023 = Edenhofer2023Query()
+#bayestar2019 = BayestarQuery()
+
+von = lambda v: v or np.nan
 
 
-def update_reddening(where=Source.ebv.is_null(), batch_size=1000):
+def _update_reddening_on_source(source, sfd, edenhofer2023, bayestar2019):
+    """
+    Compute reddening and reddening uncertainties for a source using various methods.
+    
+    :param source:
+        An astronomical source.
+    """
+
+    try:        
+        coord = SkyCoord(ra=source.ra * u.deg, dec=source.dec * u.deg)
+
+        # Zhang et al. 2023
+        source.ebv_zhang_2023 = 0.829 * von(source.zgr_e)
+        source.e_ebv_zhang_2023 = 0.829 * von(source.zgr_e_e)
+
+        # RJCE_GLIMPSE
+        ebv_ehw2 = 2.61
+        source.ebv_rjce_glimpse = ebv_ehw2 * (von(source.h_mag) - von(source.mag4_5) - 0.08)
+        source.e_ebv_rjce_glimpse = ebv_ehw2 * np.sqrt(von(source.e_h_mag)**2 + von(source.d4_5m)**2)
+
+        # RJCE_ALLWISE
+        # We store unWISE (not ALLWISE) and we have only w2 fluxes, not w2 magnitudes.
+        # See https://catalog.unwise.me/catalogs.html (Flux Scale) for justification of 32 mmag offset
+        w2_mag_vega = -2.5 * np.log10(von(source.w2_flux)) + 22.5 - 32 * 1e-3 # Vega
+        e_w2_mag_vega = (2.5 / np.log(10)) * von(source.w2_dflux) / von(source.w2_flux)
+        source.ebv_rjce_allwise = ebv_ehw2 * (von(source.h_mag) - w2_mag_vega - 0.08)
+        source.e_ebv_rjce_allwise = ebv_ehw2 * np.sqrt(von(source.e_h_mag)**2 + e_w2_mag_vega**2)
+
+        # SFD
+        e_sfd = sfd(coord)
+        source.ebv_sfd = 0.884 * e_sfd
+        source.e_ebv_sfd = np.sqrt(0.01**2 + (0.1 * e_sfd)**2)
+
+        d = von(source.r_med_geo) # [pc]
+        d_err = 0.5 * (von(source.r_hi_geo) - von(source.r_lo_geo))
+        
+        d_samples = np.clip(np.random.normal(d, d_err, 20), 1, np.inf) # 
+        
+        coord_samples = SkyCoord(
+            ra=source.ra * u.deg,
+            dec=source.dec * u.deg,
+            distance=d_samples * u.pc
+        )
+
+        # Edenhofer
+        if d is not None:
+            if d < 69:  
+                coord_integrated = SkyCoord(ra=source.ra * u.deg, dec=source.dec * u.deg, distance=69 * u.pc)
+                ed = edenhofer2023(coord_integrated)
+                source.ebv_edenhofer_2023 = 0.829 * ed
+                # TODO: document says 'reddening uncertainty = the reddening value' -> the scaled 0.829 value?
+                source.e_ebv_edenhofer_2023 = 0.829 * ed
+                source.flag_ebv_from_edenhofer_2023 = True
+                
+            else:                
+                try:
+                    ed = edenhofer2023(coord_samples, mode="samples") # TODO: awaiting samples download
+                except:
+                    ed = edenhofer2023(coord_samples)
+                    #log.warning(f"Edenhofer et al. (2023) samples not available, using median value")
+                source.ebv_edenhofer_2023 = 0.829 * np.median(ed)
+                source.e_ebv_edenhofer_2023 = 0.829 * np.std(ed)    
+            
+        # Bayestar 2019
+        bs_samples = bayestar2019(coord_samples, mode="samples").flatten()
+        source.ebv_bayestar_2019 = 0.88 * np.median(bs_samples)
+        source.e_ebv_bayestar_2019 = 0.88 * np.std(bs_samples)
+
+        # Logic to decide preferred reddening value
+
+        if source.zgr_e is not None: # target is in Zhang
+            # Zhang et al. (2023)
+            source.flag_ebv_from_zhang_2023 = True
+            source.ebv = source.ebv_zhang_2023
+            source.e_ebv = source.e_ebv_zhang_2023
+
+        elif d is not None and (69 < d < 1_250):
+            # Edenhofer et al. (2023)
+            source.flag_ebv_from_edenhofer_2023 = True
+            source.ebv = source.ebv_edenhofer_2023
+            source.e_ebv = source.e_ebv_edenhofer_2023
+
+        elif d is not None and d < 69:
+            # Edenhofer et al. (2023) using inner integrated 69 pc
+            source.flag_ebv_from_edenhofer_2023 = True
+            source.flag_ebv_upper_limit = True
+            source.ebv = source.ebv_edenhofer_2023
+            source.e_ebv = source.e_ebv_edenhofer_2023        
+                
+        elif np.abs(coord.galactic.b.value) > 30:
+            # SFD
+            source.flag_ebv_from_sfd = True
+            source.ebv = source.ebv_sfd
+            source.e_ebv = source.e_ebv_sfd
+            
+        elif source.h_mag is not None and source.mag4_5 is not None:
+            # RJCE_GLIMPSE
+            source.flag_ebv_from_rjce_glimpse = True
+            source.ebv = source.ebv_rjce_glimpse
+            source.e_ebv = source.e_ebv_rjce_glimpse
+
+        elif source.h_mag is not None and source.w2_flux is not None:
+            # RJCE_ALLWISE
+            source.flag_ebv_from_rjce_allwise = True
+            source.ebv = source.ebv_rjce_allwise
+            source.e_ebv = source.e_ebv_rjce_allwise
+
+        else:
+            # SFD Upper limit
+            source.flag_ebv_from_sfd = True
+            source.flag_ebv_upper_limit = True
+            source.ebv = source.ebv_sfd
+            source.e_ebv = source.e_ebv_sfd
+    except:
+        log.exception(f"Exception when computing reddening for source {source}")
+        return None
+    else:        
+        return source
+
+
+def _reddening_worker(sources):
+    sfd = SFDQuery()
+    edenhofer2023 = Edenhofer2023Query()
+    bayestar2019 = BayestarQuery()
+
+    updated = []
+    for source in sources:
+        s = _update_reddening_on_source(source, sfd, edenhofer2023, bayestar2019)
+        if s is not None:
+            updated.append(s)
+    return updated
+        
+
+def update_reddening(where=Source.ebv.is_null(), batch_size=1000, max_workers: int = 16):
     """
     Update reddening estimates for sources.
     """
+    
     q = (
         Source
         .select()
@@ -36,8 +176,8 @@ def update_reddening(where=Source.ebv.is_null(), batch_size=1000):
         Source.e_ebv_sfd,
         Source.ebv_bayestar_2019,
         Source.e_ebv_bayestar_2019,
-        Source.ebv_edenhofer2023,
-        Source.e_ebv_edenhofer2023,
+        Source.ebv_edenhofer_2023,
+        Source.e_ebv_edenhofer_2023,
         Source.flag_ebv_edenhofer_2023_upper_limit,
         Source.ebv,
         Source.e_ebv,
@@ -45,14 +185,16 @@ def update_reddening(where=Source.ebv.is_null(), batch_size=1000):
         Source.ebv_method_flags,
     ]
 
+    executor = concurrent.futures.ProcessPoolExecutor(max_workers)
+    
+    '''
     updated = []
-    for source in tqdm(q, total=1, desc="Computing reddening"):
+    for source in tqdm(q, desc="Computing reddening"):
         update_reddening_on_source(source)
         updated.append(source)
 
     n_updated = 0
     with tqdm(total=len(updated), desc="Updating") as pb:
-         
         for chunk in chunked(updated, batch_size):
             n_updated += (
                 Source
@@ -62,101 +204,34 @@ def update_reddening(where=Source.ebv.is_null(), batch_size=1000):
                 )
             )
             pb.update(batch_size)
+    '''
     
+    futures, chunk_size = ([], int(np.ceil(len(q) / max_workers)))
+    for chunk in tqdm(chunked(q, chunk_size), total=max_workers, desc="Chunking"):
+        futures.append(executor.submit(_reddening_worker, chunk))
+    
+    updated = []
+    for future in tqdm(concurrent.futures.as_completed(futures), desc="Computing reddening"):
+        r = future.result()
+        if r is not None:
+            updated.append(r)
+
+    n_updated = 0
+    with tqdm(total=len(updated), desc="Updating") as pb:
+        for chunk in chunked(updated, batch_size):
+            n_updated += (
+                Source
+                .bulk_update(
+                    chunk,
+                    fields=fields
+                )
+            )
+            pb.update(batch_size)        
+        
     return n_updated
 
 
-def update_reddening_on_source(source):
-    """
-    Compute reddening and reddening uncertainties for a source using various methods.
-    """
-
-    coord = SkyCoord(ra=source.ra * u.deg, dec=source.dec * u.deg)
-
-    # Zhang et al. 2023
-    source.ebv_zhang_2023 = 0.829 * source.zgr_e
-    source.e_ebv_zhang_2023 = 0.829 * source.zgr_e_e
-
-    # RJCE_GLIMPSE
-    ebv_ehw2 = 2.61
-    source.ebv_rjce_glimpse = ebv_ehw2 * (source.h_mag - source.mag4_5 - 0.08)
-    source.e_ebv_rjce_glimpse = ebv_ehw2 * np.sqrt(source.e_h_mag**2 + source.e_mag4_5**2)
-
-    # RJCE_ALLWISE
-    # We store unWISE (not ALLWISE) and we have only w2 fluxes, not w2 magnitudes.
-    # See https://catalog.unwise.me/catalogs.html (Flux Scale) for justification of 32 mmag offset
-    w2_mag_vega = -2.5 * np.log10(source.w2_flux) + 22.5 - 32 * 1e-3 # Vega
-    e_w2_mag_vega = (2.5 / np.log(10)) * source.w2_dflux / source.w2_flux
-    source.ebv_rjce_allwise = ebv_ehw2 * (source.h_mag - w2_mag_vega - 0.08)
-    source.e_ebv_rjce_allwise = ebv_ehw2 * np.sqrt(source.e_h_mag**2 + e_w2_mag_vega**2)
-
-    # SFD
-    e_sfd = sfd(coord)
-    source.ebv_sfd = 0.884 * e_sfd
-    source.e_ebv_sfd = np.sqrt(0.01**2 + (0.1 * e_sfd)**2)
-
-
-    d = source.r_med_geo # [pc]
-
-    # Logic to decide preferred reddening value
-
-    if source.zgr_e is not None: # target is in Zhang
-        # Zhang et al. (2023)
-        source.flag_ebv_from_zhang_2023 = True
-        source.ebv = source.ebv_zhang_2023
-        source.e_ebv = source.e_ebv_zhang_2023
-
-    elif d is not None and (69 < d < 1_250):
-        # Edenhofer et al. (2023)
-        source.flag_ebv_from_edenhofer_2023 = True
-
-        n_draws = 20
-
-        mean, sigma = (source.r_med_geo, 0.5 * (source.r_hi_geo - source.r_lo_geo))
-        
-        #for draw in np.random.normal(mean, sigma, n_draws):
-        #edenhofer2023(coord,)
-        raise a
-
-
-
-        raise NotImplementedError("awaiting advice on how to sample distance PDFs")
-
-    elif d is not None and d < 69:
-        # Edenhofer et al. (2023) using inner integrated 69 pc
-        source.flag_ebv_from_edenhofer_2023 = True
-
-        source.flag_ebv_upper_limit = True
-        raise NotImplementedError("awaiting dust map download")
-    
-    elif np.abs(coord.galactic.b.value) > 30:
-        # SFD
-        source.flag_ebv_from_sfd = True
-        source.ebv = source.ebv_sfd
-        source.e_ebv = source.e_ebv_sfd
-        
-    elif source.h_mag is not None and source.mag4_5 is not None:
-        # RJCE_GLIMPSE
-        source.flag_ebv_from_rjce_glimpse = True
-        source.ebv = source.ebv_rjce_glimpse
-        source.e_ebv = source.e_ebv_rjce_glimpse
-
-    elif source.h_mag is not None and source.w2_flux is not None: #TODO: unWISE w2 or ALLWISE?
-        # RJCE_ALLWISE
-        source.flag_ebv_from_rjce_allwise = True
-        source.ebv = source.ebv_rjce_allwise
-        source.e_ebv = source.e_ebv_rjce_allwise
-
-    else:
-        # SFD Upper limit
-        source.flag_ebv_from_sfd = True
-        source.flag_ebv_upper_limit = True
-        source.ebv = source.ebv_sfd
-        source.e_ebv = source.e_ebv_sfd
-        
-
-
-def setup_dustmaps():
+def setup_dustmaps(data_dir="$MWM_ASTRA/aux/dust-maps"):
     """
     Set up dustmaps package.
     """
@@ -166,7 +241,9 @@ def setup_dustmaps():
 
     config.reset()
 
-    config["data_dir"] = expand_path("$MWM_ASTRA/aux/dust-maps")
+    config["data_dir"] = expand_path(data_dir)
+
+    os.makedirs(expand_path(data_dir), exist_ok=True)
 
     log.info(f"Set dust map directory to {config['data_dir']}")
 

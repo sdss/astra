@@ -8,9 +8,23 @@ from peewee import chunked
 import concurrent.futures
 
 from astra.utils import log
+from astra.models.source import Source
 from astra.models.apogee import ApogeeVisitSpectrum
 from astra.models.boss import BossVisitSpectrum
 
+def set_missing_gaia_source_ids_to_null():
+    (
+        Source
+        .update(gaia_dr3_source_id=None)
+        .where(Source.gaia_dr3_source_id <= 0)
+        .execute()
+    )
+    (
+        Source
+        .update(gaia_dr2_source_id=None)
+        .where(Source.gaia_dr2_source_id <= 0)
+        .execute()
+    )
 
 def compute_f_night_time_for_boss_visits(
         where=(

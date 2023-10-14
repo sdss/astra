@@ -156,7 +156,8 @@ class Glossary(BaseGlossary):
     tag = "Experiment tag for this result"
 
     # Spectrum information
-    spectrum_pk = "Unique primary key for a spectrum"
+    source_pk = "Unique source primary key"
+    spectrum_pk = "Unique spectrum primary key"
     snr = "Signal-to-noise ratio"
 
     #: General data product keyword arguments.
@@ -167,14 +168,15 @@ class Glossary(BaseGlossary):
     mjd = "Modified Julian Date of observation"
     fieldid = "Field identifier"
     catalogid = "Catalog identifier used to target the source"
-    catalogid21 = "Catalog identifier (v21)"
+    catalogid21 = "Catalog identifier (v21; v0.0)"
     catalogid25 = "Catalog identifier (v25; v0.5)"
     catalogid31 = "Catalog identifier (v31; v1.0)"
-    sdss5_target_flags = "Targeting flags"
+    sdss5_target_flags = "SDSS-5 targeting flags"
     n_associated = "SDSS_IDs associated with this CATALOGID"
 
-    f_night_time = "DATE-OBS as a fraction between local sunset and sunrise"
-
+    f_night_time = "Mid-observation time as a fraction during the night"
+    f_night_time = "Mid obs time as fraction from sunset to sunrise"
+    
     plateid = "Plate identifier"
     tileid = "C"
     cartid = "Cartridge used for plugging"
@@ -263,7 +265,7 @@ class Glossary(BaseGlossary):
     date_obs = "Observation date (UTC)"
 
     pk = "Database primary key"
-    fps = "Fibre Positioning System used to acquire this data"
+    fps = "Fibre positioner used to acquire this data?"
 
     v_rel = "Relative velocity [km/s]"
     v_rad = "Barycentric rest frame radial velocity [km/s]"

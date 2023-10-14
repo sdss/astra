@@ -31,12 +31,14 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
         index=True,
         unique=True,
         lazy_load=False,
+        help_text=Glossary.spectrum_pk
     )
     source = ForeignKeyField(
         Source,
         null=True,
         index=True,
         column_name="source_pk",
+        help_text=Glossary.source_pk,
         backref="boss_visit_spectra"
     )    
 

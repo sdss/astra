@@ -1,4 +1,4 @@
-""""Functions for creating summary products (e.g., mwmAllStar, mwmAllVisit)."""
+""""Functions for creating summary products (e.g., mwmTargets, mwmAllStar, mwmAllVisit)."""
 
 from peewee import JOIN
 from astropy.io import fits

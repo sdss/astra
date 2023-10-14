@@ -73,7 +73,8 @@ def migrate(apred, run2d, limit, include_dr17):
     from astra.migrations.apogee import (
         migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb, 
         migrate_apvisit_metadata_from_image_headers,
-        migrate_apvisit_from_sdss5_apogee_drpdb
+        migrate_apvisit_from_sdss5_apogee_drpdb,
+        fix_version_id_13_edge_cases
     )
     from astra.migrations.boss import (
         migrate_spectra_from_spall_file,
@@ -90,7 +91,12 @@ def migrate(apred, run2d, limit, include_dr17):
         migrate_zhang_stellar_parameters,
         migrate_bailer_jones_distances
     )
-    from astra.migrations.misc import compute_f_night_time_for_boss_visits, compute_f_night_time_for_apogee_visits
+    from astra.migrations.misc import (
+        compute_f_night_time_for_boss_visits, 
+        compute_f_night_time_for_apogee_visits,
+        set_missing_gaia_source_ids_to_null
+    )
+    from astra.migrations.reddening import update_reddening
     from astra.migrations.targeting import migrate_carton_assignments_to_bigbitfield
 
     log.info("Starting ingestion. This will take a long time.")
@@ -98,12 +104,6 @@ def migrate(apred, run2d, limit, include_dr17):
     if include_dr17:
         log.info(f"Ingesting DR17 APOGEE spectra")
         migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(limit=limit)
-        
-    if apred:
-        log.info(f"Ingesting SDSS5 APOGEE spectra with apred={apred}")
-        migrate_apvisit_from_sdss5_apogee_drpdb(apred, limit=limit)
-        
-        log.warning(f"NEED TO MIGRATE apSTAR IFORMATION")
 
     if run2d:
         log.info(f"Ingesting SDSS5 BOSS spectra with run2d={run2d}")
@@ -111,6 +111,13 @@ def migrate(apred, run2d, limit, include_dr17):
 
         log.info(f"Migrating BOSS metadata from headers")
         migrate_specfull_metadata_from_image_headers()
+            
+    if apred:
+        log.info(f"Ingesting SDSS5 APOGEE spectra with apred={apred}")
+        migrate_apvisit_from_sdss5_apogee_drpdb(apred, limit=limit)
+        
+        fix_version_id_13_edge_cases()
+        log.warning(f"NEED TO MIGRATE apSTAR IFORMATION")    
 
     log.info(f"Migrating carton assignments")
     migrate_carton_assignments_to_bigbitfield()
@@ -141,14 +148,19 @@ def migrate(apred, run2d, limit, include_dr17):
 
     log.info(f"Migrating Bailer-Jones distances")
     migrate_bailer_jones_distances()
+    
+    log.info(f"Migration from SDSS5 catalogdb complete")
 
-    #todo: extinction
-
+    set_missing_gaia_source_ids_to_null()
+    
     log.info(f"Computing f_night_fraction for BOSS visits")
     compute_f_night_time_for_boss_visits()
 
     log.info(f"Computing f_night_fraction for APOGEE visits")
     compute_f_night_time_for_apogee_visits()
+    
+    log.info(f"Computing extinction")
+    update_reddening()
     
     log.info(f"Migrating apVisit metadata from image headers")
     migrate_apvisit_metadata_from_image_headers()

@@ -235,6 +235,60 @@ def _get_apstar_metadata(
     return { apstar.spectrum_pk: metadata }
 
 
+        
+def fix_version_id_13_edge_cases():
+    from astra.migrations.sdss5db.catalogdb import Catalog, CatalogdbModel, CatalogToGaia_DR3
+
+
+    class SDSS_ID_Flat(CatalogdbModel):
+        class Meta:
+            table_name = "sdss_id_flat"
+            
+    class SDSS_ID_Stacked(CatalogdbModel):
+        class Meta:
+            table_name = "sdss_id_stacked"
+    
+    
+    q = (
+        Source
+        .select()
+        .where(Source.version_id == 13)
+    )
+
+    for updated, source in enumerate(q, start=1):
+        
+        # Get new catalog information based on gaia_dr3_source_id
+        q_source = (
+            Catalog
+            .select(
+                Catalog.catalogid,
+                Catalog.ra,
+                Catalog.dec,
+                Catalog.lead,
+                Catalog.version_id.alias("version_id"),
+                SDSS_ID_Stacked.sdss_id,
+                SDSS_ID_Stacked.catalogid21,
+                SDSS_ID_Stacked.catalogid25,
+                SDSS_ID_Stacked.catalogid31,
+                SDSS_ID_Flat.n_associated,
+            )
+            .join(SDSS_ID_Flat, on=(SDSS_ID_Flat.catalogid == Catalog.catalogid))
+            .join(SDSS_ID_Stacked, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
+            .switch(Catalog)
+            .join(CatalogToGaia_DR3, on=(CatalogToGaia_DR3.catalog == Catalog.catalogid))
+            .where(CatalogToGaia_DR3.target == source.gaia_dr3_source_id)
+            .order_by(SDSS_ID_Flat.sdss_id.asc())
+            .dicts()
+            .first()
+        )
+        
+        for k, v in q_source.items():
+            setattr(source, k, v)
+            
+        source.save()
+        
+    return updated
+
 
 def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[int] = 100, limit: Optional[int] = None, max_workers: Optional[int] = 8):
     """

@@ -93,8 +93,9 @@ def migrate_spectra_from_spall_file(
         "CATALOGID_V0P5": "catalogid_v0p5",
         "SDSS_ID": "sdss_id",
         "GAIA_ID": "gaia_dr2_source_id",
+        "FIRSTCARTON": "carton_0"
     }
-    source_keys_only = ("catalogid_v0", "catalogid_v0p5", "sdss_id", "gaia_dr2_source_id") 
+    source_keys_only = ("catalogid_v0", "catalogid_v0p5", "sdss_id", "gaia_dr2_source_id", "carton_0") 
 
     spectrum_data = []
     for i, row in enumerate(tqdm(spAll)):
@@ -152,25 +153,25 @@ def migrate_spectra_from_spall_file(
                 .join(SDSS_ID_Stacked, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
                 .join(CatalogToGaia_DR3, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.catalogid31 == CatalogToGaia_DR3.catalog))
                 .where(Catalog.catalogid.in_(chunk_catalogids))
-                #.order_by(SDSS_ID_Flat.sdss_id.asc()) # link duplicates to earlier SDSS ID 
                 .dicts()
             )
                     
+            reference_key = "catalogid"
             for row in q:
-                if row["sdss_id"] in source_data:
+                if row[reference_key] in source_data:
                     for key, value in row.items():
-                        if source_data[row["sdss_id"]][key] is None and value is not None:
+                        if source_data[row[reference_key]][key] is None and value is not None:
                             if key == "sdss_id":
-                                source_data[row["sdss_id"]][key] = min(source_data[row["sdss_id"]][key], value)
+                                source_data[row[reference_key]][key] = min(source_data[row[reference_key]][key], value)
                             else:
-                                source_data[row["sdss_id"]][key] = value
+                                source_data[row[reference_key]][key] = value
                     continue
 
-                source_data[row["sdss_id"]] = row
-                gaia_dr2_source_id = gaia_dr2_source_id_given_catalogid[row["catalogid"]]
+                source_data[row[reference_key]] = row
+                gaia_dr2_source_id = gaia_dr2_source_id_given_catalogid[row[reference_key]]
                 if gaia_dr2_source_id < 0:
                     gaia_dr2_source_id = None
-                source_data[row["sdss_id"]]["gaia_dr2_source_id"] = gaia_dr2_source_id
+                source_data[row[reference_key]]["gaia_dr2_source_id"] = gaia_dr2_source_id
             
             pb.update(batch_size)
     

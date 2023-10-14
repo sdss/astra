@@ -106,6 +106,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         index=True,
         unique=True,
         lazy_load=False,
+        help_text=Glossary.spectrum_pk,
     )
     # Won't appear in a header group because it is first referenced in `Source`.
     source = ForeignKeyField(
@@ -116,6 +117,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         null=True, 
         index=True,
         column_name="source_pk",
+        help_text=Glossary.source_pk,
         backref="apogee_visit_spectra",
     )
         
@@ -222,8 +224,8 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     doppler_e_logg = FloatField(null=True, help_text=Glossary.e_logg)
     doppler_fe_h = FloatField(null=True, help_text=Glossary.fe_h)
     doppler_e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
-    doppler_rchi2 = FloatField(null=True, help_text=Glossary.doppler_rchi2)
-    doppler_flags = BitField(default=0, help_text="Doppler flags") 
+    doppler_rchi2 = FloatField(null=True, help_text="Reduced chi-square value of DOPPLER fit")
+    doppler_flags = BitField(default=0, help_text="DOPPLER flags") 
     
     #> Radial Velocity (X-Correlation)
     xcorr_v_rad = FloatField(null=True, help_text=Glossary.v_rad)
@@ -297,9 +299,9 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         null=True, 
         index=True,
         column_name="source_pk",
+        help_text=Glossary.source_pk,
         backref="apogee_visit_spectra_in_apstar",
     )
-
 
     #> Spectrum Identifiers
     spectrum_pk = ForeignKeyField(
@@ -430,8 +432,8 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
         # own checks to make sure that spectra and sources are linked.
         null=True, 
         index=True,
-        unique=True,
         column_name="source_pk",
+        help_text=Glossary.source_pk,
         backref="apogee_coadded_spectra_in_apstar",
     )
 
@@ -485,8 +487,8 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     doppler_e_logg = FloatField(null=True, help_text=Glossary.e_logg)
     doppler_fe_h = FloatField(null=True, help_text=Glossary.fe_h)
     doppler_e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
-    doppler_rchi2 = FloatField(null=True, help_text=Glossary.doppler_rchi2)
-    doppler_flags = BitField(default=0, help_text="Doppler flags") # TODO: is this actually STARFLAG from the DRP?
+    doppler_rchi2 = FloatField(null=True, help_text="Reduced chi-square value of DOPPLER fit")
+    doppler_flags = BitField(default=0, help_text="DOPPLER flags") # TODO: is this actually STARFLAG from the DRP?
 
     #> Radial Velocity (X-Correlation)
     xcorr_v_rad = FloatField(null=True, help_text=Glossary.v_rad)
