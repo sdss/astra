@@ -74,7 +74,8 @@ def migrate(apred, run2d, limit, include_dr17):
         migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb, 
         migrate_apvisit_metadata_from_image_headers,
         migrate_apvisit_from_sdss5_apogee_drpdb,
-        fix_version_id_13_edge_cases
+        migrate_apstar_from_sdss5_database,
+        fix_version_id_edge_cases
     )
     from astra.migrations.boss import (
         migrate_spectra_from_spall_file,
@@ -94,7 +95,9 @@ def migrate(apred, run2d, limit, include_dr17):
     from astra.migrations.misc import (
         compute_f_night_time_for_boss_visits, 
         compute_f_night_time_for_apogee_visits,
-        set_missing_gaia_source_ids_to_null
+        set_missing_gaia_source_ids_to_null,
+        compute_n_neighborhood,
+        update_visit_spectra_counts
     )
     from astra.migrations.reddening import update_reddening
     from astra.migrations.targeting import migrate_carton_assignments_to_bigbitfield
@@ -116,9 +119,9 @@ def migrate(apred, run2d, limit, include_dr17):
         log.info(f"Ingesting SDSS5 APOGEE spectra with apred={apred}")
         migrate_apvisit_from_sdss5_apogee_drpdb(apred, limit=limit)
         
-        fix_version_id_13_edge_cases()
-        log.warning(f"NEED TO MIGRATE apSTAR IFORMATION")    
-
+        fix_version_id_edge_cases()
+        migrate_apstar_from_sdss5_database(apred, limit=limit)
+        
     log.info(f"Migrating carton assignments")
     migrate_carton_assignments_to_bigbitfield()
 
@@ -159,13 +162,18 @@ def migrate(apred, run2d, limit, include_dr17):
     log.info(f"Computing f_night_fraction for APOGEE visits")
     compute_f_night_time_for_apogee_visits()
     
+    log.info(f"Computing neighbourhood size")
+    compute_n_neighborhood()
+    
+    log.info("Computing visit spectra counts")
+    update_visit_spectra_counts()
+    
     log.info(f"Computing extinction")
     update_reddening()
     
     log.info(f"Migrating apVisit metadata from image headers")
     migrate_apvisit_metadata_from_image_headers()
     
-
     log.info("Done")
         
 
