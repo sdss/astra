@@ -11,6 +11,7 @@ get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
 
 DEFAULT_IGNORE_FIELD_NAMES = ("pk", )
 
+print("mwmTargets needs a more inclusive list of cartons!")
 def create_mwm_targets_product(
     where=(
         Source.assigned_to_mapper("mwm")
@@ -19,7 +20,7 @@ def create_mwm_targets_product(
     limit=None,
     output_template="mwmTargets-{version}.fits",
     ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
-    upper=True,
+    upper=False,
     fill_values=None,
     overwrite=False,
     full_output=False
@@ -116,7 +117,7 @@ def create_mwm_all_star_product(
     output_template="mwmAllStar-{version}.fits",
     ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
     name_conflict_strategy=None,
-    upper=True,
+    upper=False,
     fill_values=None,
     overwrite=False,
     full_output=False,
@@ -203,7 +204,7 @@ def create_mwm_all_visit_product(
     output_template="mwmAllVisit-{version}.fits",
     ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
     name_conflict_strategy=None,
-    upper=True,
+    upper=False,
     fill_values=None,
     overwrite=False,
     full_output=False,
@@ -289,7 +290,7 @@ def _create_summary_product(
     apogee_spectrum_model=ApogeeVisitSpectrum,
     ignore_field_names=None,
     name_conflict_strategy=None,
-    upper=True,
+    upper=False,
     fill_values=None,
     overwrite=False,
     full_output=False,        

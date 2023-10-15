@@ -424,7 +424,7 @@ def get_basic_header(
     observatory=None,
     instrument=None,
     include_dispersion_cards=None,
-    include_hdu_descriptions=False
+    include_hdu_descriptions=False,
 ):
     created = datetime.datetime.utcnow().strftime(DATETIME_FMT)
 

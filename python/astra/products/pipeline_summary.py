@@ -21,7 +21,7 @@ def create_astra_all_star_product(
     output_template="astraAllStar{pipeline}-{version}.fits",
     ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
     name_conflict_strategy=None,
-    upper=True,
+    upper=False,
     fill_values=None,
     overwrite=False,
     full_output=False,
@@ -94,14 +94,12 @@ def create_astra_all_star_product(
     ]
     
     struct = [
-        (boss_spectrum_model, "apo", "boss", boss_where),
-        (boss_spectrum_model, "lco", "boss", boss_where),
-        (apogee_spectrum_model, "apo", "apogee", apogee_where),
-        (apogee_spectrum_model, "lco", "apogee", apogee_where),
+        (boss_spectrum_model, "boss", boss_where),
+        (apogee_spectrum_model, "apogee", apogee_where),
     ]
     
     all_fields = {}
-    for spectrum_model, observatory, instrument, instrument_where in struct:
+    for spectrum_model, instrument, instrument_where in struct:
 
         models = (Source, spectrum_model, pipeline_model)
         try:
@@ -113,7 +111,7 @@ def create_astra_all_star_product(
                 ignore_field_names=ignore_field_names
             )
 
-        header = get_basic_header(pipeline=pipeline, observatory=observatory, instrument=instrument)
+        header = get_basic_header(pipeline=pipeline, observatory=None, instrument=instrument)
 
         q = (
             spectrum_model
@@ -121,7 +119,7 @@ def create_astra_all_star_product(
             .join(pipeline_model, on=(pipeline_model.spectrum_pk == spectrum_model.spectrum_pk))
             .switch(spectrum_model)
             .join(Source, on=(Source.pk == spectrum_model.source_pk))
-            .where(spectrum_model.telescope.startswith(observatory))
+            #.where(spectrum_model.telescope.startswith(observatory))
         )
         if where: # Need to check, otherwise it requires AND with previous where.
             q = q.where(where)
@@ -155,7 +153,7 @@ def create_astra_all_visit_product(
     output_template="astraAllVisit{pipeline}-{version}.fits",    
     ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
     name_conflict_strategy=None,
-    upper=True,
+    upper=False,
     fill_values=None,
     overwrite=False,
     full_output=False,
@@ -243,8 +241,8 @@ def create_astra_all_visit_product(
     # TODO: Allow specification of `run2d` and `apred`
     struct = [
         (boss_spectrum_model, "apo", "boss", boss_where),
-        (boss_spectrum_model, "lco", "boss", boss_where),
-        (apogee_spectrum_model, "apo", "apogee", apogee_where),
+        #(boss_spectrum_model, "lco", "boss", boss_where),
+        #(apogee_spectrum_model, "apo", "apogee", apogee_where),
         (apogee_spectrum_model, "lco", "apogee", apogee_where),
     ]
     
