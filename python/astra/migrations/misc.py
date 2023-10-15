@@ -5,12 +5,141 @@ import astropy.units as u
 from scipy.signal import argrelmin
 from tqdm import tqdm
 from peewee import chunked
+from peewee import fn, JOIN
 import concurrent.futures
 
-from astra.utils import log
+from astra.utils import log, flatten
 from astra.models.source import Source
 from astra.models.apogee import ApogeeVisitSpectrum
 from astra.models.boss import BossVisitSpectrum
+
+from astra.migrations.sdss5db.catalogdb import Gaia_DR3
+
+def update_visit_spectra_counts(batch_size=10_000):
+    
+    # TODO: Switch this to distinct on (mjd, telescope, fiber) etc if you are including multiple reductions
+    q_apogee_counts = (
+        Source
+        .select(
+            Source.pk,
+            fn.count(ApogeeVisitSpectrum.pk).alias("n_apogee_visits"),
+            fn.min(ApogeeVisitSpectrum.mjd).alias("apogee_min_mjd"),
+            fn.max(ApogeeVisitSpectrum.mjd).alias("apogee_max_mjd"),
+        )
+        .join(ApogeeVisitSpectrum, JOIN.LEFT_OUTER, on=(Source.pk == ApogeeVisitSpectrum.source_pk))
+        .group_by(Source.pk)
+        .dicts()
+    )
+    q_boss_counts = (
+        Source
+        .select(
+            Source.pk,
+            fn.count(BossVisitSpectrum.pk).alias("n_boss_visits"),
+            fn.min(BossVisitSpectrum.mjd).alias("boss_min_mjd"),
+            fn.max(BossVisitSpectrum.mjd).alias("boss_max_mjd"),            
+        )
+        .join(BossVisitSpectrum, on=(Source.pk == BossVisitSpectrum.source_pk))
+        .group_by(Source.pk)
+        .dicts()
+    )
+    
+    # merge counts
+    all_counts = {}
+    for each in q_apogee_counts:
+        all_counts[each.pop("pk")] = each
+    
+    for each in q_boss_counts:
+        all_counts[each.pop("pk")].update(each)
+        
+    q = { s.pk: s for s in Source.select() }
+    
+    update = []
+    for pk, counts in all_counts.items():
+        s = q[pk]
+        for k, v in counts.items():
+            setattr(s, k, v)
+        update.append(s)
+    
+    with tqdm(total=len(update)) as pb:
+        for batch in chunked(update, batch_size):
+            Source.bulk_update(
+                batch,
+                fields=[
+                    Source.n_apogee_visits,
+                    Source.apogee_min_mjd,
+                    Source.apogee_max_mjd,
+                    Source.n_boss_visits,
+                    Source.boss_min_mjd,
+                    Source.boss_max_mjd,
+                ]
+            )
+            pb.update(batch_size)
+    return len(update)
+
+
+def compute_n_neighborhood(
+    where=(
+        (
+            Source.n_neighborhood.is_null() 
+        |   (Source.n_neighborhood < 0)
+        )
+        &   Source.gaia_dr3_source_id.is_null(False)    
+    ),
+    radius=3, # arcseconds
+    brightness=5, # magnitudes
+    batch_size=1000,
+    limit=None
+):
+    #"Sources within 3\" and G_MAG < G_MAG_source + 5"
+    
+    q = (
+        Source
+        .select()
+        .where(where)
+        .limit(limit)
+    )
+
+    n_updated = 0
+    with tqdm(q) as pb:
+        
+        for chunk in chunked(q, batch_size):
+            
+            batch_sources = {}
+            for source in chunk:
+                batch_sources[source.gaia_dr3_source_id] = source
+
+            sq = (
+                Gaia_DR3
+                .select(
+                    Gaia_DR3.source_id,
+                    Gaia_DR3.ra,
+                    Gaia_DR3.dec,
+                    Gaia_DR3.phot_g_mean_mag
+                )
+            )
+            q_neighbour = (
+                Gaia_DR3
+                .select(
+                    Gaia_DR3.source_id,
+                    fn.count(sq.c.source_id).alias("n_neighborhood")        
+                )
+                .join(sq, on=(fn.q3c_join(Gaia_DR3.ra, Gaia_DR3.dec, sq.c.ra, sq.c.dec, radius/3600)))
+                .where(Gaia_DR3.phot_g_mean_mag > (sq.c.phot_g_mean_mag - brightness))
+                .where(Gaia_DR3.source_id.in_(list(batch_sources.keys())))
+                .group_by(Gaia_DR3.source_id)
+            )
+            
+            batch_update = []
+            for source_id, n_neighborhood in q_neighbour.tuples():
+                batch_sources[source_id].n_neighborhood = n_neighborhood - 1 # exclude self
+                batch_update.append(batch_sources[source_id])
+                
+            n_updated += len(batch_update)
+            Source.bulk_update(batch_update, fields=[Source.n_neighborhood])
+            pb.update(batch_size)
+            
+    return n_updated            
+
 
 def set_missing_gaia_source_ids_to_null():
     (

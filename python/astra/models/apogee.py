@@ -122,13 +122,13 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     )
         
     catalogid = BigIntegerField(index=True, null=True, help_text="SDSS input catalog identifier")
-    star_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `star` primary key")
+    star_pk = BigIntegerField(null=True, unique=False, help_text="APOGEE DRP `star` primary key") # note: unique false
     visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `visit` primary key")
     rv_visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `rv_visit` primary key")
 
     #> Data Product Keywords
     release = TextField(index=True, help_text=Glossary.release)
-    filetype = TextField(default="apStar", help_text=Glossary.filetype)
+    filetype = TextField(default="apVisit", help_text=Glossary.filetype)
     apred = TextField(index=True, help_text=Glossary.apred)
     plate = TextField(index=True, help_text=Glossary.plate) # most are integers, but not all!
     telescope = TextField(index=True, help_text=Glossary.telescope)

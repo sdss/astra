@@ -353,6 +353,12 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
 
     #> Raw (Uncalibrated) Quantities
     calibrated = BooleanField(default=False, help_text=Glossary.calibrated)
+    print("ANDY UPDATED CALIBRATED_FLAGS")
+    #calibrated_flags = BitField(null=True, help_text="Calibration flags")
+    #flag_main_sequence = calibrated_flags.flag(2**0, "Main-sequence star")
+    #flag_red_giant_branch = calibrated_flags.flag(2**1, "Red giant branch star")
+    #flag_red_clump = calibrated_flags.flag(2**2, "Red clump")
+    
     raw_teff = FloatField(null=True, help_text=Glossary.raw_teff)
     raw_e_teff = FloatField(null=True, help_text=Glossary.raw_e_teff)
     raw_logg = FloatField(null=True, help_text=Glossary.raw_logg)

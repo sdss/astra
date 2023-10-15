@@ -50,7 +50,7 @@ class Source(BaseModel):
     catalogid25 = BigIntegerField(null=True, help_text=Glossary.catalogid25)
     catalogid31 = BigIntegerField(null=True, help_text=Glossary.catalogid31)
     n_associated = IntegerField(null=True, help_text=Glossary.n_associated)
-    n_neighborhood = IntegerField(default=-1, help_text="Sources within 3\" and G_MAG > G_MAG_source + 5")
+    n_neighborhood = IntegerField(default=-1, help_text="Sources within 3\" and G_MAG < G_MAG_source + 5")
     
     # Only do sdss5_target_flags if we are using a PostgreSQL database, as SQLite does not support it.
     if isinstance(database, PostgresqlDatabase):
@@ -485,6 +485,14 @@ class Source(BaseModel):
     e_ebv_edenhofer_2023 = FloatField(null=True, help_text="Error on Edenhofer et al. (2023) E(B-V) [mag]")
     flag_ebv_edenhofer_2023_upper_limit = BooleanField(default=False, help_text="Upper limit on Edenhofer E(B-V)")
     
+    #> Observations Summary
+    n_boss_visits = IntegerField(null=True, help_text="Number of BOSS visits")
+    boss_min_mjd = IntegerField(null=True, help_text="Minimum MJD of BOSS visits")
+    boss_max_mjd = IntegerField(null=True, help_text="Maximum MJD of BOSS visits")
+    n_apogee_visits = IntegerField(null=True, help_text="Number of APOGEE visits")    
+    apogee_min_mjd = IntegerField(null=True, help_text="Minimum MJD of APOGEE visits")
+    apogee_max_mjd = IntegerField(null=True, help_text="Maximum MJD of APOGEE visits")
+
     @property
     def sdss5_cartons(self):
         """Return the cartons that this source is assigned."""

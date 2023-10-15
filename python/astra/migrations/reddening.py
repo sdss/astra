@@ -67,6 +67,27 @@ def _update_reddening_on_source(source, sfd, edenhofer2023, bayestar2019):
         # Edenhofer
         if d is not None:
             if d < 69:  
+                # TODO: Is this the right way to do this?
+                """
+                The  Edenhofer docstring says:
+                
+                Args:
+                map_fname (Optional[str]): Filename of the map. Defaults
+                    to :obj:`None`, meaning that the default location
+                    is used.
+                load_samples (Optional[bool]): Whether to load the posterior samples
+                    of the extinction density. The samples give more accurate
+                    interpolation resoluts and are required for standard deviations
+                    of integrated extinctions. Defaults to :obj:`False`.
+                integrated (Optional[bool]): Whether to return integrated extinction
+                    density. In this case, the units of the map are E of Zhang,
+                    Green, and Rix (2023). The pre-processing for efficient access
+                    to the integrated extinction map can take a couple of minutes
+                    but subsequent queries will be fast. Defaults to :obj:`False`.
+                    
+                So should I be using a different Edenhofer2023Query object with `integrated=True`?? And a different conversion factor?
+                """
+                
                 coord_integrated = SkyCoord(ra=source.ra * u.deg, dec=source.dec * u.deg, distance=69 * u.pc)
                 ed = edenhofer2023(coord_integrated)
                 source.ebv_edenhofer_2023 = 0.829 * ed
@@ -75,11 +96,8 @@ def _update_reddening_on_source(source, sfd, edenhofer2023, bayestar2019):
                 source.flag_ebv_from_edenhofer_2023 = True
                 
             else:                
-                try:
-                    ed = edenhofer2023(coord_samples, mode="samples") # TODO: awaiting samples download
-                except:
-                    ed = edenhofer2023(coord_samples)
-                    #log.warning(f"Edenhofer et al. (2023) samples not available, using median value")
+                ed = edenhofer2023(coord_samples, mode="samples") 
+                # TODO: Take the nanmedian and nanstd? the samples are often NaNs
                 source.ebv_edenhofer_2023 = 0.829 * np.median(ed)
                 source.e_ebv_edenhofer_2023 = 0.829 * np.std(ed)    
             
@@ -142,7 +160,7 @@ def _update_reddening_on_source(source, sfd, edenhofer2023, bayestar2019):
 
 def _reddening_worker(sources):
     sfd = SFDQuery()
-    edenhofer2023 = Edenhofer2023Query()
+    edenhofer2023 = Edenhofer2023Query(load_samples=True)
     bayestar2019 = BayestarQuery()
 
     updated = []
@@ -184,7 +202,29 @@ def update_reddening(where=Source.ebv.is_null(), batch_size=1000, max_workers: i
         Source.flag_ebv_upper_limit,
         Source.ebv_method_flags,
     ]
+    
+    sfd = SFDQuery()
+    edenhofer2023 = Edenhofer2023Query(load_samples=True)
+    bayestar2019 = BayestarQuery()
+    
+    with tqdm(total=len(q)) as pb:
+            
+        for chunk in chunked(q, batch_size):
+            updated = []
+            for source in chunk:
+                s = _update_reddening_on_source(source, sfd, edenhofer2023, bayestar2019)
+                if s is not None:
+                    updated.append(s)    
+            
+            if len(updated) > 0:
+                Source.bulk_update(updated, fields)
+            
+            pb.update(batch_size)
+            
+        
+    
 
+    """
     executor = concurrent.futures.ProcessPoolExecutor(max_workers)
     
     '''
@@ -229,6 +269,7 @@ def update_reddening(where=Source.ebv.is_null(), batch_size=1000, max_workers: i
             pb.update(batch_size)        
         
     return n_updated
+    """
 
 
 def setup_dustmaps(data_dir="$MWM_ASTRA/aux/dust-maps"):
