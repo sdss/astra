@@ -1363,6 +1363,8 @@ def _migrate_apvisit_metadata(apVisits, raise_exceptions=False):
             # @Nidever: "if there’s 2048 then it hasn’t been dithered, if it’s 4096 then it’s dithered."
             all_metadata[apVisits[index].spectrum_pk]["dithered"] = (value == 4096)
             index += 1            
+        elif key == "NCOMBINE":
+            all_metadata[apVisits[index].spectrum_pk]["n_frames"] = value
         else:
             all_metadata[apVisits[index].spectrum_pk][key.lower()] = value
             
@@ -1464,11 +1466,13 @@ def migrate_apvisit_metadata_from_image_headers(
                 apVisits[apVisit.spectrum_pk] = apVisit
                 pb.update()
 
+
     with tqdm(total=total, desc="Collecting results", unit="spectra") as pb:
         for future in concurrent.futures.as_completed(futures):
             for spectrum_pk, meta in future.result().items():
                 for key, value in meta.items():
-                    setattr(apVisits[spectrum_pk], key, value)                
+                    setattr(apVisits[spectrum_pk], key, value)
+                
                 pb.update()
 
     with tqdm(total=total, desc="Updating", unit="spectra") as pb:     

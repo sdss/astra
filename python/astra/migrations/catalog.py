@@ -140,7 +140,109 @@ def migrate_bailer_jones_distances(
     return n_updated
 
 
+def migrate_gaia_synthetic_photometry(
+    where=(Source.gaia_dr3_source_id.is_null(False)), 
+    batch_size=500, 
+    limit=None
+):
+    from astra.migrations.sdss5db.catalogdb import Gaia_dr3_synthetic_photometry_gspc
+
+    q = (
+        Source
+        .select()
+    )
+    if where:
+        q = q.where(where)
+        
+    q = (
+        q
+        .order_by(Source.gaia_dr3_source_id.asc())
+        .limit(limit)
+    )
+
+    n_updated = 0
+    with tqdm(total=1, desc="Upserting") as pb:
+        for chunk in chunked(q.iterator(), batch_size):
+
+            q_bj = (
+                Gaia_dr3_synthetic_photometry_gspc
+                .select(
+                    Gaia_dr3_synthetic_photometry_gspc.source_id,
+                    Gaia_dr3_synthetic_photometry_gspc.c_star,
+                    Gaia_dr3_synthetic_photometry_gspc.u_jkc_mag,
+                    Gaia_dr3_synthetic_photometry_gspc.u_jkc_flag.alias("u_jkc_mag_flag"),                    
+                    Gaia_dr3_synthetic_photometry_gspc.b_jkc_mag,
+                    Gaia_dr3_synthetic_photometry_gspc.b_jkc_flag.alias("b_jkc_mag_flag"),                    
+                    Gaia_dr3_synthetic_photometry_gspc.v_jkc_mag,
+                    Gaia_dr3_synthetic_photometry_gspc.v_jkc_flag.alias("v_jkc_mag_flag"),                                        
+                    Gaia_dr3_synthetic_photometry_gspc.r_jkc_mag,
+                    Gaia_dr3_synthetic_photometry_gspc.r_jkc_flag.alias("r_jkc_mag_flag"),                                        
+                    Gaia_dr3_synthetic_photometry_gspc.i_jkc_mag,
+                    Gaia_dr3_synthetic_photometry_gspc.i_jkc_flag.alias("i_jkc_mag_flag"),                                                        
+                    Gaia_dr3_synthetic_photometry_gspc.u_sdss_mag,
+                    Gaia_dr3_synthetic_photometry_gspc.u_sdss_flag.alias("u_sdss_mag_flag"),
+                    Gaia_dr3_synthetic_photometry_gspc.g_sdss_mag,
+                    Gaia_dr3_synthetic_photometry_gspc.g_sdss_flag.alias("g_sdss_mag_flag"),
+                    Gaia_dr3_synthetic_photometry_gspc.r_sdss_mag,
+                    Gaia_dr3_synthetic_photometry_gspc.r_sdss_flag.alias("r_sdss_mag_flag"),
+                    Gaia_dr3_synthetic_photometry_gspc.i_sdss_mag,
+                    Gaia_dr3_synthetic_photometry_gspc.i_sdss_flag.alias("i_sdss_mag_flag"),
+                    Gaia_dr3_synthetic_photometry_gspc.z_sdss_mag,
+                    Gaia_dr3_synthetic_photometry_gspc.z_sdss_flag.alias("z_sdss_mag_flag"),
+                    Gaia_dr3_synthetic_photometry_gspc.y_ps1_mag,
+                    Gaia_dr3_synthetic_photometry_gspc.y_ps1_flag.alias("y_ps1_flag_mag"),                    
+                    
+                )
+                .where(Gaia_dr3_synthetic_photometry_gspc.source_id.in_([s.gaia_dr3_source_id for s in chunk]))
+                .dicts()
+            )
+
+            sources = { s.gaia_dr3_source_id: s for s in chunk }
+            update = []
+            for record in q_bj:
+                source_id = record.pop("source_id")
+                source = sources[source_id]
+
+                for key, value in record.items():
+                    setattr(source, key, value)
+                
+                update.append(source)
+            
+            n_updated += (
+                Source
+                .bulk_update(
+                    update,
+                    fields=[
+                        Source.c_star,
+                        Source.u_jkc_mag,
+                        Source.u_jkc_mag_flag,                    
+                        Source.b_jkc_mag,
+                        Source.b_jkc_mag_flag,                    
+                        Source.v_jkc_mag,
+                        Source.v_jkc_mag_flag,                                        
+                        Source.r_jkc_mag,
+                        Source.r_jkc_mag_flag,                                        
+                        Source.i_jkc_mag,
+                        Source.i_jkc_mag_flag,                                                        
+                        Source.u_sdss_mag,
+                        Source.u_sdss_mag_flag,
+                        Source.g_sdss_mag,
+                        Source.g_sdss_mag_flag,
+                        Source.r_sdss_mag,
+                        Source.r_sdss_mag_flag,
+                        Source.i_sdss_mag,
+                        Source.i_sdss_mag_flag,
+                        Source.z_sdss_mag,
+                        Source.z_sdss_mag_flag,
+                        Source.y_ps1_mag,
+                        Source.y_ps1_mag_flag,   
+                    ]
+                )
+            )
+
+            pb.update(batch_size)
     
+    return n_updated
 
 
 def migrate_zhang_stellar_parameters(where=None, batch_size: Optional[int] = 500, limit: Optional[int] = None):

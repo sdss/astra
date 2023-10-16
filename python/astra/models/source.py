@@ -485,6 +485,31 @@ class Source(BaseModel):
     e_ebv_edenhofer_2023 = FloatField(null=True, help_text="Error on Edenhofer et al. (2023) E(B-V) [mag]")
     flag_ebv_edenhofer_2023_upper_limit = BooleanField(default=False, help_text="Upper limit on Edenhofer E(B-V)")
     
+    #> Synthetic Photometry from Gaia XP Spectra
+    c_star = FloatField(null=True, help_text="Quality parameter (see Riello et al. 2021)")
+    u_jkc_mag = FloatField(null=True, help_text="Gaia XP synthetic U-band (JKC) [mag]")
+    u_jkc_mag_flag = IntegerField(null=True, help_text="U-band (JKC) is within valid range")
+    b_jkc_mag = FloatField(null=True, help_text="Gaia XP synthetic B-band (JKC) [mag]")
+    b_jkc_mag_flag = IntegerField(null=True, help_text="B-band (JKC) is within valid range")                    
+    v_jkc_mag = FloatField(null=True, help_text="Gaia XP synthetic V-band (JKC) [mag]")
+    v_jkc_mag_flag = IntegerField(null=True, help_text="V-band (JKC) is within valid range")
+    r_jkc_mag = FloatField(null=True, help_text="Gaia XP synthetic R-band (JKC) [mag]")
+    r_jkc_mag_flag = IntegerField(null=True, help_text="R-band (JKC) is within valid range")
+    i_jkc_mag = FloatField(null=True, help_text="Gaia XP synthetic I-band (JKC) [mag]")
+    i_jkc_mag_flag = IntegerField(null=True, help_text="I-band (JKC) is within valid range")                                                        
+    u_sdss_mag = FloatField(null=True, help_text="Gaia XP synthetic u-band (SDSS) [mag]")
+    u_sdss_mag_flag = IntegerField(null=True, help_text="u-band (SDSS) is within valid range")
+    g_sdss_mag = FloatField(null=True, help_text="Gaia XP synthetic g-band (SDSS) [mag]")
+    g_sdss_mag_flag = IntegerField(null=True, help_text="g-band (SDSS) is within valid range")
+    r_sdss_mag = FloatField(null=True, help_text="Gaia XP synthetic r-band (SDSS) [mag]")
+    r_sdss_mag_flag = IntegerField(null=True, help_text="r-band (SDSS) is within valid range")
+    i_sdss_mag = FloatField(null=True, help_text="Gaia XP synthetic i-band (SDSS) [mag]")
+    i_sdss_mag_flag = IntegerField(null=True, help_text="i-band (SDSS) is within valid range")
+    z_sdss_mag = FloatField(null=True, help_text="Gaia XP synthetic z-band (SDSS) [mag]")
+    z_sdss_mag_flag = IntegerField(null=True, help_text="z-band (SDSS) is within valid range")
+    y_ps1_mag = FloatField(null=True, help_text="Gaia XP synthetic Y-band (PS1) [mag]")
+    y_ps1_mag_flag = IntegerField(null=True, help_text="Y-band (PS1) is within valid range")
+    
     #> Observations Summary
     n_boss_visits = IntegerField(null=True, help_text="Number of BOSS visits")
     boss_min_mjd = IntegerField(null=True, help_text="Minimum MJD of BOSS visits")
@@ -598,6 +623,7 @@ class Source(BaseModel):
             The carton name.
         """
         return self.assigned_to_carton_attribute("name", name)
+    
 
     @hybrid_method
     def is_sdss5_target_bit_set(self, bit):

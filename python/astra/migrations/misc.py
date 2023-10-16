@@ -38,7 +38,7 @@ def update_visit_spectra_counts(batch_size=10_000):
             fn.min(BossVisitSpectrum.mjd).alias("boss_min_mjd"),
             fn.max(BossVisitSpectrum.mjd).alias("boss_max_mjd"),            
         )
-        .join(BossVisitSpectrum, on=(Source.pk == BossVisitSpectrum.source_pk))
+        .join(BossVisitSpectrum, JOIN.LEFT_OUTER, on=(Source.pk == BossVisitSpectrum.source_pk))
         .group_by(Source.pk)
         .dicts()
     )
@@ -58,6 +58,7 @@ def update_visit_spectra_counts(batch_size=10_000):
         s = q[pk]
         for k, v in counts.items():
             setattr(s, k, v)
+            
         update.append(s)
     
     with tqdm(total=len(update)) as pb:
