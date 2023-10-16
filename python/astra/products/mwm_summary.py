@@ -9,14 +9,87 @@ from astra.products.utils import (get_fields, get_basic_header, get_binary_table
 
 get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
 
+DEFAULT_MWM_WHERE = (
+    Source.assigned_to_mapper("mwm")
+|   Source.sdss4_apogee_id.is_null(False)
+|   Source.assigned_to_carton_with_name('bhm_csc_apogee')
+|   Source.assigned_to_carton_with_name('bhm_csc_boss')
+|   Source.assigned_to_carton_with_name('bhm_csc_boss-bright')
+|   Source.assigned_to_carton_with_name('bhm_csc_boss-dark')
+|   Source.assigned_to_carton_with_name('bhm_csc_boss_bright')
+|   Source.assigned_to_carton_with_name('bhm_csc_boss_dark')
+|   Source.assigned_to_carton_with_name('manual_bright_target_offsets_1')
+|   Source.assigned_to_carton_with_name('manual_bright_target_offsets_1_g13')
+|   Source.assigned_to_carton_with_name('manual_bright_target_offsets_3')
+|   Source.assigned_to_carton_with_name('manual_bright_targets_g13')
+|   Source.assigned_to_carton_with_name('manual_bright_targets_g13_offset_fixed_1')
+|   Source.assigned_to_carton_with_name('manual_bright_targets_g13_offset_fixed_3')
+|   Source.assigned_to_carton_with_name('manual_bright_targets_g13_offset_fixed_5')
+|   Source.assigned_to_carton_with_name('manual_bright_targets_g13_offset_fixed_7')
+|   Source.assigned_to_carton_with_name('manual_fps_position_stars')
+|   Source.assigned_to_carton_with_name('manual_fps_position_stars_10')
+|   Source.assigned_to_carton_with_name('manual_fps_position_stars_apogee_10')
+|   Source.assigned_to_carton_with_name('manual_offset_mwmhalo_off00')
+|   Source.assigned_to_carton_with_name('manual_offset_mwmhalo_off05')
+|   Source.assigned_to_carton_with_name('manual_offset_mwmhalo_off10')
+|   Source.assigned_to_carton_with_name('manual_offset_mwmhalo_off20')
+|   Source.assigned_to_carton_with_name('manual_offset_mwmhalo_off30')
+|   Source.assigned_to_carton_with_name('manual_offset_mwmhalo_offa')
+|   Source.assigned_to_carton_with_name('manual_offset_mwmhalo_offb')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_10')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_1000')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_1001a')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_1001b')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_12')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_14')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_15')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_17')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_19a')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_19b')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_19c')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_22')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_24')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_25')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_28a')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_28b')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_28c')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_29')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_3')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_31')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_32')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_34a')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_34b')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_35a')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_35b')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_35c')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_46')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_47a')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_47b')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_47c')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_47d')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_47e')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_5')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_6a')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_6b')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_6c')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_8')
+|   Source.assigned_to_carton_with_name('openfibertargets_nov2020_9')
+|   Source.assigned_to_carton_with_name('ops_apogee_stds')
+|   Source.assigned_to_carton_with_name('ops_std_apogee')
+|   Source.assigned_to_carton_with_name('ops_std_boss')
+|   Source.assigned_to_carton_with_name('ops_std_boss-red')
+|   Source.assigned_to_carton_with_name('ops_std_boss_gdr2')
+|   Source.assigned_to_carton_with_name('ops_std_boss_lsdr8')
+|   Source.assigned_to_carton_with_name('ops_std_boss_ps1dr2')
+|   Source.assigned_to_carton_with_name('ops_std_boss_red')
+|   Source.assigned_to_carton_with_name('ops_std_boss_tic')
+|   Source.assigned_to_carton_with_name('ops_std_eboss')
+)
 DEFAULT_IGNORE_FIELD_NAMES = ("pk", )
 
-print("mwmTargets needs a more inclusive list of cartons!")
+
 def create_mwm_targets_product(
-    where=(
-        Source.assigned_to_mapper("mwm")
-    |   Source.sdss4_apogee_id.is_null(False)
-    ),
+    where=DEFAULT_MWM_WHERE,
     limit=None,
     output_template="mwmTargets-{version}.fits",
     ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
@@ -108,7 +181,7 @@ def create_mwm_targets_product(
 
 
 def create_mwm_all_star_product(
-    where=None,
+    where=DEFAULT_MWM_WHERE,
     limit=None,
     boss_where=None,
     apogee_where=None,
@@ -195,7 +268,7 @@ def create_mwm_all_star_product(
 
 
 def create_mwm_all_visit_product(
-    where=None,
+    where=DEFAULT_MWM_WHERE,
     limit=None,
     boss_where=None,
     apogee_where=None,
