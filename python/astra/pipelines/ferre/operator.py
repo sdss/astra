@@ -474,7 +474,7 @@ def load_balancer(
 
 
         if chaos_monkey:
-            command = f"ferre_chaos_monkey -v {' '.join(expect_ferre_executions_in_these_pwds)}"
+            command = f"ferre_chaos_monkey"
             command += f" > {stage_dir}/monkey_{i:0>2.0f}.out 2> {stage_dir}/monkey_{i:0>2.0f}.err"
             
             slurm_tasks.append(SlurmTask([command]))

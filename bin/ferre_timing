@@ -14,7 +14,6 @@ def ferre_timing(pwd):
     timing = OrderedDict()
 
     for stdout_path in glob(f"{pwd}/stdout*"):
-
         with open(stdout_path, "r") as fp:
             stdout = fp.read()
         
@@ -40,15 +39,18 @@ def ferre_timing(pwd):
             for k, v in sorted(matched_input_names, key=lambda x: int(x[0])):
                 if "/" in v or not v[0].isdecimal(): continue
                 input_names[int(k)] = v
+                
 
             n_threads = int(re.findall("nthreads\s?= \s+[0-9]+", process_stdout)[0].split()[-1])
             n_obj = int(re.findall("nobj\s?= \s+[0-9]+", process_stdout)[0].split()[-1])
 
+            if n_obj > 1_000_000:
+                #I'm done.
+                n_obj = 10_000 # n_threads
             n_per_thread = n_obj // n_threads
             n_mod = n_obj - n_per_thread * n_threads
 
             n_items = min(n_threads, n_obj)
-
             si = 0
             expected_indices = -1 * np.ones((n_items, n_per_thread + 1), dtype=int)
             for i in range(n_items):
