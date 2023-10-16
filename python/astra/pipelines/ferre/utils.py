@@ -514,7 +514,7 @@ def validate_ferre_control_keywords(
     return (kwds, headers, segment_headers, frozen_parameters)
 
 
-def format_ferre_control_keywords(ferre_kwds: dict) -> str:
+def format_ferre_control_keywords(ferre_kwds: dict, n_obj=None) -> str:
     r"""
     Format control keywords for FERRE to digest.
 
@@ -553,6 +553,8 @@ def format_ferre_control_keywords(ferre_kwds: dict) -> str:
     )
 
     contents = "&LISTA\n"
+    if n_obj is not None:
+        contents += f"NOBJ = {n_obj}\n"
     remaining_keys = set(ferre_kwds).difference(preferred_order)
     keys = list(preferred_order) + list(remaining_keys)
 

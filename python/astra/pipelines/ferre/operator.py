@@ -286,6 +286,10 @@ def load_balancer(
     total_spectra = np.sum(spectra)
     if total_spectra == 0:
         log.info(f"Found no spectra needing execution.")
+        # TODO: I don't like this here, but it's the least bad hack I could think of right now.
+        if os.getenv("AIRFLOW_CTX_DAG_OWNER", None) is not None:
+            from airflow.exceptions import AirflowSkipException
+            raise AirflowSkipException("No spectra to execute")
         log.info(f"Operator out.")
         return None
 
@@ -343,6 +347,8 @@ def load_balancer(
         longest_job_index = np.argmax(partitioned_core_seconds)
         fractional_core_seconds = partitioned_core_seconds / np.sum(partitioned_core_seconds)
         use_n_nodes = int(np.ceil(1/fractional_core_seconds[longest_job_index]))
+        if max_nodes > 0:
+            use_n_nodes = min(max_nodes, use_n_nodes)
 
         node_indices = partition_items(
             partitioned_core_seconds,

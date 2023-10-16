@@ -101,8 +101,6 @@ def pre_process_ferre(
     absolute_pwd = expand_path(pwd)
     log.info(f"FERRE working directory: {absolute_pwd}")
 
-    control_kwds_formatted = utils.format_ferre_control_keywords(control_kwds)
-    log.info(f"FERRE control keywords:\n{control_kwds_formatted}")
 
     # Construct mask to match FERRE model grid.
     #chip_wavelengths = tuple(map(utils.wavelength_array, segment_headers))
@@ -184,6 +182,9 @@ def pre_process_ferre(
 
     if not batch_initial_parameters:
         return (pwd, 0, skipped)
+
+    control_kwds_formatted = utils.format_ferre_control_keywords(control_kwds, n_obj=1 + index)
+    log.info(f"FERRE control keywords:\n{control_kwds_formatted}")
 
     # Convert list of dicts of initial parameters to array.
     log.info(f"Validating initial and frozen parameters")
