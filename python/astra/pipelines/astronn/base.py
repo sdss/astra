@@ -2,11 +2,11 @@ import numpy as np
 import multiprocessing as mp
 from itertools import cycle
 from time import time, sleep
+from tqdm import tqdm
 
-from astra.utils import log, flatten
+from astra.utils import log
 from astra.models.astronn import AstroNN
 
-import tensorflow_probability as tfp
 from astroNN.apogee import apogee_continuum 
 
 
@@ -48,7 +48,7 @@ def _worker(q_input, q_output):
             while True:
                 if q_output.empty():
                     q_output.put(result)
-                    log.info(f"Put result {result}")
+                    #log.info(f"Put result {result}")
                     break
 
                 sleep(1)
@@ -81,6 +81,7 @@ def _inference(model, batch):
         N_param = len(model.targetname)
 
         #### astroNN prediction 
+        '''
         results = []
         for i in range(len(batch)):
             result = []
@@ -99,8 +100,16 @@ def _inference(model, batch):
             print("+"*6, 'result:', result)
             results.append(result)
         results = np.array(results)
-        print("+"*6, 'shape of results:', results.shape)
-    
+        '''
+        try:
+            pred, pred_err = model.predict(all_flux)
+        except ValueError: # some weird thing with fast_mc_inference_v2_internal
+            raise
+
+        results = np.hstack([pred, pred_err['total']])
+        
+        assert results.shape == (len(batch), 45)
+            
         #### record results
         mean_t_elapsed = (time() - t_init) / len(spectrum_pks)
         for i, (spectrum_pk, source_pk) in enumerate(zip(spectrum_pks, source_pks)):
@@ -190,7 +199,7 @@ def parallel_batch_read(target, spectra, batch_size, cpu_count=None):
 
     log.info(f"Distributing spectra")
     B, batch = (0, [])
-    for i, ((q, p), spectrum) in enumerate(zip(cycle(qps), flatten(spectra))):
+    for i, ((q, p), spectrum) in enumerate(zip(cycle(qps), tqdm(spectra, total=0))):
         q.put(spectrum)
 
     for (q, p) in qps:
@@ -204,7 +213,6 @@ def parallel_batch_read(target, spectra, batch_size, cpu_count=None):
         except:
             log.exception("Timeout on thing")
             continue
-        log.info(f"Have result {result}, {B}")
 
         if result is None:
             N_done += 1

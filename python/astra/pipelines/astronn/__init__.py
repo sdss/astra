@@ -1,5 +1,4 @@
 from typing import Iterable, Optional
-import tensorflow_probability as tfp
 from astra import task
 from astra.models.astronn import AstroNN
 from astra.pipelines.astronn.utils import read_model
@@ -8,9 +7,10 @@ from astra.pipelines.astronn.base import _prepare_data, _worker, parallel_batch_
 @task
 def astronn(
     spectra: Iterable,
-    model_path: str = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6039136/software/git/astroNN_projects/astroNN_APOGEE_VAC/astroNN_retrain_2_shi/",
-    #model_path: str = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6039136/software/git/astroNN_projects/astroNN_APOGEE_VAC/astroNN_0617_run001/",
-    parallel: Optional[bool] = False,
+    model_path: str = "$MWM_ASTRA/pipelines/astronn/astroNN_retrain_2_shi",
+    parallel: Optional[bool] = True,
+    batch_size: Optional[int] = 100,
+    cpu_count: Optional[int] = 4,
 ) -> Iterable[AstroNN]:
     """
     Estimate astrophysical parameters for a stellar spectrum given a pre-trained neural network.
@@ -19,7 +19,7 @@ def astronn(
     model = read_model(model_path)
 
     if parallel: # work for pipelines.sdss.org
-        for batch in parallel_batch_read(_worker, spectra, batch_size=100, cpu_count=4):
+        for batch in parallel_batch_read(_worker, spectra, batch_size=batch_size, cpu_count=cpu_count):
             yield from _inference(model, batch)
     else:
         try:
