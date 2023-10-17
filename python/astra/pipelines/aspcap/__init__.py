@@ -134,8 +134,16 @@ def post_process_aspcap(parent_dir, **kwargs) -> Iterable[ASPCAP]:
 
 @task
 def create_aspcap_results(
-    stellar_parameter_results: Optional[Iterable[FerreStellarParameters]] = None, 
-    chemical_abundance_results: Optional[Iterable[FerreChemicalAbundances]] = None, 
+    stellar_parameter_results: Optional[Iterable[FerreStellarParameters]] = (
+        FerreStellarParameters
+        .select()
+        .join(ASPCAP, JOIN.LEFT_OUTER, on=(ASPCAP.stellar_parameters_task_pk == FerreStellarParameters.task_pk))
+        .where(ASPCAP.stellar_parameters_task_pk.is_null())
+    ), 
+    chemical_abundance_results: Optional[Iterable[FerreChemicalAbundances]] = (
+        FerreChemicalAbundances
+        .select()
+    ), 
     **kwargs
 ) -> Iterable[ASPCAP]:
     """
@@ -152,31 +160,6 @@ def create_aspcap_results(
         An iterable of `FerreChemicalAbundances`
     """
 
-    if stellar_parameter_results is None:
-            
-        stellar_parameter_results = list(
-            FerreStellarParameters
-            .select()
-            #.join(ASPCAP, JOIN.LEFT_OUTER, on=(ASPCAP.stellar_parameters_task_pk == FerreStellarParameters.task_pk))
-            #.where(ASPCAP.stellar_parameters_task_pk.is_null())
-        )
-        '''
-        if stellar_parameter_results:
-            spectrum_pks = [r.spectrum_pk for r in stellar_parameter_results]
-            chemical_abundance_results = list(
-                FerreChemicalAbundances
-                .select()
-                .where(FerreChemicalAbundances.spectrum_pk.in_(spectrum_pks))
-            )
-        else:
-            chemical_abundance_results = []
-        '''
-    
-        chemical_abundance_results = list(
-            FerreChemicalAbundances
-            .select()
-        )        
-        
     t_coarse = (
         FerreCoarse
         .select(
@@ -259,58 +242,82 @@ def create_aspcap_results(
         })
 
 
-    # TODO: For things in chemical_abundance_results where we do not have a stellar_parameter_result..
-    #       should we look to update existing ASPCAP results?
-
-    skipped = 0
+    skipped_results = {}
     for result in tqdm(chemical_abundance_results, desc="Collecting abundances"):
         ferre_time_elapsed.setdefault(result.upstream_pk, 0)
         ferre_time_elapsed[result.upstream_pk] += (result.ferre_time_elapsed or 0)
 
         if result.upstream_pk not in data:
-            skipped += 1
+            skipped_results.setdefault(result.upstream_pk, [])
+            skipped_results[result.upstream_pk].append(result)
             continue
 
-        #data.setdefault(result.upstream_pk, {})
-        species = get_species(result.weight_path)
-        
-        if species.lower() == "c_12_13":
-            label = species.lower()
-        else:
-            label = f"{species.lower()}_h"
+        data[result.upstream_pk].update(**_result_to_kwds(result, data[result.upstream_pk]))        
 
-        for key in ("m_h", "alpha_m", "c_m", "n_m"):
-            if not getattr(result, f"flag_{key}_frozen"):
-                break
-        else:
-            raise ValueError(f"Can't figure out which label to use")
-        
-        value = getattr(result, key)
-        e_value = getattr(result, f"e_{key}")
-
-        if not ABUNDANCE_RELATIVE_TO_H[species] and value is not None:
-            # [X/M] = [X/H] - [M/H]
-            # [X/H] = [X/M] + [M/H]                
-            value += data[result.upstream_pk]["m_h_atm"]
-            e_value = np.sqrt(e_value**2 + data[result.upstream_pk]["e_m_h_atm"]**2)
-            
-        data[result.upstream_pk].update({
-            f"{label}_task_pk": result.task_pk,
-            f"{label}_rchi2": result.rchi2,
-            f"{label}": value,
-            f"e_{label}": e_value,
-            f"raw_{label}": value,
-            f"raw_e_{label}": e_value,
-        })
-        if hasattr(result, f"{key}_flags"):
-            data[result.upstream_pk][f"{label}_flags"] = getattr(result, f"{key}_flags")
-    
-    if skipped:
-        log.warn(
-            f"Skipped {skipped} chemical abundance results because no stellar parameter result "
-            f"in the accompanying argument."
+    if len(skipped_results) > 0:
+        # There shouldn't be too many of these, so let's just save them.
+        log.warn(f"There were {len(skipped_results)} chemical abundance results that might updating to existing ASPCAP records. Doing it now..")
+        q = (
+            ASPCAP
+            .select()
+            .where(ASPCAP.stellar_parameters_task_pk.in_(list(skipped_results.keys())))
         )
+        chemical_abundance_task_pk_names = [f for f in ASPCAP._meta.fields.keys() if f.endswith("_task_pk") and f != "stellar_parameters_task_pk"]
+        
+        for result in q:
+            any_update_made = False
+            chemical_abundance_task_pks = dict(zip(chemical_abundance_task_pk_names, [getattr(result, f) for f in chemical_abundance_task_pk_names]))            
+            for chemical_abundance_result in skipped_results[result.stellar_parameters_task_pk]:
+                if chemical_abundance_result.task_pk in chemical_abundance_task_pks.values(): 
+                    continue
+                
+                any_update_made = True
+                for k, v in _result_to_kwds(chemical_abundance_result, result.__data__).items():
+                    setattr(result, k, v)
+
+            if any_update_made:
+                log.info(f"Saving result {result}")                
+                result.save()
 
     for stellar_parameter_task_pk, kwds in data.items():
         yield ASPCAP(**kwds)
     
+    
+def _result_to_kwds(result, existing_kwds):
+
+    #data.setdefault(result.upstream_pk, {})
+    species = get_species(result.weight_path)
+    
+    if species.lower() == "c_12_13":
+        label = species.lower()
+    else:
+        label = f"{species.lower()}_h"
+
+    for key in ("m_h", "alpha_m", "c_m", "n_m"):
+        if not getattr(result, f"flag_{key}_frozen"):
+            break
+    else:
+        raise ValueError(f"Can't figure out which label to use")
+    
+    value = getattr(result, key)
+    e_value = getattr(result, f"e_{key}")
+
+    if not ABUNDANCE_RELATIVE_TO_H[species] and value is not None:
+        # [X/M] = [X/H] - [M/H]
+        # [X/H] = [X/M] + [M/H]                
+        value += existing_kwds["m_h_atm"]
+        e_value = np.sqrt(e_value**2 + existing_kwds["e_m_h_atm"]**2)
+        
+    new_kwds = {
+        f"{label}_task_pk": result.task_pk,
+        f"{label}_rchi2": result.rchi2,
+        f"{label}": value,
+        f"e_{label}": e_value,
+        f"raw_{label}": value,
+        f"raw_e_{label}": e_value,
+    }
+    if hasattr(result, f"{key}_flags"):
+        new_kwds[f"{label}_flags"] = getattr(result, f"{key}_flags")
+        
+    return new_kwds
+        

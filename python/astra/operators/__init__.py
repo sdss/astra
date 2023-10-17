@@ -3,7 +3,7 @@ from astra.utils import log, callable
 from inspect import getfullargspec
 from peewee import fn, JOIN
 from astropy.time import Time
-
+from airflow.exceptions import AirflowSkipException
 try:
     from airflow.models.baseoperator import BaseOperator
 except ImportError:
@@ -35,15 +35,15 @@ class Operator(BaseOperator):
 
     def where_by_execution_date(self, input_model, context):
         where_by_execution_date = {
-            "mjd": lambda m: m.mjd.between(Time(context["next_execution_date"]).mjd, Time(context["prev_execution_date"]).mjd),
-            "date_obs": lambda m: m.date_obs.between(Time(context["next_execution_date"]).datetime, Time(context["prev_execution_date"]).datetime),
-            "max_mjd": lambda m: m.max_mjd.between(Time(context["next_execution_date"]).mjd, Time(context["prev_execution_date"]).mjd),
+            "mjd": lambda m: m.mjd.between(Time(context["prev_execution_date"]).mjd, Time(context["next_execution_date"]).mjd),
+            "date_obs": lambda m: m.date_obs.between(Time(context["prev_execution_date"]).datetime, Time(context["next_execution_date"]).datetime),
+            "max_mjd": lambda m: m.max_mjd.between(Time(context["prev_execution_date"]).mjd, Time(context["next_execution_date"]).mjd),
         }
-
         if context["next_execution_date"] is not None and context["prev_execution_date"] is not None:
             for k, f in where_by_execution_date.items():
                 if hasattr(input_model, k):
-                    log.info(f"Restricting {input_model} by {k} between {context['next_execution_date']} and {context['prev_execution_date']}")
+                    log.info(f"Restricting {input_model} by {k} between {context['prev_execution_date']} and {context['next_execution_date']}")
+                    print(type(context['prev_execution_date']), context['prev_execution_date'])
                     return f(input_model)
                 
         return None
@@ -103,4 +103,3 @@ class Operator(BaseOperator):
         for n, item in enumerate(task(**kwds), start=1):
             None
         print(f"There were {n} results")
-    

@@ -202,9 +202,9 @@ def load_balancer(
     post_interpolate_model_flux=True,
     partition=True,
     overwrite=True,
-    n_threads=42,
+    n_threads=32, # 42
     max_nodes=0,
-    max_tasks_per_node=3,
+    max_tasks_per_node=4, # 3
     balance_threads=False,
     cpus_per_node=128,
     t_load_estimate=300, # 5 minutes est to load grid

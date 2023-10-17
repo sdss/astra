@@ -89,6 +89,7 @@ def create_star_pipeline_products_for_all_sources(
         apogee_where=apogee_where,
         ignore_field_names=ignore_field_names,
         name_conflict_strategy=name_conflict_strategy,
+        include_dispersion_cards=False,
         upper=upper,
         limit=limit,
         fill_values=fill_values,
@@ -451,7 +452,7 @@ def _create_pipeline_product(
             #.distinct(pipeline_model.spectrum_pk) # Require distinct per spectrum_pk? if so also update order_by
             .join(spectrum_model, on=(pipeline_model.spectrum_pk == spectrum_model.spectrum_pk), attr="__spectrum")
             .switch(pipeline_model)
-            .join(Source, on=(pipeline_model.source_pk == Source.pk), attr="__source")
+            .join(Source, on=(pipeline_model.source_pk_id == Source.pk), attr="__source")
             .where(telescope_where & (Source.pk == source.pk))
         )
         if instrument_where is not None:
@@ -531,6 +532,9 @@ def _create_pipeline_products_for_all_sources(
     # Find sources that have results from this pipeline with EITHER the boss_spectrum_model OR the apogee_spectrum_model
     # TODO: I'm not 100% sure this will work. Should try it, particularly with `boss_where` and `apogee_where`
 
+    pipeline_model = resolve_model(pipeline_model)
+    pipeline = pipeline_model.__name__
+    
     q = (
         Source
         .select()

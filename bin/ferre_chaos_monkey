@@ -68,14 +68,15 @@ def get_stub(pwd):
 @click.command()
 @click.option("--executable", default="ferre.x", help="Name of FERRE executable")
 @click.option("--output-basename", default="parameter.output", help="Basename of output path to check")
-@click.option("--wait-for-spectrum", default=300, help="Minimum seconds before killing a process")
-@click.option("--wait-for-startup", default=600, help="Minimum for-startup time seconds before killing a process")
-@click.option("--wait-after-no-ferre", default=60, help="How many consecutive seconds to wait after no FERRE processes are found")
-@click.option("--wait-factor", default=10, help="How many (estimated) standard deviations to wait before killing a process")
+@click.option("--wait-for-spectrum", default=600, help="Minimum seconds before killing a process")
+@click.option("--wait-for-startup", default=900, help="Minimum for-startup time seconds before killing a process")
+@click.option("--wait-after-no-ferre", default=300, help="How many consecutive seconds to wait after no FERRE processes are found")
+@click.option("--wait-factor", default=5*12, help="How many (estimated) standard deviations to wait before killing a process (note ferre updates in batches of 12)")
 @click.option("--wait-iter", default=10, help="Minimum iterations before killing a process")
-@click.option("--interval", default=1, help="How many seconds to wait between iterations")
+@click.option("--interval", default=10, help="How many seconds to wait between iterations")
 @click.option("--warn-to-kill", default=120, help="Show warning if we plan to kill process within this number of seconds")
 @click.option("--max-attempts", default=10, help="Maximum number of times to retry a broken FERRE process")
+@click.option("--live", is_flag=True, help="Show live output")
 def ferre_chaos_monkey(
     executable,
     output_basename, 
@@ -87,254 +88,304 @@ def ferre_chaos_monkey(
     interval,
     warn_to_kill,
     max_attempts,
+    live,
 ):
-
-    states, lookup_stub_by_pid, last_pids, time_when_all_ferre_completed = ({}, {}, None, None)
+    
+    ignore_pids = []
+    states, lookup_stub_by_pid, last_pids, time_when_all_ferre_completed, removed_leftover = ({}, {}, None, None, False)
     for iteration in count(start=1):        
         try:
-            pids = subprocess.check_output(["pidof", executable]).decode("ascii").split()
-        except subprocess.CalledProcessError:
-            # No current FERRE executions.
-            time_when_all_ferre_completed = time_when_all_ferre_completed or time()            
-            
-            time_since_all_ferre_completed = time() - time_when_all_ferre_completed
-            if time_since_all_ferre_completed > wait_after_no_ferre:
-                click.echo(f"Waited {wait_after_no_ferre}s after no FERRE processes found. Exiting.")
-                break
-        
-            # TODO: check that all things are complete.
-            sleep(interval)
-            continue
-        else:
-            time_when_all_ferre_completed = None
-
-        # Check for any completed processes that we need to clean up after
-        if last_pids is not None:
-            completed_pids = set(last_pids).difference(pids)
-            if completed_pids:                
-                click.echo(f"completed_pids={completed_pids}")
-                # this process could be completed, or it might have just been restarted
-                # if it were restarted, then we would have the new pid
-                for pid in completed_pids:
-                    stub = lookup_stub_by_pid[pid]
-                    pwd = states[stub]["pwd"]
-                    # check for any new pid
-                    if states[stub]["pids"][-1] == pid:
-                        # seems we are done
-                        click.echo(f"completed {stub} with pid {pid}")
-                        try:
-                            os.unlink(f"{pwd}/wait_for_clean_up")
-                        except:
-                            None
+            # outer loop for protection
                 
-                        
-        last_pids = []
-        last_pids.extend(pids)                    
-
-        n_procs = len(pids)
-        queue = deque([], n_procs)
-
-        for pid in pids:
-            if pid not in lookup_stub_by_pid:
-                _, pwd = subprocess.check_output(["pwdx", f"{pid}"]).decode("ascii").strip().split()
-
-                n_obj = get_n_obj(pwd)
-                
-                stub = get_stub(pwd)
-                lookup_stub_by_pid[pid] = stub
-                states[stub] = {
-                    "pids": [pid],
-                    "n_obj": n_obj,
-                    "pwd": pwd
-                }
-        
-        for pid in pids:
-            header, row = (
-                subprocess.check_output(
-                    f"ps -p {pid} -o etimes,%mem,%cpu,cmd".split()
-                )
-                .decode("ascii")
-                .strip()
-                .split("\n")
-            )
-            t_elapsed, mem, cpu, executable, *process_args = row.split()
-            t_elapsed, mem, cpu = (int(t_elapsed), float(mem), float(cpu))
-        
-            if len(process_args) == 0:
-                # a defunct process
-                continue
-        
-            # todo: replace with a 'started' touch file
-            started = time() - t_elapsed            
-            
-            stub = lookup_stub_by_pid[pid]
-            
-            pwd = states[stub]["pwd"]
-            if process_args[-1].endswith(".nml"):
-                attempt = 1
-            else:
-                attempt = 1 + int(process_args[-1].split(".nml.")[-1])                
-            
-            n_obj_done, n_obj_this_execution, last_updated = get_n_obj_done(pwd, output_basename, started, include_previous=(attempt > 1))
-
-            last_updated = last_updated or np.nan
-            t_proc = last_updated - started
-            t_since_last_updated = time() - last_updated
             try:
-                seconds_per_spectrum = t_proc / n_obj_this_execution
-            except:
-                seconds_per_spectrum = np.nan
-            
-            times = [
-                wait_for_spectrum - t_since_last_updated,
-                (wait_factor * seconds_per_spectrum) - t_since_last_updated,                
-            ]
-            # If we have 0 spectra, no update, then wait `wait_ealpsed` 
-            if n_obj_done == 0 and not np.isfinite(last_updated):
-                times.append(wait_for_startup - t_elapsed)
-            
-            if not np.any(np.isfinite(times)):
-                t_until_kill = np.nan
-            else:
-                t_until_kill = np.nanmax(times)                
+                pids = subprocess.check_output(["pidof", executable]).decode("ascii").split()
+            except subprocess.CalledProcessError:
+                if time_when_all_ferre_completed is None:
+                    removed_leftover = False
+                    click.echo(f"FERRE executions complete. Will wait for {wait_after_no_ferre}s before exiting.")
+                # No current FERRE executions.
+                time_when_all_ferre_completed = time_when_all_ferre_completed or time()            
                 
-            if t_until_kill < warn_to_kill:
-                warn_text = f'[WARN] {t_until_kill:.0f}s to die'
-            else:
-                warn_text = ""
-            
-            n_obj = states[stub]["n_obj"]
-                            
-            queue.append(f"iter={iteration} n_procs={n_procs} pid={pid} attempt={attempt} cpu={cpu: >4.0f} mem={mem: >2.0f} n_obj={n_obj_done: >5.0f}/{n_obj: >5.0f} stub={stub: <30s} t_elapsed={t_elapsed: >4.0f} t_proc={t_proc: >4.0f} t_last_update={t_since_last_updated: >3.0f} sec/spec={seconds_per_spectrum: >3.1f} {warn_text}")
-
-            if (
-                (t_until_kill <= 0)
-                and
-                (
-                    (wait_iter is None)
-                or  (iteration > wait_iter)
-                )
-            ):
-                # Time to die.
-                subprocess.check_output(["touch", f"{pwd}/wait_for_clean_up"])
-                subprocess.check_output(["kill", "-9", f"{pid}"])     
+                # TODO: this part may not be necessary
+                time_since_all_ferre_completed = time() - time_when_all_ferre_completed
                 
-                if is_abundances_stage(pwd):
-                    input_list_path = f"{pwd}/{process_args[-1]}"
-                                                    
-                    try:
-                        v = int(input_list_path.split(".")[-1])
-                    except:
-                        v = 1
-                        new_input_list_path = f"{input_list_path}.{v}"
-
-                    else:
-                        v += 1
-                        original_input_list_path = ".".join(input_list_path.split(".")[:-1])
-                        new_input_list_path = f"{original_input_list_path}.{v}"
-
-                    if v > max_attempts:
-                        click.echo(f"reached max max_attempts for {pwd}")
+                if time_since_all_ferre_completed > 0.5 * wait_after_no_ferre and not removed_leftover:
+                    # Remove any leftover wait_for_cleanups
+                    for stub, state in states.items():
+                        try:
+                            os.unlink(f"{state['pwd']}/wait_for_clean_up")
+                        except:
+                            None             
                     
-                    else:       
-                        with open(input_list_path, "r") as fp:
-                            input_nml_paths = fp.readlines()
-                        
-                        for i, input_nml_path in enumerate(input_nml_paths):
-                            output_path = os.path.join(pwd, os.path.dirname(input_nml_path), "parameter.output")
-                            if os.path.exists(output_path):
-                                continue         
-                            else:
-                                break
+                    removed_leftover = True                   
+                
+                if time_since_all_ferre_completed > wait_after_no_ferre:
+                    click.echo(f"Waited {wait_after_no_ferre}s after no FERRE processes found. Exiting.")
+                    
+                    break
+            
+                sleep(interval)
+                continue
+            else:
+                time_when_all_ferre_completed = None
 
-                        with open(new_input_list_path, "w") as fp:
-                            fp.write("".join(input_nml_paths[max(0, i - 1):]))
-                                                
-                        proc = subprocess.Popen(
-                            ["ferre.x", "-l", os.path.basename(new_input_list_path)],
-                            stdout=open(f"{pwd}/stdout.{v}", "w"),
-                            stderr=open(f"{pwd}/stderr.{v}", "w"),
-                            cwd=pwd
+            # Check for any completed processes that we need to clean up after
+            if last_pids is not None:
+                completed_pids = set(last_pids).difference(pids)
+                if completed_pids:                
+                    click.echo(f"completed_pids={completed_pids}")
+                    # this process could be completed, or it might have just been restarted
+                    # if it were restarted, then we would have the new pid
+                    for pid in completed_pids:
+                        try:
+                            stub = lookup_stub_by_pid[pid]
+                        except:
+                            # we don't know what this pid is
+                            continue
+                        else:
+                            pwd = states[stub]["pwd"]
+                            # check for any new pid
+                            if states[stub]["pids"][-1] == pid:
+                                # seems we are done
+                                click.echo(f"completed {stub} with pid {pid}")
+                                try:
+                                    os.unlink(f"{pwd}/wait_for_clean_up")
+                                except:
+                                    None
+                    
+                            
+            last_pids = []
+            last_pids.extend(pids)                    
+
+            n_procs = len(pids)
+            queue = deque([], n_procs)
+            
+            for pid in pids:     
+                if pid in ignore_pids:
+                    continue
+                
+                try:
+                    header, row = (
+                        subprocess.check_output(
+                            f"ps -p {pid} -o etimes,%mem,%cpu,cmd".split()
                         )
-                        lookup_stub_by_pid[proc.pid] = stub
-                        states[stub]["pids"].append(proc.pid)
+                        .decode("ascii")
+                        .strip()
+                        .split("\n")
+                    )
+                except subprocess.CalledProcessError:
+                    # Process is gone.
+                    continue
+                
+                t_elapsed, mem, cpu, executable, *process_args = row.split()
+                t_elapsed, mem, cpu = (int(t_elapsed), float(mem), float(cpu))
+                
+                if len(process_args) == 0 or not (process_args[-1].startswith("input.nml") or process_args[-1].startswith("input_list.nml")):
+                    # a defunct process or an interpolation thing or something,.. ignore it.
+                    ignore_pids.append(pid)
+                    continue
+            
+                if pid not in lookup_stub_by_pid:
+                    _, pwd = subprocess.check_output(["pwdx", f"{pid}"]).decode("ascii").strip().split()
 
-                else:                                         
-                    input_nml_path = process_args[-1]
+                    n_obj = get_n_obj(pwd)
                     
-                    if input_nml_path.endswith(".nml"):
-                        restart_number, existing_suffix = (1, "")
-                    else:
-                        existing_suffix = "." + input_nml_path.split(".nml.")[1]
-                        restart_number = 1 + int(existing_suffix)
+                    stub = get_stub(pwd)
+                    lookup_stub_by_pid[pid] = stub
+                    states[stub] = {
+                        "pids": [pid],
+                        "n_obj": n_obj,
+                        "pwd": pwd
+                    }           
 
-                    if restart_number > max_attempts:
-                        click.echo(f"reached max max_attempts for {pwd}")
-                    else:
-                        # Just get the input/output names from this execution.
-                        input_names = np.loadtxt(f"{pwd}/parameter.input{existing_suffix}", usecols=(0, ), dtype=str)
-                        output_names = np.loadtxt(f"{pwd}/parameter.output{existing_suffix}", usecols=(0, ), dtype=str)
+                # todo: replace with a 'started' touch file
+                started = time() - t_elapsed            
+                
+                stub = lookup_stub_by_pid[pid]
+                
+                pwd = states[stub]["pwd"]
+                if process_args[-1].endswith(".nml"):
+                    attempt = 1
+                else:
+                    attempt = 1 + int(process_args[-1].split(".nml.")[-1])                
+                
+                n_obj_done, n_obj_this_execution, last_updated = get_n_obj_done(pwd, output_basename, started, include_previous=(attempt > 1))
+
+                last_updated = last_updated or np.nan
+                t_proc = last_updated - started
+                t_since_last_updated = time() - last_updated
+                try:
+                    seconds_per_spectrum = t_proc / n_obj_this_execution
+                except:
+                    seconds_per_spectrum = np.nan
+                
+                times = [
+                    (wait_factor * seconds_per_spectrum) - t_since_last_updated,                
+                ]
+                if n_obj_this_execution > 0:
+                    times.append(wait_for_spectrum - t_since_last_updated)
+                    
+                # If we have 0 spectra, no update, then wait `wait_ealpsed` 
+                if n_obj_this_execution == 0 and not np.isfinite(last_updated):
+                    times.append(wait_for_startup - t_elapsed)
+                
+                if not np.any(np.isfinite(times)):
+                    t_until_kill = np.nan
+                else:
+                    t_until_kill = np.nanmax(times)                
+                    
+                if t_until_kill < warn_to_kill:
+                    warn_text = f'[WARN] {t_until_kill:.0f}s to die'
+                else:
+                    warn_text = ""
+                
+                n_obj = states[stub]["n_obj"]
+                                
+                queue.append(f"iter={iteration} n_procs={n_procs} pid={pid} attempt={attempt} cpu={cpu: >4.0f} mem={mem: >2.0f} n_obj={n_obj_done: >5.0f}/{n_obj: >5.0f} stub={stub: <15s} t_elapsed={t_elapsed: >4.0f} t_proc={t_proc: >4.0f} t_last_update={t_since_last_updated: >3.0f} sec/spec={seconds_per_spectrum: >3.1f} {warn_text}")
+
+                if (
+                    (t_until_kill <= 0)
+                    and
+                    (
+                        (wait_iter is None)
+                    or  (iteration > wait_iter)
+                    )
+                ):
+                    # Time to die.
+                    subprocess.check_output(["touch", f"{pwd}/wait_for_clean_up"])
+                    subprocess.check_output(["kill", "-9", f"{pid}"])     
+                    
+                    if is_abundances_stage(pwd):
+                        input_list_path = f"{pwd}/{process_args[-1]}"
+                                                        
+                        try:
+                            v = int(input_list_path.split(".")[-1])
+                        except:
+                            v = 1
+                            new_input_list_path = f"{input_list_path}.{v}"
+
+                        else:
+                            v += 1
+                            original_input_list_path = ".".join(input_list_path.split(".")[:-1])
+                            new_input_list_path = f"{original_input_list_path}.{v}"
+
+                        if v > max_attempts:
+                            click.echo(f"reached max max_attempts for {pwd}")
                         
-                        incomplete_names = np.setdiff1d(input_names, output_names)
-
-                        intersect, input_indices, incomplete_indices = np.intersect1d(input_names, incomplete_names, return_indices=True)
-
-                        # Only restart the process if the number of spectra is more than the number of threads
-                        with open(f"{pwd}/input.nml", "r") as fp:
-                            input_nml_contents = fp.readlines()
-                        
-                        nthreads = -1
-                        for line in input_nml_contents:
-                            if line.startswith("NTHREADS"):
-                                nthreads = int(line.split("=")[-1])
-                                break
+                        else:       
+                            with open(input_list_path, "r") as fp:
+                                input_nml_paths = fp.readlines()
                             
-                        if len(input_indices) < nthreads:
-                            click.echo(f"not enough incomplete spectra to restart {pid} in {pwd}")
+                            for i, input_nml_path in enumerate(input_nml_paths):
+                                output_path = os.path.join(pwd, os.path.dirname(input_nml_path), "parameter.output")
+                                if os.path.exists(output_path):
+                                    continue         
+                                else:
+                                    break
 
-                        else:                                
-                            # Randomize
-                            np.random.shuffle(input_indices)
-
-                            # Create a new parameter.input file, new flux.input file, and new e_flux.input file.
-                            for prefix in ("flux.input", "e_flux.input", "parameter.input"):
-                                with open(f"{pwd}/{prefix}{existing_suffix}", "r") as fp:
-                                    content = fp.readlines()
-                                    new_content = [content[index] for index in input_indices]
-                                    with open(f"{pwd}/{prefix}.{restart_number}", "w") as fp_new:
-                                        fp_new.write("".join(new_content))
-                                
-                            with open(f"{pwd}/input.nml", "r") as fp:
-                                new_content = []
-                                for line in fp.readlines():
-                                    if line.startswith(("PFILE", "ERFILE", "FFILE", "OPFILE", "OFFILE", "SFFILE")):
-                                        key, value = line.split(" = ")
-                                        value = value.strip("'\n")
-                                        new_content.append(f"{key} = '{value}.{restart_number}'\n")
-                                    else:
-                                        new_content.append(line)
-                                
-                                with open(f"{pwd}/input.nml.{restart_number}", "w") as fp_new:
-                                    fp_new.write("".join(new_content))                                
-
-                            click.echo(f"retrying process {pid} in {pwd} as restart number {restart_number}")
-
-                            # Re-start the process.
+                            with open(new_input_list_path, "w") as fp:
+                                fp.write("".join(input_nml_paths[max(0, i - 1):]))
+                                                    
                             proc = subprocess.Popen(
-                                ["ferre.x", f"input.nml.{restart_number}"],
-                                stdout=open(f"{pwd}/stdout.{restart_number}", "w"),
-                                stderr=open(f"{pwd}/stderr.{restart_number}", "w"),
+                                ["ferre.x", "-l", os.path.basename(new_input_list_path)],
+                                stdout=open(f"{pwd}/stdout.{v}", "w"),
+                                stderr=open(f"{pwd}/stderr.{v}", "w"),
                                 cwd=pwd
                             )
                             lookup_stub_by_pid[proc.pid] = stub
                             states[stub]["pids"].append(proc.pid)
-    
-        for item in queue:
-            sys.stdout.write(f"{item}\n")
-            
-        sleep(interval)
-        for _ in range(len(queue)):
-            sys.stdout.write("\x1b[1A\x1b[2K")
+
+                    else:                                         
+                        input_nml_path = process_args[-1]
+                        
+                        if input_nml_path.endswith(".nml"):
+                            restart_number, existing_suffix = (1, "")
+                        else:
+                            num = input_nml_path.split(".nml.")[1]
+                            existing_suffix = "." + num
+                            restart_number = 1 + int(num)
+
+                        if restart_number > max_attempts:
+                            click.echo(f"reached max max_attempts for {pwd}")
+                        else:
+                            # Just get the input/output names from this execution.
+                            input_names = np.loadtxt(f"{pwd}/parameter.input{existing_suffix}", usecols=(0, ), dtype=str)
+                            try:
+                                output_names = np.loadtxt(f"{pwd}/parameter.output{existing_suffix}", usecols=(0, ), dtype=str)
+                            except:
+                                output_names = []
+                            
+                            incomplete_names = np.setdiff1d(input_names, output_names)
+
+                            intersect, input_indices, incomplete_indices = np.intersect1d(input_names, incomplete_names, return_indices=True)
+
+                            # Only restart the process if the number of spectra is more than the number of threads
+                            with open(f"{pwd}/input.nml", "r") as fp:
+                                input_nml_contents = fp.readlines()
+                            
+                            nthreads = -1
+                            for line in input_nml_contents:
+                                if line.startswith("NTHREADS"):
+                                    nthreads = int(line.split("=")[-1])
+                                    break
+                                
+                            if len(input_indices) < nthreads:
+                                click.echo(f"not enough incomplete spectra to restart {pid} in {pwd}")
+
+                            else:                                
+                                # Randomize
+                                np.random.shuffle(input_indices)
+
+                                # Create a new parameter.input file, new flux.input file, and new e_flux.input file.
+                                for prefix in ("flux.input", "e_flux.input", "parameter.input"):
+                                    with open(f"{pwd}/{prefix}{existing_suffix}", "r") as fp:
+                                        content = fp.readlines()
+                                        new_content = [content[index] for index in input_indices]
+                                        with open(f"{pwd}/{prefix}.{restart_number}", "w") as fp_new:
+                                            fp_new.write("".join(new_content))
+                                    
+                                with open(f"{pwd}/input.nml", "r") as fp:
+                                    new_content = []
+                                    for line in fp.readlines():
+                                        if line.startswith(("PFILE", "ERFILE", "FFILE", "OPFILE", "OFFILE", "SFFILE")):
+                                            key, value = line.split(" = ")
+                                            value = value.strip("'\n")
+                                            new_content.append(f"{key} = '{value}.{restart_number}'\n")
+                                        else:
+                                            new_content.append(line)
+                                    
+                                    with open(f"{pwd}/input.nml.{restart_number}", "w") as fp_new:
+                                        fp_new.write("".join(new_content))                                
+
+                                click.echo(f"retrying process {pid} in {pwd} as restart number {restart_number}")
+
+                                # Re-start the process.
+                                proc = subprocess.Popen(
+                                    ["ferre.x", f"input.nml.{restart_number}"],
+                                    stdout=open(f"{pwd}/stdout.{restart_number}", "w"),
+                                    stderr=open(f"{pwd}/stderr.{restart_number}", "w"),
+                                    cwd=pwd
+                                )
+                                lookup_stub_by_pid[proc.pid] = stub
+                                states[stub]["pids"].append(proc.pid)
+        
+            if live:
+                for item in queue:
+                    sys.stdout.write(f"{item}\n")
+                    
+                sleep(interval)
+                for _ in range(len(queue)):
+                    sys.stdout.write("\x1b[1A\x1b[2K")
+                    
+            else:
+                for item in queue:
+                    click.echo(item)
+                sleep(interval)
+                
+        # catch exception and log it:
+        except Exception as e:
+            click.echo(f"Error: {e}")
+            continue
     
     click.echo("Fin")
 
