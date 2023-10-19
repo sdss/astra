@@ -1,13 +1,15 @@
 from typing import Iterable, Optional
 from astra import task
 from astra.models.astronn import AstroNN
-from astra.pipelines.astronn.utils import read_model
+#from astra.pipelines.astronn.utils import read_model # for TensorFlow version
+from astra.pipelines.astronn.network import read_model # for PyTorch version
 from astra.pipelines.astronn.base import _prepare_data, _worker, parallel_batch_read, _inference
 
 @task
 def astronn(
     spectra: Iterable,
-    model_path: str = "$MWM_ASTRA/pipelines/astronn/astroNN_retrain_2_shi",
+    #model_path: str = "$MWM_ASTRA/pipelines/astronn/astroNN_retrain_2_shi",     # for TensorFlow version
+    model_path: str = "$MWM_ASTRA/pipelines/astronn/astroNN_model_parameter.pt", # for PyTorch version
     parallel: Optional[bool] = True,
     batch_size: Optional[int] = 100,
     cpu_count: Optional[int] = 4,

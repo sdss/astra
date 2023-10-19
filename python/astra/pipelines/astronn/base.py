@@ -106,7 +106,8 @@ def _inference(model, batch):
         except ValueError: # some weird thing with fast_mc_inference_v2_internal
             raise
 
-        results = np.hstack([pred, pred_err['total']])
+        #results = np.hstack([pred, pred_err['total']]) # for TensorFlow version 
+        results = np.hstack([pred, pred_err['total']]) # for PyTorch version
         
         assert results.shape == (len(batch), 45)
             
