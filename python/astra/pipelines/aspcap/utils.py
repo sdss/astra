@@ -50,6 +50,7 @@ ABUNDANCE_CONTROLS = {
     },
     "Ce": {
         "INDV_LABEL": ("METALS",),
+        "TIES": [("C", 0, -1), ("N", 0, -1), ("O Mg Si S Ca Ti", 0, -1)],  
     },
     #CI
     "C_1": {
@@ -59,7 +60,7 @@ ABUNDANCE_CONTROLS = {
         "INDV_LABEL": ("C",),
     },
     "C_12_13": {
-        "INDV_LABEL": ("METALS", ),
+        "INDV_LABEL": ("C", ),
     }, 
     "CN": {
         "INDV_LABEL": (

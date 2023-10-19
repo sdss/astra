@@ -88,8 +88,8 @@ def savitzky_golay(y, window_size, order, deriv=0):
        Cambridge University Press ISBN-13: 9780521880688
     """
     try:
-        window_size = np.abs(np.int(window_size))
-        order = np.abs(np.int(order))
+        window_size = np.abs(int(window_size))
+        order = np.abs(int(order))
     except ValueError:
         raise ValueError("window_size and order have to be of type int")
     if window_size % 2 != 1 or window_size < 1:
@@ -235,7 +235,7 @@ def sgolay2d(z, window_size, order, derivative=None):
     exps = [(k - n, n) for k in range(order + 1) for n in range(k + 1)]
 
     # coordinates of points
-    ind = np.arange(-half_size, half_size + 1, dtype=np.float)
+    ind = np.arange(-half_size, half_size + 1, dtype=float)
     dx = np.repeat(ind, window_size)
     dy = np.tile(ind, [window_size, 1]).reshape(
         window_size**2,
@@ -581,7 +581,7 @@ class SmoothSpline(PPform):
         # ndy = y.ndim
         szy = y.shape
 
-        nd = np.int(prod(szy[:-1]))  ## modified by Bo Zhang
+        nd = int(prod(szy[:-1]))  ## modified by Bo Zhang
         ny = szy[-1]
 
         if n < 2:
@@ -742,9 +742,9 @@ def slopes(x, y, method="parabola", tension=0, monotone=False):
                 Cubic Hermite spline
 
     """
-    x = np.asarray(x, np.float_)
-    y = np.asarray(y, np.float_)
-    yp = np.zeros(y.shape, np.float_)
+    x = np.asarray(x, float_)
+    y = np.asarray(y, float_)
+    yp = np.zeros(y.shape, float_)
 
     dx = x[1:] - x[:-1]
     # Compute the slopes of the secant lines between successive points
@@ -838,18 +838,18 @@ def stineman_interp(xi, x, y, yp=None):
     """
 
     # Cast key variables as float.
-    x = np.asarray(x, np.float_)
-    y = np.asarray(y, np.float_)
+    x = np.asarray(x, float_)
+    y = np.asarray(y, float_)
     assert x.shape == y.shape
     # N = len(y)
 
     if yp is None:
         yp = slopes(x, y)
     else:
-        yp = np.asarray(yp, np.float_)
+        yp = np.asarray(yp, float_)
 
-    xi = np.asarray(xi, np.float_)
-    # yi = np.zeros(xi.shape, np.float_)
+    xi = np.asarray(xi, float_)
+    # yi = np.zeros(xi.shape, float_)
 
     # calculate linear slopes
     dx = x[1:] - x[:-1]
@@ -885,7 +885,7 @@ def stineman_interp(xi, x, y, yp=None):
     dy1mdy2 = np.where(dy1dy2, dy1 - dy2, np.inf)
     dy1pdy2 = np.where(dy1dy2, dy1 + dy2, np.inf)
     yi = yo + dy1dy2 * np.choose(
-        np.array(np.sign(dy1dy2), np.int32) + 1,
+        np.array(np.sign(dy1dy2), int32) + 1,
         ((2 * xi - xidx - xidxp1) / ((dy1mdy2) * (xidxp1 - xidx)), 0.0, 1 / (dy1pdy2)),
     )
     return yi
@@ -984,12 +984,12 @@ class StinemanInterp(object):
     def __init__(self, x, y, yp=None, method="parabola", monotone=False):
         if yp is None:
             yp = slopes(x, y, method, monotone=monotone)
-        self.x = np.asarray(x, np.float_)
-        self.y = np.asarray(y, np.float_)
-        self.yp = np.asarray(yp, np.float_)
+        self.x = np.asarray(x, float_)
+        self.y = np.asarray(y, float_)
+        self.yp = np.asarray(yp, float_)
 
     def __call__(self, xi):
-        xi = np.asarray(xi, np.float_)
+        xi = np.asarray(xi, float_)
         x = self.x
         y = self.y
         yp = self.yp
@@ -1028,7 +1028,7 @@ class StinemanInterp(object):
         dy1mdy2 = np.where(dy1dy2, dy1 - dy2, np.inf)
         dy1pdy2 = np.where(dy1dy2, dy1 + dy2, np.inf)
         yi = yo + dy1dy2 * np.choose(
-            np.array(np.sign(dy1dy2), np.int32) + 1,
+            np.array(np.sign(dy1dy2), int32) + 1,
             (
                 (2 * xi - xidx - xidxp1) / ((dy1mdy2) * (xidxp1 - xidx)),
                 0.0,

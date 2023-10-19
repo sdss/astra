@@ -41,7 +41,7 @@ class Source(BaseModel):
     tic_v8_id = BigIntegerField(null=True, help_text="TESS Input Catalog (v8) identifier")
     healpix = IntegerField(null=True, help_text="HEALPix (128 side)")
     
-    #> Targeting provenance 
+    #> Targeting Provenance 
     carton_0 = TextField(default="", help_text="Highest priority carton name")
     lead = TextField(null=True, help_text="Lead catalog used for cross-match")
     version_id = IntegerField(null=True, help_text="SDSS catalog version for targeting")
@@ -426,6 +426,16 @@ class Source(BaseModel):
     flag_glimpse_4_sources_within_1_and_1p5_arcsecond = csf.flag(2**4, "4 sources in GLIMPSE within 1\" and 1.5\" of the source")
     flag_glimpse_5_sources_within_0p5_and_1_arcsecond = csf.flag(2**5, "5 sources in GLIMPSE within 0.5\" and 1.0\" of the source")
     flag_glimpse_6_sources_within_0p5_arcsecond = csf.flag(2**6, "6 sources in GLIMPSE within 0.5\" of this source")
+
+    #> IRFM Temperatures (Casagrande et al. 2010)
+    irfm_teff = FloatField(null=True, help_text=Glossary.teff)
+    e_irfm_teff = FloatField(null=True, help_text=Glossary.e_teff)
+    irfm_teff_flags = BitField(default=0, help_text="IRFM temperature flags")
+    flag_out_of_v_k_bounds = irfm_teff_flags.flag(2**0, "Out of V-Ks bounds (0.78, 3.15)")
+    flag_extrapolated_v_mag = irfm_teff_flags.flag(2**1, "Synthetic V magnitude is extrapolated")
+    flag_poor_quality_k_mag = irfm_teff_flags.flag(2**2, "Poor quality Ks magnitude")
+    flag_ebv_used_is_upper_limit = irfm_teff_flags.flag(2**3, "E(B-V) used is an upper limit")
+    
 
     #> Gaia XP Stellar Parameters (Zhang, Green & Rix 2023)
     zgr_teff = FloatField(null=True, help_text=Glossary.teff)

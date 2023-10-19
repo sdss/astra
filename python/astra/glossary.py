@@ -194,6 +194,8 @@ class Glossary(BaseGlossary):
     ivar = "Inverse variance of flux values"
     wresl = "Spectral resolution [Angstrom]"
     pixel_flags = "Pixel-level quality flags (see documentation)"
+    model_flux = "Best-fit model flux"
+    continuum = "Best-fit continuum flux"
 
 
     spectrum_flags = "Data reduction pipeline flags for this spectrum"

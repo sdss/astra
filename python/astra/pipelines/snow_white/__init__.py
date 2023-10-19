@@ -6,26 +6,44 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.io import fits
-from typing import Iterable
+from typing import Iterable, Optional
 
 
 from astra import __version__, task
 from astra.utils import log, expand_path
-
+from peewee import JOIN
+from astra.models.boss import BossVisitSpectrum
+from astra.models.source import Source
+from astra.models.spectrum import SpectrumMixin
 from astra.models.snow_white import SnowWhite
-from astra.pipelines.snow_white import get_line_info_v3, fitting_scripts
+
 
 PIPELINE_DATA_DIR = expand_path(f"$MWM_ASTRA/pipelines/snow_white")
 
 
 @task
-def snow_white(spectra, plot=False) -> Iterable[SnowWhite]:
+def snow_white(
+    spectra: Optional[Iterable[SpectrumMixin]] = (
+        BossVisitSpectrum
+        .select()
+        .join(Source)
+        .switch(BossVisitSpectrum)
+        .join(SnowWhite, JOIN.LEFT_OUTER, on=(SnowWhite.spectrum_pk == BossVisitSpectrum.spectrum_pk))
+        .where(
+            Source.assigned_to_program("mwm_wd")
+        &   SnowWhite.spectrum_pk.is_null()
+        )        
+    ), 
+    plot=True
+) -> Iterable[SnowWhite]:
     """
     Classify white dwarf types based on their spectra, and fit stellar parameters to DA-type white dwarfs.
 
     :param spectra:
         Input spectra.
     """
+    
+    from astra.pipelines.snow_white import get_line_info_v3, fitting_scripts
 
     with open(os.path.join(PIPELINE_DATA_DIR, 'training_file_LL'), 'rb') as f:
         kf = pickle._load(f, fix_imports=True)
@@ -38,16 +56,11 @@ def snow_white(spectra, plot=False) -> Iterable[SnowWhite]:
         emu = pickle.load(pickle_file)
 
     for spectrum in spectra:
-        if "mwm_wd" not in set(spectrum.source.sdss5_cartons["alt_name"]):
-            # Skip over things that are not in a WD carton
-            continue
-
         try:                
             labels = get_line_info_v3.line_info(spectrum.wavelength, spectrum.flux, spectrum.e_flux)
-
             predictions = kf.predict(labels.reshape(1, -1))
             probs = kf.predict_proba(labels.reshape(1, -1))
-
+            
             first = probs[0][kf.classes_==predictions[0]]
             if first >= 0.4:
                 classification = predictions[0]
@@ -244,6 +257,7 @@ def snow_white(spectra, plot=False) -> Iterable[SnowWhite]:
                 # resample
                 resampled_model_flux = interpolate.interp1d(model_wavelength, model_flux, kind='linear', bounds_error=False)(spectrum.wavelength)
 
+                os.makedirs(os.path.dirname(result.absolute_path), exist_ok=True)
                 fits.HDUList([
                     fits.PrimaryHDU(), 
                     fits.ImageHDU(resampled_model_flux)

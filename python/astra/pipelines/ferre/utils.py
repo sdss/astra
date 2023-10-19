@@ -421,7 +421,7 @@ def validate_ferre_control_keywords(
     kwds = {
         "synthfile(1)": header_path,
         "pfile": "parameter.input",
-        "wfile": "wavelength.input",
+        #"wfile": "wavelength.input",
         "ffile": "flux.input",
         "erfile": "e_flux.input",
         "opfile": "parameter.output",
@@ -530,44 +530,96 @@ def format_ferre_control_keywords(ferre_kwds: dict, n_obj=None) -> str:
         "nov",
         "indv",
         "synthfile(1)",
+        "filterfile",        
         "pfile",
-        "ffile",
+        "offile",
         "erfile",
         "opfile",
-        "offile",
+        "ffile",        
         "obscont",
-        "inter",
+        "sffile",
         "errbar",
-        "nruns",
         "init",
-        #"indini",
-        "winter",
         "algor",
-        "lsf",
+        "nruns",
+        "ntie",
+        #"typetie",
+        #"indtie(1)",
+        #"ttie0(1)",
+        #"ttie(1,6)",
+        #"indtie(2)",
+        #"ttie0(2)",
+        #"ttie(2,6)",
+        #"indtie(3)",
+        #"ttie0(3)",
+        #"ttie(3,6)",
         "nthreads",
         "covprint",
+        "pcaproject",
         "pcachi",
+        "inter",
         "f_format",
         "f_access",
         "f_sort",
     )
 
-    contents = "&LISTA\n"
-    if n_obj is not None:
-        contents += f"NOBJ = {n_obj}\n"
-    remaining_keys = set(ferre_kwds).difference(preferred_order)
-    keys = list(preferred_order) + list(remaining_keys)
+    contents = " &LISTA\n"
+    #if n_obj is not None:
+    #    contents += f" NOBJ = {n_obj}\n"
+    remaining_keys = set(map(str.lower, ferre_kwds)).difference(preferred_order)
+    keys = list(preferred_order)
+    for k in remaining_keys:
+        if k.upper().startswith("INDTIE") or k.upper().startswith("TTIE") or k.upper() == "TYPETIE":
+            continue
+        keys.append(k)
+
 
     for key in keys:
-        if key in ferre_kwds:
-            value = ferre_kwds[key]
-            if isinstance(value, str) and key not in ("indv", "indini"):
+        if key in ferre_kwds or key.upper() in ferre_kwds:
+            # TODO: put the tties in as lower case in ASPCAP/abundances.py then fix this shit
+            try:
+                value = ferre_kwds[key]
+            except:
+                value = ferre_kwds[key.upper()]
+                
+            if isinstance(value, str) and key.lower() not in ("indv", "indini"):
                 value = f"'{value}'"
             else:
+                #if key.lower() in ("algor", "nruns", "ntie", "nov"):
+                #    value = f" {value}"
+                #else:
                 value = f"{value}"
-            contents += f"{key.upper()} = {value}\n"
+            
+            #if "filterfile" in keys or "FILTERFILE" in keys and key.upper() == "SYNTHFILE(1)":
+            #    value = value.replace("/uufs/chpc.utah.edu/common/home/sdss50/dr17/apogee/spectro/", "")                
+            
+            #if key.lower() == "filterfile":
+            #    value = f"'{os.path.basename(ferre_kwds[key])}'"
+            # represent TTIE as floats
+            #if key.lower().startswith("ttie"):
+            #    value += "."
+            
+            contents += f" {key.upper()} = {value}\n"            
+            #if key.lower() == "obscont":
+            #    contents += f" REJECTCONT = 0.300000\n"
+                
+            if key.lower() == "ntie":
+                # do all the ties now.
+                contents += f" TYPETIE = {ferre_kwds['TYPETIE']}\n"
+                for i in range(1, 1 + int(ferre_kwds["NTIE"])):
+                    v = ferre_kwds[f'INDTIE({i})']
+                    contents += f" INDTIE({i}) = {v}\n"
+                    ttie = ferre_kwds[f"TTIE0({i})"]
+                    contents += f" TTIE0({i}) = {ttie:.0f}.\n"
+                    others = []
+                    for k in ferre_kwds:
+                        if k.startswith(f"TTIE({i},"):
+                            others.append(k)
+                    others = sorted(others)
+                    for k in others:
+                        contents += f" {k.upper()} = {ferre_kwds[k]}.\n"                    
 
-    contents += "/\n"
+    contents += " /\n" # without at least one \n, FERRE won't run
     return contents
 
 
@@ -1022,7 +1074,7 @@ def read_control_file(path):
     with open(path, "r") as fp:
         for line in fp.readlines():
             for route, key in routes:
-                if line.startswith(route):
+                if line.strip().startswith(route):
                     meta[key] = line.split("=")[1].strip(" \n'")
 
     return meta

@@ -40,6 +40,7 @@ def line_info(wave,flux,err):
     wave_a=np.array(xdata)
     flux_a=np.array(ydata)
     err_a=np.array(edata)
+    err_a[~np.isfinite(err_a)] = 1e3
 
     #define fauter lists
     feature_list=['DA.features', 'DB.features', 'DQ.features', 'DZ.features', 'WDMS.features','Pec.features','hDQ.features']

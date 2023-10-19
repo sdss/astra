@@ -194,8 +194,8 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
     Execute a task on one or many spectra.
     """
     # Resolve spectrum ids.
-    if len(spectra) == 0:
-        raise click.UsageError("No spectral model or spectrum identifiers given.")
+    #if len(spectra) == 0:
+    #    raise click.UsageError("No spectral model or spectrum identifiers given.")
 
     import os
     import sys
@@ -256,6 +256,7 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
             if len(_spectra) > 1:
                 raise NotImplementedError("Only one spectrum model allowed for now. This can be changed.")
             
+            # If the first item has a default, then don't do anything special.
             model_name, = _spectra
             spectrum_model = getattr(models, model_name)
             try:
@@ -286,7 +287,9 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
         else:
             total = len(spectrum_pks)
 
-        if total == 0:
+        argspec = getfullargspec(f)
+
+        if len(argspec.defaults) != len(argspec.args) and total == 0:
             # Nothing to do.
             log.info(f"No spectra to process.")
             sys.exit(0)
@@ -355,36 +358,42 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
         
         model_name, = _spectra
         spectrum_model = getattr(models, model_name)
-        try:
-            output_model = getfullargspec(f).annotations["return"].__args__[0]
-        except:
-            raise ValueError(f"Cannot infer output model for task {f}, is it missing a type annotation?")
+        argspec = getfullargspec(f)
 
-        # Query for spectra that does not have a result in this output model
-        iterable = (
-            spectrum_model
-            .select(
-                spectrum_model,
-                Source
-            )
-            .join(
-                output_model,
-                JOIN.LEFT_OUTER,
-                on=(spectrum_model.spectrum_pk == output_model.spectrum_pk)
-            )
-            .switch(spectrum_model)
-            .join(Source, attr="source") # convenience to pre-fetch .source attribute on everything
-            .where(output_model.spectrum_pk.is_null())
-        )
-        if page:
-            iterable = (
-                iterable
-                .paginate(page, limit)
-            )
+        if len(argspec.defaults) == len(argspec.args):
+            # It has a default for everything, so give nothing
+            iterable = None
         else:
-            iterable = iterable.limit(limit)
-        total = limit or iterable.count()
-    
+            try:
+                output_model = argspec.annotations["return"].__args__[0]
+            except:
+                raise ValueError(f"Cannot infer output model for task {f}, is it missing a type annotation?")
+
+            # Query for spectra that does not have a result in this output model
+            iterable = (
+                spectrum_model
+                .select(
+                    spectrum_model,
+                    Source
+                )
+                .join(
+                    output_model,
+                    JOIN.LEFT_OUTER,
+                    on=(spectrum_model.spectrum_pk == output_model.spectrum_pk)
+                )
+                .switch(spectrum_model)
+                .join(Source, attr="source") # convenience to pre-fetch .source attribute on everything
+                .where(output_model.spectrum_pk.is_null())
+            )
+            if page:
+                iterable = (
+                    iterable
+                    .paginate(page, limit)
+                )
+            else:
+                iterable = iterable.limit(limit)
+            total = limit or iterable.count()
+        
     else:            
         if not spectrum_pks:
             spectrum_pks.extend(kwargs.pop("spectra", []))
@@ -392,8 +401,12 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
             if "spectra" in kwargs:
                 raise ValueError("`spectra` given in `kwargs_path` and in command line")
     
-        # Figure out which model it is
-        if spectrum_pks:                
+        argspec = getfullargspec(f)
+
+        if len(argspec.defaults) == len(argspec.args):
+            # It has a default for everything, so give nothing
+            iterable = None
+        elif spectrum_pks:                
             example = Spectrum.get(spectrum_pks[0])
             spectrum_model = None
             for expr, field in example.dependencies():
@@ -429,8 +442,13 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
         else:
             raise click.UsageError("Could not resolve spectrum identifiers.")
 
-    for result in tqdm(f(iterable, **kwargs), total=total, unit=" spectra"):
-        None
+    if iterable is None:
+        for result in tqdm(f(**kwargs), total=0, unit=" spectra"):
+            None
+    
+    else:
+        for result in tqdm(f(iterable, **kwargs), total=total, unit=" spectra"):
+            None
     
     return None
 

@@ -253,12 +253,19 @@ def plan_abundances(
     mask = get_apogee_pixel_mask()
     continuum_cache, continuum_cache_names = ({}, {})
 
-
+    shown_BA_lsfcombo5_warning = False
     done, group_task_kwds, pre_computed_continuum = ([], {}, {})
     for result in tqdm(best_results.values(), total=len(best_results), desc="Planning for abundances"):
         if result.spectrum_pk in done:
             # We have a more recent FerreStellarParameters result which we will use instead of this one.
             log.warning(f"Ignoring stellar parameter result {result} because we have a more recent result for this spectrum_pk={result.spectrum_pk}")
+            continue
+        
+        # TODO: make a better check for this
+        if result.header_path.find("BA_lsfcombo5") > 0:
+            if not shown_BA_lsfcombo5_warning:
+                log.warning(f"Not doing abundances on BA_lsfcombo5 grid")
+                shown_BA_lsfcombo5_warning = True
             continue
 
         done.append(result.spectrum_pk)

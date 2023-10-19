@@ -1,7 +1,8 @@
 from peewee import AutoField
 from astra.models.base import BaseModel
 from astra.models.fields import BitField
-
+from functools import cached_property
+import numpy as np
 
 class Spectrum(BaseModel):
 
@@ -24,7 +25,60 @@ class Spectrum(BaseModel):
                 
         raise self.model.DoesNotExist(f"Cannot resolve spectrum with identifier {self.pk}")
 
-                
+    @cached_property
+    def ref(self):
+        return self.resolve()
+    
+    def __getattr__(self, attr):
+        # Resolve to reference attribute
+        return getattr(self.ref, attr)
+    
+    def __repr__(self):
+        return f"<Spectrum pointer -> ({self.ref.__repr__().strip('<>')})>"
+    
+    
+    def plot(self, figsize=(8, 3), ylim_percentile=(1, 99)):
+        
+        import matplotlib.pyplot as plt        
+        # to gracefully handle apVisits
+        x = np.atleast_2d(self.wavelength)
+        y = np.atleast_2d(self.flux) 
+        try:
+            y_err = np.atleast_2d(self.e_flux)
+        except:
+            try:
+                y_err = np.atleast_2d(self.ivar)**-0.5
+            except:
+                y_err = np.nan * np.ones_like(self.flux)
+        
+        N, P = y.shape
+        
+        fig, ax = plt.subplots(figsize=figsize)
+        for i in range(N):
+            ax.plot(
+                x[i],
+                y[i],
+                c='k',
+                label=f"spectrum_pk={self.pk}" if i == 0 else None,
+                drawstyle="steps-mid"
+            )
+            ax.fill_between(
+                x[i],
+                y[i] - y_err[i],
+                y[i] + y_err[i],
+                step="mid",
+                facecolor="#cccccc",
+                zorder=-1                
+            )
+        
+        # discern some useful limits
+        ax.set_xlim(*x.flatten()[[0, -1]])
+        ax.set_ylim(np.clip(np.nanpercentile(y, ylim_percentile), 0, np.inf))        
+        ax.set_xlabel(r"$\lambda$ $(\mathrm{\AA})$")
+        ax.set_ylabel(r"$f_\lambda$ $(10^{-17}\,\mathrm{erg}\,\mathrm{s}^{-1}\,\mathrm{cm}^2\,\mathrm{\AA}^{-1})$")
+        fig.tight_layout()
+        return fig
+    
 class SpectrumMixin:
 
     '''
