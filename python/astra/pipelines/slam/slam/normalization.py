@@ -112,7 +112,7 @@ def normalize_spectrum(
     assert 0.0 < q < 1.0
 
     # n_iter = len(p)
-    n_bin = np.int(np.fix(np.diff(norm_range) / dwave) + 1)
+    n_bin = int(np.fix(np.diff(norm_range) / dwave) + 1)
     wave1 = norm_range[0]
 
     # SMOOTH 1
@@ -121,7 +121,7 @@ def normalize_spectrum(
         ind_good_init = 1.0 * (ivar > 0.0) * (flux > 0.0)
     else:
         ind_good_init = 1.0 * (flux > 0.0)
-    ind_good_init = ind_good_init.astype(np.bool)
+    ind_good_init = ind_good_init.astype(bool)
     # print("@Cham: sum(ind_good_init)", np.sum(ind_good_init))
 
     flux_smoothed1 = SmoothSpline(
@@ -130,7 +130,7 @@ def normalize_spectrum(
     dflux = flux - flux_smoothed1
 
     # collecting continuum pixels --> ITERATION 1
-    ind_good = np.zeros(wave.shape, dtype=np.bool)
+    ind_good = np.zeros(wave.shape, dtype=bool)
     for i_bin in range(n_bin):
         ind_bin = np.logical_and(
             wave > wave1 + (i_bin - 0.5) * dwave, wave <= wave1 + (i_bin + 0.5) * dwave
@@ -152,7 +152,7 @@ def normalize_spectrum(
         assert np.sum(ind_good) > 0
     except AssertionError:
         Warning("@Keenan.normalize_spectrum(): unable to find continuum!")
-        ind_good = np.ones(wave.shape, dtype=np.bool)
+        ind_good = np.ones(wave.shape, dtype=bool)
 
     # SMOOTH 2
     # continuum flux
@@ -213,7 +213,7 @@ def normalize_spectrum_iter(
     # check q region
     # assert 0. <= q <= 1.
 
-    nbins = np.int(np.ceil((wave[-1] - wave[0]) / binwidth) + 1)
+    nbins = int(np.ceil((wave[-1] - wave[0]) / binwidth) + 1)
     bincenters = np.linspace(wave[0], wave[-1], nbins)
 
     # iteratively smoothing
@@ -248,7 +248,7 @@ def normalize_spectrum_iter(
             assert np.sum(ind_good) > 0
         except AssertionError:
             Warning("@normalize_spectrum_iter: unable to find continuum!")
-            ind_good = np.ones(wave.shape, dtype=np.bool)
+            ind_good = np.ones(wave.shape, dtype=bool)
 
     # final smoothing
     flux_smoothed2 = SmoothSpline(
@@ -361,7 +361,7 @@ def get_stable_pixels(pixel_disp, wave_arm=100, frac=0.20):
     ind_stable
 
     """
-    ind_stable = np.zeros_like(pixel_disp, dtype=np.bool)
+    ind_stable = np.zeros_like(pixel_disp, dtype=bool)
 
     for i in range(len(ind_stable)):
         edge_l = np.max([i - wave_arm, 0])

@@ -92,13 +92,13 @@ def predict_spectrum(svrs, X_, mask=None, scaler=None):
 
     # default is to use all pixels
     if mask is None:
-        mask = np.ones((len(svrs),), dtype=np.bool)
+        mask = np.ones((len(svrs),), dtype=bool)
 
     # make predictions
     # print('number of true mask: ', np.sum(mask))
     # print('mask len: ', mask.shape)
     ys = [predict_pixel(svr, X_, mask_) for svr, mask_ in zip(svrs, mask)]
-    ys = np.array(ys, dtype=float).T
+    ys = np.hstack(ys, dtype=float).reshape((1, -1))
 
     return ys
 
@@ -283,7 +283,7 @@ def costfun_for_label(X_, svrs, test_flux, test_ivar, mask):
     X_.reshape(1, -1)
     # default is to use all pixels [True->will be used, False->deprecated]
     if mask is None:
-        mask = np.ones((len(test_flux),), dtype=np.bool)
+        mask = np.ones((len(test_flux),), dtype=bool)
 
     # default ivar is all 1
     if test_ivar is None:
@@ -294,7 +294,7 @@ def costfun_for_label(X_, svrs, test_flux, test_ivar, mask):
         # mask = np.logical_and(mask, test_ivar > 0.01 * np.median(test_ivar))
 
     # do prediction
-    pred_flux = predict_spectrum(svrs, X_, mask).astype(np.float)
+    pred_flux = predict_spectrum(svrs, X_, mask).astype(float)
     # the pred_flux contains nan for mask=False pixels
 
     # print ("test_flux", test_flux, test_flux.shape)
