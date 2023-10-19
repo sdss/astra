@@ -2,7 +2,7 @@
 
 import os
 from astropy.io import fits
-from peewee import FloatField
+from peewee import JOIN
 from tqdm import tqdm
 from astra import __version__
 from astra.glossary import Glossary
@@ -11,13 +11,15 @@ from astra.models import Source, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpect
 from astra.products.utils import (
     BLANK_CARD,
     create_source_primary_hdu,
-    get_fields_and_pixel_arrays, get_basic_header, fits_column_kwargs, get_fill_value, check_path, resolve_model,
+    get_fields_and_pixel_arrays, get_basic_header,
+    fits_column_kwargs, get_fill_value, check_path, resolve_model,
     add_category_headers, add_category_comments, dispersion_array
 )
 
 ASTRA_STAR_TEMPLATE = "astraStar{pipeline}-{version}-{sdss_id}.fits"
 ASTRA_VISIT_TEMPLATE = "astraVisit{pipeline}-{version}-{sdss_id}.fits"
-DEFAULT_IGNORE_FIELD_NAMES = ("pk", "sdss5_target_flags", "source", "wresl", "flux", "ivar", "pixel_flags")
+DEFAULT_STAR_IGNORE_FIELD_NAMES = ("pk", "sdss5_target_flags", "source", "wresl", "flux", "ivar", "pixel_flags", "source_pk_id", "source_pk")
+DEFAULT_VISIT_IGNORE_FIELD_NAMES = tuple(list(DEFAULT_STAR_IGNORE_FIELD_NAMES) + ["wavelength"])
 
 def create_star_pipeline_products_for_all_sources(
     pipeline_model,
@@ -25,7 +27,7 @@ def create_star_pipeline_products_for_all_sources(
     apogee_spectrum_model=ApogeeCoaddedSpectrumInApStar,
     boss_where=None,
     apogee_where=None,
-    ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
+    ignore_field_names=DEFAULT_STAR_IGNORE_FIELD_NAMES,
     name_conflict_strategy=None,
     upper=False,
     limit=None,
@@ -102,7 +104,7 @@ def create_visit_pipeline_products_for_all_sources(
     apogee_spectrum_model=ApogeeVisitSpectrumInApStar,
     boss_where=None,
     apogee_where=None,
-    ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
+    ignore_field_names=DEFAULT_VISIT_IGNORE_FIELD_NAMES,
     name_conflict_strategy=None,
     upper=False,
     limit=None,
@@ -164,6 +166,7 @@ def create_visit_pipeline_products_for_all_sources(
         apogee_spectrum_model=apogee_spectrum_model,        
         boss_where=boss_where,
         apogee_where=apogee_where,
+        include_dispersion_cards=True,
         ignore_field_names=ignore_field_names,
         name_conflict_strategy=name_conflict_strategy,
         upper=upper,
@@ -180,7 +183,7 @@ def create_star_pipeline_product(
     apogee_spectrum_model=ApogeeCoaddedSpectrumInApStar,
     boss_where=None,
     apogee_where=None,    
-    ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
+    ignore_field_names=DEFAULT_STAR_IGNORE_FIELD_NAMES,
     name_conflict_strategy=None,
     upper=False,
     limit=None,
@@ -269,7 +272,7 @@ def create_visit_pipeline_product(
     apogee_spectrum_model=ApogeeVisitSpectrumInApStar,
     boss_where=None,
     apogee_where=None,    
-    ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
+    ignore_field_names=DEFAULT_VISIT_IGNORE_FIELD_NAMES,
     name_conflict_strategy=None,
     upper=False,
     limit=None,
@@ -351,6 +354,34 @@ def create_visit_pipeline_product(
     )
 
 
+def _get_output_product_path(output_template, pipeline, sdss_id, source_pk=None):
+    if sdss_id is None:
+        log.warning(f"Source {source_pk} has no SDSS_ID")
+        sdss_id_groups = "no_sdss_id"
+        sdss_id = f"source_pk={source_pk}"
+        
+    else:
+        chars = str(sdss_id)[-4:]
+        sdss_id_groups = f"{chars[:2]}/{chars[2:]}"
+        sdss_id = f"{sdss_id}"
+    
+    if output_template.lower().startswith("astrastar"):
+        star_or_visit = "star"
+    elif output_template.lower().startswith("astravisit"):
+        star_or_visit = "visit"
+    else:
+        raise ValueError(f"Could not figure out whether this is `star` or `visit` level for the folder structure. Please use `output_template` to start with 'astraStar' or 'astraVisit'")
+    
+    output_dir = f"$MWM_ASTRA/{__version__}/results/{star_or_visit}/{sdss_id_groups}/"
+    path = expand_path(
+        os.path.join(
+            output_dir,
+            output_template.format(pipeline=pipeline, version=__version__, sdss_id=sdss_id)
+        )
+    )    
+    return path
+
+
 def _create_pipeline_product(
     source,
     pipeline_model,
@@ -372,33 +403,11 @@ def _create_pipeline_product(
     pipeline_model = resolve_model(pipeline_model)
     pipeline = pipeline_model.__name__
 
-    if source.sdss_id is None:
-        log.warning(f"Source {source} has no SDSS_ID")
-        sdss_id_groups = "no_sdss_id"
-        sdss_id = f"source_pk={source.pk}"
-    else:
-        chars = str(source.sdss_id)[-4:]
-        sdss_id_groups = f"{chars[:2]}/{chars[2:]}"
-        sdss_id = f"{source.sdss_id}"
-    
-    if output_template.lower().startswith("astrastar"):
-        star_or_visit = "star"
-    elif output_template.lower().startswith("astravisit"):
-        star_or_visit = "visit"
-    else:
-        raise ValueError(f"Could not figure out whether this is `star` or `visit` level for the folder structure. Please use `output_template` to start with 'astraStar' or 'astraVisit'")
-
-    output_dir = f"$MWM_ASTRA/{__version__}/results/{star_or_visit}/{sdss_id_groups}/"
-    path = expand_path(
-        os.path.join(
-            output_dir,
-            output_template.format(pipeline=pipeline, version=__version__, sdss_id=sdss_id)
-        )
-    )
+    path = _get_output_product_path(output_template, pipeline, source.sdss_id, source.pk)
     check_path(path, overwrite)
     
     kwds = dict(upper=upper, fill_values=fill_values)
-    hdus = [create_source_primary_hdu(source)]
+    hdus = [create_source_primary_hdu(source, upper=upper)]
         
     struct = [
         (
@@ -434,7 +443,7 @@ def _create_pipeline_product(
     all_fields = {}
     for spectrum_model, observatory, instrument, instrument_where, telescope_where in struct:
 
-        models = (Source, spectrum_model, pipeline_model)
+        models = (spectrum_model, pipeline_model)
         try:
             fields = all_fields[spectrum_model]
         except KeyError:
@@ -444,16 +453,22 @@ def _create_pipeline_product(
                 ignore_field_names=ignore_field_names
             )
 
-        header = get_basic_header(observatory=observatory, instrument=instrument, include_dispersion_cards=include_dispersion_cards)
+        header = get_basic_header(
+            observatory=observatory,
+            instrument=instrument,
+            include_dispersion_cards=include_dispersion_cards,
+            upper=upper,
+        )
 
         q = (
             pipeline_model
             .select(*models)
             #.distinct(pipeline_model.spectrum_pk) # Require distinct per spectrum_pk? if so also update order_by
             .join(spectrum_model, on=(pipeline_model.spectrum_pk == spectrum_model.spectrum_pk), attr="__spectrum")
-            .switch(pipeline_model)
-            .join(Source, on=(pipeline_model.source_pk_id == Source.pk), attr="__source")
-            .where(telescope_where & (Source.pk == source.pk))
+            #.switch(pipeline_model)
+            #.join(Source, on=(pipeline_model.source_pk_id == Source.pk), attr="__source")
+            .where(spectrum_model.source_pk == source.pk) # note: spectrum_model.source_pk but pipeline_models are soure_pk_id eeeek whoops sorry
+            .where(telescope_where)
         )
         if instrument_where is not None:
             q = q.where(instrument_where)
@@ -533,16 +548,15 @@ def _create_pipeline_products_for_all_sources(
     # TODO: I'm not 100% sure this will work. Should try it, particularly with `boss_where` and `apogee_where`
 
     pipeline_model = resolve_model(pipeline_model)
-    pipeline = pipeline_model.__name__
     
     q = (
         Source
         .select()
         .distinct()
         .join(pipeline_model, on=(pipeline_model.source_pk == Source.pk))
-        .join(boss_spectrum_model, on=(pipeline_model.spectrum_pk == boss_spectrum_model.spectrum_pk))
+        .join(boss_spectrum_model, JOIN.LEFT_OUTER, on=(pipeline_model.spectrum_pk == boss_spectrum_model.spectrum_pk))
         .switch(pipeline_model)
-        .join(apogee_spectrum_model, on=(pipeline_model.spectrum_pk == apogee_spectrum_model.spectrum_pk))
+        .join(apogee_spectrum_model, JOIN.LEFT_OUTER, on=(pipeline_model.spectrum_pk == apogee_spectrum_model.spectrum_pk))
     )
     if boss_where is not None and apogee_where is not None:
         q = q.where((boss_where) | (apogee_where))
@@ -550,12 +564,15 @@ def _create_pipeline_products_for_all_sources(
         q = q.where(boss_where)
     elif apogee_where is not None:
         q = q.where(apogee_where)
+        
+    if limit is not None:
+        q = q.limit(limit)
 
     # TODO: Parallelize and chunk this.
     N_created, N_skipped, failures = (0, 0, [])
-    for source in tqdm(q, desc="Creating pipeline products"):
+    for source in tqdm(q, desc="Creating pipeline products"):        
         try:     
-            _create_pipeline_product(
+            new_path = _create_pipeline_product(
                 source,
                 pipeline_model,
                 output_template,
@@ -570,6 +587,7 @@ def _create_pipeline_products_for_all_sources(
                 fill_values=fill_values,
                 limit=limit,
                 overwrite=overwrite,
+                full_output=False
             )
         except OSError:
             if overwrite:
@@ -578,6 +596,7 @@ def _create_pipeline_products_for_all_sources(
             else:
                 N_skipped += 1
         else:
+            log.info(f"Created {new_path}")
             N_created += 1
 
     return (N_created, N_skipped, failures)

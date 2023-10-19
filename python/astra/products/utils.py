@@ -37,76 +37,118 @@ DATETIME_FMT = "%y-%m-%d %H:%M:%S"
 BLANK_CARD = (" ", " ", None)
 FILLER_CARD = (FILLER_CARD_KEY, *_) = ("TTYPE0", "Water cuggle", None)
 
-
 INSTRUMENT_COMMON_DISPERSION_VALUES = {
     "apogee": (4.179, 6e-6, 8575),
     "boss": (3.5523, 1e-4, 4648)
 }
+INCLUDE_SOURCE_FIELD_NAMES = (
+    ("sdss_id", ),
+    ("sdss4_apogee_id", "apogeeid"),
+    ("gaia_dr2_source_id", "gaia2_id"),
+    ("gaia_dr3_source_id", "gaia3_id"),
+    ("tic_v8_id", "tic_id"),
+    ("healpix", ),
+    
+    ("carton_0", ),
+    ("lead", ),
+    ("version_id", "ver_id"),
+    ("catalogid", "cat_id"),
+    ("catalogid21", "cat_id21"),
+    ("catalogid25", "cat_id25"),
+    ("catalogid31", "cat_id31"),
+    ("n_associated", "n_assoc"),
+    ("n_neighborhood", "n_neigh"),
+    
+    ("ra", ),
+    ("dec", ),
+    ("plx", ),
+    ("e_plx", ),
+    ("pmra", ),
+    ("e_pmra", ),
+    ("pmde", ),
+    ("e_pmde", ),
+    ("gaia_v_rad", "v_rad"),
+    ("gaia_e_v_rad", "e_v_rad"),
 
+    ("g_mag", ),
+    ("bp_mag", ),
+    ("rp_mag", ),
+
+    ("j_mag", ),
+    ("e_j_mag", ),
+    ("h_mag", ),
+    ("e_h_mag", ),
+    ("k_mag", ),
+    ("e_k_mag", ),
+    ("ph_qual", ),
+    ("bl_flg", ),
+    ("cc_flg", ),
+
+    ("w1_flux", ),
+    ("w1_dflux", ),
+    ("w2_flux", ),
+    ("w2_dflux", ),
+    ("w1_frac", ),
+    ("w2_frac", ),
+    ("w1uflags", ),
+    ("w2uflags", ),
+    ("w1aflags", ),
+    ("w2aflags", ),
+
+    ("mag4_5", ),
+    ("d4_5m", ),
+    ("rms_f4_5", ),
+    ("sqf_4_5", ),
+    ("mf4_5", ),
+    ("csf", ),
+
+    ("n_boss_visits", "n_boss"),
+    ("boss_min_mjd", "b_minmjd"),
+    ("boss_max_mjd", "n_maxmjd"),
+    ("n_apogee_visits", "n_apogee"),
+    ("apogee_min_mjd", "a_minmjd"),
+    ("apogee_max_mjd", "a_maxmjd"),
+)
 
 
 def create_source_primary_hdu(
     source, 
-    ignore_fields=(
-        "sdss5_target_flags", 
-        "sdss4_apogee_target1_flags", 
-        "sdss4_apogee_target2_flags",
-        "sdss4_apogee2_target1_flags", 
-        "sdss4_apogee2_target2_flags",         
-        "sdss4_apogee2_target3_flags",
-        "sdss4_apogee_member_flags", 
-        "sdss4_apogee_extra_target_flags",
-    ),
-    upper=True
+    field_names=INCLUDE_SOURCE_FIELD_NAMES,
+    upper=False
 ):
-
-    shortened_names = {
-        "GAIA_DR2_SOURCE_ID": "GAIA2_ID",
-        "GAIA_DR3_SOURCE_ID": "GAIA3_ID",
-        "SDSS4_APOGEE_ID": "APOGEEID",
-        "TIC_V8_ID": "TIC_ID",
-        "VERSION_ID": "VER_ID",
-        "CATALOGID": "CAT_ID",
-        "CATALOGID21": "CAT_ID21",
-        "CATALOGID25": "CAT_ID25",
-        "CATALOGID31": "CAT_ID31",
-        "N_ASSOCIATED": "N_ASSOC",
-        "N_NEIGHBORHOOD": "N_NEIGH",
-        "GAIA_V_RAD": "V_RAD",
-        "GAIA_E_V_RAD": "E_V_RAD",
-        "ZGR_TEFF": "Z_TEFF",
-        "ZGR_E_TEFF": "Z_E_TEFF",
-        "ZGR_LOGG": "Z_LOGG",
-        "ZGR_E_LOGG": "Z_E_LOGG",
-        "ZGR_FE_H": "Z_FE_H",
-        "ZGR_E_FE_H": "Z_E_FE_H",
-        "ZGR_E": "Z_E",
-        "ZGR_E_E": "Z_E_E",
-        "ZGR_PLX": "Z_PLX",
-        "ZGR_E_PLX": "Z_E_PLX",
-        "ZGR_TEFF_CONFIDENCE": "Z_TEFF_C",
-        "ZGR_LOGG_CONFIDENCE": "Z_LOGG_C",
-        "ZGR_FE_H_CONFIDENCE": "Z_FE_H_C",
-        "ZGR_LN_PRIOR": "Z_LPRIOR",
-        "ZGR_QUALITY_FLAGS": "Z_FLAGS",
-    }
+    """
+    Create a primary (header only) HDU with basic source-level information only.
+    
+    The information to include are identifiers, astrometry, and photometry.
+    
+    Note that the names for some fields are shortened so that they are not prefixed by the FITS 'HIERARCH' cards.
+    """
 
     created = datetime.datetime.utcnow().strftime(DATETIME_FMT)
 
+    shortened_names = { k[0]: k[0] if len(k) == 1 else k[1] for k in field_names }
+    s = lambda v: v.upper() if upper else v
+
     cards = [
         BLANK_CARD,
-        (" ", "METADATA", None),
+        (" ", s("Metadata"), None),
         BLANK_CARD,
-        ("V_ASTRA", __version__, Glossary.v_astra),
-        ("CREATED", created, f"File creation time (UTC {DATETIME_FMT})"),
+        (s("v_astra"), __version__, Glossary.v_astra),
+        (s("created"), created, f"File creation time (UTC {DATETIME_FMT})"),
     ]
     original_names = {}
     for name, field in source._meta.fields.items():
-        if ignore_fields is None or name not in ignore_fields:
-            use_name = shortened_names.get(name.upper(), name.upper())
-
+        try:
+            use_name = shortened_names[name]
+        except:
+            continue
+        else:                        
+            use_name = s(use_name)
+            
             value = getattr(source, name)
-
+            if value is not None and isinstance(value, float) and not np.isfinite(value):
+                # FITS header cards can't have numpy NaNs
+                value = 'NaN'
             cards.append((use_name, value, field.help_text))
             original_names[use_name] = name
 
@@ -114,18 +156,18 @@ def create_source_primary_hdu(
 
     cards.extend([
         BLANK_CARD,
-        (" ", "HDU DESCRIPTIONS", None),
+        (" ", s("HDU Descriptions"), None),
         BLANK_CARD,
         ("COMMENT", "HDU 0: Summary information only", None),
-        ("COMMENT", "HDU 1: BOSS spectra from Apache Point Observatory"),
-        ("COMMENT", "HDU 2: BOSS spectra from Las Campanas Observatory"),
-        ("COMMENT", "HDU 3: APOGEE spectra from Apache Point Observatory"),
-        ("COMMENT", "HDU 4: APOGEE spectra from Las Campanas Observatory"),
+        ("COMMENT", "HDU 1: BOSS results from Apache Point Observatory"),
+        ("COMMENT", "HDU 2: BOSS results from Las Campanas Observatory"),
+        ("COMMENT", "HDU 3: APOGEE results from Apache Point Observatory"),
+        ("COMMENT", "HDU 4: APOGEE results from Las Campanas Observatory"),
     ])
     
 
     hdu = fits.PrimaryHDU(header=fits.Header(cards=cards))
-
+    
     # Add category groupings.
     add_category_headers(hdu, (source.__class__, ), original_names, upper, use_ttype=False)
     add_category_comments(hdu, (source.__class__, ), original_names, upper, use_ttype=False)
@@ -133,7 +175,7 @@ def create_source_primary_hdu(
     # Add checksums.
     hdu.add_checksum()
     hdu.header.insert("CHECKSUM", BLANK_CARD)
-    hdu.header.insert("CHECKSUM", (" ", "DATA INTEGRITY"))
+    hdu.header.insert("CHECKSUM", (" ", s("Data Integrity")))
     hdu.header.insert("CHECKSUM", BLANK_CARD)
     hdu.add_checksum()
     return hdu
@@ -248,8 +290,7 @@ def get_binary_table_hdu(q, models, fields, limit=None, header=None, upper=True,
 
     hdu = fits.BinTableHDU.from_columns(columns, header=header)
 
-    # Add comments for
-     
+    # Add comments for each field.
     for i, name in enumerate(hdu.data.dtype.names, start=1):
         field = fields[original_names[name]]
         hdu.header.comments[f"TTYPE{i}"] = field.help_text
@@ -336,10 +377,12 @@ def fits_column_kwargs(field, values, upper, name=None, default_n_pixels=0, warn
             return dict(format=f"{P:.0f}E", dim=f"({P})")
         
     elif isinstance(field, ArrayField):
+        
         def callable(v):
             V, P = np.atleast_2d(v).shape
             format_code = "E" if field.field_type == "FLOAT" else "J"
             return dict(format=f"{P:.0f}{format_code}", dim=f"({P})")    
+    
     elif isinstance(field, BigBitField):
         def callable(v):
             V, P = np.atleast_2d(v).shape
@@ -364,6 +407,16 @@ def fits_column_kwargs(field, values, upper, name=None, default_n_pixels=0, warn
         array = np.zeros((N, F), dtype=np.uint8)
         for i, item in enumerate(values):
             array[i, :len(item)] = np.frombuffer(item.tobytes(), dtype=np.uint8)
+    elif isinstance(field, ArrayField):
+        if len(values) > 0:
+            P = max(map(len, values))
+            # TODO: we are assuming floats here for this ArrayField
+            assert field.field_type == "FLOAT"
+            array = np.nan * np.ones((len(values), P), dtype=np.float32)
+            for i, item in enumerate(values):
+                array[i, :len(item)] = item
+        else:
+            array = np.ones((0, 0), dtype=np.float32)                
     else:
         array = values
 
@@ -398,11 +451,14 @@ def wavelength_cards(
     cdelt: Union[int, float], 
     num_pixels: int, 
     decimals: int = 6, 
+    upper: bool = False,
     **kwargs
 ):
+    h = "Wavelength Information (Vacuum)"
+    h = h.upper() if upper else h
     return [
         BLANK_CARD,
-        (" ", "WAVELENGTH INFORMATION (VACUUM)", None),
+        (" ", h, None),
         BLANK_CARD,
         ("CRVAL", np.round(crval, decimals), Glossary.crval),
         ("CDELT", np.round(cdelt, decimals), Glossary.cdelt),
@@ -425,12 +481,14 @@ def get_basic_header(
     instrument=None,
     include_dispersion_cards=None,
     include_hdu_descriptions=False,
+    upper=False
 ):
     created = datetime.datetime.utcnow().strftime(DATETIME_FMT)
 
+    s = lambda v: v.upper() if upper else v
     cards = [
         BLANK_CARD,
-        (" ", "METADATA", None),
+        (" ", s("Metadata"), None),
         BLANK_CARD,
     ]
 
@@ -453,14 +511,14 @@ def get_basic_header(
 
     if include_dispersion_cards:
         try:
-            cards.extend(wavelength_cards(*INSTRUMENT_COMMON_DISPERSION_VALUES[instrument.lower().strip()]))
+            cards.extend(wavelength_cards(*INSTRUMENT_COMMON_DISPERSION_VALUES[instrument.lower().strip()], upper=upper))
         except KeyError:
             raise ValueError(f"Unknown instrument '{instrument}': not among {', '.join(INSTRUMENT_COMMON_DISPERSION_VALUES.keys())}")
 
     if include_hdu_descriptions:
         cards.extend([
             BLANK_CARD,
-            (" ", "HDU DESCRIPTIONS", None),
+            (" ", s("HDU Descriptions"), None),
             BLANK_CARD,
             ("COMMENT", "HDU 0: Summary information only", None),
             ("COMMENT", "HDU 1: BOSS spectra taken at Apache Point Observatory"),
@@ -484,6 +542,12 @@ def get_fill_value(field, given_fill_values):
         except:
             None
         finally:
+            if isinstance(field, ArrayField):
+                if field.field_type == "FLOAT":
+                    return [np.nan]
+                else:
+                    return [-1]
+                
             default_fill_values = {
                 TextField: "",
                 BooleanField: False,
@@ -493,7 +557,7 @@ def get_fill_value(field, given_fill_values):
                 FloatField: np.nan,
                 ForeignKeyField: -1,
                 DateTimeField: "",
-                BitField: 0            
+                BitField: 0,
             }
             return default_fill_values[type(field)]
                 
