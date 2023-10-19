@@ -38,9 +38,6 @@ class AstroNN(BaseModel, PipelineOutputMixin):
     t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
     tag = TextField(default="", index=True, help_text=Glossary.tag)
 
-    #> Task Parameters
-
-
     #> Stellar Labels
     teff = FloatField(null=True, help_text="Effective temperature [K]")
     e_teff = FloatField(null=True, help_text="Error on effective temperature [K]")

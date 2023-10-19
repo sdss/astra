@@ -101,72 +101,29 @@ def _inference(model, batch):
             results.append(result)
         results = np.array(results)
         '''
+        all_flux = np.atleast_2d(all_flux).reshape((-1, 7514))
         try:
             pred, pred_err = model.predict(all_flux)
-        except ValueError: # some weird thing with fast_mc_inference_v2_internal
+        except ValueError: # on TensorFlow some weird thing with fast_mc_inference_v2_internal
             raise
 
         #results = np.hstack([pred, pred_err['total']]) # for TensorFlow version 
-        results = np.hstack([pred, pred_err['total']]) # for PyTorch version
-        
-        assert results.shape == (len(batch), 45)
-            
+        #results = np.hstack([pred, pred_err]) # for PyTorch version
+                    
         #### record results
         mean_t_elapsed = (time() - t_init) / len(spectrum_pks)
         for i, (spectrum_pk, source_pk) in enumerate(zip(spectrum_pks, source_pks)):
-            print("+"*6, 'write to database: Teff =', results[i, 0])
-            output = AstroNN(
+            result_kwds = dict(
                 spectrum_pk=spectrum_pk,
                 source_pk=source_pk,
                 t_elapsed=mean_t_elapsed,
-                teff = results[i, 0],
-                e_teff = results[i, 1],
-                logg = results[i, 2],
-                e_logg = results[i, 3],
-                c_h = results[i, 4],
-                e_c_h = results[i, 5],
-                c_1_h = results[i, 6],
-                e_c_1_h = results[i, 7],
-                n_h = results[i, 8],
-                e_n_h = results[i, 9],
-                o_h = results[i, 10],
-                e_o_h = results[i, 11],
-                na_h = results[i, 12],
-                e_na_h = results[i, 13],
-                mg_h = results[i, 14],
-                e_mg_h = results[i, 15],
-                al_h = results[i, 16],
-                e_al_h = results[i, 17],
-                si_h = results[i, 18],
-                e_si_h = results[i, 19],
-                p_h = results[i, 20],
-                e_p_h = results[i, 21],
-                s_h = results[i, 22],
-                e_s_h = results[i, 23],
-                k_h = results[i, 24],
-                e_k_h = results[i, 25],
-                ca_h = results[i, 26],
-                e_ca_h = results[i, 27],
-                ti_h = results[i, 28],
-                e_ti_h = results[i, 29],
-                ti_2_h = results[i, 30],
-                e_ti_2_h = results[i, 31],
-                v_h = results[i, 32],
-                e_v_h = results[i, 33],
-                cr_h = results[i, 34],
-                e_cr_h = results[i, 35],
-                mn_h = results[i, 36],
-                e_mn_h = results[i, 37],
-                fe_h = results[i, 38],
-                e_fe_h = results[i, 39],
-                co_h = results[i, 40],
-                e_co_h = results[i, 41],
-                ni_h = results[i, 42],
-                e_ni_h = results[i, 43],
-                result_flags=results[i, 44]
             )
-            #output.apply_flags(meta[i])
-            yield output
+            result_kwds.update(dict(zip(model.targetname, pred[i])))
+            result_kwds.update(dict(zip([f"e_{ln}" for ln in model.targetname], pred_err[i])))
+            result_kwds["result_flags"] = 0 # TODO
+            
+            yield AstroNN(**result_kwds)
+
 
 def parallel_batch_read(target, spectra, batch_size, cpu_count=None):
     """

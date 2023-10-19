@@ -1,3 +1,4 @@
+import scipy.optimize as op # build problems
 from typing import Iterable, Optional
 from astra import task
 from astra.models.astronn import AstroNN
@@ -12,7 +13,7 @@ def astronn(
     model_path: str = "$MWM_ASTRA/pipelines/astronn/astroNN_model_parameter.pt", # for PyTorch version
     parallel: Optional[bool] = True,
     batch_size: Optional[int] = 100,
-    cpu_count: Optional[int] = 4,
+    cpu_count: Optional[int] = 1,
 ) -> Iterable[AstroNN]:
     """
     Estimate astrophysical parameters for a stellar spectrum given a pre-trained neural network.
