@@ -13,14 +13,33 @@ from dustmaps.sfd import SFDQuery
 from dustmaps.edenhofer2023 import Edenhofer2023Query
 from dustmaps.bayestar import BayestarQuery
 
-#sfd = SFDQuery()
-#edenhofer2023 = Edenhofer2023Query()
-#bayestar2019 = BayestarQuery()
 
 von = lambda v: v or np.nan
-
-
-def _update_reddening_on_source(source, sfd, edenhofer2023, bayestar2019):
+    
+def _fix_w2_flux():
+    (
+        Source
+        .update(w2_flux=None, w2_dflux=None)
+        .where(Source.w2_flux == 0)
+        .execute()
+    )
+    
+def _fix_rjce_glimpse(sfd, edenhofer2023, bayestar2019):
+    sources = list(
+        Source
+        .select()
+        .where(Source.mag4_5 > 99)
+    )
+    for s in sources:
+        s.mag4_5 = None
+        s.d4_5m = None
+        s.rms_f4_5 = None
+        
+        s = _update_reddening_on_source(s, sfd, edenhofer2023, bayestar2019)
+        s.save()    
+            
+    
+def _update_reddening_on_source(source, sfd, edenhofer2023, bayestar2019, raise_exceptions=False):
     """
     Compute reddening and reddening uncertainties for a source using various methods.
     
@@ -97,9 +116,12 @@ def _update_reddening_on_source(source, sfd, edenhofer2023, bayestar2019):
                 
             else:                
                 ed = edenhofer2023(coord_samples, mode="samples") 
+                assert np.any(np.isfinite(ed))
                 # TODO: Take the nanmedian and nanstd? the samples are often NaNs
-                source.ebv_edenhofer_2023 = 0.829 * np.median(ed)
-                source.e_ebv_edenhofer_2023 = 0.829 * np.std(ed)    
+                source.ebv_edenhofer_2023 = 0.829 * np.nanmedian(ed)
+                source.e_ebv_edenhofer_2023 = 0.829 * np.nanstd(ed)    
+        
+        assert np.isfinite(source.ebv_edenhofer_2023)
             
         # Bayestar 2019
         bs_samples = bayestar2019(coord_samples, mode="samples").flatten()
@@ -108,7 +130,7 @@ def _update_reddening_on_source(source, sfd, edenhofer2023, bayestar2019):
 
         # Logic to decide preferred reddening value
 
-        if source.zgr_e is not None: # target is in Zhang
+        if source.zgr_e is not None and source.zgr_quality_flags < 8: # target is in Zhang
             # Zhang et al. (2023)
             source.flag_ebv_from_zhang_2023 = True
             source.ebv = source.ebv_zhang_2023
@@ -139,7 +161,7 @@ def _update_reddening_on_source(source, sfd, edenhofer2023, bayestar2019):
             source.ebv = source.ebv_rjce_glimpse
             source.e_ebv = source.e_ebv_rjce_glimpse
 
-        elif source.h_mag is not None and source.w2_flux is not None:
+        elif source.h_mag is not None and source.w2_flux is not None and source.w2_flux > 0:
             # RJCE_ALLWISE
             source.flag_ebv_from_rjce_allwise = True
             source.ebv = source.ebv_rjce_allwise
@@ -153,6 +175,8 @@ def _update_reddening_on_source(source, sfd, edenhofer2023, bayestar2019):
             source.e_ebv = source.e_ebv_sfd
     except:
         log.exception(f"Exception when computing reddening for source {source}")
+        if raise_exceptions:
+            raise
         return None
     else:        
         return source
@@ -176,6 +200,16 @@ def update_reddening(where=Source.ebv.is_null(), batch_size=1000, max_workers: i
     Update reddening estimates for sources.
     """
     
+    sfd = SFDQuery()
+    edenhofer2023 = Edenhofer2023Query(load_samples=True)
+    bayestar2019 = BayestarQuery()
+    
+    _fix_w2_flux()
+    # Fix any problem children first:
+    # TODO: mag4_5 uses 99.999 as a BAD value. set to NaNs.
+    _fix_rjce_glimpse(sfd, edenhofer2023, bayestar2019)    
+    
+    
     q = (
         Source
         .select()
@@ -196,17 +230,12 @@ def update_reddening(where=Source.ebv.is_null(), batch_size=1000, max_workers: i
         Source.e_ebv_bayestar_2019,
         Source.ebv_edenhofer_2023,
         Source.e_ebv_edenhofer_2023,
-        Source.flag_ebv_edenhofer_2023_upper_limit,
         Source.ebv,
         Source.e_ebv,
-        Source.flag_ebv_upper_limit,
-        Source.ebv_method_flags,
+        Source.ebv_flags,
     ]
     
-    sfd = SFDQuery()
-    edenhofer2023 = Edenhofer2023Query(load_samples=True)
-    bayestar2019 = BayestarQuery()
-    
+
     with tqdm(total=len(q)) as pb:
             
         for chunk in chunked(q, batch_size):
@@ -221,7 +250,6 @@ def update_reddening(where=Source.ebv.is_null(), batch_size=1000, max_workers: i
             
             pb.update(batch_size)
             
-        
     
 
     """

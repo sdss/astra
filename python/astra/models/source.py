@@ -436,7 +436,6 @@ class Source(BaseModel):
     flag_poor_quality_k_mag = irfm_teff_flags.flag(2**2, "Poor quality Ks magnitude")
     flag_ebv_used_is_upper_limit = irfm_teff_flags.flag(2**3, "E(B-V) used is an upper limit")
     
-
     #> Gaia XP Stellar Parameters (Zhang, Green & Rix 2023)
     zgr_teff = FloatField(null=True, help_text=Glossary.teff)
     zgr_e_teff = FloatField(null=True, help_text=Glossary.e_teff)
@@ -469,15 +468,14 @@ class Source(BaseModel):
     #> Reddening
     ebv = FloatField(null=True, help_text="E(B-V) [mag]")
     e_ebv = FloatField(null=True, help_text="Error on E(B-V) [mag]")
-    flag_ebv_upper_limit = BooleanField(default=False, help_text="E(B-V) is an upper limit")
-    ebv_method_flags = BitField(default=0, help_text="Flags indicating the source of E(B-V)")
-
-    flag_ebv_from_zhang_2023 = ebv_method_flags.flag(2**0, "E(B-V) from Zhang et al. (2023)")
-    flag_ebv_from_edenhofer_2023 = ebv_method_flags.flag(2**1, "E(B-V) from Edenhofer et al. (2023)")
-    flag_ebv_from_sfd = ebv_method_flags.flag(2**2, "E(B-V) from SFD")
-    flag_ebv_from_rjce_glimpse = ebv_method_flags.flag(2**3, "E(B-V) from RJCE GLIMPSE")
-    flag_ebv_from_rjce_allwise = ebv_method_flags.flag(2**4, "E(B-V) from RJCE AllWISE")
-    flag_ebv_from_bayestar_2019 = ebv_method_flags.flag(2**5, "E(B-V) from Bayestar 2019")
+    ebv_flags = BitField(default=0, help_text="Flags indicating the source of E(B-V)")
+    flag_ebv_upper_limit = ebv_flags.flag(2**0, "E(B-V) is an upper limit")
+    flag_ebv_from_zhang_2023 = ebv_flags.flag(2**1, "E(B-V) from Zhang et al. (2023)")
+    flag_ebv_from_edenhofer_2023 = ebv_flags.flag(2**2, "E(B-V) from Edenhofer et al. (2023)")
+    flag_ebv_from_sfd = ebv_flags.flag(2**3, "E(B-V) from SFD")
+    flag_ebv_from_rjce_glimpse = ebv_flags.flag(2**4, "E(B-V) from RJCE GLIMPSE")
+    flag_ebv_from_rjce_allwise = ebv_flags.flag(2**5, "E(B-V) from RJCE AllWISE")
+    flag_ebv_from_bayestar_2019 = ebv_flags.flag(2**6, "E(B-V) from Bayestar 2019")
 
     ebv_zhang_2023 = FloatField(null=True, help_text="E(B-V) from Zhang et al. (2023) [mag]")
     e_ebv_zhang_2023 = FloatField(null=True, help_text="Error on E(B-V) from Zhang et al. (2023) [mag]")
@@ -493,7 +491,6 @@ class Source(BaseModel):
     e_ebv_bayestar_2019 = FloatField(null=True, help_text="Error on Bayestar 2019 E(B-V) [mag]")
     ebv_edenhofer_2023 = FloatField(null=True, help_text="E(B-V) from Edenhofer et al. (2023) [mag]")
     e_ebv_edenhofer_2023 = FloatField(null=True, help_text="Error on Edenhofer et al. (2023) E(B-V) [mag]")
-    flag_ebv_edenhofer_2023_upper_limit = BooleanField(default=False, help_text="Upper limit on Edenhofer E(B-V)")
     
     #> Synthetic Photometry from Gaia XP Spectra
     c_star = FloatField(null=True, help_text="Quality parameter (see Riello et al. 2021)")
