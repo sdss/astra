@@ -184,7 +184,7 @@ def _update_reddening_on_source(source, sfd, edenhofer2023, bayestar2019, raise_
 
 def _reddening_worker(sources):
     sfd = SFDQuery()
-    edenhofer2023 = Edenhofer2023Query(load_samples=True)
+    edenhofer2023 = Edenhofer2023Query(load_samples=True, integrated=True)
     bayestar2019 = BayestarQuery()
 
     updated = []
@@ -201,7 +201,7 @@ def update_reddening(where=Source.ebv.is_null(), batch_size=1000, max_workers: i
     """
     
     sfd = SFDQuery()
-    edenhofer2023 = Edenhofer2023Query(load_samples=True)
+    edenhofer2023 = Edenhofer2023Query(load_samples=True, integrated=True)
     bayestar2019 = BayestarQuery()
     
     _fix_w2_flux()
