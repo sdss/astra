@@ -5,14 +5,16 @@ from peewee import (
     ForeignKeyField,
     BitField,
     IntegerField,
+    DateTimeField
 )
-
+import datetime
 from astra import __version__
 from astra.models.base import BaseModel
 from astra.models.fields import BitField
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
+from astra.glossary import Glossary
 
 SMALL = -1e+20
 
@@ -20,14 +22,21 @@ class SpectrumClassification(BaseModel, PipelineOutputMixin):
 
     """A spectrum-level classification."""
     
-    sdss_id = ForeignKeyField(Source, index=True)
-    spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
-    
+    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
+    spectrum_pk = ForeignKeyField(
+        Spectrum, 
+        index=True, 
+        lazy_load=False,
+        help_text=Glossary.spectrum_pk
+    )
+
     #> Astra Metadata
-    task_id = AutoField()
-    v_astra = TextField(default=__version__)
-    t_elapsed = FloatField(null=True)
-    tag = TextField(default="", index=True)
+    task_pk = AutoField(help_text=Glossary.task_pk)
+    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
+    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
+    t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
+    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
+    tag = TextField(default="", index=True, help_text=Glossary.tag)
     
     #> Classification
     p_cv = FloatField(default=0)
@@ -50,8 +59,8 @@ class SpectrumClassification(BaseModel, PipelineOutputMixin):
     flag_most_likely_wd = classification_flags.flag(2**3, "Most likely is a white dwarf")
     flag_most_likely_sb2 = classification_flags.flag(2**4, "Most likely is a spectroscopic binary (SB2)")
     flag_most_likely_yso = classification_flags.flag(2**5, "Most likely is a young stellar object")
-    
-    
+
+'''    
 
 class SourceClassification(BaseModel, PipelineOutputMixin):
 
@@ -90,3 +99,4 @@ class SourceClassification(BaseModel, PipelineOutputMixin):
     flag_most_likely_wd = classification_flags.flag(2**3, "Most likely is a white dwarf")
     flag_most_likely_sb2 = classification_flags.flag(2**4, "Most likely is a spectroscopic binary (SB2)")
     flag_most_likely_yso = classification_flags.flag(2**5, "Most likely is a young stellar object")
+'''
