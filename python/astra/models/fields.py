@@ -1,4 +1,5 @@
 import numpy as np
+import pickle
 from peewee import (
     BitField as _BitField,
     VirtualField,
@@ -74,6 +75,24 @@ class BasePixelArrayAccessor(object):
         finally:
             instance.__pixel_data__[self.name] = value
         return None
+
+class PickledPixelArrayAccessor(BasePixelArrayAccessor):
+    
+    """A class to access pixel arrays stored in a pickle file."""
+
+    def __get__(self, instance, instance_type=None):
+        if instance is not None:
+            try:
+                return instance.__pixel_data__[self.name]
+            except (AttributeError, KeyError):
+                # Load them all.
+                instance.__pixel_data__ = {}
+                with open(expand_path(instance.path), "rb") as fp:
+                    instance.__pixel_data__.update(pickle.load(fp))
+                
+                return instance.__pixel_data__[self.name]
+
+        return self.field
 
 
 class PixelArrayAccessorFITS(BasePixelArrayAccessor):

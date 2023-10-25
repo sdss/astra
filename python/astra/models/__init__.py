@@ -11,3 +11,5 @@ from astra.models.mdwarftype import MDwarfType
 from astra.models.snow_white import SnowWhite
 from astra.models.slam import Slam
 from astra.models.line_forest import LineForest
+from astra.models.astronn import AstroNN
+from astra.models.corv import Corv

@@ -352,12 +352,10 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     v_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [V/H]")
 
     #> Raw (Uncalibrated) Quantities
-    calibrated = BooleanField(default=False, help_text=Glossary.calibrated)
-    print("ANDY UPDATED CALIBRATED_FLAGS")
-    #calibrated_flags = BitField(null=True, help_text="Calibration flags")
-    #flag_main_sequence = calibrated_flags.flag(2**0, "Main-sequence star")
-    #flag_red_giant_branch = calibrated_flags.flag(2**1, "Red giant branch star")
-    #flag_red_clump = calibrated_flags.flag(2**2, "Red clump")
+    calibrated_flags = BitField(null=True, help_text="Calibration flags")
+    flag_main_sequence = calibrated_flags.flag(2**0, "Classified as main-sequence star for calibration")
+    flag_red_giant_branch = calibrated_flags.flag(2**1, "Classified as red giant branch star for calibration")
+    flag_red_clump = calibrated_flags.flag(2**2, "Classified as red clump star for calibration")
     
     raw_teff = FloatField(null=True, help_text=Glossary.raw_teff)
     raw_e_teff = FloatField(null=True, help_text=Glossary.raw_e_teff)

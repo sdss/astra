@@ -38,6 +38,7 @@ def slam(
                     Source.g_mag.is_null(False)
                 &   Source.rp_mag.is_null(False)
                 &   Source.plx.is_null(False)
+                &   (Source.plx > 0)
                 &   ((Source.g_mag - Source.rp_mag) > 0.56)
                 &   ((Source.g_mag + 5 + 5 * fn.log10(Source.plx/1000)) > 5.553)
                 )

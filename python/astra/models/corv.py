@@ -28,7 +28,7 @@ class Corv(BaseModel, PipelineOutputMixin):
     )
     
     #> Astra Metadata
-    task_pk = AutoField(help_text=Glossary.task_pk, help_text=Glossary.task_pk)
+    task_pk = AutoField(help_text=Glossary.task_pk)
     v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
     created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
     t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)

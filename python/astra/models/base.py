@@ -142,7 +142,9 @@ database, schema = get_database_and_schema(
         config_file=f"{Path(__file__).parent.resolve()}/../etc/astra.yml"
     )   
 )
-
+if os.environ.get("FOO", False):
+    schema = "astra_043"
+    print("SETTING SCHEMA")
 
 class BaseModel(Model):
     

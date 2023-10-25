@@ -8,10 +8,12 @@ from peewee import (
     TextField,
     ForeignKeyField,
 )
+import datetime
+from astra import __version__
 from astra.models.base import BaseModel
 from astra.models.source import Source
 from astra.models.spectrum import (Spectrum, SpectrumMixin)
-from astra.models.fields import PixelArray, BitField
+from astra.models.fields import PixelArray, BitField, PickledPixelArrayAccessor, LogLambdaArrayAccessor
 
 from astra.glossary import Glossary
 from astra.utils import log
@@ -201,3 +203,72 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
         if self.run2d in ['v6_0_1','v6_0_2', 'v6_0_3', 'v6_0_4']:
             return 'p'
         return ''
+
+
+class BossCoaddedSpectrum(BaseModel, SpectrumMixin):
+
+    """A co-added BOSS spectrum. """
+
+    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
+    spectrum_pk = ForeignKeyField(
+        Spectrum, 
+        index=True, 
+        lazy_load=False,
+        help_text=Glossary.spectrum_pk
+    )
+    
+    #> Astra Metadata
+    task_pk = AutoField(help_text=Glossary.task_pk)
+    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
+    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
+    t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
+    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
+    tag = TextField(default="", index=True, help_text=Glossary.tag)
+    
+    #> Spectral Data
+    wavelength = PixelArray(
+        accessor_class=LogLambdaArrayAccessor,
+        accessor_kwargs=dict(
+            crval=3.5523,
+            cdelt=1e-4,
+            naxis=4648,
+        ),
+        help_text=Glossary.wavelength
+    )    
+    flux = PixelArray(help_text=Glossary.flux, accessor_class=PickledPixelArrayAccessor)
+    ivar = PixelArray(help_text=Glossary.flux, accessor_class=PickledPixelArrayAccessor)
+    pixel_flags = PixelArray(help_text=Glossary.flux, accessor_class=PickledPixelArrayAccessor)
+    
+    #> Data Product Keywords
+    release = TextField(help_text=Glossary.release)
+    filetype = TextField(default="mwmStar", help_text=Glossary.filetype)
+    sdss_id = BigIntegerField(help_text=Glossary.sdss_id)
+
+    run2d = TextField(help_text=Glossary.run2d)    
+    telescope = TextField(help_text=Glossary.telescope)
+    snr = FloatField(null=True, help_text=Glossary.snr)
+    
+    #> Spectrum Resampling
+    L = FloatField(null=True)#, help_text=Glossary.L)
+    P = FloatField(null=True)#, help_text=Glossary.P)
+    rcond = FloatField(null=True)#, help_text=Glossary.rcond)
+    Lambda = FloatField(null=True)#, help_text=Glossary.Lambda)
+    spectrum_pks_in_coadd = ArrayField(IntegerField)#, null=True, help_text=Glossary.spectrum_pks_in_coadd)
+    spectrum_pks_considered = ArrayField(IntegerField)#, null=True, help_text=Glossary.spectrum_pks_considered)
+    
+    #> Non-negative Matrix Factorization (NMF) Continuum Fit
+    W = ArrayField(FloatField, null=True)#, help_text=Glossary.W)
+    theta = ArrayField(FloatField, null=True)# help_text=Glossary.theta)
+    nmf_model_flux = PixelArray(help_text=Glossary.flux, accessor_class=PickledPixelArrayAccessor)
+    nmf_continuum = PixelArray(help_text=Glossary.flux, accessor_class=PickledPixelArrayAccessor)
+    nmf_mask = PixelArray(help_text=Glossary.flux, accessor_class=PickledPixelArrayAccessor)
+    nmf_chi2 = FloatField(null=True)#, help_text=Glossary.nmf_chi2)
+    nmf_rchi2 = FloatField(null=True)#, help_text=Glossary.nmf_rchi2)
+    
+
+    
+    @property    
+    def path(self):
+        g = f"{self.sdss_id}"[-4:]
+        folder_groups = f"{g[:2]}/{g[2:]}"
+        return f"$MWM_ASTRA/{self.v_astra}/spectra/intermediate-coadds/{folder_groups}/boss-{self.telescope}-{self.sdss_id}.pkl"

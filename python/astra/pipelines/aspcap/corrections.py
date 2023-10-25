@@ -41,7 +41,7 @@ def clear_corrections(batch_size: int = 500):
     return N_updated
 
 
-def apply_ipl3_logg_corrections(batch_size: int = 500):
+def apply_ipl3_logg_corrections(batch_size: int = 500, limit: int = None):
     """
     Apply the IPL-3 logg corrections to the ASPCAP data model.
     """
@@ -55,6 +55,7 @@ def apply_ipl3_logg_corrections(batch_size: int = 500):
             ASPCAP,
             Source.sdss4_apogee_id
         )
+        .distinct(Source)
         .join(Source)
         .where(Source.sdss4_apogee_id.in_(list(apokasc["2MASS_ID"])))
         .objects()
@@ -85,7 +86,7 @@ def apply_ipl3_logg_corrections(batch_size: int = 500):
         apokasc["raw_logg"],
         apokasc["raw_m_h_atm"],
         apokasc["raw_c_m_atm"],
-        apokasc["raw_n_m_atm"],
+        #apokasc["raw_n_m_atm"],
     ]).T
     y = np.array(apokasc["APOKASC3_EVSTATES"])
     
@@ -113,8 +114,8 @@ def apply_ipl3_logg_corrections(batch_size: int = 500):
     # For all the RC stars, construct a corrector.
     is_rc_for_fit = (
         (apokasc["APOKASC3_EVSTATES"] == 2)
-    &   (apokasc["APOKASC3P_LOGG"] > 2)    
-    &   (apokasc["APOKASC3P_LOGG"] < 3) # remove secondary red clump
+    &   (apokasc["APOKASC3P_LOGG"] > 2.3)    
+    &   (apokasc["APOKASC3P_LOGG"] < 2.5) # remove secondary red clump
 #    &   (apokasc["KALLINGER_EVSTATES"] != 2) # remove secondary red clump
     &   (apokasc["APOKASC3P_MASS"] >= 0) # remove other secondary red clump things    
     &   (np.abs(apokasc["APOKASC3P_LOGG"] - apokasc["raw_logg"] + 0.2) < 0.2) # coarse outlier removal
@@ -131,8 +132,9 @@ def apply_ipl3_logg_corrections(batch_size: int = 500):
     
     mask_lm_rc = np.isfinite(X).all(axis=1) * is_rc_for_fit
     
-    lm_rc = LinearRegression()
-    lm_rc.fit(X[mask_lm_rc], y[mask_lm_rc])
+    rc_offset = np.median(apokasc["raw_logg"][mask_lm_rc] - y[mask_lm_rc])
+    #lm_rc = LinearRegression()
+    #lm_rc.fit(X[mask_lm_rc], y[mask_lm_rc])
     
     '''
     dy = lm_rc.predict(X[mask_lm_rc]) - y[mask_lm_rc]
@@ -166,9 +168,9 @@ def apply_ipl3_logg_corrections(batch_size: int = 500):
     )
     
     X = np.array([
+        apokasc["raw_m_h_atm"],
         apokasc["raw_logg"],
-        apokasc["raw_logg"]**2,
-        apokasc["raw_m_h_atm"]
+        #apokasc["raw_logg"]**2,
     ]).T
     y = apokasc["APOKASC3P_LOGG"]
     
@@ -195,64 +197,71 @@ def apply_ipl3_logg_corrections(batch_size: int = 500):
 
     
     # We're ready to apply corrections for RGB, RC, and MS stars.
-    q = ASPCAP.select()
+    q = (
+        ASPCAP
+        .select()
+        .where(
+            ASPCAP.raw_teff.is_null(False)
+        &   ASPCAP.raw_logg.is_null(False)
+        &   ASPCAP.raw_m_h_atm.is_null(False)
+        )
+        .limit(limit)
+    )
     
-    updated = []
-    for r in tqdm(q, desc="Applying corrections"):
-        if r.raw_logg > 4 or r.raw_teff > 6000:
-            # dwarf
-            r.flag_main_sequence = True
-            r.logg = logg_correction_dwarf(r) #
-        elif r.raw_logg > -1:
-            # evolved
-            X = np.atleast_2d([
-                r.raw_teff,
-                r.raw_logg,
-                r.raw_m_h_atm,
-                r.raw_c_m_atm,
-                r.raw_n_m_atm
-            ])
-            
-            predicted_class, = clf.predict(X)
-            if predicted_class == 1: # rgb
-                r.flag_red_giant_branch = True
-                r.logg, = lm_rgb.predict(np.atleast_2d([
-                    r.raw_logg,
-                    r.raw_logg**2,
-                    r.raw_m_h_atm
-                ]))
-            elif predicted_class == 2: # rc
-                r.flag_red_clump = True
-                r.logg, = lm_rc.predict(np.atleast_2d([
-                    r.raw_logg,
-                ]))
-            else:
-                raise ValueError("arrrgh")
-                
-        updated.append(r)
-    
+    with tqdm(total=len(q), desc="Applying corrections") as pb:
+        for chunk in chunked(q, batch_size):
+            updated = []
+            for r in chunk:   
+                r.calibrated_flags = 0 # remove any previous classifications     
+                if r.raw_logg > 4 or r.raw_teff > 6000:
+                    # dwarf
+                    r.flag_main_sequence = True
+                    r.logg = logg_correction_dwarf(r) #
+                elif r.raw_logg > -1:
+                    # evolved
+                    X = np.atleast_2d([
+                        r.raw_teff,
+                        r.raw_logg,
+                        r.raw_m_h_atm,
+                        r.raw_c_m_atm,
+                        #r.raw_n_m_atm
+                    ])            
+                    predicted_class, = clf.predict(X)
+                    if predicted_class == 1: # rgb
+                        r.flag_red_giant_branch = True
+                        r.logg, = lm_rgb.predict(np.atleast_2d([
+                            r.raw_m_h_atm,
+                            r.raw_logg,                            
+                        ]))
+                    elif predicted_class == 2: # rc
+                        r.flag_red_clump = True
+                        '''
+                        r.logg, = lm_rc.predict(np.atleast_2d([
+                            #r.raw_logg,
+                            0,
+                        ]))
+                        '''
+                        r.logg = r.raw_logg - rc_offset
+                    else:
+                        raise ValueError("arrrgh")
+                        
+                if np.isfinite(r.logg):
+                    updated.append(r)
 
-        r.calibrated = True
-        updated.append(r)
-
-    N_updated = 0
-    with tqdm(total=len(updated), desc="Saving") as pb:
-        for chunk in chunked(updated, batch_size):
-            N_updated += (
-                ASPCAP
-                .bulk_update(
-                    chunk,
-                    fields=[
-                        ASPCAP.logg,
-                        #ASPCAP.evolutionary_state_flags,
-                        #ASPCAP.calibrated
-                    ]
+            if updated:                    
+                (
+                    ASPCAP
+                    .bulk_update(
+                        updated,
+                        fields=[
+                            ASPCAP.logg,
+                            ASPCAP.calibrated_flags,
+                        ]
+                    )
                 )
-            )
-            pb.update(N_updated)
-    
-    return N_updated
-    
+            pb.update(batch_size)
+            
+    return None    
 
 
 def apply_dr16_parameter_corrections(batch_size: int = 500):
