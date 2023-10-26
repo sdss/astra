@@ -109,8 +109,8 @@ def line_forest(spectra: Iterable[BossVisitSpectrum], steps: int = 128, reps: in
 def _line_forest(spectra, steps, reps):
         
     models = {
-        "zlines.model": read_model(os.path.join(f"$MWM_ASTRA/pipelines/lineforest/zlines.model")),
-        "hlines.model": read_model(os.path.join(f"$MWM_ASTRA/pipelines/lineforest/hlines.model")),
+        "zlines.model": read_model(os.path.join(f"$MWM_ASTRA/pipelines/lineforest/zlines2.model")),
+        "hlines.model": read_model(os.path.join(f"$MWM_ASTRA/pipelines/lineforest/hlines2.model")),
     }
 
     results = []
@@ -173,19 +173,20 @@ def _line_forest(spectra, steps, reps):
 
                         a = np.where(np.abs(predictions[1:,2])>0.5)[0]
                         detection_upper = np.round(len(a)/reps,2)
-
-                        result_kwds.update({
-                            f"eqw_{name.lower()}": eqw,
-                            f"abs_{name.lower()}": abs,
-                            f"detection_lower_{name.lower()}": detection_lower,
-                            f"detection_upper_{name.lower()}": detection_upper
-                        })
-
-                        if len(a)>2:
+                        
+                        if detection_upper>0.3:
                             result_kwds.update({
-                                f"eqw_percentiles_{name.lower()}": np.round(np.percentile(predictions[1:,0][a],[16,50,84]),4),
-                                f"abs_percentiles_{name.lower()}": np.round(np.percentile(predictions[1:,1][a],[16,50,84]),4),
-                            }) 
+                                f"eqw_{name.lower()}": eqw,
+                                f"abs_{name.lower()}": abs,
+                                f"detection_lower_{name.lower()}": detection_lower,
+                                f"detection_upper_{name.lower()}": detection_upper
+                            })
+    
+                            if len(a)>2:
+                                result_kwds.update({
+                                    f"eqw_percentiles_{name.lower()}": np.round(np.percentile(predictions[1:,0][a],[16,50,84]),4),
+                                    f"abs_percentiles_{name.lower()}": np.round(np.percentile(predictions[1:,1][a],[16,50,84]),4),
+                                }) 
                 except:
                     log.exception(f"Exception when measuring {name} for spectrum {spectrum}")
                     continue
@@ -212,7 +213,7 @@ def unnormalize(predictions):
 def read_model(path):
     import tensorflow as tf
     tf.autograph.set_verbosity(0)
-    return tf.keras.models.load_model(expand_path(path))
+    return tf.keras.models.load_model(expand_path(path),compile=False)
 
 # TODO: move this to a utility
 def airtovac(wave_air) :
