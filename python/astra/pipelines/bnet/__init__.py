@@ -302,7 +302,7 @@ def open_boss_fits(file_path):
 
     return flux, error, wavlen
 
-def make_prediction(spectra, error, wavlen,num_uncertainty_draws,model,device, interpolate_flux, interpolate_flux_err, linear_grid):
+def make_prediction(spectra, error, wavlen,num_uncertainty_draws,model,device):
 
     # Interpolate and log scale spectra
     interp_spectra = interpolate_flux(spectra, wavlen)
@@ -353,10 +353,13 @@ from astra.models.bnet import BNet
 from peewee import JOIN
 from typing import Optional, Iterable
 
-
+MIN_WL, MAX_WL, FLUX_LEN = 3800, 8900, 3900
+linear_grid = torch.linspace(MIN_WL, MAX_WL, steps=FLUX_LEN)
+interpolate_flux = partial(interpolate_flux, linear_grid=linear_grid)
+interpolate_flux_err = partial(interpolate_flux_err, linear_grid=linear_grid)   
 
 @task
-def anet(
+def bnet(
     spectra: Optional[Iterable[BossVisitSpectrum]] = (
         BossVisitSpectrum
         .select()
@@ -376,11 +379,7 @@ def anet(
     # As per https://stackoverflow.com/questions/59013109/runtimeerror-input-type-torch-floattensor-and-weight-type-torch-cuda-floatte
     if torch.cuda.is_available():
         model.cuda()
-
-    MIN_WL, MAX_WL, FLUX_LEN = 3800, 8900, 3900
-    linear_grid = torch.linspace(MIN_WL, MAX_WL, steps=FLUX_LEN)
-    interpolate_flux = partial(interpolate_flux, linear_grid=linear_grid)
-    interpolate_flux_err = partial(interpolate_flux_err, linear_grid=linear_grid)    
+ 
     
     for spectrum in tqdm(spectra, total=0):
         
@@ -393,7 +392,7 @@ def anet(
             e_flux = torch.from_numpy(e_flux).float()
             wavelen = torch.from_numpy(wavelen).float()
             
-            log_G,log_Teff,FeH,rv,log_G_std,log_Teff_std,Feh_std,rv_std = make_prediction(flux, e_flux, wavelen, num_uncertainty_draws,model,device, interpolate_flux, interpolate_flux_err, linear_grid)
+            log_G,log_Teff,FeH,rv,log_G_std,log_Teff_std,Feh_std,rv_std = make_prediction(flux, e_flux, wavelen, num_uncertainty_draws,model,device)
         except:
             log.exception(f"Exception when running ANet on {spectrum}")    
         else:
