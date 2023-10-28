@@ -144,6 +144,15 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     model_flux_ti_2_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ti 2/H]")
     model_flux_v_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [V/H]")
 
+    #> IRFM Temperatures (Casagrande et al. 2010)
+    irfm_teff = FloatField(null=True, help_text=Glossary.teff)
+    e_irfm_teff = FloatField(null=True, help_text=Glossary.e_teff)
+    irfm_teff_flags = BitField(default=0, help_text="IRFM temperature flags")
+    flag_out_of_v_k_bounds = irfm_teff_flags.flag(2**0, "Out of V-Ks bounds (0.78, 3.15)")
+    flag_extrapolated_v_mag = irfm_teff_flags.flag(2**1, "Synthetic V magnitude is extrapolated")
+    flag_poor_quality_k_mag = irfm_teff_flags.flag(2**2, "Poor quality Ks magnitude")
+    flag_ebv_used_is_upper_limit = irfm_teff_flags.flag(2**3, "E(B-V) used is an upper limit")
+
     #> Stellar Parameters
     teff = FloatField(null=True, help_text=Glossary.teff)
     e_teff = FloatField(null=True, help_text=Glossary.e_teff)

@@ -194,24 +194,30 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     spectrum_flags = BitField(default=0, help_text=Glossary.spectrum_flags)
     
     # From https://github.com/sdss/apogee_drp/blob/630d3d45ecff840d49cf75ac2e8a31e22b543838/python/apogee_drp/utils/bitmask.py#L110
+    # and https://github.com/sdss/apogee/blob/e134409dc14b20f69e68a0d4d34b2c1b5056a901/python/apogee/utils/bitmask.py#L9
     flag_bad_pixels = spectrum_flags.flag(2**0, help_text="Spectrum has many bad pixels (>20%).")
     flag_commissioning = spectrum_flags.flag(2**1, help_text="Commissioning data (MJD <55761); non-standard configuration; poor LSF.")
     flag_bright_neighbor = spectrum_flags.flag(2**2, help_text="Star has neighbor more than 10 times brighter.")
     flag_very_bright_neighbor = spectrum_flags.flag(2**3, help_text="Star has neighbor more than 100 times brighter.")
     flag_low_snr = spectrum_flags.flag(2**4, help_text="Spectrum has low S/N (<5).")
-    flag_persist_high = spectrum_flags.flag(2**5, help_text="Spectrum has at least 20% of pixels in high persistence region.")
-    flag_persist_med = spectrum_flags.flag(2**6, help_text="Spectrum has at least 20% of pixels in medium persistence region.")
-    flag_persist_low = spectrum_flags.flag(2**7, help_text="Spectrum has at least 20% of pixels in low persistence region.")
-    flag_persist_jump_pos = spectrum_flags.flag(2**8, help_text="Spectrum has obvious positive jump in blue chip.")
-    flag_persist_jump_neg = spectrum_flags.flag(2**9, help_text="Spectrum has obvious negative jump in blue chip.")
-    flag_suspect_rv_combination = spectrum_flags.flag(2**10, help_text="RVs from synthetic template differ significantly (~2 km/s) from those from combined template.")
-    flag_suspect_broad_lines = spectrum_flags.flag(2**11, help_text="Cross-correlation peak with template significantly broader than autocorrelation of template.")
-    flag_bad_rv_combination = spectrum_flags.flag(2**12, help_text="RVs from synthetic template differ very significantly (~10 km/s) from those from combined template.")
-    flag_rv_reject = spectrum_flags.flag(2**13, help_text="Rejected visit because cross-correlation RV differs significantly from least squares RV.")
-    flag_rv_suspect = spectrum_flags.flag(2**14, help_text="Suspect visit (but used!) because cross-correlation RV differs slightly from least squares RV.")
-    flag_multiple_suspect = spectrum_flags.flag(2**15, help_text="Suspect multiple components from Gaussian decomposition of cross-correlation.")
-    flag_rv_failure = spectrum_flags.flag(2**16, help_text="RV failure.")
-
+    # 4-8 inclusive are not defined
+    flag_persist_high = spectrum_flags.flag(2**9, help_text="Spectrum has at least 20% of pixels in high persistence region.")
+    flag_persist_med = spectrum_flags.flag(2**10, help_text="Spectrum has at least 20% of pixels in medium persistence region.")
+    flag_persist_low = spectrum_flags.flag(2**11, help_text="Spectrum has at least 20% of pixels in low persistence region.")
+    flag_persist_jump_pos = spectrum_flags.flag(2**12, help_text="Spectrum has obvious positive jump in blue chip.")
+    flag_persist_jump_neg = spectrum_flags.flag(2**13, help_text="Spectrum has obvious negative jump in blue chip.")
+    # 14-15 inclusive are not defined
+    flag_suspect_rv_combination = spectrum_flags.flag(2**16, help_text="RVs from synthetic template differ significantly (~2 km/s) from those from combined template.")
+    flag_suspect_broad_lines = spectrum_flags.flag(2**17, help_text="Cross-correlation peak with template significantly broader than autocorrelation of template.")
+    flag_bad_rv_combination = spectrum_flags.flag(2**18, help_text="RVs from synthetic template differ very significantly (~10 km/s) from those from combined template.")
+    flag_rv_reject = spectrum_flags.flag(2**19, help_text="Rejected visit because cross-correlation RV differs significantly from least squares RV.")
+    flag_rv_suspect = spectrum_flags.flag(2**20, help_text="Suspect visit (but used!) because cross-correlation RV differs slightly from least squares RV.")
+    flag_multiple_suspect = spectrum_flags.flag(2**21, help_text="Suspect multiple components from Gaussian decomposition of cross-correlation.")
+    flag_rv_failure = spectrum_flags.flag(2**22, help_text="RV failure.")
+    flag_suspect_rotation = spectrum_flags.flag(2**23, help_text="Suspect rotation: cross-correlation peak with template significantly broader than autocorretion of template")
+    flag_mtpflux_lt_75 = spectrum_flags.flag(2**24, help_text="Spectrum falls on fiber in MTP block with relative flux < 0.75")
+    flag_mtpflux_lt_50 = spectrum_flags.flag(2**25, help_text="Spectrum falls on fiber in MTP block with relative flux < 0.5")
+    
     #> Radial Velocity (Doppler)
     v_rad = FloatField(null=True, help_text=Glossary.v_rad)
     v_rel = FloatField(null=True, help_text=Glossary.v_rel)
@@ -372,14 +378,13 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
             "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits"
         }[self.release]
 
-        kwds = {}
+        kwds = self.__data__.copy()
         if self.release == "sdss5":
-            kwds["healpix_group"] = "{:d}".format(int(self.healpix) // 1000)
+            healpix = self.healpix or self.source.healpix
+            kwds["healpix"] = healpix
+            kwds["healpix_group"] = "{:d}".format(int(healpix) // 1000)
         
-        return template.format(
-            **self.__data__,
-            **kwds
-        )
+        return template.format(**kwds)
 
 
     class Meta:

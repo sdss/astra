@@ -13,3 +13,6 @@ from astra.models.slam import Slam
 from astra.models.line_forest import LineForest
 from astra.models.astronn import AstroNN
 from astra.models.corv import Corv
+from astra.models.classifier import SpectrumClassification
+from astra.models.anet import ANet
+from astra.models.bnet import BNet

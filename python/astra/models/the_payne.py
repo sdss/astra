@@ -4,34 +4,37 @@ from peewee import (
     TextField,
     ForeignKeyField,
     BitField,
+    DateTimeField
 )
-
+import datetime
 from astra import __version__
 from astra.models.base import BaseModel
 from astra.models.fields import BitField
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
-
+from astra.glossary import Glossary
 
 class ThePayne(BaseModel, PipelineOutputMixin):
 
     """A result from The Payne."""
     
-    sdss_id = ForeignKeyField(Source, index=True)
-    spectrum_id = ForeignKeyField(Spectrum, index=True, lazy_load=False)
+    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
+    spectrum_pk = ForeignKeyField(
+        Spectrum, 
+        index=True, 
+        lazy_load=False,
+        help_text=Glossary.spectrum_pk
+    )
     
     #> Astra Metadata
-    task_id = AutoField()
-    v_astra = TextField(default=__version__)
-    t_elapsed = FloatField(null=True)
-    tag = TextField(default="", index=True)
+    task_pk = AutoField(help_text=Glossary.task_pk)
+    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
+    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
+    t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
+    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
+    tag = TextField(default="", index=True, help_text=Glossary.tag)
     
-    #> Task Parameters
-    model_path = TextField(default="")
-    opt_tolerance = FloatField(null=True)
-    v_rad_tolerance = FloatField(null=True)
-    # TODO: include continuum parameters?
     
     #> Stellar Labels
     v_rel = FloatField(null=True)
@@ -88,8 +91,8 @@ class ThePayne(BaseModel, PipelineOutputMixin):
     
 
     #> Summary Statistics
-    chi_sq = FloatField(null=True)
-    reduced_chi_sq = FloatField(null=True)
+    chi2 = FloatField(null=True)
+    reduced_chi2 = FloatField(null=True)
     result_flags = BitField(default=0)
     
 

@@ -86,6 +86,7 @@ class AstroNN(BaseModel, PipelineOutputMixin):
 
     #> Summary Statistics
     result_flags = BitField(default=0, help_text="Flags describing the results")
+    flag_bad = result_flags.flags(2**0, help_text="Results are known to be bad (e_logg >= 0.2)")
 
     #> Flag definitions
     flag_no_result = result_flags.flag(2**11, help_text="Exception raised when loading spectra")
