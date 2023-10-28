@@ -1,0 +1,87 @@
+
+from peewee import BitField
+from astra.models import (
+    Source, 
+    ApogeeVisitSpectrum, 
+    BossVisitSpectrum,
+    ANet,
+    BNet,
+    ApogeeNet,
+    ASPCAP,
+    AstroNN,
+    MDwarfType,
+    Slam,
+    SnowWhite,
+)
+from collections import OrderedDict
+
+models = [
+    Source,
+    BossVisitSpectrum,
+    ApogeeVisitSpectrum
+]
+
+template = """
+<h3>
+  <code>{flag_name}</code> (on the <code>astra.models.{model_name}</code> data model)
+</h3>
+<table>
+  <colgroup>
+    <col/>
+    <col/>
+    <col/>
+  </colgroup>
+  <tbody>
+    <tr>
+      <th>Bit</th>
+      <th>Short description</th>
+      <th>Long description</th>
+    </tr>
+    {flag_definitions}
+  </tbody>
+</table>
+<p>&nbsp;</p>
+"""
+
+for model in models:
+    fields = OrderedDict()
+    for name, field in model._meta.fields.items():
+        if isinstance(field, BitField):
+            fields[name] = field
+    
+    flags = OrderedDict()
+    for key, value in model.__dict__.items():
+        if key.startswith("flag_") and (value.__class__.__name__ == "FlagDescriptor"):
+            flags.setdefault(value._field.name, [])
+            
+            bit = int(np.log2(value._value))
+            short_description = key[5:].upper() # strip the flag_
+            full_description = value.help_text
+            
+            flags[value._field.name].append((bit, short_description, full_description))
+    
+    # Now ensure all the flag definitions are sorted by bit value.
+    for name in flags.keys():
+        flags[name] = sorted(flags[name], key=lambda item: item[0])
+    
+    # Now print them for this Model.
+
+
+    for name, field in fields.items():
+        kwds = dict(
+            flag_name=name, 
+            model_name=model.__name__
+        )        
+        if name not in flags:
+            kwds["flag_definitions"] = "<tr><td></td><td></td><td></td></tr>"
+        else:           
+            flag_definitions = ""     
+            for bit, short_description, full_description in flags[name]:
+                full_desc = full_description.replace(">", "&gt;").replace("<", "&lt;")
+                flag_definitions += f"<tr>\n<td>{bit}</td>\n<td><code>{short_description}</code></td>\n<td>{full_desc}</td>\n</tr>"
+            kwds["flag_definitions"] = flag_definitions
+            
+        print(template.format(**kwds))
+    
+    print("\n\n\n")
+
