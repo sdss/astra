@@ -69,7 +69,7 @@ def _inference(model, batch):
             yield AstroNN(
                 spectrum_pk=spectrum_pk,
                 source_pk=source_pk,
-                flag_no_result = True
+                flag_no_result=True
             )
         else:
             spectrum_pks.append(spectrum_pk)
@@ -119,8 +119,8 @@ def _inference(model, batch):
                 t_elapsed=mean_t_elapsed,
             )
             result_kwds.update(dict(zip(model.targetname, pred[i])))
-            result_kwds.update(dict(zip([f"e_{ln}" for ln in model.targetname], pred_err[i])))
-            result_kwds["result_flags"] = 0 # TODO
+            result_kwds.update(dict(zip([f"e_{ln}" for ln in model.targetname], pred_err[i])))    
+            result_kwds["result_flags"] = 0 if result_kwds["e_logg"] < 0.2 else 1 
             
             yield AstroNN(**result_kwds)
 
