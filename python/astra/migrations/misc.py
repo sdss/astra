@@ -13,15 +13,14 @@ from astra.models.source import Source
 from astra.models.apogee import ApogeeVisitSpectrum
 from astra.models.boss import BossVisitSpectrum
 
-from astra.migrations.sdss5db.catalogdb import Gaia_DR3
 
 
 def compute_casagrande_irfm_effective_temperatures(
+    model, 
     fe_h_field,
     where=(
         Source.v_jkc_mag.is_null(False)
     &   Source.k_mag.is_null(False)
-    &   Source.irfm_teff.is_null(True)        
     ),
     batch_size=10_000
 ):
@@ -29,7 +28,7 @@ def compute_casagrande_irfm_effective_temperatures(
     Compute IRFM effective temperatures using the V-Ks colour and the Casagrande et al. (2010) scale.
     """
     
-    valid_v_k = [0.78 ,3.15]
+    valid_v_k = [0.78, 3.15]
     
     #https://www.aanda.org/articles/aa/full_html/2010/04/aa13204-09/aa13204-09.html
     a0, a1, a2, a3, a4, a5 = (
@@ -42,60 +41,59 @@ def compute_casagrande_irfm_effective_temperatures(
     )
     
     q = (
-        Source
+        model
         .select(
+            model,
             Source,
-            fe_h_field.alias("fe_h")
         )
-        .distinct(Source)
-        .join(fe_h_field.model, on=(fe_h_field.model.source_pk_id == Source.pk))
-        .objects()
+        .join(Source, on=(model.source_pk == Source.pk), attr="_source")
     )
+    
     if where:
         q = q.where(where)
 
     n_updated, batch = (0, [])
-    for source in tqdm(q.iterator()):
+    for row in tqdm(q.iterator()):
         
-        X = (source.v_jkc_mag or np.nan) - (source.k_mag or np.nan)
-        fe_h = source.fe_h or np.nan
+        X = (row._source.v_jkc_mag or np.nan) - (row._source.k_mag or np.nan)
+        fe_h = getattr(row, fe_h_field.name) or np.nan
         theta = a0 + a1 * X + a2*X**2 + a3*X*fe_h + a4*fe_h + a5*fe_h**2
         
-        source.irfm_teff = 5040/theta
-        source.e_irfm_teff = np.nan
+        row.irfm_teff = 5040/theta
+        row.e_irfm_teff = np.nan
         
-        #source.e_irfm_teff = 5040 * np.sqrt(
-        #    (a1 + 2*a2*X + a3*fe_h) ** 2 * source.e_v_jkc_mag**2
-        #+   (a1 + 2*a2*X + a3*fe_h) ** 2 * source.e_k_mag**2
-        #+   (a3*X + a4 + 2*a5*fe_h) ** 2 * source.e_fe_h**2
+        #_source.e_irfm_teff = 5040 * np.sqrt(
+        #    (a1 + 2*a2*X + a3*fe_h) ** 2 * _source.e_v_jkc_mag**2
+        #+   (a1 + 2*a2*X + a3*fe_h) ** 2 * _source.e_k_mag**2
+        #+   (a3*X + a4 + 2*a5*fe_h) ** 2 * _source.e_fe_h**2
         #)
         
         
-        source.flag_out_of_v_k_bounds = not (valid_v_k[0] <= X <= valid_v_k[1])
-        source.flag_extrapolated_v_mag = (source.v_jkc_mag_flag == 0)
-        source.flag_poor_quality_k_mag = (source.ph_qual is None) or (source.ph_qual[-1] != "A")
-        source.flag_ebv_used_is_upper_limit = source.flag_ebv_upper_limit        
-        batch.append(source)
+        row.flag_out_of_v_k_bounds = not (valid_v_k[0] <= X <= valid_v_k[1])
+        row.flag_extrapolated_v_mag = (row._source.v_jkc_mag_flag == 0)
+        row.flag_poor_quality_k_mag = (row._source.ph_qual is None) or (row._source.ph_qual[-1] != "A")
+        row.flag_ebv_used_is_upper_limit = row._source.flag_ebv_upper_limit        
+        batch.append(row)
         
         if len(batch) >= batch_size:
-            Source.bulk_update(
+            model.bulk_update(
                 batch,
                 fields=[
-                    Source.irfm_teff,
-                    Source.e_irfm_teff,
-                    Source.irfm_teff_flags,
+                    model.irfm_teff,
+                    model.e_irfm_teff,
+                    model.irfm_teff_flags,
                 ]
             )
             n_updated += batch_size
             batch = []
             
     if len(batch) > 0:
-        Source.bulk_update(
+        model.bulk_update(
             batch,
             fields=[
-                Source.irfm_teff,
-                Source.e_irfm_teff,
-                Source.irfm_teff_flags,
+                model.irfm_teff,
+                model.e_irfm_teff,
+                model.irfm_teff_flags,
             ]
         )
         n_updated += len(batch)
@@ -182,6 +180,8 @@ def compute_n_neighborhood(
 ):
     #"Sources within 3\" and G_MAG < G_MAG_source + 5"
     
+    from astra.migrations.sdss5db.catalogdb import Gaia_DR3
+
     q = (
         Source
         .select()
