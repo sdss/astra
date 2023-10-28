@@ -269,7 +269,7 @@ from astra.utils import log, expand_path
 
 from astra.models import ApogeeCoaddedSpectrumInApStar
 from astra.models.anet import ANet
-from peewee import JOIN
+from peewee import JOIN, ModelSelect
 from typing import Optional, Iterable
 
 
@@ -284,6 +284,11 @@ def anet(
     ),
     num_uncertainty_draws: Optional[int] = 20
 ) -> Iterable[ANet]:
+    """
+    Run the ANet (APOGEENet III) pipeline.
+    
+    """
+    
     
     model = BossNet()
     model_path = expand_path("$MWM_ASTRA/pipelines/ANet/deconstructed_model")
@@ -296,7 +301,11 @@ def anet(
     # As per https://stackoverflow.com/questions/59013109/runtimeerror-input-type-torch-floattensor-and-weight-type-torch-cuda-floatte
     if torch.cuda.is_available():
         model.cuda()
-            
+    
+    if isinstance(spectra, ModelSelect):
+        # Note: if you don't use the `.iterator()` you may get out-of-memory issues from the GPU nodes 
+        spectra = spectra.iterator() 
+    
     for spectrum in tqdm(spectra, total=0):
         
         try:        
@@ -309,6 +318,11 @@ def anet(
             log_G,log_Teff,FeH,log_G_std,log_Teff_std,Feh_std = make_prediction(flux, e_flux, None, num_uncertainty_draws,model,device)
         except:
             log.exception(f"Exception when running ANet on {spectrum}")    
+            yield ANet(
+                spectrum_pk=spectrum.spectrum_pk,
+                source_pk=spectrum.source_pk,
+                flag_runtime_exception=True
+            )
         else:
             yield ANet(
                 spectrum_pk=spectrum.spectrum_pk,

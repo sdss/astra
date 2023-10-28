@@ -379,7 +379,10 @@ def bnet(
     # As per https://stackoverflow.com/questions/59013109/runtimeerror-input-type-torch-floattensor-and-weight-type-torch-cuda-floatte
     if torch.cuda.is_available():
         model.cuda()
- 
+
+    if isinstance(spectra, ModelSelect):
+        # Note: if you don't use the `.iterator()` you may get out-of-memory issues from the GPU nodes 
+        spectra = spectra.iterator()         
     
     for spectrum in tqdm(spectra, total=0):
         
@@ -395,6 +398,11 @@ def bnet(
             log_G,log_Teff,FeH,rv,log_G_std,log_Teff_std,Feh_std,rv_std = make_prediction(flux, e_flux, wavelen, num_uncertainty_draws,model,device)
         except:
             log.exception(f"Exception when running ANet on {spectrum}")    
+            yield ANet(
+                spectrum_pk=spectrum.spectrum_pk,
+                source_pk=spectrum.source_pk,
+                flag_runtime_exception=True
+            )            
         else:
             yield BNet(
                 spectrum_pk=spectrum.spectrum_pk,

@@ -47,6 +47,7 @@ class BNet(BaseModel, PipelineOutputMixin):
     fe_h = FloatField(null=True, help_text=Glossary.fe_h)
     e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
     result_flags = BitField(default=0, help_text=Glossary.result_flags)
+    flag_runtime_exception = result_flags.flag(2**0)    
     
     v_rad = FloatField(null=True, help_text=Glossary.v_rad)
     e_v_rad = FloatField(null=True, help_text=Glossary.e_v_rad)
