@@ -327,7 +327,10 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
         if slurm_dir is None:
             from datetime import datetime
             from tempfile import mkdtemp
-            slurm_dir = mkdtemp(prefix=f"{datetime.now().strftime('%Y-%m-%d')}-{resolved_task.split('.')[-1]}-", dir=expand_path(f"$PBS/"))
+            prefix = f"{datetime.now().strftime('%Y-%m-%d')}-{resolved_task.split('.')[-1][:30]}-"
+            if page:
+                prefix += f"{page}-"
+            slurm_dir = mkdtemp(prefix=prefix, dir=expand_path(f"$PBS/"))
             os.chmod(slurm_dir, 0o755)
             log.info(f"Using Slurm directory: {slurm_dir}")    
             job_name = f"{os.path.basename(slurm_dir)}"
@@ -335,9 +338,20 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
             os.makedirs(slurm_dir, exist_ok=True)
             job_name = f"{resolved_task.split('.')[-1]}"
 
+        python_threads = slurm_kwds.pop("python_threads", 8)
+        if slurm_kwds is None:
+            pre_execute_commands = []
+        else:
+            pre_execute_commands = [
+                f"export OMP_NUM_THREADS={python_threads}",
+                f"export OPENBLAS_NUM_THREADS={python_threads}",
+                f"export MKL_NUM_THREADS={python_threads}",
+                f"export VECLIB_MAXIMUM_THREADS={python_threads}",
+                f"export NUMEXPR_NUM_THREADS={python_threads}"            
+            ]
         slurm_job = SlurmJob(
             [
-                SlurmTask([command])
+                SlurmTask(pre_execute_commands + [command])
             ],
             job_name,
             dir=slurm_dir,
@@ -442,6 +456,11 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
         else:
             raise click.UsageError("Could not resolve spectrum identifiers.")
 
+    if page is not None:
+        kwargs["page"] = page
+    if limit is not None:
+        kwargs["limit"] = limit
+        
     if iterable is None:
         for result in tqdm(f(**kwargs), total=0, unit=" spectra"):
             None
