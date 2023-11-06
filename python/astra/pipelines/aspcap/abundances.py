@@ -116,7 +116,7 @@ def pre_abundances(
 
 
 @task
-def post_abundances(parent_dir, skip_pixel_arrays=True, **kwargs) -> Iterable[FerreChemicalAbundances]:
+def post_abundances(parent_dir, ferre_list_mode=False, skip_pixel_arrays=True, **kwargs) -> Iterable[FerreChemicalAbundances]:
     """
     Collect the results from FERRE and create database entries for the abundance step.
 
@@ -127,8 +127,13 @@ def post_abundances(parent_dir, skip_pixel_arrays=True, **kwargs) -> Iterable[Fe
     # Note the "/*" after STAGE because of the way folders are structured for abundances
     # And we use the `ref_dir` because it was executed from the parent folder.
     for dir in map(os.path.dirname, get_input_nml_paths(parent_dir, f"{STAGE}/*")):
-        log.info(f"Post-processing FERRE results in {dir}")
-        ref_dir = os.path.dirname(dir)
+        
+        # If the abundances were executed from the parent directory with the -l flag, you should use
+        if ferre_list_mode:
+            ref_dir = os.path.dirname(dir)
+        else:
+            ref_dir = None
+        log.info(f"Post-processing FERRE results in {dir} {'with FERRE list mode' if ferre_list_mode else 'in standard mode'}")
         for kwds in post_process_ferre(dir, ref_dir, skip_pixel_arrays=skip_pixel_arrays, **kwargs):
             yield FerreChemicalAbundances(**kwds)    
 
