@@ -319,8 +319,11 @@ class Glossary(BaseGlossary):
     alpha_m_atm = "[alpha/M] abundance ratio [dex]"
     v_sini = "Projected rotational velocity [km/s]"
     v_micro = "Microturbulence [km/s]"
+    v_macro = "Macroscopic broadening [km/s]"
     c_m_atm = "Atmospheric carbon abundance [dex]"
     n_m_atm = "Atmospheric nitrogen abundance [dex]"
+    
+    covar = "Covariance matrix (flattened)"
 
     v_astra = "Astra version"
     component = "Spectrum component"
@@ -340,6 +343,7 @@ class Glossary(BaseGlossary):
     cr_h = "[Cr/H] [dex]"
     cu_h = "[Cu/H] [dex]"
     fe_h = "[Fe/H] [dex]"
+    he_h = "[He/H] [dex]"
     k_h = "[K/H] [dex]"
     mg_h = "[Mg/H] [dex]"
     mn_h = "[Mn/H] [dex]"
