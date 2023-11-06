@@ -1,5 +1,6 @@
 """"Functions for creating summary pipeline products (e.g., astraAllStarASPCAP, astraAllVisitASPCAP)."""
 
+import os
 from astropy.io import fits
 from astra import __version__
 from astra.utils import log, expand_path
@@ -8,7 +9,12 @@ from astra.products.utils import (get_fields, get_basic_header, get_binary_table
 
 get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
 
-DEFAULT_IGNORE_FIELD_NAMES = ("pk", )
+def ignore_field_name_callable(field_name):
+    return (
+        (field_name.lower() in ("pk", )) 
+    or  field_name.lower().startswith("rho_")
+    )
+    
 
 def create_astra_all_star_product(
     pipeline_model,
@@ -19,10 +25,11 @@ def create_astra_all_star_product(
     boss_spectrum_model=BossVisitSpectrum,
     apogee_spectrum_model=ApogeeCoaddedSpectrumInApStar,
     output_template="astraAllStar{pipeline}-{version}.fits",
-    ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
+    ignore_field_name_callable=ignore_field_name_callable,
     name_conflict_strategy=None,
     upper=False,
     fill_values=None,
+    gzip=True,
     overwrite=False,
     full_output=False,
 ):
@@ -45,8 +52,8 @@ def create_astra_all_star_product(
     :param limit: [optional]
         Specify an optional limit on the number of rows.
     
-    :param ignore_field_names: [optional]
-        Ignore the given field names.
+    :param ignore_field_name_callable: [optional]
+        A callable that returns `True` if a field name should be ignored.
 
     :param name_conflict_strategy: [optional]
         A callable that expects
@@ -94,14 +101,16 @@ def create_astra_all_star_product(
     ]
     
     struct = [
-        (boss_spectrum_model, "apo", "boss", boss_where),
-        (boss_spectrum_model, "lco", "boss", boss_where),
-        (apogee_spectrum_model, "apo", "apogee", apogee_where),
-        (apogee_spectrum_model, "lco", "apogee", apogee_where),
+    #    (boss_spectrum_model, "apo", "boss", boss_where),
+    #    (boss_spectrum_model, "lco", "boss", boss_where),
+    #    (apogee_spectrum_model, "apo", "apogee", apogee_where),
+    #    (apogee_spectrum_model, "lco", "apogee", apogee_where),
+        (boss_spectrum_model, "boss", boss_where),
+        (apogee_spectrum_model, "apogee", apogee_where)
     ]
     
     all_fields = {}
-    for spectrum_model, observatory, instrument, instrument_where in struct:
+    for spectrum_model, instrument, instrument_where in struct:
 
         models = (Source, spectrum_model, pipeline_model)
         try:
@@ -110,10 +119,14 @@ def create_astra_all_star_product(
             fields = all_fields[spectrum_model] = get_fields(
                 models,
                 name_conflict_strategy=name_conflict_strategy,
-                ignore_field_names=ignore_field_names
+                ignore_field_name_callable=ignore_field_name_callable
             )
 
-        header = get_basic_header(pipeline=pipeline, observatory=observatory, instrument=instrument)
+        header = get_basic_header(
+            pipeline=pipeline, 
+        #    observatory=observatory, 
+            instrument=instrument
+        )
 
         q = (
             spectrum_model
@@ -121,7 +134,7 @@ def create_astra_all_star_product(
             .join(pipeline_model, on=(pipeline_model.spectrum_pk == spectrum_model.spectrum_pk))
             .switch(spectrum_model)
             .join(Source, on=(Source.pk == spectrum_model.source_pk))
-            .where(spectrum_model.telescope.startswith(observatory))
+            #.where(spectrum_model.telescope.startswith(observatory))
         )
         if where: # Need to check, otherwise it requires AND with previous where.
             q = q.where(where)
@@ -141,6 +154,10 @@ def create_astra_all_star_product(
 
     hdu_list = fits.HDUList(hdus)
     hdu_list.writeto(path, overwrite=overwrite)
+    if gzip:
+        os.system(f"gzip -f {path}")
+        path += ".gz"
+    
     return (path, hdu_list) if full_output else path    
 
 
@@ -153,10 +170,11 @@ def create_astra_all_visit_product(
     boss_spectrum_model=BossVisitSpectrum,
     apogee_spectrum_model=ApogeeVisitSpectrumInApStar,
     output_template="astraAllVisit{pipeline}-{version}.fits",    
-    ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
+    ignore_field_name_callable=ignore_field_name_callable,
     name_conflict_strategy=None,
     upper=False,
     fill_values=None,
+    gzip=True,
     overwrite=False,
     full_output=False,
 ):
@@ -179,8 +197,8 @@ def create_astra_all_visit_product(
     :param limit: [optional]
         Specify an optional limit on the number of rows.
     
-    :param ignore_field_names: [optional]
-        Ignore the given field names.
+    :param ignore_field_name_callable: [optional]
+        A callable that returns `True` if a field name should be ignored.
 
     :param name_conflict_strategy: [optional]
         A callable that expects
@@ -241,14 +259,16 @@ def create_astra_all_visit_product(
     }
     
     struct = [
-        (boss_spectrum_model, "apo", "boss", boss_where),
-        (boss_spectrum_model, "lco", "boss", boss_where),
-        (apogee_spectrum_model, "apo", "apogee", apogee_where),
-        (apogee_spectrum_model, "lco", "apogee", apogee_where),
+    #    (boss_spectrum_model, "apo", "boss", boss_where),
+    #    (boss_spectrum_model, "lco", "boss", boss_where),
+    #    (apogee_spectrum_model, "apo", "apogee", apogee_where),
+    #    (apogee_spectrum_model, "lco", "apogee", apogee_where),
+        (boss_spectrum_model, "boss", boss_where),
+        (apogee_spectrum_model, "apogee", apogee_where)
     ]
     
     all_fields = {}
-    for spectrum_model, observatory, instrument, instrument_where in struct:
+    for spectrum_model, instrument, instrument_where in struct:
 
         drp_spectrum_model = drp_spectrum_models[spectrum_model]
         
@@ -263,10 +283,14 @@ def create_astra_all_visit_product(
             fields = all_fields[spectrum_model] = get_fields(
                 models,
                 name_conflict_strategy=name_conflict_strategy,
-                ignore_field_names=ignore_field_names
+                ignore_field_name_callable=ignore_field_name_callable
             )
 
-        header = get_basic_header(pipeline=pipeline, observatory=observatory, instrument=instrument)
+        header = get_basic_header(
+            pipeline=pipeline, 
+            #observatory=observatory, 
+            instrument=instrument
+        )
 
         q = (
             spectrum_model
@@ -284,7 +308,7 @@ def create_astra_all_visit_product(
             .join(pipeline_model, on=(pipeline_model.spectrum_pk == spectrum_model.spectrum_pk))
             .switch(spectrum_model)
             .join(Source, on=(Source.pk == spectrum_model.source_pk))
-            .where(spectrum_model.telescope.startswith(observatory))
+            #.where(spectrum_model.telescope.startswith(observatory))
         )
         if where: # Need to check, otherwise it requires AND with previous where.
             q = q.where(where)
@@ -305,4 +329,8 @@ def create_astra_all_visit_product(
 
     hdu_list = fits.HDUList(hdus)
     hdu_list.writeto(path, overwrite=overwrite)
+    if gzip:
+        os.system(f"gzip -f {path}")
+        path += ".gz"
+    
     return (path, hdu_list) if full_output else path    

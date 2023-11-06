@@ -1,5 +1,6 @@
 """"Functions for creating summary products (e.g., mwmTargets, mwmAllStar, mwmAllVisit)."""
 
+import os
 from peewee import JOIN
 from astropy.io import fits
 from astra import __version__
@@ -85,18 +86,19 @@ DEFAULT_MWM_WHERE = (
 |   Source.assigned_to_carton_with_name('ops_std_boss_tic')
 |   Source.assigned_to_carton_with_name('ops_std_eboss')
 )
-DEFAULT_IGNORE_FIELD_NAMES = ("pk", )
-
+def ignore_field_name_callable(field_name):
+    return field_name in ("pk", )
 
 def create_mwm_targets_product(
     where=DEFAULT_MWM_WHERE,
     limit=None,
     output_template="mwmTargets-{version}.fits",
-    ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
+    ignore_field_name_callable=ignore_field_name_callable,
     upper=False,
     fill_values=None,
     overwrite=False,
-    full_output=False
+    gzip=True,
+    full_output=False,
 ):
     """
     Create an `mwmTargets` product containing a single HDU with source-level information about all targets,
@@ -111,8 +113,8 @@ def create_mwm_targets_product(
     :param output_template: [optional]
         The output basename template to use for this product.
 
-    :param ignore_field_names: [optional]
-        Ignore the given field names.
+    :param ignore_field_name_callable: [optional]
+        A callable that returns `True` if a field name should be ignored.
 
     :param name_conflict_strategy: [optional]
         A callable that expects
@@ -136,6 +138,9 @@ def create_mwm_targets_product(
     
     :param overwrite: [optional]
         Overwrite the path if it already exists.
+        
+    :param gzip: [optional]
+        Gzip the file.
     
     :param full_output: [optional]
         If `True`, return a two-length tuple containing the path and the HDU list,
@@ -147,7 +152,7 @@ def create_mwm_targets_product(
     fields = get_fields(
         (Source, ),
         name_conflict_strategy=None,
-        ignore_field_names=ignore_field_names
+        ignore_field_name_callable=ignore_field_name_callable
     )
     
     q = (
@@ -177,6 +182,9 @@ def create_mwm_targets_product(
 
     hdu_list = fits.HDUList(hdus)
     hdu_list.writeto(path, overwrite=overwrite)
+    if gzip:
+        os.system(f"gzip -f {path}")
+        path += ".gz"
     return (path, hdu_list) if full_output else path    
 
 
@@ -188,10 +196,11 @@ def create_mwm_all_star_product(
     boss_spectrum_model=BossVisitSpectrum,
     apogee_spectrum_model=ApogeeCoaddedSpectrumInApStar,
     output_template="mwmAllStar-{version}.fits",
-    ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
+    ignore_field_name_callable=ignore_field_name_callable,
     name_conflict_strategy=None,
     upper=False,
     fill_values=None,
+    gzip=True,
     overwrite=False,
     full_output=False,
 ):
@@ -219,8 +228,8 @@ def create_mwm_all_star_product(
     :param output_template: [optional]
         The output basename template to use for this product.
 
-    :param ignore_field_names: [optional]
-        Ignore the given field names.
+    :param ignore_field_name_callable: [optional]
+        A callable that returns `True` if a field name should be ignored.
 
     :param name_conflict_strategy: [optional]
         A callable that expects
@@ -258,11 +267,12 @@ def create_mwm_all_star_product(
         apogee_where=apogee_where,
         boss_spectrum_model=boss_spectrum_model,
         apogee_spectrum_model=apogee_spectrum_model,
-        ignore_field_names=ignore_field_names,
+        ignore_field_name_callable=ignore_field_name_callable,
         name_conflict_strategy=name_conflict_strategy,
         upper=upper,
         fill_values=fill_values,
         overwrite=overwrite,
+        gzip=gzip,
         full_output=full_output
     )
 
@@ -275,10 +285,11 @@ def create_mwm_all_visit_product(
     boss_spectrum_model=BossVisitSpectrum,
     apogee_spectrum_model=ApogeeVisitSpectrum,
     output_template="mwmAllVisit-{version}.fits",
-    ignore_field_names=DEFAULT_IGNORE_FIELD_NAMES,
+    ignore_field_name_callable=ignore_field_name_callable,
     name_conflict_strategy=None,
     upper=False,
     fill_values=None,
+    gzip=True,
     overwrite=False,
     full_output=False,
 ):
@@ -306,8 +317,8 @@ def create_mwm_all_visit_product(
     :param output_template: [optional]
         The output basename template to use for this product.
 
-    :param ignore_field_names: [optional]
-        Ignore the given field names.
+    :param ignore_field_name_callable: [optional]
+        A callable that returns `True` if a field name should be ignored.
 
     :param name_conflict_strategy: [optional]
         A callable that expects
@@ -345,10 +356,11 @@ def create_mwm_all_visit_product(
         apogee_where=apogee_where,
         boss_spectrum_model=boss_spectrum_model,
         apogee_spectrum_model=apogee_spectrum_model,
-        ignore_field_names=ignore_field_names,
+        ignore_field_name_callable=ignore_field_name_callable,
         name_conflict_strategy=name_conflict_strategy,
         upper=upper,
         fill_values=fill_values,
+        gzip=gzip,
         overwrite=overwrite,
         full_output=full_output
     )
@@ -361,10 +373,11 @@ def _create_summary_product(
     apogee_where=None,
     boss_spectrum_model=BossVisitSpectrum,
     apogee_spectrum_model=ApogeeVisitSpectrum,
-    ignore_field_names=None,
+    ignore_field_name_callable=None,
     name_conflict_strategy=None,
     upper=False,
     fill_values=None,
+    gzip=True,
     overwrite=False,
     full_output=False,        
 ):    
@@ -377,14 +390,16 @@ def _create_summary_product(
     ]
 
     struct = [
-        (boss_spectrum_model, "apo", boss_where),
-        (boss_spectrum_model, "lco", boss_where),
-        (apogee_spectrum_model, "apo", apogee_where),
-        (apogee_spectrum_model, "lco", apogee_where),
+    #    (boss_spectrum_model, "apo", boss_where),
+    #    (boss_spectrum_model, "lco", boss_where),
+    #    (apogee_spectrum_model, "apo", apogee_where),
+    #    (apogee_spectrum_model, "lco", apogee_where),
+        (boss_spectrum_model, boss_where),
+        (apogee_spectrum_model, apogee_where)
     ]
     
     all_fields = {}
-    for model, observatory, hdu_where in struct:
+    for model, hdu_where in struct:
 
         instrument = model.__name__.split("Visit")[0].lower()
 
@@ -395,16 +410,19 @@ def _create_summary_product(
             fields = all_fields[model] = get_fields(
                 models,
                 name_conflict_strategy=name_conflict_strategy,
-                ignore_field_names=ignore_field_names
+                ignore_field_name_callable=ignore_field_name_callable
             )
 
-        header = get_basic_header(observatory=observatory, instrument=instrument)
+        header = get_basic_header(
+            #observatory=observatory, 
+            instrument=instrument
+        )
 
         q = (
             model
             .select(*tuple(fields.values()))
             .join(Source, JOIN.LEFT_OUTER, on=(Source.pk == model.source_pk))
-            .where(model.telescope.startswith(observatory))
+            #.where(model.telescope.startswith(observatory))
         )        
 
         if hdu_where is not None:
@@ -426,4 +444,7 @@ def _create_summary_product(
 
     hdu_list = fits.HDUList(hdus)
     hdu_list.writeto(path, overwrite=overwrite)
+    if gzip:
+        os.system(f"gzip -f {path}")
+        path += ".gz"    
     return (path, hdu_list) if full_output else path

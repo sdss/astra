@@ -221,11 +221,11 @@ def get_fields_and_pixel_arrays(models, name_conflict_strategy=None, ignore_fiel
     return fields
 
 
-def get_fields(models, name_conflict_strategy=None, ignore_field_names=None):
+def get_fields(models, name_conflict_strategy=None, ignore_field_name_callable=None):
     fields = OrderedDict([])
     for model in models:
         for name, field in model._meta.fields.items():
-            if ignore_field_names is not None and name in ignore_field_names:
+            if ignore_field_name_callable is not None and ignore_field_name_callable(name):
                 continue
 
             if name in fields:
