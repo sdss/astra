@@ -194,6 +194,85 @@ def post_execution_interpolation(pwd, n_threads=128, f_access=1, epsilon=0.001):
     return None
 
 
+def setup_ferre_for_re_execution():
+    """
+    Take an existing FERRE execution that has partial results and set it up for a new execution with only the things not yet finished.
+    """
+    raise NotImplementedError
+
+    input_nml_path = process_args[-1]
+    
+    if input_nml_path.endswith(".nml"):
+        restart_number, existing_suffix = (1, "")
+    else:
+        num = input_nml_path.split(".nml.")[1]
+        existing_suffix = "." + num
+        restart_number = 1 + int(num)
+
+    if restart_number > max_attempts:
+        click.echo(f"reached max max_attempts for {pwd}")
+    else:
+        # Just get the input/output names from this execution.
+        input_names = np.loadtxt(f"{pwd}/parameter.input{existing_suffix}", usecols=(0, ), dtype=str)
+        try:
+            output_names = np.loadtxt(f"{pwd}/parameter.output{existing_suffix}", usecols=(0, ), dtype=str)
+        except:
+            output_names = []
+        
+        incomplete_names = np.setdiff1d(input_names, output_names)
+
+        intersect, input_indices, incomplete_indices = np.intersect1d(input_names, incomplete_names, return_indices=True)
+
+        # Only restart the process if the number of spectra is more than the number of threads
+        with open(f"{pwd}/input.nml", "r") as fp:
+            input_nml_contents = fp.readlines()
+        
+        nthreads = -1
+        for line in input_nml_contents:
+            if line.startswith("NTHREADS"):
+                nthreads = int(line.split("=")[-1])
+                break
+            
+        if len(input_indices) < nthreads:
+            click.echo(f"not enough incomplete spectra to restart {pid} in {pwd}")
+
+        else:                                
+            # Randomize
+            np.random.shuffle(input_indices)
+
+            # Create a new parameter.input file, new flux.input file, and new e_flux.input file.
+            for prefix in ("flux.input", "e_flux.input", "parameter.input"):
+                with open(f"{pwd}/{prefix}{existing_suffix}", "r") as fp:
+                    content = fp.readlines()
+                    new_content = [content[index] for index in input_indices]
+                    with open(f"{pwd}/{prefix}.{restart_number}", "w") as fp_new:
+                        fp_new.write("".join(new_content))
+                
+            with open(f"{pwd}/input.nml", "r") as fp:
+                new_content = []
+                for line in fp.readlines():
+                    if line.startswith(("PFILE", "ERFILE", "FFILE", "OPFILE", "OFFILE", "SFFILE")):
+                        key, value = line.split(" = ")
+                        value = value.strip("'\n")
+                        new_content.append(f"{key} = '{value}.{restart_number}'\n")
+                    else:
+                        new_content.append(line)
+                
+                with open(f"{pwd}/input.nml.{restart_number}", "w") as fp_new:
+                    fp_new.write("".join(new_content))                                
+
+            click.echo(f"retrying process {pid} in {pwd} as restart number {restart_number}")
+
+            # Re-start the process.
+            proc = subprocess.Popen(
+                ["ferre.x", f"input.nml.{restart_number}"],
+                stdout=open(f"{pwd}/stdout.{restart_number}", "w"),
+                stderr=open(f"{pwd}/stderr.{restart_number}", "w"),
+                cwd=pwd
+            )
+            lookup_stub_by_pid[proc.pid] = stub
+            states[stub]["pids"].append(proc.pid)
+
 def load_balancer(
     stage_dir,
     job_name="ferre",
@@ -210,6 +289,7 @@ def load_balancer(
     t_load_estimate=300, # 5 minutes est to load grid
     chaos_monkey=True,
     full_output=False,
+    experimental_abundances=False
 ):
 
     slurm_kwds = slurm_kwds or DEFAULT_SLURM_KWDS
@@ -226,7 +306,7 @@ def load_balancer(
     )
     nodes = max_nodes if max_nodes > 0 else 1
 
-    is_input_list = lambda p: os.path.basename(p).lower() == "input_list.nml"
+    is_input_list = lambda p: os.path.basename(p).lower().startswith("input_list")
 
     input_paths, spectra, core_seconds = ([], [], [])
     for input_path in all_input_paths:
@@ -255,6 +335,9 @@ def load_balancer(
             # Check whether there are partial results
             pwd = os.path.dirname(input_path)
             partial_results, partial_result_paths = has_partial_results(pwd, control_kwds)
+            # Check whether it has FULL results.
+            
+            
             if partial_results:
                 if overwrite:
                     log.warning(f"Partial results exist in {pwd}. Moving existing result files:")
@@ -265,7 +348,10 @@ def load_balancer(
                     log.warning(f"Skipping over {pwd} because partial results exist in: {', '.join(partial_result_paths)}")
                     continue
             
-            N = wc(f"{pwd}/{control_kwds['PFILE']}")
+            if experimental_abundances:
+                N = wc(f"{pwd}/{os.path.basename(control_kwds['PFILE'])}")
+            else:
+                N = wc(f"{pwd}/{control_kwds['PFILE']}")
             nov, synthfile = (control_kwds["NOV"], control_kwds["SYNTHFILE(1)"])
             grid = synthfile.split("/")[-2].split("_")[0]
             t = predict_ferre_core_time(grid, N, nov)
@@ -445,7 +531,13 @@ def load_balancer(
                 command = f"ferre.x {flags}{os.path.basename(input_path)}"
                 expect_ferre_executions_in_these_pwds.append(cwd)
                 
-                execution_commands.append(f"cd {cwd}")
+                if experimental_abundances:
+                    execution_commands.append(f"cd {cwd}/../")
+                    rel = "/".join(input_path.split("/")[-2:])
+                    command = f"ferre.x {rel}"
+                else:
+                    execution_commands.append(f"cd {cwd}")
+                    
                 execution_commands.append(f"{command} > stdout 2> stderr")
                 execution_commands.append(f"ferre_wait_for_clean_up .")
                 execution_commands.append(f"ferre_timing . > timing.csv")
