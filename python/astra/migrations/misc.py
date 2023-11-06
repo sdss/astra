@@ -8,11 +8,60 @@ from peewee import chunked
 from peewee import fn, JOIN
 import concurrent.futures
 
-from astra.utils import log, flatten
+import pickle
+from astra.utils import log, flatten, expand_path
 from astra.models.source import Source
 from astra.models.apogee import ApogeeVisitSpectrum
 from astra.models.boss import BossVisitSpectrum
 
+
+def backup_unsigned_apogee_flags():
+    """
+    in case we do some damage
+    """
+    
+    data = list(
+        Source
+        .select(
+            Source.sdss_id,
+            Source.sdss4_apogee_target1_flags,
+            Source.sdss4_apogee_target2_flags,
+            Source.sdss4_apogee2_target1_flags,
+            Source.sdss4_apogee2_target2_flags,
+            Source.sdss4_apogee2_target3_flags,
+            Source.sdss4_apogee_member_flags,
+            Source.sdss4_apogee_extra_target_flags
+        )
+        .tuples()
+    )
+    with open(expand_path("$MWM_ASTRA/misc/0.5.0-sdss4-target-flags.pkl"), "wb") as fp:
+        pickle.dump(data, fp)
+
+
+def fix_unsigned_apogee_flags():
+    
+    delta = 2**32 - 2**31
+    field_names = [
+        "sdss4_apogee_target1_flags",
+        "sdss4_apogee_target2_flags",
+        "sdss4_apogee2_target1_flags",
+        "sdss4_apogee2_target2_flags",
+        "sdss4_apogee2_target3_flags",
+        "sdss4_apogee_member_flags",
+        "sdss4_apogee_extra_target_flags"        
+    ]
+    updated = {}
+    for field_name in tqdm(field_names):
+        field = getattr(Source, field_name)
+        kwds = { field_name: field + delta }
+        
+        updated[field_name] = (
+            Source
+            .update(**kwds)
+            .where(field < 0)
+            .execute()
+        )
+    return updated
 
 
 def compute_casagrande_irfm_effective_temperatures(
