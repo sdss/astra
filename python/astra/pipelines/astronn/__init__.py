@@ -5,6 +5,7 @@ from astra.models.astronn import AstroNN
 #from astra.pipelines.astronn.utils import read_model # for TensorFlow version
 from astra.pipelines.astronn.network import read_model # for PyTorch version
 from astra.pipelines.astronn.base import _prepare_data, _worker, parallel_batch_read, _inference
+from peewee import ModelSelect
 
 @task
 def astronn(
@@ -14,12 +15,15 @@ def astronn(
     parallel: Optional[bool] = True,
     batch_size: Optional[int] = 100,
     cpu_count: Optional[int] = 1,
+    **kwargs
 ) -> Iterable[AstroNN]:
     """
     Estimate astrophysical parameters for a stellar spectrum given a pre-trained neural network.
     """
 
     model = read_model(model_path)
+    if isinstance(spectra, ModelSelect):
+        spectra = spectra.iterator()
 
     if parallel: # work for pipelines.sdss.org
         for batch in parallel_batch_read(_worker, spectra, batch_size=batch_size, cpu_count=cpu_count):

@@ -98,6 +98,7 @@ def _slam(
 
     flux_resamp = np.empty((N, R))
     ivar_resamp = np.empty((N, R))
+    assert N == 1
     for i in range(N):
         # Note: One non-finite value given to scipy.interpolate.interp1d will cause the
         #       entire interpolated output to be NaN. This is a known issue.
@@ -210,44 +211,42 @@ def _slam(
     if not np.all(np.isfinite(model_continuum[i])):
         log.warning(f"Not all model continuum values finite!")
 
-    for i in range(N):
+    i = 0
 
-        finite_prediction = np.isfinite(prediction[i])
-        finite_model_continuum = np.isfinite(model_continuum[i])
-        if any(finite_prediction):
+    finite_prediction = np.isfinite(prediction[i])
+    finite_model_continuum = np.isfinite(model_continuum[i])
+    if any(finite_prediction):
 
-            f = interp1d(
-                model.wave[finite_prediction], 
-                prediction[i][finite_prediction], 
-                kind="cubic", 
-                bounds_error=False, 
-                fill_value=np.nan
-            )
-            resampled_rectified_model_flux[i] = f(wave)
-
-        if any(finite_model_continuum): 
-            c = interp1d(
-                model.wave[finite_model_continuum], 
-                model_continuum[i][finite_model_continuum], 
-                kind="cubic", 
-                bounds_error=False, 
-                fill_value=np.nan
-            )
-
-            # Re-sample the predicted spectra back to the observed frame.
-            resampled_continuum[i] = c(wave)
-
-
-
-        result = Slam(
-            spectrum_pk=spectrum.spectrum_pk,
-            source_pk=spectrum.source_pk,
-            **kwargs
+        f = interp1d(
+            model.wave[finite_prediction], 
+            prediction[i][finite_prediction], 
+            kind="cubic", 
+            bounds_error=False, 
+            fill_value=np.nan
         )
-        path = expand_path(result.intermediate_output_path)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "wb") as fp:
-            pickle.dump((resampled_continuum, resampled_rectified_model_flux), fp)
-            
-        # Send back the database result.
+        resampled_rectified_model_flux[i] = f(wave)
 
+    if any(finite_model_continuum): 
+        c = interp1d(
+            model.wave[finite_model_continuum], 
+            model_continuum[i][finite_model_continuum], 
+            kind="cubic", 
+            bounds_error=False, 
+            fill_value=np.nan
+        )
+
+        # Re-sample the predicted spectra back to the observed frame.
+        resampled_continuum[i] = c(wave)
+
+
+    result = Slam(
+        spectrum_pk=spectrum.spectrum_pk,
+        source_pk=spectrum.source_pk,
+        **kwargs
+    )
+    path = expand_path(result.intermediate_output_path)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fp:
+        pickle.dump((resampled_continuum, resampled_rectified_model_flux), fp)
+        
+    return result

@@ -32,6 +32,7 @@ def classify_apogee_visit_spectrum(
         .select()
         .join(SpectrumClassification, JOIN.LEFT_OUTER, on=(SpectrumClassification.spectrum_pk == ApogeeVisitSpectrum.spectrum_pk))
         .where(SpectrumClassification.spectrum_pk.is_null())
+        .iterator()
     ),
     model_path: str = "$MWM_ASTRA/pipelines/classifier/classifier_NIRCNN_77804646.pt",
 ) -> Iterable[SpectrumClassification]:
@@ -45,31 +46,35 @@ def classify_apogee_visit_spectrum(
     log.info(f"Making predictions..")
 
     for spectrum in spectra:
-        if not spectrum.dithered:
-            existing_flux = spectrum.flux.reshape((3, -1))
-            flux = np.empty(expected_shape)
-            for j in range(3):
-                flux[j, ::2] = existing_flux[j]
-                flux[j, 1::2] = existing_flux[j]   
-        else:
-            flux = spectrum.flux.reshape(expected_shape)
-        
-        continuum = np.nanmedian(flux, axis=1)
-        batch = flux / continuum.reshape((-1, 1))
-        batch = batch.reshape((-1, *expected_shape)).astype(np.float32)
-        batch = torch.from_numpy(batch).to(DEVICE)
+        try:                
+            if not spectrum.dithered:
+                existing_flux = spectrum.flux.reshape((3, -1))
+                flux = np.empty(expected_shape)
+                for j in range(3):
+                    flux[j, ::2] = existing_flux[j]
+                    flux[j, 1::2] = existing_flux[j]   
+            else:
+                flux = spectrum.flux.reshape(expected_shape)
+            
+            continuum = np.nanmedian(flux, axis=1)
+            batch = flux / continuum.reshape((-1, 1))
+            batch = batch.reshape((-1, *expected_shape)).astype(np.float32)
+            batch = torch.from_numpy(batch).to(DEVICE)
 
-        with torch.no_grad():
-            prediction = model.forward(batch)
+            with torch.no_grad():
+                prediction = model.forward(batch)
 
-        # Should be only one result with apVisit, but whatever..
-        for log_probs in prediction.cpu().numpy():
-            result = classification_result(log_probs, model.class_names)
-            yield SpectrumClassification(
-                spectrum_pk=spectrum.spectrum_pk,
-                source_pk=spectrum.source_pk,
-                **result
-            )
+            # Should be only one result with apVisit, but whatever..
+            for log_probs in prediction.cpu().numpy():
+                result = classification_result(log_probs, model.class_names)
+                yield SpectrumClassification(
+                    spectrum_pk=spectrum.spectrum_pk,
+                    source_pk=spectrum.source_pk,
+                    **result
+                )
+        except:
+            # TODO: yield a record with no result?
+            None
 
 
 @task
@@ -93,36 +98,39 @@ def classify_boss_visit_spectrum(
     log.info(f"Making predictions")
 
     for spectrum in spectra:
-        
-        flux = spectrum.flux[si:ei]
-        continuum = np.nanmedian(flux)
-        batch = flux / continuum
-        # remove nans
-        finite = np.isfinite(batch)
-        if not any(finite):
-            log.warning(f"Skipping {spectrum} because all values are NaN")
-            continue
+        try:
+            flux = spectrum.flux[si:ei]
+            continuum = np.nanmedian(flux)
+            batch = flux / continuum
+            # remove nans
+            finite = np.isfinite(batch)
+            if not any(finite):
+                log.warning(f"Skipping {spectrum} because all values are NaN")
+                continue
 
-        if any(~finite):
-            batch[~finite] = np.interp(
-                spectrum.wavelength.value[si:ei][~finite],
-                spectrum.wavelength.value[si:ei][finite],
-                batch[finite],
-            )        
-        batch = batch.reshape((1, 1, -1)).astype(np.float32)
-        batch = torch.from_numpy(batch).to(DEVICE)
+            if any(~finite):
+                batch[~finite] = np.interp(
+                    spectrum.wavelength.value[si:ei][~finite],
+                    spectrum.wavelength.value[si:ei][finite],
+                    batch[finite],
+                )        
+            batch = batch.reshape((1, 1, -1)).astype(np.float32)
+            batch = torch.from_numpy(batch).to(DEVICE)
 
-        with torch.no_grad():
-            prediction = model.forward(batch)
+            with torch.no_grad():
+                prediction = model.forward(batch)
 
-        # Should be only one result with specFull, but whatever..
-        for log_probs in prediction.cpu().numpy():
-            result = classification_result(log_probs, model.class_names)
-            yield SpectrumClassification(
-                spectrum_pk=spectrum.spectrum_pk,
-                source_pk=spectrum.source_pk,
-                **result
-            )
+            # Should be only one result with specFull, but whatever..
+            for log_probs in prediction.cpu().numpy():
+                result = classification_result(log_probs, model.class_names)
+                yield SpectrumClassification(
+                    spectrum_pk=spectrum.spectrum_pk,
+                    source_pk=spectrum.source_pk,
+                    **result
+                )
+        except:
+            # TODO: yield a record with no result?
+            None
 
     log.info("Done")
 

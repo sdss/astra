@@ -13,6 +13,7 @@ def apogeenet(
     large_error: Optional[float] = 1e10,
     num_uncertainty_draws: Optional[int] = 100,
     parallel: Optional[bool] = False,
+    **kwargs
 ) -> Iterable[ApogeeNet]:
     """
     Estimate astrophysical parameters for a stellar spectrum given a pre-trained neural network.

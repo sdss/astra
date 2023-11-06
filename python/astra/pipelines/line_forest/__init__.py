@@ -75,7 +75,7 @@ LINES = [
 ]
 
 @task
-def line_forest(spectra: Iterable[BossVisitSpectrum], steps: int = 128, reps: int = 100, max_workers: int = 32) -> Iterable[LineForest]:
+def line_forest(spectra: Iterable[BossVisitSpectrum], steps: int = 128, reps: int = 100, max_workers: int = 16) -> Iterable[LineForest]:
     """
     Measure spectral line strengths.
 
@@ -94,109 +94,107 @@ def line_forest(spectra: Iterable[BossVisitSpectrum], steps: int = 128, reps: in
     
     executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
 
-    total, futures = (0, [])
-    for chunk in chunked(spectra, 1000):
-        futures.append(executor.submit(_line_forest, chunk, steps, reps))
-        total += len(chunk)
+    futures = []
+    with tqdm(total=0, desc="Chunking") as pb:            
+        for total, spectrum in enumerate(spectra, start=1):
+            futures.append(executor.submit(_line_forest, spectrum, steps, reps))
+            pb.update()
 
     with tqdm(total=total) as pb:
         for future in concurrent.futures.as_completed(futures):
-            results = future.result()
-            yield from results
-            pb.update(len(results))
+            result = future.result()
+            if result is not None:
+                yield result
+            pb.update()
+        
 
-
-def _line_forest(spectra, steps, reps):
+def _line_forest(spectrum, steps, reps):
         
     models = {
         "zlines.model": read_model(os.path.join(f"$MWM_ASTRA/pipelines/lineforest/zlines2.model")),
         "hlines.model": read_model(os.path.join(f"$MWM_ASTRA/pipelines/lineforest/hlines2.model")),
     }
 
-    results = []
-    for spectrum in spectra:
+    try:    
+        flux = np.copy(spectrum.flux)
+        e_flux = np.copy(spectrum.e_flux)
+        median_e_flux = np.median(e_flux[np.isfinite(e_flux)])
+        if not np.isfinite(median_e_flux):
+            median_e_flux = 1e3
 
-        try:    
-            flux = np.copy(spectrum.flux)
-            e_flux = np.copy(spectrum.e_flux)
-            median_e_flux = np.median(e_flux[np.isfinite(e_flux)])
-            if not np.isfinite(median_e_flux):
-                median_e_flux = 1e3
+        high_error = (e_flux > (5 * median_e_flux)) | (~np.isfinite(e_flux))
+        bad_pixel = (flux <= 0) | (~np.isfinite(flux))
+        e_flux[high_error] = 5 * median_e_flux
+        flux[bad_pixel] = 1
+        
+        # TODO: increase flux error at bad pixels?
+        uncertainty = e_flux/flux/np.log(10)
+        uncertainty[~np.isfinite(uncertainty)] = 5 * median_e_flux
+        
+        specs = Spectrum1D(
+            spectral_axis=spectrum.wavelength * u.Angstrom,
+            flux=u.Quantity(np.log10(flux)),
+            uncertainty=StdDevUncertainty(uncertainty)
+        )
 
-            high_error = (e_flux > (5 * median_e_flux)) | (~np.isfinite(e_flux))
-            bad_pixel = (flux <= 0) | (~np.isfinite(flux))
-            e_flux[high_error] = 5 * median_e_flux
-            flux[bad_pixel] = 1
+        spline = SplineInterpolatedResampler()
+
+        result_kwds = OrderedDict([])
+        result_kwds.update(dict(
+            source_pk=spectrum.source_pk,
+            spectrum_pk=spectrum.spectrum_pk,
+        ))
+
+        for name, model_path, wavelength_air, minmax in LINES:
             
-            # TODO: increase flux error at bad pixels?
-            uncertainty = e_flux/flux/np.log(10)
-            uncertainty[~np.isfinite(uncertainty)] = 5 * median_e_flux
-            
-            specs = Spectrum1D(
-                spectral_axis=spectrum.wavelength * u.Angstrom,
-                flux=u.Quantity(np.log10(flux)),
-                uncertainty=StdDevUncertainty(uncertainty)
-            )
-
-            spline = SplineInterpolatedResampler()
-
-            result_kwds = OrderedDict([])
-            result_kwds.update(dict(
-                source_pk=spectrum.source_pk,
-                spectrum_pk=spectrum.spectrum_pk,
-            ))
-
-            for name, model_path, wavelength_air, minmax in LINES:
-                
-                try:
-                        
-                    wavelength_vac = airtovac(wavelength_air)
+            try:
                     
-                    model = models[os.path.basename(model_path)]
+                wavelength_vac = airtovac(wavelength_air)
+                
+                model = models[os.path.basename(model_path)]
 
-                    spec = spline(specs, (np.linspace(-minmax, minmax, steps) + wavelength_vac) * u.AA)
+                spec = spline(specs, (np.linspace(-minmax, minmax, steps) + wavelength_vac) * u.AA)
 
-                    window = spec.flux.value.reshape((1,(steps) , 1))
-                    window = np.tile(window,(reps+1,1,1))
-                    scatter= spec.uncertainty.array.reshape((1,(steps) , 1))
-                    scatter= np.tile(scatter,(reps+1,1,1))*np.random.normal(size=(reps+1,steps,1),loc=0,scale=1)
-                    scatter[0]=0
-                    window=window+scatter
+                window = spec.flux.value.reshape((1,(steps) , 1))
+                window = np.tile(window,(reps+1,1,1))
+                scatter= spec.uncertainty.array.reshape((1,(steps) , 1))
+                scatter= np.tile(scatter,(reps+1,1,1))*np.random.normal(size=(reps+1,steps,1),loc=0,scale=1)
+                scatter[0]=0
+                window=window+scatter
 
-                    predictions = unnormalize(np.array(model(window[0:1,:,:])))
+                predictions = unnormalize(np.array(model(window[0:1,:,:])))
 
-                    if np.abs(predictions[0,2])>0.5: 
-                        eqw, abs = (predictions[0, 0], predictions[0, 1])
-                        detection_lower = predictions[0, 2]
+                if np.abs(predictions[0,2])>0.5: 
+                    eqw, abs = (predictions[0, 0], predictions[0, 1])
+                    detection_lower = predictions[0, 2]
 
-                        predictions = unnormalize(np.array(model(window[1:,:,:])))  
+                    predictions = unnormalize(np.array(model(window[1:,:,:])))  
 
-                        a = np.where(np.abs(predictions[1:,2])>0.5)[0]
-                        detection_upper = np.round(len(a)/reps,2)
-                        
-                        if detection_upper>0.3:
+                    a = np.where(np.abs(predictions[1:,2])>0.5)[0]
+                    detection_upper = np.round(len(a)/reps,2)
+                    
+                    if detection_upper>0.3:
+                        result_kwds.update({
+                            f"eqw_{name.lower()}": eqw,
+                            f"abs_{name.lower()}": abs,
+                            f"detection_lower_{name.lower()}": detection_lower,
+                            f"detection_upper_{name.lower()}": detection_upper
+                        })
+
+                        if len(a)>2:
                             result_kwds.update({
-                                f"eqw_{name.lower()}": eqw,
-                                f"abs_{name.lower()}": abs,
-                                f"detection_lower_{name.lower()}": detection_lower,
-                                f"detection_upper_{name.lower()}": detection_upper
-                            })
-    
-                            if len(a)>2:
-                                result_kwds.update({
-                                    f"eqw_percentiles_{name.lower()}": np.round(np.percentile(predictions[1:,0][a],[16,50,84]),4),
-                                    f"abs_percentiles_{name.lower()}": np.round(np.percentile(predictions[1:,1][a],[16,50,84]),4),
-                                }) 
-                except:
-                    log.exception(f"Exception when measuring {name} for spectrum {spectrum}")
-                    continue
-                                
-        except:
-            log.warning(f"Exception when running line_forest for spectrum {spectrum}")
-        else:
-            results.append(LineForest(**result_kwds))
-    
-    return results
+                                f"eqw_percentiles_{name.lower()}": np.round(np.percentile(predictions[1:,0][a],[16,50,84]),4),
+                                f"abs_percentiles_{name.lower()}": np.round(np.percentile(predictions[1:,1][a],[16,50,84]),4),
+                            }) 
+            except:
+                log.exception(f"Exception when measuring {name} for spectrum {spectrum}")
+                continue
+                            
+    except:
+        log.warning(f"Exception when running line_forest for spectrum {spectrum}")
+        return None
+    else:
+        return LineForest(**result_kwds)
 
 
 

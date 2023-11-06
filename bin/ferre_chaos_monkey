@@ -17,6 +17,7 @@ def wc(path):
     return int(subprocess.check_output(["wc", "-l", path]).split()[0])
 
 def is_abundances_stage(pwd):
+    return False
     return "/abundances/" in pwd
 
 def get_n_obj(pwd):
@@ -62,7 +63,11 @@ def get_n_obj_done(pwd, output_basename, started, include_previous):
 
 def get_stub(pwd):
     *_, stage, short_grid_name = pwd.rstrip("/").split("/")
-    return f"{short_grid_name}"
+
+    if "abundances" in pwd:
+        return f"{stage}/{short_grid_name}"
+    else:
+        return f"{short_grid_name}"
     
 
 @click.command()

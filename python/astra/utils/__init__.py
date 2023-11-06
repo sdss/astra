@@ -18,6 +18,11 @@ def get_logger(kwargs=None):
 
 log = get_logger()
 
+def executable(name):
+    module_name, class_name = name.rsplit(".", 1)
+    module = import_module(module_name)
+    return getattr(module, class_name)
+
 
 def get_config_paths():
     from sdsstools.configuration import DEFAULT_PATHS
