@@ -2,43 +2,125 @@ import numpy as np
 import pickle
 from tqdm import tqdm
 from astra.utils import expand_path
-from astra.specutils.continuum.nmf import ApogeeContinuum
+#from astra.specutils.continuum.nmf import ApogeeContinuum
 from astropy.table import Table
 import os
 from astra.utils import log
 from astra.models.base import database
 from astra.models.apogee import ApogeeCoaddedSpectrumInApStar
-from astra.models.the_cannon import TrainingSet, TrainingSetSpectrum
+from astra.specutils.continuum.nmf.apogee import ApogeeNMFContinuum
+
+from astra.models.nmf_rectify import NMFRectify
+#from astra.models.the_cannon import TrainingSet, TrainingSetSpectrum
 import warnings
+
+
+def create_training_set_from_sdss4_dr17_apogee_subset(
+    name,
+    path,
+):
+    
+    prefix = expand_path(f"$MWM_ASTRA/pipelines/TheCannon/{name}")
+    data_path = f"{prefix}.pkl"
+    labels_path = f"{prefix}.fits"
+    os.makedirs(os.path.dirname(data_path), exist_ok=True)
+
+    if os.path.exists(data_path) and not overwrite:
+        raise OSError(f"Path exists and won't overwrite: {data_path}")    
+
+    q = (
+        ApogeeCoaddedSpectrumInApStar
+        .select(
+            ApogeeCoaddedSpectrumInApStar,
+            NMFRectify.continuum_theta   
+        )
+        .join(NMFRectify, on=(NMFRectify.spectrum_pk == ApogeeCoaddedSpectrumInApStar.spectrum_pk))
+        .where(ApogeeCoaddedSpectrumInApStar.release == "dr17")
+        .objects()
+    )
+    
+    labelled_set = Table.read(path)
+
+    model = ApogeeNMFContinuum()
+
+    spectra = {}
+    for spectrum in q:
+        spectra[f"{spectrum.telescope}/{spectrum.field}/{spectrum.obj}"] = spectrum
+
+    has_spectra = np.zeros(len(labelled_set), dtype=bool)
+    for i, row in enumerate(labelled_set):
+        key = "/".join([row[k.upper()].strip() for k in ("telescope", "field", "apogee_id")])
+        try:
+            spectrum = spectra[key]
+        except:
+            has_spectra[i] = False
+        else:
+            has_spectra[i] = True    
+    
+    use_labelled_set = labelled_set[has_spectra]
+
+    pks, flux, ivar, rows, labels = ([], [], [], [], [])
+    for i, row in enumerate(tqdm(use_labelled_set)):
+
+        key = "/".join([row[k.upper()].strip() for k in ("telescope", "field", "apogee_id")])
+        try:
+            spectrum = spectra[key]
+        except:
+            log.warning(f"Could not find spectrum for row key {key}")
+            continue
+
+        continuum = model.continuum(spectrum.wavelength, spectrum.continuum_theta)[0]
+        
+        pks.append((spectrum.source_pk, spectrum.spectrum_pk))
+        flux.append(spectrum.flux / continuum)
+        ivar.append(spectrum.ivar * continuum**2)
+        rows.append(row)    
+    
+    rows_table = Table(rows=rows, names=rows[0].dtype.names)
+    flux, ivar = (np.atleast_2d(flux), np.atleast_2d(ivar))
+    training_set = dict(
+        flux=flux,
+        ivar=ivar,
+        pks=pks
+    )
+
+    with open(data_path, "wb") as fp:
+        pickle.dump(training_set, fp)
+        
+    rows_table.write(labels_path, overwrite=overwrite)    
+
 
 
 def create_training_set_for_apogee_coadded_spectra_from_sdss4_dr17_apogee(
     name,
-    label_names,
     mask_callable,
-    continuum_model_class=ApogeeContinuum,
+    label_names=None,
     overwrite=False,
     batch_size=1000,
 ) -> None:
 
-    path = expand_path(f"$MWM_ASTRA/pipelines/TheCannon/{name}.pkl")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    prefix = expand_path(f"$MWM_ASTRA/pipelines/TheCannon/{name}")
+    data_path = f"{prefix}.pkl"
+    labels_path = f"{prefix}.fits"
+    os.makedirs(os.path.dirname(data_path), exist_ok=True)
 
-    if os.path.exists(path) and not overwrite:
-        raise OSError(f"Path exists and won't overwrite: {path}")
-
-    TrainingSet.create_table()
-
-    if TrainingSet.select().where(TrainingSet.name == name).exists():
-        raise ValueError(f"Training set with name `{name}` already exists")
+    if os.path.exists(data_path) and not overwrite:
+        raise OSError(f"Path exists and won't overwrite: {data_path}")
     
     dr17_allStar = Table.read(expand_path("$SAS_BASE_DIR/dr17/apogee/spectro/aspcap/dr17/synspec_rev1/allStar-dr17-synspec_rev1.fits"))
 
     q = (
         ApogeeCoaddedSpectrumInApStar
-        .select()
+        .select(
+            ApogeeCoaddedSpectrumInApStar,
+            NMFRectify.continuum_theta   
+        )
+        .join(NMFRectify, on=(NMFRectify.spectrum_pk == ApogeeCoaddedSpectrumInApStar.spectrum_pk))
         .where(ApogeeCoaddedSpectrumInApStar.release == "dr17")
+        .objects()
     )
+
+    model = ApogeeNMFContinuum()
 
     spectra = {}
     for spectrum in q:
@@ -54,15 +136,13 @@ def create_training_set_for_apogee_coadded_spectra_from_sdss4_dr17_apogee(
         else:
             has_spectra[i] = True    
 
-    rows = mask_callable(dr17_allStar[has_spectra])
-
-    continuum_model = continuum_model_class()
+    dr17_rows = mask_callable(dr17_allStar[has_spectra])
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-        pks, labels, flux, ivar, rectified_model_flux, rows_used = ([], [], [], [], [], [])
-        for i, row in enumerate(tqdm(rows)):
+        pks, flux, ivar, rows, labels = ([], [], [], [], [])
+        for i, row in enumerate(tqdm(dr17_rows)):
 
             key = "/".join([row[k.upper()].strip() for k in ("telescope", "field", "apogee_id")])
             try:
@@ -70,32 +150,50 @@ def create_training_set_for_apogee_coadded_spectra_from_sdss4_dr17_apogee(
             except:
                 log.warning(f"Could not find spectrum for row key {key}")
                 continue
-            
-            try:
-                continuum, continuum_meta = continuum_model.fit(spectrum.flux, spectrum.ivar)
-            except:
-                log.exception(f"Could not fit continuum model to spectrum {spectrum}")
-                continue
 
+            # TODO: make this faster by getting the join with the original spectra
+            '''
+            try:
+                result = NMFRectify.get(spectrum_pk=spectrum.spectrum_pk)
+            except:
+                args = tuple(map(np.atleast_2d, (spectrum.flux, spectrum.ivar)))
+                x0 = model.get_initial_guess_with_small_W(*args)
+                try:
+                    continuum, result = model.fit(*args, x0=x0, full_output=True)          
+                except:
+                    log.warning(f"Could not fit continuum for row key {key}")
+                    continue
+            else:
+                continuum = model.continuum(spectrum.wavelength, result.continuum_theta)[0]
+            '''
+            
+            continuum = model.continuum(spectrum.wavelength, spectrum.continuum_theta)[0]
+            
             pks.append((spectrum.source_pk, spectrum.spectrum_pk))
             flux.append(spectrum.flux / continuum)
-            ivar.append(continuum * spectrum.ivar * continuum)
-            rectified_model_flux.append(continuum_meta["rectified_model_flux"])
-            labels.append([row[ln] for ln in label_names])
-            rows_used.append(row)
+            ivar.append(spectrum.ivar * continuum**2)
+            rows.append(row)
 
+    rows_table = Table(rows=rows, names=rows[0].dtype.names)
+    flux, ivar = (np.atleast_2d(flux), np.atleast_2d(ivar))
+    if label_names is None:
+        labels = None
+    else:
+        labels = np.array([rows_table[ln] for ln in label_names])
     training_set = dict(
-        labels=np.array(labels),
-        flux=np.array(flux),
-        ivar=np.array(ivar),
-        rectified_model_flux=np.array(rectified_model_flux),
-        label_names=label_names,
+        flux=flux,
+        ivar=ivar,
+        labels=labels,
         pks=pks
     )
 
-    with open(path, "wb") as fp:
+    with open(data_path, "wb") as fp:
         pickle.dump(training_set, fp)
+        
+    rows_table.write(labels_path, overwrite=overwrite)
     
+    '''
+    raise a
 
     ts = TrainingSet.create(
         name=name,
@@ -121,8 +219,10 @@ def create_training_set_for_apogee_coadded_spectra_from_sdss4_dr17_apogee(
     # Create a flat file from the rows used
     reference_table = Table(rows=rows_used, names=rows_used[0].dtype.names)
     reference_table.write(expand_path(f"$MWM_ASTRA/pipelines/TheCannon/{name}.fits"))
+    '''
+    return (data_path, labels_path)
 
-    return (ts, path)
+    #return (ts, path)
 
     
 

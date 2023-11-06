@@ -2,7 +2,7 @@ import numpy as np
 import warnings
 from tqdm import tqdm
 
-from model import CannonModel
+from astra.pipelines.the_cannon.model import CannonModel
 
 
 def grid_search(
@@ -41,10 +41,9 @@ def grid_search(
             regularization=alpha,
         )
         model.train(**kwargs)
-        validation_chi_sqs[i] = model.chi_sq(
+        validation_chi_sqs[i] = model.chi2(
             validation_labels, validation_flux, validation_ivar
         )
-
         models.append(model)
 
     # Select model with lowest validation \chi^2

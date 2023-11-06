@@ -5,6 +5,7 @@ import warnings
 from itertools import cycle
 from functools import cached_property
 from scipy import optimize as op
+import concurrent.futures
 from sklearn.linear_model import Lasso, LinearRegression
 from joblib import Parallel, delayed
 from time import time
@@ -124,7 +125,7 @@ class CannonModel:
         N, L = X.shape
         N, P = flux.shape
 
-        _tqdm_kwds = dict(total=P, desc="Training")
+        _tqdm_kwds = dict(total=P, desc="Training", unit="pixel")
         _tqdm_kwds.update(tqdm_kwds or {})
 
         n_threads = _evaluate_n_threads(n_threads)
@@ -153,7 +154,32 @@ class CannonModel:
         self.s2 = self._calculate_s2()
         return self
 
-    def _calculate_s2(self, SMALL=1e-12):
+
+    def _calculate_s2(self, min_log10_s2=-6, max_log10_s2=0, n_steps=120, large=1e3, max_workers=32):
+
+        L2s = (self.training_flux - self.predict(self.training_labels))**2
+        s2_steps = np.logspace(min_log10_s2, max_log10_s2, n_steps)
+        N, P = self.training_flux.shape
+        
+        executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
+        futures = []
+        for i, (L2, ivar) in enumerate(zip(L2s.T, self.training_ivar.T)):
+            if np.all(ivar == 0):
+                continue            
+            futures.append(executor.submit(_calculate_s2_single_pixel, i, L2, ivar, s2_steps))
+            
+        s2 = large * np.ones(P, dtype=float)                
+        with tqdm(total=len(futures)) as pb:
+            for future in concurrent.futures.as_completed(futures):
+                i, pixel_s2 = future.result()
+                s2[i] = pixel_s2
+                pb.update(1)
+        
+        return s2
+
+        
+        
+    def _calculate_s2_bad_way(self, SMALL=1e-12):
         """Calculate the model variance (s^2)."""
 
         L2 = (self.training_flux - self.predict(self.training_labels)) ** 2
@@ -426,7 +452,8 @@ class CannonModel:
         return _initial_estimate(
             A, B, linear_term_indices, offsets, scales, clip_sigma, normalize=False
         )
-
+        
+    
 
 def _initial_estimate(
     A, B, linear_term_indices, offsets, scales, clip_sigma=None, normalize=False
@@ -518,7 +545,8 @@ def _fit_spectrum(
         is_frozen,
         any_frozen,
     )
-    sigma = (ivar / (1.0 + ivar * s2)) ** -0.5
+    adjusted_ivar = (ivar / (1.0 + ivar * s2))
+    sigma = adjusted_ivar ** -0.5
 
     meta = dict()
     if x0 is None:
@@ -539,7 +567,7 @@ def _fit_spectrum(
         x0_normalized = x0_normalized_trials[np.argmin(chi2s)]
         x0 = _denormalize(x0_normalized, offsets, scales)
         meta["trial_x0"] = np.array(x0_normalized_trials) * scales + offsets
-        meta["trial_chisq"] = np.array(chi2s)
+        meta["trial_chi2"] = np.array(chi2s)
     else:
         x0_normalized = _normalize(x0, offsets, scales)
 
@@ -570,9 +598,12 @@ def _fit_spectrum(
         p_opt = np.nan * np.ones(L)
         cov = np.nan * np.ones((L, L))
         meta.update(
-            chi2=np.nan, rchi2=np.nan, model_flux=np.nan * np.ones(P),
+            chi2=np.nan, 
+            rchi2=np.nan, 
+            model_flux=np.nan * np.ones(P),
             ier=ier,
             message=message,
+            flag_fitting_failure=True,
             **infodict
         )
     else:
@@ -593,9 +624,10 @@ def _fit_spectrum(
             )  # TODO: define this with _normalize somehow
 
         # WARNING: Here we are calculating chi-sq with *DIFFERENT CODE* than what is used elsewhere.
-        chi2 = np.sum(((flux - model_flux) / sigma) ** 2)
-        nu = np.sum(np.isfinite(sigma)) - L
+        chi2 = np.sum((flux - model_flux)**2 * adjusted_ivar)
+        nu = np.sum(ivar > 0) - L
         rchi2 = chi2 / nu
+        
         meta.update(
             chi2=chi2,
             rchi2=rchi2,
@@ -604,6 +636,7 @@ def _fit_spectrum(
             model_flux=model_flux,
             ier=ier,
             message=message,            
+            flag_fitting_failure=False,
             **infodict
         )
     finally:
@@ -726,3 +759,10 @@ def _evaluate_n_threads(given_n_threads):
         n_threads = os.cpu_count()
     return n_threads
 
+    
+def _calculate_s2_single_pixel(i, L2, ivar, s2_steps):
+    adjusted_ivar = ivar/(1 + ivar * s2_steps.reshape((-1, 1)))
+    chi2 = (np.mean(L2 * adjusted_ivar, axis=1) - 1)**2
+    s2 = s2_steps[np.argmin(chi2)]
+    return (i, s2)
+            

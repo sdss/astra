@@ -22,20 +22,79 @@ except ImportError:
     logger.warn("Could not import matplotlib; plotting functionality disabled")
 
 
-def plot_gridsearch_sparsity(
-    regularization, sparsity, sparsity_by_feature_type, **kwargs
-):
+def plot_sparsity(models):
+
+    mask = model.theta[:,]
+
+    regularization = np.array([model.regularization for model in models])
+    sparsity = np.array([np.sum(model.theta == 0)/model.theta.size for model in models])
+    
+    sort_indices = np.argsort(regularization)
+    
     fig, ax = plt.subplots()
-    ax.plot(regularization, sparsity, c="k", lw=2)
-    for j in range(sparsity_by_feature_type.shape[1]):
-        ax.plot(regularization, sparsity_by_feature_type[:, j], label=f"{j:.0f}")
-    ax.legend()
+    ax.plot(regularization[sort_indices], sparsity[sort_indices], c="k", lw=2, label="all terms")    
+    for label, indices in zip(["linear terms", "quadratic terms", "cross terms"], models[0].term_type_indices):
+        term_sparsity = np.array([np.sum(model.theta[indices] == 0)/model.theta[indices].size for model in models])        
+        ax.plot(regularization[sort_indices], term_sparsity[sort_indices], label=label)
+    
+    ax.legend(frameon=False)
     ax.semilogx()
     ax.set_xlabel(r"Regularization")
     ax.set_ylabel(r"Sparsity")
-
+    ax.axhline(1, c="#666666", ls=":", lw=0.5)
     fig.tight_layout()
 
+    return fig
+
+from scipy.interpolate import splrep, splev
+
+def plot_validation_chisq(models, validation_flux, validation_ivar, validation_labels):
+    
+    regularization = np.array([model.regularization for model in models])
+    chi2 = np.zeros_like(regularization)    
+    chi2_with_model_scatter = np.zeros_like(regularization)
+    for i, model in enumerate(tqdm(models)):
+        adjusted_ivar = validation_ivar/(1 + validation_ivar*model.s2)
+        chi2[i] = np.sum((model.predict(validation_labels) - validation_flux)**2 * validation_ivar)
+        chi2_with_model_scatter[i] = np.sum((model.predict(validation_labels) - validation_flux)**2 * adjusted_ivar)    
+    sort_indices = np.argsort(regularization)
+
+    x, y = (regularization[sort_indices], chi2[sort_indices]/chi2[sort_indices][0])
+    ya = chi2_with_model_scatter[sort_indices]/chi2_with_model_scatter[sort_indices][0]
+    
+    dy = 1.5 * (1 - np.min(y))
+    
+    fig, ax = plt.subplots()
+    ax.scatter(x, y, facecolor="tab:blue")
+    ax.scatter(x, ya, facecolor="tab:orange")
+    
+    tck = splrep(x, y)
+    xi = np.logspace(np.log10(x.min()), np.log10(x.max()), 1000)
+    yi = splev(xi, tck)
+    
+    tck_a = splrep(x, ya)
+    yai = splev(xi, tck_a)
+    ax.plot(xi, yi, c="tab:blue")
+    ax.plot(xi, yai, c="tab:orange")
+    
+    sj = np.argmin(yi)
+    ej = np.where(np.diff(np.sign(yi - 1)))[0][1]
+    
+    ax.semilogx()
+    ax.set_ylim(1 - dy, 1 + dy)
+    ax.axhline(1, c="#666666", ls=":", lw=0.5, zorder=-1)
+    ax.axvline(xi[sj], c="#666666", ls="--", lw=0.5, zorder=-1)
+    ax.axvline(xi[ej], c="#666666", ls="--", lw=0.5, zorder=-1)
+    ylim = ax.get_ylim()
+    ax.axvspan(
+        xi[sj],
+        xi[ej],
+        ymin=-10,
+        ymax=+10,
+        facecolor="#cccccc",
+        zorder=-10        
+    )
+    print(xi[sj], xi[ej])
     return fig
 
 
