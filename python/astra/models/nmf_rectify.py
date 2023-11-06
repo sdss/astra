@@ -20,12 +20,6 @@ from astra.models.source import Source
 from astra import __version__
 from astra.glossary import Glossary
 
-
-
-# The actual training set contains the continuum-normalized fluxes, labels, error arrays, etc.
-# These two models are simply to link spectra to records in the database
-
-
 class NMFRectify(BaseModel):
 
     source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)

@@ -7,13 +7,57 @@ from peewee import (
     DateTimeField
 )
 import datetime
+import pickle
 from astra import __version__
+from astra.utils import expand_path
 from astra.models.base import BaseModel
-from astra.models.fields import BitField
+from astra.models.fields import BitField, PixelArray, BasePixelArrayAccessor, LogLambdaArrayAccessor
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
 from astra.glossary import Glossary
+
+
+class PaynePixelArrayAccessor(BasePixelArrayAccessor):
+    
+    def __get__(self, instance, instance_type=None):
+        if instance is not None:
+            try:
+                return instance.__pixel_data__[self.name]
+            except (AttributeError, KeyError):
+                # Load them all.
+                instance.__pixel_data__ = {}
+
+                with open(expand_path(instance.intermediate_output_path), "rb") as fp:
+                    continuum, rectified_model_flux = pickle.load(fp)
+                
+                continuum = continuum.flatten()
+                rectified_model_flux = rectified_model_flux.flatten()
+                model_flux = continuum * rectified_model_flux
+                
+                instance.__pixel_data__.setdefault("continuum", continuum)
+                instance.__pixel_data__.setdefault("model_flux", model_flux)
+                instance.__pixel_data__.setdefault("rectified_model_flux", rectified_model_flux)
+                
+                return instance.__pixel_data__[self.name]
+
+        return self.field
+
+
+
+
+class PaynePixelArray(PixelArray):
+    
+    def __init__(self, ext=None, column_name=None, transform=None, accessor_class=PaynePixelArrayAccessor, help_text=None, **kwargs):
+        super(PaynePixelArray, self).__init__(
+            ext=ext,
+            column_name=column_name,
+            transform=transform,
+            accessor_class=accessor_class,
+            help_text=help_text,
+            **kwargs
+        )
+
 
 class ThePayne(BaseModel, PipelineOutputMixin):
 
@@ -94,6 +138,7 @@ class ThePayne(BaseModel, PipelineOutputMixin):
     chi2 = FloatField(null=True)
     reduced_chi2 = FloatField(null=True)
     result_flags = BitField(default=0)
+    flag_fitting_failure = result_flags.flag(2**0, "Fitting failure")
     
 
     #> Correlation Coefficients
@@ -397,3 +442,23 @@ class ThePayne(BaseModel, PipelineOutputMixin):
     rho_ge_h_c12_c13 = FloatField(null=True)
     rho_ge_h_v_macro = FloatField(null=True)
     rho_c12_c13_v_macro = FloatField(null=True)
+        
+    #> Spectral Data
+    wavelength = PixelArray(
+        accessor_class=LogLambdaArrayAccessor,
+        accessor_kwargs=dict(
+            crval=4.179,
+            cdelt=6e-6,
+            naxis=8575,
+        ),
+        help_text=Glossary.wavelength
+    )
+    model_flux = PaynePixelArray(help_text=Glossary.model_flux)
+    continuum = PaynePixelArray(help_text=Glossary.continuum)
+    
+    @property    
+    def intermediate_output_path(self):
+        return f"$MWM_ASTRA/{self.v_astra}/pipelines/ThePayne/{self.source_pk}-{self.spectrum_pk}.pkl"
+        
+    
+    

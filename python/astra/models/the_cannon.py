@@ -24,6 +24,7 @@ from astra.glossary import Glossary
 # The actual training set contains the continuum-normalized fluxes, labels, error arrays, etc.
 # These two models are simply to link spectra to records in the database
 
+'''
 class TrainingSet(BaseModel):
 
     pk = AutoField()
@@ -49,7 +50,7 @@ class TrainingSetSpectrum(BaseModel):
     training_set_pk = ForeignKeyField(TrainingSet)
     spectrum_pk = ForeignKeyField(Spectrum)
     source_pk = ForeignKeyField(Source, null=True)
-
+'''
 
 
 class TheCannon(BaseModel):
@@ -81,8 +82,10 @@ class TheCannon(BaseModel):
     e_fe_h = FloatField(default=np.nan, help_text=Glossary.e_fe_h)
     v_micro = FloatField(default=np.nan, help_text=Glossary.v_micro)
     e_v_micro = FloatField(default=np.nan, help_text=Glossary.e_v_micro)
-    v_broad = FloatField(default=np.nan, help_text=Glossary.v_broad)
-    e_v_broad = FloatField(default=np.nan, help_text=Glossary.e_v_broad)
+    v_macro = FloatField(default=np.nan, help_text=Glossary.v_macro)
+    e_v_macro = FloatField(default=np.nan, help_text=Glossary.e_v_macro)
+    
+    #> Chemical Abundances
     c_fe = FloatField(default=np.nan)
     e_c_fe = FloatField(default=np.nan)
     n_fe = FloatField(default=np.nan)
@@ -113,17 +116,21 @@ class TheCannon(BaseModel):
     e_mn_fe = FloatField(default=np.nan)
     ni_fe = FloatField(default=np.nan)
     e_ni_fe = FloatField(default=np.nan)
-
+    
     #> Summary Statistics
     chi2 = FloatField(default=np.nan)
     rchi2 = FloatField(default=np.nan)
 
     #> Metadata
-    training_set_pk = ForeignKeyField(TrainingSet, null=True, lazy_load=False)
     ier = IntegerField(default=-1)
     nfev = IntegerField(default=-1)
     x0_index = IntegerField(default=-1)
-    in_convex_hull = BooleanField(default=False)
-
     result_flags = BitField(default=0)
-
+    flag_fitting_failure = result_flags.flag(2**0, "Fitting failure")
+    
+    @property
+    def intermediate_output_path(self):
+        parts = f"{self.source_pk}"
+        group_dir = f"{parts[-4:-2]}/{parts[-2:]}"
+        return f"$MWM_ASTRA/{self.v_astra}/pipelines/TheCannon/{group_dir}/{self.source_pk}-{self.spectrum_pk}.pkl"
+    
