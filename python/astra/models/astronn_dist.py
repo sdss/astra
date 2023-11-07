@@ -39,11 +39,11 @@ class AstroNNdist(BaseModel, PipelineOutputMixin):
     tag = TextField(default="", index=True, help_text=Glossary.tag)
 
     #> Stellar Labels
-    k_mag = FloatField(null=True, help_text="2MASS K-band apparent magnitude")
+    k_mag = FloatField(null=True, help_text="2MASS Ks-band apparent magnitude")
     ebv = FloatField(null=True, help_text="E(B-V) reddening")
-    a_k_mag = FloatField(null=True, help_text="K-band extinction")
-    fake_k_mag = FloatField(null=True, help_text="Predicted (fake) K-band absolute magnitude")
-    fake_k_mag_err = FloatField(null=True, help_text="Prediected (fake) K-band absolute magnitude error")
+    a_k_mag = FloatField(null=True, help_text="Ks-band extinction")
+    L_fakemag = FloatField(null=True, help_text="Predicted (fake) Ks-band absolute luminosity, L_fakemag = 10^(1/5*M_Ks+2)")
+    L_fakemag_err = FloatField(null=True, help_text="Prediected (fake) Ks-band absolute luminosity error")
     dist = FloatField(null=True, help_text="Heliocentric distance [pc]")
     dist_err = FloatField(null=True, help_text="Heliocentric distance error [pc]")
 
@@ -51,7 +51,7 @@ class AstroNNdist(BaseModel, PipelineOutputMixin):
     result_flags = BitField(default=0, help_text=Glossary.result_flags)
 
     #> Flag definitions
-    flag_fakemag_unreliable = result_flags.flag(2**0, help_text="Predicted (fake) K-band absolute photometry is unreliable (fakemag_err / fakemag >= 0.2)")
+    flag_fakemag_unreliable = result_flags.flag(2**0, help_text="Predicted (fake) Ks-band absolute luminosity is unreliable (fakemag_err / fakemag >= 0.2)")
     flag_missing_photometry = result_flags.flag(2**1, help_text="Missing Ks-band apparent magnitude")
     flag_missing_extinction = result_flags.flag(2**2, help_text="Missing extinction")
     flag_no_result = result_flags.flag(2**11, help_text="Exception raised when loading spectra")
@@ -68,7 +68,7 @@ class AstroNNdist(BaseModel, PipelineOutputMixin):
                 - a_k_mag
         """
 
-        if self.fake_k_mag_err >= self.fake_k_mag * 0.2:
+        if self.L_fakemag_err >= self.L_fakemag * 0.2:
             self.flag_fakemag_unreliable = True
 
         if meta is None or missing_photometry:

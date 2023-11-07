@@ -111,9 +111,9 @@ def _inference(model, batch):
                 k_mag=all_meta[i][0],
                 ebv = all_meta[i][1],
                 a_k_mag=all_meta[i][2],
-                fake_k_mag=float(fakemag),
-                #fake_k_mag_err=float(fakemag_err['total']),
-                fake_k_mag_err=float(fakemag_err),
+                L_fakemag=float(fakemag),
+                #L_fakemag=float(fakemag_err['total']),
+                L_fakemag_err=float(fakemag_err),
                 dist=pc.value,
                 dist_err=pc_err.value,
             )
