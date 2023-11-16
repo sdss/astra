@@ -73,14 +73,14 @@ class BaseNMFSinusoidsContinuum(object):
             for j, mask in enumerate(self.region_masks):
                 sj, ej = (j * self.n_parameters_per_region, (j + 1) * self.n_parameters_per_region)
                 A = self.continuum_design_matrix[mask, sj:ej]
-                MTM = A @ (continuum_ivar[i, mask][:, None] * A.T)
-                MTy = A @ (continuum_ivar[i, mask] * continuum_flux[i, mask]).T
+                MTM = A.T @ (continuum_ivar[i, mask][:, None] * A)
+                MTy = A.T @ (continuum_ivar[i, mask] * continuum_flux[i, mask])
                 try:
                     theta[i, j] = np.linalg.solve(MTM, MTy)
                 except np.linalg.LinAlgError:
                     if np.any(continuum_ivar[i, mask] > 0):
                         raise
-                continuum[i, mask] = A.T @ theta[i, j]        
+                continuum[i, mask] = A @ theta[i, j]        
 
         return (theta, continuum)
 

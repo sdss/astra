@@ -79,6 +79,7 @@ class ApogeeMADGICSVisitSpectrum(BaseModel, SpectrumMixin):
     plate = IntegerField()
     mjd = IntegerField()
     fiber = IntegerField()
+    filetype = TextField(default="apMADGICSVisit")
 
     class Meta:
         indexes = (

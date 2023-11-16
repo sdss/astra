@@ -77,6 +77,10 @@ class SnowWhite(BaseModel, PipelineOutputMixin):
     e_logg = FloatField(null=True, help_text=Glossary.e_logg)
     v_rel = FloatField(null=True, help_text="Relative velocity used in stellar parameter fit [km/s]")
     
+    #> Formal uncertainties
+    raw_e_teff = FloatField(null=True, help_text=Glossary.raw_e_teff)
+    raw_e_logg = FloatField(null=True, help_text=Glossary.raw_e_logg)
+    
     #> Metadata
     result_flags = BitField(default=0, help_text="Result flags")
 
@@ -102,3 +106,16 @@ class SnowWhite(BaseModel, PipelineOutputMixin):
 
 
 
+
+def apply_noise_model():
+    
+    (
+        SnowWhite
+        .update(e_teff=1.5 * SnowWhite.raw_e_teff + 100)
+        .execute()
+    )
+    (
+        SnowWhite
+        .update(e_logg=2 * SnowWhite.raw_e_logg + 5e-2)
+        .execute()
+    )

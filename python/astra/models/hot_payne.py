@@ -119,3 +119,98 @@ class HotPayne(BaseModel, PipelineOutputMixin):
     covar_hmasked = ArrayField(FloatField, help_text=Glossary.covar)
     chi2_hmasked = FloatField(null=True, help_text=Glossary.chi2)    
     
+    
+    #> Formal uncertainties
+    raw_e_teff = FloatField(null=True, help_text=Glossary.e_teff)
+    raw_e_logg = FloatField(null=True, help_text=Glossary.e_logg)
+    raw_e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
+    raw_e_v_micro = FloatField(null=True, help_text=Glossary.e_v_micro)
+    raw_e_v_sini = FloatField(null=True, help_text=Glossary.e_v_sini)
+    raw_e_he_h = FloatField(null=True, help_text=Glossary.e_he_h)
+    raw_e_c_h = FloatField(null=True, help_text=Glossary.e_c_h)
+    raw_e_n_h = FloatField(null=True, help_text=Glossary.e_n_h)
+    raw_e_o_h = FloatField(null=True, help_text=Glossary.e_o_h)
+    raw_e_si_h = FloatField(null=True, help_text=Glossary.e_si_h)
+    raw_e_s_h = FloatField(null=True, help_text=Glossary.e_s_h)
+    raw_e_teff_fullspec = FloatField(null=True, help_text=Glossary.e_teff)
+    raw_e_logg_fullspec = FloatField(null=True, help_text=Glossary.e_logg)
+    raw_e_fe_h_fullspec = FloatField(null=True, help_text=Glossary.e_fe_h)
+    raw_e_v_micro_fullspec = FloatField(null=True, help_text=Glossary.e_v_micro)
+    raw_e_v_sini_fullspec = FloatField(null=True, help_text=Glossary.e_v_sini)
+    raw_e_he_h_fullspec = FloatField(null=True, help_text=Glossary.e_he_h)
+    raw_e_c_h_fullspec = FloatField(null=True, help_text=Glossary.e_c_h)
+    raw_e_n_h_fullspec = FloatField(null=True, help_text=Glossary.e_n_h)
+    raw_e_o_h_fullspec = FloatField(null=True, help_text=Glossary.e_o_h)
+    raw_e_si_h_fullspec = FloatField(null=True, help_text=Glossary.e_si_h)
+    raw_e_s_h_fullspec = FloatField(null=True, help_text=Glossary.e_s_h)
+    raw_e_teff_hmasked = FloatField(null=True, help_text=Glossary.e_teff)
+    raw_e_logg_hmasked = FloatField(null=True, help_text=Glossary.e_logg)
+    raw_e_fe_h_hmasked = FloatField(null=True, help_text=Glossary.e_fe_h)
+    raw_e_v_micro_hmasked = FloatField(null=True, help_text=Glossary.e_v_micro)
+    raw_e_v_sini_hmasked = FloatField(null=True, help_text=Glossary.e_v_sini)
+    raw_e_he_h_hmasked = FloatField(null=True, help_text=Glossary.e_he_h)
+    raw_e_c_h_hmasked = FloatField(null=True, help_text=Glossary.e_c_h)
+    raw_e_n_h_hmasked = FloatField(null=True, help_text=Glossary.e_n_h)
+    raw_e_o_h_hmasked = FloatField(null=True, help_text=Glossary.e_o_h)
+    raw_e_si_h_hmasked = FloatField(null=True, help_text=Glossary.e_si_h)
+    raw_e_s_h_hmasked = FloatField(null=True, help_text=Glossary.e_s_h)
+
+
+def set_formal_errors():
+    (
+        HotPayne
+        .update(
+            raw_e_teff=HotPayne.e_teff,
+            raw_e_logg=HotPayne.e_logg,
+            raw_e_fe_h=HotPayne.e_fe_h,
+            raw_e_v_micro=HotPayne.e_v_micro,
+            raw_e_v_sini=HotPayne.e_v_sini,
+            raw_e_he_h=HotPayne.e_he_h,
+            raw_e_c_h=HotPayne.e_c_h,
+            raw_e_n_h=HotPayne.e_n_h,
+            raw_e_o_h=HotPayne.e_o_h,
+            raw_e_si_h=HotPayne.e_si_h,
+            raw_e_s_h=HotPayne.e_s_h,
+            raw_e_teff_fullspec=HotPayne.e_teff_fullspec,
+            raw_e_logg_fullspec=HotPayne.e_logg_fullspec,
+            raw_e_fe_h_fullspec=HotPayne.e_fe_h_fullspec,
+            raw_e_v_micro_fullspec=HotPayne.e_v_micro_fullspec,
+            raw_e_v_sini_fullspec=HotPayne.e_v_sini_fullspec,
+            raw_e_he_h_fullspec=HotPayne.e_he_h_fullspec,
+            raw_e_c_h_fullspec=HotPayne.e_c_h_fullspec,
+            raw_e_n_h_fullspec=HotPayne.e_n_h_fullspec,
+            raw_e_o_h_fullspec=HotPayne.e_o_h_fullspec,
+            raw_e_si_h_fullspec=HotPayne.e_si_h_fullspec,
+            raw_e_s_h_fullspec=HotPayne.e_s_h_fullspec,
+            raw_e_teff_hmasked=HotPayne.e_teff_hmasked,
+            raw_e_logg_hmasked=HotPayne.e_logg_hmasked,
+            raw_e_fe_h_hmasked=HotPayne.e_fe_h_hmasked,
+            raw_e_v_micro_hmasked=HotPayne.e_v_micro_hmasked,
+            raw_e_v_sini_hmasked=HotPayne.e_v_sini_hmasked,
+            raw_e_he_h_hmasked=HotPayne.e_he_h_hmasked,
+            raw_e_c_h_hmasked=HotPayne.e_c_h_hmasked,
+            raw_e_n_h_hmasked=HotPayne.e_n_h_hmasked,
+            raw_e_o_h_hmasked=HotPayne.e_o_h_hmasked,
+            raw_e_si_h_hmasked=HotPayne.e_si_h_hmasked,
+            raw_e_s_h_hmasked=HotPayne.e_s_h_hmasked,
+        )
+        .execute()
+    )
+    
+def apply_noise_model():
+    
+    with open(expand_path(f"$MWM_ASTRA/{__version__}/aux/HotPayne_corrections.pkl"), "rb") as fp:
+        corrections, reference = pickle.load(fp)
+
+    update_kwds = {}
+    for label_name, kwds in corrections.items():
+        offset, scale = kwds["offset"], kwds["scale"]
+        update_kwds[f"e_{label_name}"] = scale * getattr(HotPayne, f"raw_e_{label_name}") + offset
+        
+    (
+        HotPayne
+        .update(**update_kwds)
+        .execute()
+    )
+    
+            

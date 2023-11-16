@@ -1,7 +1,7 @@
 from astropy.io import fits
 from astra.utils import log
 from astra.models.apogee import ApogeeVisitSpectrum
-from astra.models.apogeenet import ApogeeNet
+from astra.models import ApogeeNetV2 as ApogeeNet
 from astra.models.aspcap import FerreCoarse
 from astra.pipelines.aspcap.utils import approximate_log10_microturbulence 
 
@@ -132,7 +132,7 @@ def get_initial_guesses(spectra):
                 params = {
                     "teff": r.teff,
                     "logg": r.logg,
-                    "m_h": r.m_h,
+                    "m_h": r.fe_h,
                     "initial_flags": FerreCoarse(flag_initial_guess_from_apogeenet=True).initial_flags
                 }
             

@@ -61,6 +61,8 @@ INCLUDE_SOURCE_FIELD_NAMES = (
     
     ("ra", ),
     ("dec", ),
+    ("l", ),
+    ("b", ),
     ("plx", ),
     ("e_plx", ),
     ("pmra", ),
@@ -84,11 +86,15 @@ INCLUDE_SOURCE_FIELD_NAMES = (
     ("bl_flg", ),
     ("cc_flg", ),
 
+    ("w1_mag", ),
+    ("e_w1_mag", ),
     ("w1_flux", ),
     ("w1_dflux", ),
+    ("w1_frac", ),
+    ("w2_mag", ),
+    ("e_w2_mag", ),
     ("w2_flux", ),
     ("w2_dflux", ),
-    ("w1_frac", ),
     ("w2_frac", ),
     ("w1uflags", ),
     ("w2uflags", ),
@@ -124,6 +130,38 @@ def create_source_primary_hdu(
     Note that the names for some fields are shortened so that they are not prefixed by the FITS 'HIERARCH' cards.
     """
 
+    cards, original_names = create_source_primary_hdu_cards(source, field_names, upper)
+    return create_source_primary_hdu_from_cards(source, cards, original_names, upper)
+    
+
+
+
+def create_source_primary_hdu_from_cards(source, cards, original_names, upper=False):
+
+    hdu = fits.PrimaryHDU(header=fits.Header(cards=cards))
+    
+    # Add category groupings.
+    add_category_headers(hdu, (source.__class__, ), original_names, upper, use_ttype=False)
+    add_category_comments(hdu, (source.__class__, ), original_names, upper, use_ttype=False)
+
+    s = lambda v: v.upper() if upper else v
+
+    # Add checksums.
+    hdu.add_checksum()
+    hdu.header.insert("CHECKSUM", BLANK_CARD)
+    hdu.header.insert("CHECKSUM", (" ", s("Data Integrity")))
+    hdu.header.insert("CHECKSUM", BLANK_CARD)
+    hdu.add_checksum()
+    return hdu
+    
+
+def create_source_primary_hdu_cards(
+    source,
+    field_names=INCLUDE_SOURCE_FIELD_NAMES,
+    upper=False,
+    context="results"
+):
+    
     created = datetime.datetime.utcnow().strftime(DATETIME_FMT)
 
     shortened_names = { k[0]: k[0] if len(k) == 1 else k[1] for k in field_names }
@@ -159,27 +197,14 @@ def create_source_primary_hdu(
         (" ", s("HDU Descriptions"), None),
         BLANK_CARD,
         ("COMMENT", "HDU 0: Summary information only", None),
-        ("COMMENT", "HDU 1: BOSS results from Apache Point Observatory"),
-        ("COMMENT", "HDU 2: BOSS results from Las Campanas Observatory"),
-        ("COMMENT", "HDU 3: APOGEE results from Apache Point Observatory"),
-        ("COMMENT", "HDU 4: APOGEE results from Las Campanas Observatory"),
+        ("COMMENT", f"HDU 1: BOSS {context} from Apache Point Observatory"),
+        ("COMMENT", f"HDU 2: BOSS {context} from Las Campanas Observatory"),
+        ("COMMENT", f"HDU 3: APOGEE {context} from Apache Point Observatory"),
+        ("COMMENT", f"HDU 4: APOGEE {context} from Las Campanas Observatory"),
     ])
     
-
-    hdu = fits.PrimaryHDU(header=fits.Header(cards=cards))
+    return (cards, original_names)
     
-    # Add category groupings.
-    add_category_headers(hdu, (source.__class__, ), original_names, upper, use_ttype=False)
-    add_category_comments(hdu, (source.__class__, ), original_names, upper, use_ttype=False)
-
-    # Add checksums.
-    hdu.add_checksum()
-    hdu.header.insert("CHECKSUM", BLANK_CARD)
-    hdu.header.insert("CHECKSUM", (" ", s("Data Integrity")))
-    hdu.header.insert("CHECKSUM", BLANK_CARD)
-    hdu.add_checksum()
-    return hdu
-
 
 def resolve_model(model_or_model_name):
     if isinstance(model_or_model_name, str):
@@ -244,17 +269,29 @@ def get_fields(models, name_conflict_strategy=None, ignore_field_name_callable=N
 
 
 
-def get_binary_table_hdu(q, models, fields, limit=None, header=None, upper=True, fill_values=None):
-    column_fill_values = {"sdss5_target_flags": np.zeros((0, 0), dtype=np.uint8)}
-    for field in fields.values():
+def get_binary_table_hdu(
+    q,
+    models,
+    fields,
+    limit=None,
+    header=None,
+    upper=True,
+    fill_values=None,
+):
+    column_fill_values = {
+        "sdss5_target_flags": np.zeros((0, 0), dtype=np.uint8),
+    }
+    
+    for name, field in fields.items():
         try:
-            column_fill_values[field.name] = get_fill_value(field, fill_values)
+            column_fill_values[name] = get_fill_value(field, fill_values)
         except KeyError:
             # May not be a problem yet.
             continue
 
     data = { name: [] for name in fields.keys() }
     for result in tqdm(q.iterator(), desc="Collecting results", total=limit or q.count()):
+        
         if isinstance(result, dict):        
             for name, value in result.items():
                 if value is None:
@@ -283,7 +320,7 @@ def get_binary_table_hdu(q, models, fields, limit=None, header=None, upper=True,
                 value = np.ones((0, 0), dtype=np.float32)
         else:
             value = data[name]
-        kwds = fits_column_kwargs(field, value, upper=upper)
+        kwds = fits_column_kwargs(field, value, upper=upper, name=name)
         # Keep track of field-to-HDU names so that we can add help text.
         original_names[kwds['name']] = name
         columns.append(fits.Column(**kwds))    
@@ -329,7 +366,7 @@ def add_category_comments(hdu, models, original_names, upper, use_ttype=True):
             category_comments_added.append(field_name)
     return None
 
-def add_category_headers(hdu, models, original_names, upper, use_ttype=True):
+def add_category_headers(hdu, models, original_names, upper, use_ttype=True, suppress_warnings=False):
     category_headers_added = []
     list_original_names = list(original_names.values())
     for model in models:
@@ -339,7 +376,8 @@ def add_category_headers(hdu, models, original_names, upper, use_ttype=True):
             try:
                 index = 1 + list_original_names.index(field_name)
             except:
-                log.warning(f"Cannot find field {field_name} to put category header above it")
+                if not suppress_warnings:
+                    log.warning(f"Cannot find field {field_name} to put category header above it")
                 continue
             if use_ttype:
                 key = f"TTYPE{index}"
@@ -424,7 +462,7 @@ def fits_column_kwargs(field, values, upper, name=None, default_n_pixels=0, warn
         name = name or field.name
     else:
         name = name or field.column_name or field.name
-
+        
     kwds = dict(
         name=name.upper() if upper else name,
         array=array,

@@ -20,6 +20,8 @@ from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
 from astra.glossary import Glossary
+from playhouse.hybrid import hybrid_property
+
 
 
 class StellarParameterPixelAccessor(BasePixelArrayAccessor):
@@ -88,7 +90,7 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     """ APOGEE Stellar Parameter and Chemical Abundances Pipeline (ASPCAP) """
     
     #> Identifiers
-    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False, help_text=Glossary.spectrum_pk)    
+    spectrum_pk = ForeignKeyField(Spectrum, index=True, unique=True, lazy_load=False, help_text=Glossary.spectrum_pk)    
     source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
     
     #> Astra Metadata
@@ -144,14 +146,16 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     model_flux_ti_2_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ti 2/H]")
     model_flux_v_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [V/H]")
 
-    #> IRFM Temperatures (Casagrande et al. 2010)
+    #> IRFM Effective Temperatures from V-Ks (Gonzalez Hernandez and Bonifacio 2009)
     irfm_teff = FloatField(null=True, help_text=Glossary.teff)
-    e_irfm_teff = FloatField(null=True, help_text=Glossary.e_teff)
     irfm_teff_flags = BitField(default=0, help_text="IRFM temperature flags")
-    flag_out_of_v_k_bounds = irfm_teff_flags.flag(2**0, "Out of V-Ks bounds (0.78, 3.15)")
-    flag_extrapolated_v_mag = irfm_teff_flags.flag(2**1, "Synthetic V magnitude is extrapolated")
-    flag_poor_quality_k_mag = irfm_teff_flags.flag(2**2, "Poor quality Ks magnitude")
-    flag_ebv_used_is_upper_limit = irfm_teff_flags.flag(2**3, "E(B-V) used is an upper limit")
+    flag_out_of_v_k_bounds = irfm_teff_flags.flag(2**0, "Out of V-Ks bounds")
+    flag_out_of_fe_h_bounds = irfm_teff_flags.flag(2**1, "Out of [Fe/H] bounds")
+    flag_extrapolated_v_mag = irfm_teff_flags.flag(2**2, "Synthetic V magnitude is extrapolated")
+    flag_poor_quality_k_mag = irfm_teff_flags.flag(2**3, "Poor quality Ks magnitude")
+    flag_ebv_used_is_upper_limit = irfm_teff_flags.flag(2**4, "E(B-V) used is an upper limit")
+    flag_as_dwarf_for_irfm_teff = irfm_teff_flags.flag(2**5, "Flagged as dwarf for IRFM temperature")
+    flag_as_giant_for_irfm_teff = irfm_teff_flags.flag(2**6, "Flagged as giant for IRFM temperature")
 
     #> Stellar Parameters
     teff = FloatField(null=True, help_text=Glossary.teff)
@@ -309,29 +313,86 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     rchi2 = FloatField(null=True, help_text=Glossary.rchi2)
     ferre_log_snr_sq = FloatField(null=True, help_text="FERRE-reported log10(snr**2)")
     ferre_time_elapsed = FloatField(null=True, help_text="Total core-second use reported by FERRE [s]")
-    ferre_flags = BitField(default=0, help_text="Flags indicating FERRE issues")
+    result_flags = BitField(default=0, help_text="Flags indicating FERRE issues")
 
-    flag_ferre_fail = ferre_flags.flag(2**0, "FERRE failed")
-    flag_missing_model_flux = ferre_flags.flag(2**1, "Missing model fluxes from FERRE")
-    flag_potential_ferre_timeout = ferre_flags.flag(2**2, "Potentially impacted by FERRE timeout")
-    flag_no_suitable_initial_guess = ferre_flags.flag(2**3, help_text="FERRE not executed because there's no suitable initial guess")
-    flag_spectrum_io_error = ferre_flags.flag(2**4, help_text="Error accessing spectrum pixel data")
-    flag_teff_grid_edge_warn = ferre_flags.flag(2**5)
-    flag_teff_grid_edge_bad = ferre_flags.flag(2**6)
-    flag_logg_grid_edge_warn = ferre_flags.flag(2**7)
-    flag_logg_grid_edge_bad = ferre_flags.flag(2**8)
-    flag_v_micro_grid_edge_warn = ferre_flags.flag(2**9)
-    flag_v_micro_grid_edge_bad = ferre_flags.flag(2**10)
-    flag_v_sini_grid_edge_warn = ferre_flags.flag(2**11)
-    flag_v_sini_grid_edge_bad = ferre_flags.flag(2**12)
-    flag_m_h_atm_grid_edge_warn = ferre_flags.flag(2**13)
-    flag_m_h_atm_grid_edge_bad = ferre_flags.flag(2**14)
-    flag_alpha_m_grid_edge_warn = ferre_flags.flag(2**15)
-    flag_alpha_m_grid_edge_bad = ferre_flags.flag(2**16)
-    flag_c_m_atm_grid_edge_warn = ferre_flags.flag(2**17)
-    flag_c_m_atm_grid_edge_bad = ferre_flags.flag(2**18)
-    flag_n_m_atm_grid_edge_warn = ferre_flags.flag(2**19)
-    flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**20)    
+    flag_ferre_fail = result_flags.flag(2**0, "FERRE failed")
+    flag_missing_model_flux = result_flags.flag(2**1, "Missing model fluxes from FERRE")
+    flag_potential_ferre_timeout = result_flags.flag(2**2, "Potentially impacted by FERRE timeout")
+    flag_no_suitable_initial_guess = result_flags.flag(2**3, help_text="FERRE not executed because there's no suitable initial guess")
+    flag_spectrum_io_error = result_flags.flag(2**4, help_text="Error accessing spectrum pixel data")
+    flag_teff_grid_edge_warn = result_flags.flag(2**5)
+    flag_teff_grid_edge_bad = result_flags.flag(2**6)
+    flag_logg_grid_edge_warn = result_flags.flag(2**7)
+    flag_logg_grid_edge_bad = result_flags.flag(2**8)
+    flag_v_micro_grid_edge_warn = result_flags.flag(2**9)
+    flag_v_micro_grid_edge_bad = result_flags.flag(2**10)
+    flag_v_sini_grid_edge_warn = result_flags.flag(2**11)
+    flag_v_sini_grid_edge_bad = result_flags.flag(2**12)
+    flag_m_h_atm_grid_edge_warn = result_flags.flag(2**13)
+    flag_m_h_atm_grid_edge_bad = result_flags.flag(2**14)
+    flag_alpha_m_grid_edge_warn = result_flags.flag(2**15)
+    flag_alpha_m_grid_edge_bad = result_flags.flag(2**16)
+    flag_c_m_atm_grid_edge_warn = result_flags.flag(2**17)
+    flag_c_m_atm_grid_edge_bad = result_flags.flag(2**18)
+    flag_n_m_atm_grid_edge_warn = result_flags.flag(2**19)
+    flag_n_m_atm_grid_edge_bad = result_flags.flag(2**20)    
+    flag_suspicious_parameters = result_flags.flag(2**21)
+    flag_high_v_sini = result_flags.flag(2**22)
+    flag_high_v_micro = result_flags.flag(2**23)
+    flag_unphysical_parameters = result_flags.flag(2**24)
+    flag_high_rchi2 = result_flags.flag(2**25)
+    flag_low_snr = result_flags.flag(2**26)
+    flag_high_std_v_rad = result_flags.flag(2**27)
+    
+    @hybrid_property
+    def flag_warn(self):
+        return (self.result_flags > 0)
+
+    @flag_warn.expression
+    def flag_warn(self):
+        return (self.result_flags > 0)
+
+    @hybrid_property
+    def flag_bad(self):
+        return (
+            self.flag_suspicious_parameters
+        |   self.flag_high_v_sini
+        |   self.flag_high_v_micro
+        |   self.flag_unphysical_parameters
+        |   self.flag_high_rchi2
+        |   self.flag_low_snr
+        |   self.flag_high_std_v_rad
+        |   self.flag_teff_grid_edge_bad
+        |   self.flag_logg_grid_edge_bad
+        |   self.flag_ferre_fail
+        |   self.flag_missing_model_flux
+        |   self.flag_potential_ferre_timeout
+        |   self.flag_no_suitable_initial_guess
+        |   self.flag_spectrum_io_error
+    )
+
+    @flag_bad.expression
+    def flag_bad(self):
+        return (
+            self.flag_suspicious_parameters
+        |   self.flag_high_v_sini
+        |   self.flag_high_v_micro
+        |   self.flag_unphysical_parameters
+        |   self.flag_high_rchi2
+        |   self.flag_low_snr
+        |   self.flag_high_std_v_rad
+        |   self.flag_teff_grid_edge_bad
+        |   self.flag_logg_grid_edge_bad
+        |   self.flag_ferre_fail
+        |   self.flag_missing_model_flux
+        |   self.flag_potential_ferre_timeout
+        |   self.flag_no_suitable_initial_guess
+        |   self.flag_spectrum_io_error
+    )
+
+        
+    
+    
     
     #> Task Primary Keys
     stellar_parameters_task_pk = ForeignKeyField(FerreStellarParameters, unique=True, null=True, lazy_load=False, help_text="Task primary key for stellar parameters")
@@ -360,12 +421,16 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     ti_2_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Ti 2/H]")
     v_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [V/H]")
 
-    #> Raw (Uncalibrated) Quantities
+    #> Calibration flags
     calibrated_flags = BitField(null=True, help_text="Calibration flags")
-    flag_main_sequence = calibrated_flags.flag(2**0, "Classified as main-sequence star for calibration")
-    flag_red_giant_branch = calibrated_flags.flag(2**1, "Classified as red giant branch star for calibration")
-    flag_red_clump = calibrated_flags.flag(2**2, "Classified as red clump star for calibration")
+    flag_as_dwarf_for_calibration = calibrated_flags.flag(2**0, "Classified as main-sequence star for logg calibration")
+    flag_as_giant_for_calibration = calibrated_flags.flag(2**1, "Classified as red giant branch star for logg calibration")
+    flag_as_red_clump_for_calibration = calibrated_flags.flag(2**2, "Classified as red clump star for logg calibration")
+    flag_as_m_dwarf_for_calibration = calibrated_flags.flag(2**3, "Classifed as M-dwarf for teff and logg calibration")
+    mass = FloatField(null=True, help_text="Mass inferred from isochrones [M_sun]")
+    radius = FloatField(null=True, help_text="Radius inferred from isochrones [R_sun]")
     
+    #> Raw (Uncalibrated) Quantities
     raw_teff = FloatField(null=True, help_text=Glossary.raw_teff)
     raw_e_teff = FloatField(null=True, help_text=Glossary.raw_e_teff)
     raw_logg = FloatField(null=True, help_text=Glossary.raw_logg)
@@ -431,3 +496,26 @@ class ASPCAP(BaseModel, PipelineOutputMixin):
     raw_v_h = FloatField(null=True, help_text=Glossary.raw_v_h)
     raw_e_v_h = FloatField(null=True, help_text=Glossary.raw_e_v_h)
     
+
+
+
+def apply_noise_model():
+    import pickle
+    from astra import __version__
+    from astra.utils import expand_path
+    
+    with open(expand_path(f"$MWM_ASTRA/{__version__}/aux/ASPCAP_corrections.pkl"), "rb") as fp:
+        corrections, reference = pickle.load(fp)
+
+    update_kwds = {}
+    for label_name, kwds in corrections.items():
+        offset, scale = kwds["offset"], kwds["scale"]
+        update_kwds[f"e_{label_name}"] = scale * getattr(ASPCAP, f"raw_e_{label_name}") + offset
+        
+    (
+        ASPCAP
+        .update(**update_kwds)
+        .execute()
+    )
+    
+        

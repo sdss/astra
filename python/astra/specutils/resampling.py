@@ -3,6 +3,8 @@ from scipy import interpolate
 from astropy.constants import c
 from astropy import units as u
 from collections import OrderedDict
+from scipy.ndimage.filters import median_filter, gaussian_filter
+
 
 C_KM_S = c.to(u.km / u.s).value
 
@@ -39,6 +41,7 @@ def separate_bitmasks(bitmasks):
     """
 
     q_max = max([int(np.log2(np.max(bitmask))) for bitmask in bitmasks])
+    #q_max = int(np.ceil(np.log2(np.hstack([bitmasks]).flatten().max())))
     separated = OrderedDict()
     for q in range(1 + q_max):
         separated[q] = []
@@ -48,6 +51,11 @@ def separate_bitmasks(bitmasks):
     return separated
 
 
+smooth_filter = lambda f, median_filter_size=501, gaussian_filter_size=100, median_filter_mode='reflect': gaussian_filter(
+    median_filter(f, [median_filter_size], mode=median_filter_mode),
+    gaussian_filter_size,
+)
+
 def resample(old_wavelength, new_wavelength, flux, ivar, n_res, pixel_flags=None, fill_flux=0, fill_ivar=0, min_bitmask_value=0.1):
     # TODO: Check inputs
 
@@ -55,6 +63,7 @@ def resample(old_wavelength, new_wavelength, flux, ivar, n_res, pixel_flags=None
     new_ivar = fill_ivar * np.ones(new_wavelength.size)
 
     if pixel_flags is not None:
+        pixel_flags = np.atleast_2d(pixel_flags)
         separate_pixel_flags = separate_bitmasks(pixel_flags)
         n_flags = len(separate_pixel_flags)
         resampled_flags = np.zeros((n_flags, new_wavelength.size), dtype=pixel_flags.dtype)
@@ -63,14 +72,27 @@ def resample(old_wavelength, new_wavelength, flux, ivar, n_res, pixel_flags=None
 
     old_wavelength = np.atleast_2d(old_wavelength)
     flux, ivar = (np.atleast_2d(flux), np.atleast_2d(ivar))
+        
     n_res = np.atleast_1d(n_res)
     for i, chip_wavelength in enumerate(old_wavelength):
         pixel = wave_to_pixel(new_wavelength, chip_wavelength)
         (finite, ) = np.where(np.isfinite(pixel))
 
+        # do a smoothing of bad pixels
+        flux_smooth = smooth_filter(flux[i])
+        var_smooth = smooth_filter(1/ivar[i])
+        
+        bad = (ivar[i] == 0) | (flux[i] < 0) | ~np.isfinite(flux[i]) | ~np.isfinite(ivar[i])
+        
+        sinc_flux = flux[i].copy()
+        sinc_var = 1/ivar[i]
+        
+        sinc_flux[bad] = flux_smooth[bad]
+        sinc_var[bad] = var_smooth[bad]
+        
         ((finite_flux, finite_e_flux), ) = sincint(
             pixel[finite], n_res[i], [
-                [flux[i], 1/ivar[i]]
+                [sinc_flux, sinc_var]
             ]
         )
         new_flux[finite] = finite_flux
@@ -122,6 +144,74 @@ def resample(old_wavelength, new_wavelength, flux, ivar, n_res, pixel_flags=None
             )
 
     return (new_flux, new_ivar, new_pixel_flags)
+
+
+def pixel_weighted_spectrum(
+    flux: np.ndarray,
+    ivar: np.ndarray,
+    bitmask: np.ndarray,
+    scale_by_pseudo_continuum=False,
+    median_filter_size=501,
+    median_filter_mode="reflect",
+    gaussian_filter_size=100,
+    **kwargs,
+):
+    """
+    Combine input spectra to produce a single pixel-weighted spectrum.
+
+    :param flux:
+        An array of flux values, resampled to the same wavelength values.
+
+    :param ivar:
+        inverse variance
+        
+
+    :param bitmask:
+        A pixel bitmask, same shape as `flux`.
+
+    :param scale_by_pseudo_continuum: [optional]
+        Optionally scale each visit spectrum by its pseudo-continuum (a gaussian median filter) when
+        stacking to keep them on the same relative scale (default: False).
+
+    :param median_filter_size: [optional]
+        The filter width (in pixels) to use for any median filters (default: 501).
+
+    :param median_filter_mode: [optional]
+        The mode to use for any median filters (default: reflect).
+
+    :param gaussian_filter_size: [optional]
+        The filter size (in pixels) to use for any gaussian filter applied.
+    """
+    meta = dict(
+        scale_by_pseudo_continuum=scale_by_pseudo_continuum,
+        median_filter_mode=median_filter_mode,
+        gaussian_filter_size=gaussian_filter_size,
+    )
+
+    if flux.size == 0:
+        return (None, None, None, None, meta)
+
+    V, P = flux.shape
+    continuum = np.ones((V, P), dtype=float)
+    if scale_by_pseudo_continuum:
+        smooth_filter = lambda f: gaussian_filter(
+            median_filter(f, [median_filter_size], mode=median_filter_mode),
+            gaussian_filter_size,
+        )
+        # TODO: If there are gaps in `finite` then this will cause issues because median filter and gaussian filter
+        #       don't receive the x array
+        # TODO: Take a closer look at this process.
+        for v in range(V):
+            finite = np.isfinite(flux)
+            continuum[v, finite] = smooth_filter(flux[v, finite])
+
+
+    #cont = np.median(continuum, axis=0)  # TODO: is this right?
+    stacked_ivar = np.sum(ivar, axis=0)
+    stacked_flux = np.sum(flux * ivar, axis=0) / stacked_ivar #* cont
+
+    stacked_bitmask = np.bitwise_or.reduce(bitmask.astype(int), 0)
+    return (stacked_flux, stacked_ivar, stacked_bitmask, continuum, meta)
 
 
 def resample_apmadgics(spectrum, n_res):       

@@ -22,7 +22,7 @@ class AstroNN(BaseModel, PipelineOutputMixin):
 
     """A result from the AstroNN pipeline."""
 
-    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
+    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False, help_text=Glossary.source_pk)
     spectrum_pk = ForeignKeyField(
         Spectrum, 
         index=True, 
@@ -86,7 +86,7 @@ class AstroNN(BaseModel, PipelineOutputMixin):
 
     #> Summary Statistics
     result_flags = BitField(default=0, help_text="Flags describing the results")
-    flag_bad = result_flags.flag(2**0, help_text="Results are known to be bad (e_logg >= 0.2)")
+    flag_bad = result_flags.flag(2**0, help_text="Results are known to be bad (`e_logg` >= 0.2)")
 
     #> Flag definitions
     flag_no_result = result_flags.flag(2**11, help_text="Exception raised when loading spectra")

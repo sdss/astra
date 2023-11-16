@@ -13,6 +13,103 @@ from astra.utils import log, flatten, expand_path
 from astra.models.source import Source
 from astra.models.apogee import ApogeeVisitSpectrum
 from astra.models.boss import BossVisitSpectrum
+from astropy.coordinates import SkyCoord
+from astropy import units as u
+
+
+von = lambda v: v or np.nan
+
+def compute_w1mag_and_w2mag(
+    where=(
+        (Source.w1_flux.is_null(False) & Source.w1_mag.is_null(True))
+    |   (Source.w2_flux.is_null(False) & Source.w2_mag.is_null(True))
+    ),
+    limit=None, 
+    batch_size=1000
+):
+
+    q = (
+        Source
+        .select(
+            Source.pk,
+            Source.w1_flux,
+            Source.w1_dflux,
+            Source.w2_flux,
+            Source.w2_dflux,
+        )
+        .where(where)
+        .limit(limit)
+    )
+    n_updated = 0
+    with tqdm(total=len(q)) as pb:
+    
+        for batch in chunked(q, batch_size):
+            
+            for source in batch:
+                # See https://catalog.unwise.me/catalogs.html (Flux Scale) for justification of 32 mmag offset in W2, and 4 mmag offset in W1
+                source.w1_mag = -2.5 * np.log10(von(source.w1_flux)) + 22.5 - 4 * 1e-3 # Vega
+                source.e_w1_mag = (2.5 / np.log(10)) * von(source.w1_dflux) / von(source.w1_flux)
+                source.w2_mag = -2.5 * np.log10(von(source.w2_flux)) + 22.5 - 32 * 1e-3 # Vega
+                source.e_w2_mag = (2.5 / np.log(10)) * von(source.w2_dflux) / von(source.w2_flux)
+            
+            n_updated += Source.bulk_update(
+                batch,
+                fields=[
+                    Source.w1_mag,
+                    Source.e_w1_mag,
+                    Source.w2_mag,
+                    Source.e_w2_mag
+                ]
+            )
+            pb.update(len(batch)) 
+    
+    return n_updated                
+
+
+
+def update_galactic_coordinates(
+    where=(Source.ra.is_null(False) & Source.l.is_null(True)),
+    limit=None,
+    frame="icrs", 
+    batch_size=1000
+):
+    
+    q = (
+        Source
+        .select(
+            Source.pk,
+            Source.ra,
+            Source.dec
+        )
+        .where(where)
+        .limit(limit)
+    )
+    
+    n_updated = 0
+    with tqdm(total=len(q)) as pb:
+        
+        for batch in chunked(q, batch_size):
+            
+            coord = SkyCoord(
+                ra=[s.ra for s in batch] * u.degree,
+                dec=[s.dec for s in batch] * u.degree,
+                frame=frame
+            )
+            
+            for source, position in zip(batch, coord.galactic):
+                source.l = position.l.value
+                source.b = position.b.value
+                
+            n_updated += Source.bulk_update(
+                batch,
+                fields=[
+                    Source.l,
+                    Source.b
+                ]
+            )
+            pb.update(len(batch))
+    
+    return n_updated            
 
 
 def backup_unsigned_apogee_flags():
@@ -63,6 +160,110 @@ def fix_unsigned_apogee_flags():
         )
     return updated
 
+
+def compute_gonzalez_hernandez_irfm_effective_temperatures_from_vmk(
+    model,
+    logg_field,
+    fe_h_field,
+    where=(
+        Source.v_jkc_mag.is_null(False)
+    &   Source.k_mag.is_null(False)
+    ),
+    dwarf_giant_logg_split=3.8,
+    batch_size=10_000
+):
+    '''
+    # These are from Table 2 of https://arxiv.org/pdf/0901.3034.pdf
+    A_dwarf = np.array([2.3522, -1.8817, 0.6229, -0.0745, 0.0371, -0.0990, -0.0052])
+    A_giant = np.array([2.1304, -1.5438, 0.4562, -0.0483, 0.0132, 0.0456, -0.0026])
+    
+    dwarf_colour_range = [1, 3]
+    dwarf_fe_h_range = [-3.5, 0.3]
+
+    giant_colour_range = [0.7, 3.8]
+    giant_fe_h_range = [-4.0, 0.1]
+    '''
+    
+    B_dwarf = np.array([0.5201, 0.2511, -0.0118, -0.0186, 0.0408, 0.0033])
+    B_giant = np.array([0.5293, 0.2489, -0.0119, -0.0042, 0.0135, 0.0010])
+    
+    #dwarf_colour_range = [0.1, 0.8] ### WRONG
+    dwarf_colour_range = [0.7, 3.0]
+    dwarf_fe_h_range = [-3.5, 0.5]
+    
+    giant_colour_range = [1.1, 3.4]
+    giant_fe_h_range = [-4, 0.2]
+    
+    
+    q = (
+        model
+        .select(
+            model,
+            Source,
+        )
+        .join(Source, on=(model.source_pk == Source.pk), attr="_source")
+    )
+    
+    if where:
+        q = q.where(where)
+
+    n_updated, batch = (0, [])
+    for row in tqdm(q.iterator()):
+        X = (row._source.v_jkc_mag or np.nan) - (row._source.k_mag or np.nan)
+        fe_h = getattr(row, fe_h_field.name) or np.nan
+        logg = getattr(row, logg_field.name) or np.nan
+        
+        if logg >= dwarf_giant_logg_split:
+            # dwarf
+            B = B_dwarf
+            valid_v_k = dwarf_colour_range
+            valid_fe_h = dwarf_fe_h_range
+            row.flag_as_dwarf_for_irfm_teff = True
+        else:
+            # giant
+            B = B_giant
+            valid_v_k = giant_colour_range
+            valid_fe_h = giant_fe_h_range
+            row.flag_as_giant_for_irfm_teff = True
+            
+        theta = np.sum(B * np.array([1, X, X**2, X*fe_h, fe_h, fe_h**2]))
+        
+        row.irfm_teff = 5040/theta
+        row.flag_out_of_v_k_bounds = not (valid_v_k[0] <= X <= valid_v_k[1])
+        row.flag_out_of_fe_h_bounds = not (valid_fe_h[0] <= fe_h <= valid_fe_h[1])
+        row.flag_extrapolated_v_mag = (row._source.v_jkc_mag_flag == 0)
+        row.flag_poor_quality_k_mag = (
+            (row._source.ph_qual is None) 
+        or  (row._source.ph_qual[-1] != "A") 
+        or  (row._source.e_k_mag > 0.1)
+        )
+        row.flag_ebv_used_is_upper_limit = row._source.flag_ebv_upper_limit        
+        batch.append(row)
+        
+        if len(batch) >= batch_size:
+            model.bulk_update(
+                batch,
+                fields=[
+                    model.irfm_teff,
+                    model.irfm_teff_flags,
+                ]
+            )
+            n_updated += batch_size
+            batch = []
+            
+    if len(batch) > 0:
+        model.bulk_update(
+            batch,
+            fields=[
+                model.irfm_teff,
+                model.irfm_teff_flags,
+            ]
+        )
+        n_updated += len(batch)
+    
+    return n_updated
+        
+        
 
 def compute_casagrande_irfm_effective_temperatures(
     model, 

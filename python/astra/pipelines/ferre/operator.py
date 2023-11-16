@@ -273,10 +273,78 @@ def setup_ferre_for_re_execution():
             lookup_stub_by_pid[proc.pid] = stub
             states[stub]["pids"].append(proc.pid)
 
+def load_balance(
+    stage_dir,
+    job_name="ferre",
+    input_nml_wildmask="*/input*.nml",
+    slurm_kwds=None,
+    post_interpolate_model_flux=True,
+    partition=True,
+    overwrite=True,
+    n_threads=32, # 42
+    max_nodes=0,
+    max_tasks_per_node=4, # 3
+    balance_threads=False,
+    cpus_per_node=128,
+    t_load_estimate=300, # 5 minutes est to load grid
+    chaos_monkey=True,
+    full_output=False,
+    experimental_abundances=False
+):
+    
+    slurm_kwds = slurm_kwds or DEFAULT_SLURM_KWDS
+
 def load_balancer(
     stage_dir,
     job_name="ferre",
     input_nml_wildmask="*/input*.nml",
+    slurm_kwds=None,
+    post_interpolate_model_flux=True,
+    partition=True,
+    overwrite=True,
+    n_threads=32, # 42
+    max_nodes=0,
+    max_tasks_per_node=4, # 3
+    balance_threads=False,
+    cpus_per_node=128,
+    t_load_estimate=300, # 5 minutes est to load grid
+    chaos_monkey=True,
+    full_output=False,
+    experimental_abundances=False
+):
+    stage_dir = expand_path(stage_dir)
+
+    # Find all executable directories.
+    input_nml_paths = glob(
+        os.path.join(
+        stage_dir,
+        input_nml_wildmask
+        )
+    )
+    return _load_balancer(
+        stage_dir,
+        input_nml_paths,
+        job_name=job_name,
+        slurm_kwds=slurm_kwds,
+        post_interpolate_model_flux=post_interpolate_model_flux,
+        partition=partition,
+        overwrite=overwrite,
+        n_threads=n_threads,
+        max_nodes=max_nodes,
+        max_tasks_per_node=max_tasks_per_node,
+        balance_threads=balance_threads,
+        cpus_per_node=cpus_per_node,
+        t_load_estimate=t_load_estimate,
+        chaos_monkey=chaos_monkey,
+        full_output=full_output,
+        experimental_abundances=experimental_abundances
+    )
+    
+
+def _load_balancer(
+    stage_dir,
+    input_nml_paths,
+    job_name="ferre",
     slurm_kwds=None,
     post_interpolate_model_flux=True,
     partition=True,
@@ -297,19 +365,12 @@ def load_balancer(
     input_basename = "input.nml"
     stage_dir = expand_path(stage_dir)
 
-    # Find all executable directories.
-    all_input_paths = glob(
-        os.path.join(
-        stage_dir,
-        input_nml_wildmask
-        )
-    )
     nodes = max_nodes if max_nodes > 0 else 1
 
     is_input_list = lambda p: os.path.basename(p).lower().startswith("input_list")
 
     input_paths, spectra, core_seconds = ([], [], [])
-    for input_path in all_input_paths:
+    for input_path in input_nml_paths:
 
         if is_input_list(input_path):
             warnings.warn(f"No clever load balancing implemented for the abundance stage yet!")

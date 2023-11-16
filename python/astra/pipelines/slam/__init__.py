@@ -184,11 +184,9 @@ def _slam(
     rchi2 = chi2 / (R_finite - L - 1)
     
     # Flags
-    flag_teff_outside_bounds = (kwargs["teff"] < 2000 or kwargs["teff"] > 5000)    
+    flag_teff_outside_bounds = (kwargs["teff"] < 2800 or kwargs["teff"] > 4500)    
     flag_fe_h_outside_bounds = (kwargs['fe_h'] < -1 or kwargs['fe_h'] > 0.5)
     flag_bad_optimizer_status = (kwargs["status"] > 0 and kwargs["status"] != 2) | (kwargs["status"] < 0)
-    warn_flag = bool(flag_bad_optimizer_status)
-    bad_flag = bool(warn_flag or flag_teff_outside_bounds or flag_fe_h_outside_bounds)
     
     
     kwargs.update(
@@ -197,8 +195,8 @@ def _slam(
         flag_teff_outside_bounds=flag_teff_outside_bounds,
         flag_fe_h_outside_bounds=flag_fe_h_outside_bounds,
         flag_bad_optimizer_status=flag_bad_optimizer_status,
-        warn_flag=warn_flag,
-        bad_flag=bad_flag,
+        #warn_flag=warn_flag,
+        #bad_flag=bad_flag,
     )
 
     # Prepare model spectrum for final product.

@@ -528,7 +528,6 @@ def _create_pipeline_product(
     return (path, hdu_list) if full_output else path
 
 
-
 def _create_pipeline_products_for_all_sources(
     pipeline_model,
     output_template,

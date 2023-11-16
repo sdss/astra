@@ -140,6 +140,34 @@ class ThePayne(BaseModel, PipelineOutputMixin):
     result_flags = BitField(default=0)
     flag_fitting_failure = result_flags.flag(2**0, "Fitting failure")
     
+    #> Formal uncertainties
+    raw_e_teff = FloatField(null=True)
+    raw_e_logg = FloatField(null=True)
+    raw_e_v_turb = FloatField(null=True)
+    raw_e_c_h = FloatField(null=True)
+    raw_e_n_h = FloatField(null=True)
+    raw_e_o_h = FloatField(null=True)
+    raw_e_na_h = FloatField(null=True)
+    raw_e_mg_h = FloatField(null=True)
+    raw_e_al_h = FloatField(null=True)
+    raw_e_si_h = FloatField(null=True)
+    raw_e_p_h = FloatField(null=True)
+    raw_e_s_h = FloatField(null=True)
+    raw_e_k_h = FloatField(null=True)
+    raw_e_ca_h = FloatField(null=True)
+    raw_e_ti_h = FloatField(null=True)
+    raw_e_v_h = FloatField(null=True)
+    raw_e_cr_h = FloatField(null=True)
+    raw_e_mn_h = FloatField(null=True)
+    raw_e_fe_h = FloatField(null=True)
+    raw_e_co_h = FloatField(null=True)
+    raw_e_ni_h = FloatField(null=True)
+    raw_e_cu_h = FloatField(null=True)
+    raw_e_ge_h = FloatField(null=True)
+    raw_e_c12_c13 = FloatField(null=True)
+    raw_e_v_macro = FloatField(null=True)
+        
+
 
     #> Correlation Coefficients
     rho_teff_logg = FloatField(null=True)
@@ -462,3 +490,48 @@ class ThePayne(BaseModel, PipelineOutputMixin):
         
     
     
+def set_formal_errors():
+    ThePayne.update(raw_e_teff=ThePayne.e_teff).execute()
+    ThePayne.update(raw_e_logg=ThePayne.e_logg).execute()
+    ThePayne.update(raw_e_v_turb=ThePayne.e_v_turb).execute()
+    ThePayne.update(raw_e_c_h=ThePayne.e_c_h).execute()
+    ThePayne.update(raw_e_n_h=ThePayne.e_n_h).execute()
+    ThePayne.update(raw_e_o_h=ThePayne.e_o_h).execute()
+    ThePayne.update(raw_e_na_h=ThePayne.e_na_h).execute()
+    ThePayne.update(raw_e_mg_h=ThePayne.e_mg_h).execute()
+    ThePayne.update(raw_e_al_h=ThePayne.e_al_h).execute()
+    ThePayne.update(raw_e_si_h=ThePayne.e_si_h).execute()
+    ThePayne.update(raw_e_p_h=ThePayne.e_p_h).execute()
+    ThePayne.update(raw_e_s_h=ThePayne.e_s_h).execute()
+    ThePayne.update(raw_e_k_h=ThePayne.e_k_h).execute()
+    ThePayne.update(raw_e_ca_h=ThePayne.e_ca_h).execute()
+    ThePayne.update(raw_e_ti_h=ThePayne.e_ti_h).execute()
+    ThePayne.update(raw_e_v_h=ThePayne.e_v_h).execute()
+    ThePayne.update(raw_e_cr_h=ThePayne.e_cr_h).execute()
+    ThePayne.update(raw_e_mn_h=ThePayne.e_mn_h).execute()
+    ThePayne.update(raw_e_fe_h=ThePayne.e_fe_h).execute()
+    ThePayne.update(raw_e_co_h=ThePayne.e_co_h).execute()
+    ThePayne.update(raw_e_ni_h=ThePayne.e_ni_h).execute()
+    ThePayne.update(raw_e_cu_h=ThePayne.e_cu_h).execute()
+    ThePayne.update(raw_e_ge_h=ThePayne.e_ge_h).execute()
+    ThePayne.update(raw_e_c12_c13=ThePayne.e_c12_c13).execute()
+    ThePayne.update(raw_e_v_macro=ThePayne.e_v_macro).execute()
+
+
+def apply_noise_model():
+    
+    with open(expand_path(f"$MWM_ASTRA/{__version__}/aux/ThePayne_corrections.pkl"), "rb") as fp:
+        corrections, reference = pickle.load(fp)
+
+    update_kwds = {}
+    for label_name, kwds in corrections.items():
+        offset, scale = kwds["offset"], kwds["scale"]
+        update_kwds[f"e_{label_name}"] = scale * getattr(ThePayne, f"raw_e_{label_name}") + offset
+        
+    (
+        ThePayne
+        .update(**update_kwds)
+        .execute()
+    )
+    
+        

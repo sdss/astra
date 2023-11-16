@@ -108,7 +108,7 @@ def line_forest(spectra: Iterable[BossVisitSpectrum], steps: int = 128, reps: in
             pb.update()
         
 
-def _line_forest(spectrum, steps, reps):
+def _line_forest(spectrum, steps, reps, debug=False):
         
     models = {
         "zlines.model": read_model(os.path.join(f"$MWM_ASTRA/pipelines/lineforest/zlines2.model")),
@@ -166,19 +166,19 @@ def _line_forest(spectrum, steps, reps):
 
                 if np.abs(predictions[0,2])>0.5: 
                     eqw, abs = (predictions[0, 0], predictions[0, 1])
-                    detection_lower = predictions[0, 2]
+                    detection_stat = predictions[0, 2]
 
                     predictions = unnormalize(np.array(model(window[1:,:,:])))  
 
                     a = np.where(np.abs(predictions[1:,2])>0.5)[0]
-                    detection_upper = np.round(len(a)/reps,2)
+                    detection_raw = np.round(len(a)/reps,2)
                     
-                    if detection_upper>0.3:
+                    if detection_raw>0.3:
                         result_kwds.update({
                             f"eqw_{name.lower()}": eqw,
                             f"abs_{name.lower()}": abs,
-                            f"detection_lower_{name.lower()}": detection_lower,
-                            f"detection_upper_{name.lower()}": detection_upper
+                            f"detection_stat_{name.lower()}": detection_stat,
+                            f"detection_raw_{name.lower()}": detection_raw
                         })
 
                         if len(a)>2:
@@ -188,10 +188,14 @@ def _line_forest(spectrum, steps, reps):
                             }) 
             except:
                 log.exception(f"Exception when measuring {name} for spectrum {spectrum}")
+                if debug:
+                    raise
                 continue
                             
     except:
         log.warning(f"Exception when running line_forest for spectrum {spectrum}")
+        if debug:
+            raise 
         return None
     else:
         return LineForest(**result_kwds)

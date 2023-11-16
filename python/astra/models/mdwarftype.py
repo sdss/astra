@@ -20,7 +20,7 @@ class MDwarfType(BaseModel, PipelineOutputMixin):
 
     """M-dwarf type classifier."""
 
-    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
+    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False, help_text=Glossary.source_pk)
     spectrum_pk = ForeignKeyField(
         Spectrum, 
         index=True, 

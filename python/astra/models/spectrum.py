@@ -9,8 +9,13 @@ import numpy as np
 
 
 class SpectrumMixin(object):
+    
+    @property
+    def e_flux(self):
+        return self.ivar**-0.5        
+    
 
-    def plot(self, rectified=False, plot_model=False, figsize=(8, 3), ylim_percentile=(1, 99)):
+    def plot(self, rectified=True, plot_model=True, figsize=(8, 3), ylim_percentile=(1, 99)):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
 
@@ -29,7 +34,7 @@ class SpectrumMixin(object):
             continuum, is_rectified = (1, False)
             if rectified:            
                 try:
-                    for key in ("continuum", "nmf_continuum"):
+                    for key in ("continuum", ):
                         continuum = getattr(self, key, None)
                         if continuum is not None:
                             is_rectified = True
@@ -41,19 +46,21 @@ class SpectrumMixin(object):
                     log.exception(f"Exception when trying to get continum for spectrum {self}")
 
             has_model_flux = False
-            if plot_model:            
+            if plot_model:                        
                 try:
-                    for key in ("model_flux", "nmf_model_flux"):
-                        model_flux = getattr(self, key, None)
-                        if model_flux is not None:
-                            has_model_flux = True
-                            break
+                    model_flux = self.model_flux
+                except AttributeError:
+                    try:
+                        model_flux = self.nmf_rectified_model_flux * continuum
+                    except:
+                        None
                     else:
-                        log.warning(f"No model flux found for spectrum {self}")
-                except:
-                    log.exception(f"Exception when trying to get model flux for spectrum {self}")
+                        has_model_flux = True
+                else:
+                    has_model_flux = True
 
             N, P = y.shape
+                            
             
             fig, ax = plt.subplots(figsize=figsize)
             for i in range(N):
@@ -72,7 +79,7 @@ class SpectrumMixin(object):
                     y[i] / continuum,
                     c='k',
                     label=label,
-                    drawstyle="steps-mid"
+                    drawstyle="steps-mid",
                 )
                 ax.fill_between(
                     x[i],
@@ -88,7 +95,8 @@ class SpectrumMixin(object):
                     ax.plot(
                         self.wavelength,
                         model_flux / continuum,
-                        c="tab:red"
+                        c="tab:red",
+                        label="model",
                     )
                 except:
                     log.exception(f"Exception when trying to plot model flux for {self}")
@@ -97,14 +105,16 @@ class SpectrumMixin(object):
             ax.set_xlim(*x.flatten()[[0, -1]])
             if is_rectified:
                 ax.set_ylim(0, 1.2)
-            else:        
-                
+                ax.axhline(1.0, c='#666666', ls=":", lw=0.5, zorder=-1)
+                ax.set_ylabel(r"$f_\lambda$ $(\mathrm{rectified})$")
+            else:                        
                 ylim = np.clip(np.nanpercentile(y, ylim_percentile), 0, np.inf)
                 offset = np.ptp(ylim) * 0.10
                 ylim = (ylim[0] - offset, ylim[1] + offset)
                 ax.set_ylim(ylim)
+                ax.set_ylabel(r"$f_\lambda$ $(10^{-17}\,\mathrm{erg}\,\mathrm{s}^{-1}\,\mathrm{cm}^2\,\mathrm{\AA}^{-1})$")
+                    
             ax.set_xlabel(r"$\lambda$ $(\mathrm{\AA})$")
-            ax.set_ylabel(r"$f_\lambda$ $(10^{-17}\,\mathrm{erg}\,\mathrm{s}^{-1}\,\mathrm{cm}^2\,\mathrm{\AA}^{-1})$")
             fig.tight_layout()
             return fig
 

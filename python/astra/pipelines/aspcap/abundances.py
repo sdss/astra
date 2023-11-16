@@ -10,7 +10,7 @@ from astra import task
 from astra.utils import expand_path, log, list_to_dict
 from astra.models.spectrum import Spectrum
 from astra.models.aspcap import FerreStellarParameters, FerreChemicalAbundances
-from astra.pipelines.ferre.operator import FerreOperator, FerreMonitoringOperator
+from astra.pipelines.ferre.operator import FerreOperator
 from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
 from astra.pipelines.ferre.utils import (get_apogee_pixel_mask, parse_ferre_spectrum_name, read_ferre_headers, parse_header_path, get_input_spectrum_primary_keys)
@@ -53,8 +53,7 @@ def abundances(
             **(operator_kwds or {})
         )
         .execute()
-    )
-    FerreMonitoringOperator(job_ids, executions).execute()
+    )(job_ids, executions).execute()
     
     yield from post_abundances(parent_dir)
 

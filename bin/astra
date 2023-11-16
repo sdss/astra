@@ -362,8 +362,6 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
         click.echo(f"{slurm_job_pk}")
         sys.exit(0)
 
-
-
     try:
         spectrum_pks = list(map(int, _spectra))
     except ValueError:
@@ -374,40 +372,36 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
         spectrum_model = getattr(models, model_name)
         argspec = getfullargspec(f)
 
-        if len(argspec.defaults) == len(argspec.args):
-            # It has a default for everything, so give nothing
-            iterable = None
-        else:
-            try:
-                output_model = argspec.annotations["return"].__args__[0]
-            except:
-                raise ValueError(f"Cannot infer output model for task {f}, is it missing a type annotation?")
+        try:
+            output_model = argspec.annotations["return"].__args__[0]
+        except:
+            raise ValueError(f"Cannot infer output model for task {f}, is it missing a type annotation?")
 
-            # Query for spectra that does not have a result in this output model
-            iterable = (
-                spectrum_model
-                .select(
-                    spectrum_model,
-                    Source
-                )
-                .join(
-                    output_model,
-                    JOIN.LEFT_OUTER,
-                    on=(spectrum_model.spectrum_pk == output_model.spectrum_pk)
-                )
-                .switch(spectrum_model)
-                .join(Source, attr="source") # convenience to pre-fetch .source attribute on everything
-                .where(output_model.spectrum_pk.is_null())
+        # Query for spectra that does not have a result in this output model
+        iterable = (
+            spectrum_model
+            .select(
+                spectrum_model,
+                Source
             )
-            if page:
-                iterable = (
-                    iterable
-                    .paginate(page, limit)
-                )
-            else:
-                iterable = iterable.limit(limit)
-            total = limit or iterable.count()
-        
+            .join(
+                output_model,
+                JOIN.LEFT_OUTER,
+                on=(spectrum_model.spectrum_pk == output_model.spectrum_pk)
+            )
+            .switch(spectrum_model)
+            .join(Source, attr="source") # convenience to pre-fetch .source attribute on everything
+            .where(output_model.spectrum_pk.is_null())
+        )
+        if page:
+            iterable = (
+                iterable
+                .paginate(page, limit)
+            )
+        else:
+            iterable = iterable.limit(limit)
+        total = limit or iterable.count()
+    
     else:            
         if not spectrum_pks:
             spectrum_pks.extend(kwargs.pop("spectra", []))
@@ -418,7 +412,7 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
         argspec = getfullargspec(f)
 
         if len(argspec.defaults) == len(argspec.args):
-            # It has a default for everything, so give nothing
+            # It has a default for everything, and no spectrum model given, so give nothing
             iterable = None
         elif spectrum_pks:                
             example = Spectrum.get(spectrum_pks[0])

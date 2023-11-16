@@ -19,11 +19,11 @@ from astra.models.pipeline import PipelineOutputMixin
 
 from astra.glossary import Glossary
 
-class ApogeeNet(BaseModel, PipelineOutputMixin):
+class BossNet(BaseModel, PipelineOutputMixin):
 
-    """A result from the APOGEENet (version 3) pipeline."""
+    """A result from the BOSSNet pipeline."""
 
-    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False, help_text=Glossary.source_pk)
+    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
     spectrum_pk = ForeignKeyField(
         Spectrum, 
         index=True, 
@@ -47,24 +47,29 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
     fe_h = FloatField(null=True, help_text=Glossary.fe_h)
     e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
     result_flags = BitField(default=0, help_text=Glossary.result_flags)
-    flag_runtime_exception = result_flags.flag(2**0, "Exception raised during runtime")
+    flag_runtime_exception = result_flags.flag(2**0, help_text="Exception occurred at runtime")
     flag_unreliable_teff = result_flags.flag(2**1, help_text="`teff` is outside the range of 1700 K and 100,000 K")
-    flag_unreliable_logg = result_flags.flag(2**2, help_text="`logg` is outside the range of -1 and 6")
+    flag_unreliable_logg = result_flags.flag(2**2, help_text="`logg` is outside the range of -1 and 10")
     flag_unreliable_fe_h = result_flags.flag(2**3, help_text="`teff` < 3200 K or `logg` > 5 or `fe_h` is outside the range of -4 and 2")
-
-    #> Formal (raw) uncertainties
-    raw_e_teff = FloatField(null=True, help_text=Glossary.raw_e_teff)
-    raw_e_logg = FloatField(null=True, help_text=Glossary.raw_e_logg)
-    raw_e_fe_h = FloatField(null=True, help_text=Glossary.raw_e_fe_h)
-
+    flag_suspicious_fe_h = result_flags.flag(2**4, help_text="[Fe/H] below `teff` < 3900 K and with 3 < `logg` < 6 may be suspicious")
+    
+    v_rad = FloatField(null=True, help_text=Glossary.v_rad)
+    e_v_rad = FloatField(null=True, help_text=Glossary.e_v_rad)
+    
     @hybrid_property
     def flag_warn(self):
-        return self.flag_unreliable_fe_h
+        return (
+            self.flag_unreliable_fe_h
+        |   self.flag_suspicious_fe_h
+        )
     
     @flag_warn.expression
     def flag_warn(self):
-        return self.flag_unreliable_fe_h
-    
+        return (
+            self.flag_unreliable_fe_h
+        |   self.flag_suspicious_fe_h
+        )
+
     @hybrid_property
     def flag_bad(self):
         return (
@@ -73,6 +78,7 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
         |   self.flag_unreliable_fe_h
         |   self.flag_runtime_exception
     )
+
 
     @flag_bad.expression
     def flag_bad(self):
@@ -82,50 +88,51 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
         |   self.flag_unreliable_fe_h
         |   self.flag_runtime_exception
     )
+    
 
 # TODO: Move this to happen at runtime
 def apply_result_flags():
+    
     (
-        ApogeeNet
-        .update(result_flags=ApogeeNet.flag_unreliable_teff.set())
-        .where(
-            (ApogeeNet.teff < 1700) | (ApogeeNet.teff > 100_000)
-        )
-        .execute()
-    )    
-    (
-        ApogeeNet
-        .update(result_flags=ApogeeNet.flag_unreliable_logg.set())
-        .where(
-            (ApogeeNet.logg < -1) | (ApogeeNet.logg > 10)
-        )
-        .execute()
-    )    
-    (
-        ApogeeNet
-        .update(result_flags=ApogeeNet.flag_unreliable_fe_h.set())
-        .where(
-            (ApogeeNet.teff < 3200)
-        |   (ApogeeNet.logg > 5)
-        |   (ApogeeNet.fe_h < -4)
-        |   (ApogeeNet.fe_h > 2)
-        )
+        BossNet
+        .update(result_flags=BossNet.flag_runtime_exception.set())
+        .where(BossNet.teff.is_null())
         .execute()
     )
     
-def apply_noise_model():
     (
-        ApogeeNet
-        .update(e_teff=1.25 * ApogeeNet.raw_e_teff + 10)
+        BossNet
+        .update(result_flags=BossNet.flag_unreliable_teff.set())
+        .where(
+            (BossNet.teff < 1700) | (BossNet.teff > 100_000)
+        )
+        .execute()
+    )    
+    (
+        BossNet
+        .update(result_flags=BossNet.flag_unreliable_logg.set())
+        .where(
+            (BossNet.logg < -1) | (BossNet.logg > 10)
+        )
+        .execute()
+    )    
+    (
+        BossNet
+        .update(result_flags=BossNet.flag_unreliable_fe_h.set())
+        .where(
+            (BossNet.teff < 3200)
+        |   (BossNet.logg > 5)
+        |   (BossNet.fe_h < -4)
+        |   (BossNet.fe_h > 2)
+        )
         .execute()
     )
     (
-        ApogeeNet
-        .update(e_logg=1.25 * ApogeeNet.raw_e_logg + 1e-2)
-        .execute()
-    )
-    (
-        ApogeeNet
-        .update(e_fe_h=1.25 * ApogeeNet.raw_e_fe_h + 1e-2)
+        BossNet
+        .update(result_flags=BossNet.flag_suspicious_fe_h.set())
+        .where(
+            (BossNet.teff < 3900)
+        &   ((6 > BossNet.logg) & (BossNet.logg > 3))
+        )
         .execute()
     )

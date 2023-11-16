@@ -108,13 +108,11 @@ class Slam(BaseModel, PipelineOutputMixin):
     success = BooleanField(help_text="Optimizer returned successful value")
     status = IntegerField(help_text="Optimization status")
     optimality = BooleanField(help_text="Optimality condition")
-    bad_flag = BooleanField(default=False, help_text="Results are unreliable")
-    warn_flag = BooleanField(default=False, help_text="Results may not be reliable")
-    result_flags = BitField(default=0, help_text=Glossary.result_flags)        
-        
+    result_flags = BitField(default=0, help_text=Glossary.result_flags)            
     flag_bad_optimizer_status = result_flags.flag(2**0, help_text="Optimizer status value indicate results may not be reliable")
-    flag_teff_outside_bounds = result_flags.flag(2**1, help_text="Teff is outside reliable bounds: (2000, 5000)")
-    flag_fe_h_outside_bounds = result_flags.flag(2**2, help_text="[Fe/H] is outside reliable bounds: (-1, 0.5)")        
+    flag_teff_outside_bounds = result_flags.flag(2**1, help_text="Teff is outside reliable bounds: (2800, 4500)")
+    flag_fe_h_outside_bounds = result_flags.flag(2**2, help_text="[Fe/H] is outside reliable bounds: (-1, 0.5)")   
+    flag_outside_photometry_range = result_flags.flag(2**3, help_text="Outside 1.5 < BP - RP < 3.5 and 6 < M_G < 12, which approximates the range SLAM was trained on")
     
     #> Summary Statistics
     chi2 = FloatField(help_text=Glossary.chi2)
@@ -136,5 +134,71 @@ class Slam(BaseModel, PipelineOutputMixin):
     @property    
     def intermediate_output_path(self):
         return f"$MWM_ASTRA/{self.v_astra}/pipelines/slam/{self.source_pk}-{self.spectrum_pk}.pkl"
-        
+            
+    @hybrid_property
+    def flag_warn(self):
+        return (
+            self.flag_bad_optimizer_status
+        |   self.flag_outside_photometry_range
+        )
     
+    @flag_warn.expression
+    def flag_warn(self):    
+        return (
+            self.flag_bad_optimizer_status
+        |   self.flag_outside_photometry_range
+        )
+    
+    @hybrid_property
+    def flag_bad(self):
+        return (
+            self.flag_teff_outside_bounds
+        |   self.flag_fe_h_outside_bounds
+        |   self.flag_outside_photometry_range
+        |   self.flag_bad_optimizer_status
+        )        
+    
+    @flag_bad.expression
+    def flag_bad(self):
+        return (
+            self.flag_teff_outside_bounds
+        |   self.flag_fe_h_outside_bounds
+        |   self.flag_outside_photometry_range
+        |   self.flag_bad_optimizer_status
+        )
+    
+    
+def apply_flag_teff_outside_bounds():
+    (
+        Slam
+        .update(result_flags=Slam.flag_teff_outside_bounds.set())
+        .where(
+            (Slam.teff < 2800) | (Slam.teff > 4500)
+        )
+        .execute()
+    )
+    
+    
+def apply_flag_outside_photometry_range():
+    # TODO: put this calculation in at runtime
+    
+    # Apply flagging criteria as per Zach Way suggestion
+    (
+        Slam
+        .update(result_flags=Slam.flag_outside_photometry_range.set())
+        .where(
+            (                
+                ((Source.bp_mag - Source.rp_mag) >= 3.5)
+            |   ((Source.bp_mag - Source.rp_mag) <= 1.5)
+            |   (
+                    (Source.plx > 0)
+                &   (
+                        ((Source.g_mag - 5 + 5 * fn.log10(Source.plx)) >= 12)
+                    |   ((Source.g_mag - 5 + 5 * fn.log10(Source.plx)) <= 6)
+                    )
+                )
+            )
+        )
+        .from_(Source)
+        .execute()
+    )

@@ -5,7 +5,7 @@ from peewee import JOIN
 from astropy.io import fits
 from astra import __version__
 from astra.utils import expand_path
-from astra.models import Source, ApogeeVisitSpectrum, ApogeeCoaddedSpectrumInApStar, BossVisitSpectrum
+from astra.models import Source, ApogeeVisitSpectrum, ApogeeCoaddedSpectrumInApStar, BossVisitSpectrum, BossCombinedSpectrum, ApogeeCombinedSpectrum
 from astra.products.utils import (get_fields, get_basic_header, get_binary_table_hdu, check_path)
 
 get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
@@ -87,7 +87,7 @@ DEFAULT_MWM_WHERE = (
 |   Source.assigned_to_carton_with_name('ops_std_eboss')
 )
 def ignore_field_name_callable(field_name):
-    return field_name in ("pk", )
+    return field_name in ("pk", "input_spectrum_pks", )
 
 def create_mwm_targets_product(
     where=DEFAULT_MWM_WHERE,
@@ -193,7 +193,7 @@ def create_mwm_all_star_product(
     limit=None,
     boss_where=None,
     apogee_where=None,
-    boss_spectrum_model=BossVisitSpectrum,
+    boss_spectrum_model=BossCombinedSpectrum,
     apogee_spectrum_model=ApogeeCoaddedSpectrumInApStar,
     output_template="mwmAllStar-{version}.fits",
     ignore_field_name_callable=ignore_field_name_callable,

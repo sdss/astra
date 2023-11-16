@@ -15,7 +15,6 @@ from astra.pipelines.aspcap.coarse import coarse_stellar_parameters, post_coarse
 from astra.pipelines.aspcap.stellar_parameters import stellar_parameters, post_stellar_parameters
 from astra.pipelines.aspcap.abundances import abundances, get_species, post_abundances
 from astra.pipelines.aspcap.utils import ABUNDANCE_RELATIVE_TO_H
-        
 
 
 @task
@@ -137,6 +136,7 @@ def create_aspcap_results(
     stellar_parameter_results: Optional[Iterable[FerreStellarParameters]] = (
         FerreStellarParameters
         .select()
+        .distinct(FerreStellarParameters.spectrum_pk)
         .join(ASPCAP, JOIN.LEFT_OUTER, on=(ASPCAP.stellar_parameters_task_pk == FerreStellarParameters.task_pk))
         .where(ASPCAP.stellar_parameters_task_pk.is_null())
     ), 
@@ -218,7 +218,7 @@ def create_aspcap_results(
 
             "snr": result.snr,
             "rchi2": result.rchi2,
-            "ferre_flags": result.ferre_flags,
+            "result_flags": result.ferre_flags,
             "ferre_log_snr_sq": result.ferre_log_snr_sq,     
             "ferre_time_elapsed": ferre_time_elapsed[result.task_pk],
             "stellar_parameters_task_pk": result.task_pk,
@@ -257,6 +257,7 @@ def create_aspcap_results(
     if len(skipped_results) > 0:
         # There shouldn't be too many of these, so let's just save them.
         log.warn(f"There were {len(skipped_results)} chemical abundance results that might updating to existing ASPCAP records. Doing it now..")
+        '''
         q = (
             ASPCAP
             .select()
@@ -278,7 +279,8 @@ def create_aspcap_results(
             if any_update_made:
                 log.info(f"Saving result {result}")                
                 result.save()
-
+        '''
+        
     for stellar_parameter_task_pk, kwds in data.items():
         yield ASPCAP(**kwds)
     
@@ -315,6 +317,8 @@ def _result_to_kwds(result, existing_kwds):
         f"e_{label}": e_value,
         f"raw_{label}": value,
         f"raw_e_{label}": e_value,
+        f"{label}_flags": result.ferre_flags,
+        
     }
     if hasattr(result, f"{key}_flags"):
         new_kwds[f"{label}_flags"] = getattr(result, f"{key}_flags")

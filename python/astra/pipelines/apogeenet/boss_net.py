@@ -28,10 +28,10 @@ SOFTWARE.
 import torch 
 from functools import partial
 
-from astra.pipelines.anet.modules.conv_block_1d import ConvolutionBlock1D
-from astra.pipelines.anet.modules.res_block_1d import ResNetBlock1D
-from astra.pipelines.anet.modules.linear_block import LinearBlock
-from astra.pipelines.anet.modules.positional_encodings import PositionalEncoding1D
+from astra.pipelines.apogeenet.modules.conv_block_1d import ConvolutionBlock1D
+from astra.pipelines.apogeenet.modules.res_block_1d import ResNetBlock1D
+from astra.pipelines.apogeenet.modules.linear_block import LinearBlock
+from astra.pipelines.apogeenet.modules.positional_encodings import PositionalEncoding1D
 
 class BossNet(torch.nn.Module):
     """

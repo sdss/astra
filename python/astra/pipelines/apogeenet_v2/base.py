@@ -6,7 +6,7 @@ from itertools import cycle
 from time import time, sleep
 
 from astra.utils import log, flatten
-from astra.models.apogeenet import ApogeeNet
+from astra.models import ApogeeNetV2
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -74,7 +74,7 @@ def _inference(network, batch, num_uncertainty_draws):
     for spectrum_pk, source_pk, f, ef, m, md, mp in batch:
         if f is None:
             # OS Error when loading it.
-            yield ApogeeNet(
+            yield ApogeeNetV2(
                 spectrum_pk=spectrum_pk,
                 source_pk=source_pk,
                 flag_no_result=True
@@ -125,24 +125,24 @@ def _inference(network, batch, num_uncertainty_draws):
         median_draw_predictions = np.nanmedian(draws, axis=0).T
         std_draw_predictions = np.nanstd(draws, axis=0).T
 
-        logg_median, teff_median, m_h_median = median_draw_predictions
-        logg_std, teff_std, m_h_std = std_draw_predictions
-        logg, teff, m_h = predictions
+        logg_median, teff_median, fe_h_median = median_draw_predictions
+        logg_std, teff_std, fe_h_std = std_draw_predictions
+        logg, teff, fe_h = predictions
 
         mean_t_elapsed = (time() - t_init) / len(spectrum_pks)
         for i, (spectrum_pk, source_pk, missing_photometry) in enumerate(zip(spectrum_pks, source_pks, missing_photometrys)):
-            output = ApogeeNet(
+            output = ApogeeNetV2(
                 spectrum_pk=spectrum_pk,
                 source_pk=source_pk,
                 teff=teff[i],
                 logg=logg[i],
-                m_h=m_h[i],
+                fe_h=fe_h[i],
                 e_teff=teff_std[i],
                 e_logg=logg_std[i],
-                e_m_h=m_h_std[i],
+                e_fe_h=fe_h_std[i],
                 teff_sample_median=teff_median[i],
                 logg_sample_median=logg_median[i],
-                m_h_sample_median=m_h_median[i],
+                fe_h_sample_median=fe_h_median[i],
                 t_elapsed=mean_t_elapsed
             )
             output.apply_flags(meta[i], missing_photometry=missing_photometry)

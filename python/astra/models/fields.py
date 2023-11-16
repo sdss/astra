@@ -5,6 +5,8 @@ from peewee import (
     VirtualField,
     ColumnBase
 )
+import h5py
+
 from astropy.io import fits
 from astra.utils import expand_path
 
@@ -68,23 +70,29 @@ class BasePixelArrayAccessor(object):
         return None
 
     def __set__(self, instance, value):
+        self._initialise_pixel_array(instance)
+
+        instance.__pixel_data__[self.name] = value
+        return None
+
+    def _initialise_pixel_array(self, instance):
         try:
             instance.__pixel_data__
         except AttributeError:
             instance.__pixel_data__ = {}
-        finally:
-            instance.__pixel_data__[self.name] = value
         return None
-
+        
 class PickledPixelArrayAccessor(BasePixelArrayAccessor):
     
     """A class to access pixel arrays stored in a pickle file."""
 
     def __get__(self, instance, instance_type=None):
         if instance is not None:
+            self._initialise_pixel_array(instance)
+
             try:
                 return instance.__pixel_data__[self.name]
-            except (AttributeError, KeyError):
+            except KeyError:
                 # Load them all.
                 instance.__pixel_data__ = {}
                 with open(expand_path(instance.path), "rb") as fp:
@@ -101,9 +109,11 @@ class PixelArrayAccessorFITS(BasePixelArrayAccessor):
 
     def __get__(self, instance, instance_type=None):
         if instance is not None:
+            self._initialise_pixel_array(instance)
+            
             try:
                 return instance.__pixel_data__[self.name]
-            except (AttributeError, KeyError):
+            except KeyError:
                 # Load them all.
                 instance.__pixel_data__ = {}
                 with fits.open(expand_path(instance.path)) as image:
@@ -143,20 +153,19 @@ class PixelArrayAccessorHDF(BasePixelArrayAccessor):
 
     def __get__(self, instance, instance_type=None):
         if instance is not None:
+            self._initialise_pixel_array(instance)
             try:
                 return instance.__pixel_data__[self.name]
-            except (AttributeError, KeyError):
+            except KeyError:
                 # Load them all.
-                instance.__pixel_data__ = {}
-                import h5py
                 with h5py.File(instance.path, "r") as fp:
                     for name, accessor in instance._meta.pixel_fields.items():
                         value = fp[accessor.column_name][instance.row_index]
                         if accessor.transform is not None:
                             value = accessor.transform(value)
                         
-                        instance.__pixel_data__.setdefault(name, value)
-                
+                        instance.__pixel_data__.setdefault(name, value)            
+            finally:
                 return instance.__pixel_data__[self.name]
 
         return self.field
@@ -176,15 +185,17 @@ class LogLambdaArrayAccessor(BasePixelArrayAccessor):
         self.cdelt = cdelt
 
     def __get__(self, instance, instance_type=None):
-        if instance is not None:                
+        if instance is not None:         
+            # If we have a manually set pixel array, we don't want to clear that by accident
+            # when we access .wavelength                
+            self._initialise_pixel_array(instance)
             try:
-                return instance.__pixel_data__[self.name]
-            except (AttributeError, KeyError):
-                instance.__pixel_data__ = {
-                    self.name: 10**(self.crval + self.cdelt * np.arange(self.naxis))
-                }
+                return instance.__pixel_data__[self.name]            
+            except KeyError:
+                instance.__pixel_data__[self.name] = 10**(self.crval + self.cdelt * np.arange(self.naxis))
             finally:
                 return instance.__pixel_data__[self.name]
+            
         return self.field
 
 

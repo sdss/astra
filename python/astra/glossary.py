@@ -363,6 +363,9 @@ class Glossary(BaseGlossary):
     rchi2 = "Reduced chi-square value"
     initial_flags = "Flags indicating source of initial guess"
 
+    nmf_rchi2 = "Reduced chi-square value of NMF continuum fit"
+    nmf_rectified_model_flux = "Rectified NMF model flux"
+
     # MDwarfType
     spectral_type = "Spectral type"
     sub_type = "Spectral sub-type"

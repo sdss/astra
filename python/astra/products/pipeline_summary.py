@@ -1,10 +1,12 @@
 """"Functions for creating summary pipeline products (e.g., astraAllStarASPCAP, astraAllVisitASPCAP)."""
 
 import os
+from collections import OrderedDict
+from peewee import BooleanField
 from astropy.io import fits
 from astra import __version__
 from astra.utils import log, expand_path
-from astra.models import Source, ApogeeVisitSpectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar, BossVisitSpectrum
+from astra.models import Source, ApogeeVisitSpectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar, BossVisitSpectrum, BossCombinedSpectrum
 from astra.products.utils import (get_fields, get_basic_header, get_binary_table_hdu, check_path, resolve_model)
 
 get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
@@ -22,11 +24,12 @@ def create_astra_all_star_product(
     limit=None,
     boss_where=None,
     apogee_where=None,
-    boss_spectrum_model=BossVisitSpectrum,
+    boss_spectrum_model=BossCombinedSpectrum,
     apogee_spectrum_model=ApogeeCoaddedSpectrumInApStar,
     output_template="astraAllStar{pipeline}-{version}.fits",
     ignore_field_name_callable=ignore_field_name_callable,
     name_conflict_strategy=None,
+    distinct_spectrum_pk=False,
     upper=False,
     fill_values=None,
     gzip=True,
@@ -95,7 +98,11 @@ def create_astra_all_star_product(
     
     pipeline = pipeline_model.__name__
 
-    kwds = dict(upper=upper, fill_values=fill_values, limit=limit)
+    kwds = dict(
+        upper=upper, 
+        fill_values=fill_values, 
+        limit=limit,
+    )
     hdus = [
         fits.PrimaryHDU(header=get_basic_header(pipeline=pipeline, include_hdu_descriptions=True))
     ]
@@ -116,21 +123,45 @@ def create_astra_all_star_product(
         try:
             fields = all_fields[spectrum_model]
         except KeyError:
-            fields = all_fields[spectrum_model] = get_fields(
+            og_fields = get_fields(
                 models,
                 name_conflict_strategy=name_conflict_strategy,
                 ignore_field_name_callable=ignore_field_name_callable
             )
+
+            # Try and insert fields for `flag_warn` and `flag_bad`.
+            fields = OrderedDict([])
+            for k, v in og_fields.items():
+                fields[k] = v
+                if k == "result_flags":
+                    if hasattr(pipeline_model, "flag_warn"):
+                        fields["flag_warn"] = BooleanField(default=False, help_text="Warning flag for results")
+                    if hasattr(pipeline_model, "flag_bad"):
+                        fields["flag_bad"] = BooleanField(default=False, help_text="Bad flag for results")
+                
+            all_fields[spectrum_model] = fields            
 
         header = get_basic_header(
             pipeline=pipeline, 
         #    observatory=observatory, 
             instrument=instrument
         )
-
+        
+        select_fields = []
+        for n, f in fields.items():
+            if n in ("flag_warn", "flag_bad"):
+                select_fields.append(getattr(pipeline_model, n).alias(n))
+            else:
+                select_fields.append(f)
+                
         q = (
             spectrum_model
-            .select(*tuple(fields.values()))
+            .select(*select_fields)
+        )
+        if distinct_spectrum_pk:
+            q = q.distinct(spectrum_model.spectrum_pk)
+        q = (
+            q
             .join(pipeline_model, on=(pipeline_model.spectrum_pk == spectrum_model.spectrum_pk))
             .switch(spectrum_model)
             .join(Source, on=(Source.pk == spectrum_model.source_pk))
@@ -172,6 +203,7 @@ def create_astra_all_visit_product(
     output_template="astraAllVisit{pipeline}-{version}.fits",    
     ignore_field_name_callable=ignore_field_name_callable,
     name_conflict_strategy=None,
+    distinct_spectrum_pk=True,
     upper=False,
     fill_values=None,
     gzip=True,
@@ -248,7 +280,11 @@ def create_astra_all_visit_product(
     
     pipeline = pipeline_model.__name__
 
-    kwds = dict(upper=upper, fill_values=fill_values, limit=limit)
+    kwds = dict(
+        upper=upper, 
+        fill_values=fill_values, 
+        limit=limit,
+    )
     hdus = [
         fits.PrimaryHDU(header=get_basic_header(pipeline=pipeline, include_hdu_descriptions=True))
     ]
@@ -280,22 +316,44 @@ def create_astra_all_visit_product(
         try:
             fields = all_fields[spectrum_model]
         except KeyError:
-            fields = all_fields[spectrum_model] = get_fields(
+            og_fields = get_fields(
                 models,
                 name_conflict_strategy=name_conflict_strategy,
                 ignore_field_name_callable=ignore_field_name_callable
             )
-
+                    
+            # Try and insert fields for `flag_warn` and `flag_bad`.
+            fields = OrderedDict([])
+            for k, v in og_fields.items():
+                fields[k] = v
+                if k == "result_flags":
+                    if hasattr(pipeline_model, "flag_warn"):
+                        fields["flag_warn"] = BooleanField(default=False, help_text="Warning flag for results")
+                    if hasattr(pipeline_model, "flag_bad"):
+                        fields["flag_bad"] = BooleanField(default=False, help_text="Bad flag for results")
+                                
+            all_fields[spectrum_model] = fields
+            
         header = get_basic_header(
             pipeline=pipeline, 
             #observatory=observatory, 
             instrument=instrument
         )
 
+        select_fields = []
+        for n, f in fields.items():
+            if n in ("flag_warn", "flag_bad"):
+                select_fields.append(getattr(pipeline_model, n).alias(n))
+            else:
+                select_fields.append(f)
+
         q = (
             spectrum_model
-            .select(*tuple(fields.values()))
+            .select(*select_fields)
         )
+        if distinct_spectrum_pk:
+            q = q.distinct(spectrum_model.spectrum_pk)
+        
         if drp_spectrum_model != spectrum_model:
             q = (
                 q
@@ -317,7 +375,7 @@ def create_astra_all_visit_product(
             q = q.where(instrument_where)
         
         q = q.limit(limit).dicts()
-
+        
         hdu = get_binary_table_hdu(
             q,
             header=header,

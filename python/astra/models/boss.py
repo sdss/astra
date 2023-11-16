@@ -61,7 +61,6 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
         return self.ivar**-0.5
 
 
-
     #> Data Product Keywords
     release = TextField(help_text=Glossary.release)
     filetype = TextField(default="specFull", help_text=Glossary.filetype)
@@ -205,6 +204,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
         return ''
 
 
+'''
 class BossCoaddedSpectrum(BaseModel, SpectrumMixin):
 
     """A co-added BOSS spectrum. """
@@ -272,3 +272,4 @@ class BossCoaddedSpectrum(BaseModel, SpectrumMixin):
         g = f"{self.sdss_id}"[-4:]
         folder_groups = f"{g[:2]}/{g[2:]}"
         return f"$MWM_ASTRA/{self.v_astra}/spectra/intermediate-coadds/{folder_groups}/boss-{self.telescope}-{self.sdss_id}.pkl"
+'''

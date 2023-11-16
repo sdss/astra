@@ -4,7 +4,8 @@ from peewee import (
     DateTimeField,
     TextField,
     ForeignKeyField,
-    AutoField
+    AutoField,
+    IntegerField
 )
 from astra import __version__
 from astra.models.base import BaseModel
@@ -51,4 +52,5 @@ class Corv(BaseModel, PipelineOutputMixin):
     initial_v_rad = FloatField(null=True, help_text="Initial radial velocity [km/s]")
 
     #> Summary Statistics
-    rchi2 = FloatField(null=True, help_text=Glossary.rchi2)
+    rchi2 = FloatField(null=True, help_text=Glossary.rchi2) 
+    result_flags = IntegerField(null=True, help_text=Glossary.result_flags)

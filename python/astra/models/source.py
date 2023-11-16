@@ -296,6 +296,8 @@ class Source(BaseModel):
     #> Astrometry
     ra = FloatField(null=True, help_text="Right ascension [deg]")
     dec = FloatField(null=True, help_text="Declination [deg]")
+    l = FloatField(null=True, help_text="Galactic longitude [deg]")
+    b = FloatField(null=True, help_text="Galactic latitude [deg]")
     plx = FloatField(null=True, help_text="Parallax [mas]")
     e_plx = FloatField(null=True, help_text="Error on parallax [mas]")
     pmra = FloatField(null=True, help_text="Proper motion in RA [mas/yr]")
@@ -341,11 +343,15 @@ class Source(BaseModel):
     #< See https://www.ipac.caltech.edu/2mass/releases/allsky/doc/sec2_2a.html 
 
     #> unWISE Photometry
+    w1_mag = FloatField(null=True, help_text="W1 magnitude")
+    e_w1_mag = FloatField(null=True, help_text="Error on W1 magnitude")
     w1_flux = FloatField(null=True, help_text="W1 flux [Vega nMgy]")
     w1_dflux = FloatField(null=True, help_text="Error on W1 flux [Vega nMgy]")
+    w1_frac = FloatField(null=True, help_text="Fraction of W1 flux from this object")
+    w2_mag = FloatField(null=True, help_text="W2 magnitude [Vega]")
+    e_w2_mag = FloatField(null=True, help_text="Error on W2 magnitude")
     w2_flux = FloatField(null=True, help_text="W2 flux [Vega nMgy]")
     w2_dflux = FloatField(null=True, help_text="Error on W2 flux [Vega nMgy]")
-    w1_frac = FloatField(null=True, help_text="Fraction of W1 flux from this object")
     w2_frac = FloatField(null=True, help_text="Fraction of W2 flux from this object")
     w1uflags = BitField(default=0, null=True, help_text="unWISE flags for W1")
     w2uflags = BitField(default=0, null=True, help_text="unWISE flags for W2")
@@ -419,12 +425,12 @@ class Source(BaseModel):
     flag_glimpse_edge_of_frame = sqf_4_5.flag(2**29, "Edge of frame (within 3 pixels of edge)")
     flag_glimpse_truth_list = sqf_4_5.flag(2**30, "Truth list (for simulated data)")
 
-    flag_glimpse_no_source_within_3_arcsecond = csf.flag(2**0, "No sources in GLIMPSE within 3\" of the source")
-    flag_glimpse_1_source_within_2p5_and_3_arcsecond = csf.flag(2**1, "1 sources in GLIMPSE between 2.5\" and 3\" of the source")
-    flag_glimpse_2_sources_within_2_and_2p5_arcsecond = csf.flag(2**2, "2 sources in GLIMPSE within 2\" and 2.5\" of the source")
-    flag_glimpse_3_sources_within_1p5_and_2_arcsecond = csf.flag(2**3, "3 sources in GLIMPSE within 1.5\" and 2\" of the source")
-    flag_glimpse_4_sources_within_1_and_1p5_arcsecond = csf.flag(2**4, "4 sources in GLIMPSE within 1\" and 1.5\" of the source")
-    flag_glimpse_5_sources_within_0p5_and_1_arcsecond = csf.flag(2**5, "5 sources in GLIMPSE within 0.5\" and 1.0\" of the source")
+    flag_glimpse_no_source_within_3_arcsecond = csf.flag(2**0, "No GLIMPSE sources within 3\" of this source")
+    flag_glimpse_1_source_within_2p5_and_3_arcsecond = csf.flag(2**1, "1 source in GLIMPSE between 2.5\" and 3\" of this source")
+    flag_glimpse_2_sources_within_2_and_2p5_arcsecond = csf.flag(2**2, "2 sources in GLIMPSE within 2\" and 2.5\" of this source")
+    flag_glimpse_3_sources_within_1p5_and_2_arcsecond = csf.flag(2**3, "3 sources in GLIMPSE within 1.5\" and 2\" of this source")
+    flag_glimpse_4_sources_within_1_and_1p5_arcsecond = csf.flag(2**4, "4 sources in GLIMPSE within 1\" and 1.5\" of this source")
+    flag_glimpse_5_sources_within_0p5_and_1_arcsecond = csf.flag(2**5, "5 sources in GLIMPSE within 0.5\" and 1.0\" of this source")
     flag_glimpse_6_sources_within_0p5_arcsecond = csf.flag(2**6, "6 sources in GLIMPSE within 0.5\" of this source")
     
     #> Gaia XP Stellar Parameters (Zhang, Green & Rix 2023)
@@ -515,7 +521,8 @@ class Source(BaseModel):
     n_apogee_visits = IntegerField(null=True, help_text="Number of APOGEE visits")    
     apogee_min_mjd = IntegerField(null=True, help_text="Minimum MJD of APOGEE visits")
     apogee_max_mjd = IntegerField(null=True, help_text="Maximum MJD of APOGEE visits")
-
+    #updated_mwm_visit_mwm_star_products = DateTimeField(null=True, help_text="Last updated mwmVisit/mwmStar products")
+    
     @property
     def sdss5_cartons(self):
         """Return the cartons that this source is assigned."""

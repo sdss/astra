@@ -28,12 +28,12 @@ SOFTWARE.
 import torch 
 from functools import partial
 
-from astra.pipelines.bnet.modules.conv_block_1d import ConvolutionBlock1D
-from astra.pipelines.bnet.modules.res_block_1d import ResNetBlock1D
-from astra.pipelines.bnet.modules.linear_block import LinearBlock
-from astra.pipelines.bnet.modules.positional_encodings import PositionalEncoding1D
+from astra.pipelines.bossnet.modules.conv_block_1d import ConvolutionBlock1D
+from astra.pipelines.bossnet.modules.res_block_1d import ResNetBlock1D
+from astra.pipelines.bossnet.modules.linear_block import LinearBlock
+from astra.pipelines.bossnet.modules.positional_encodings import PositionalEncoding1D
 
-class BossNet(torch.nn.Module):
+class BossNetModel(torch.nn.Module):
     """
     A class representing the BossNet model for predicting stellar parameters from input spectra and metadata.
 
