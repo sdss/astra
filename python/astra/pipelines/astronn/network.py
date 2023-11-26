@@ -95,8 +95,8 @@ class Network:
                 **self.factory_kwargs
             )
 
-            self.dense_1 = torch.nn.Linear(7512, 192, **self.factory_kwargs)
-            self.dense_2 = torch.nn.Linear(192, 96, **self.factory_kwargs)
+            self.dense_1 = torch.nn.Linear(7512, 256, **self.factory_kwargs)
+            self.dense_2 = torch.nn.Linear(256, 96, **self.factory_kwargs)
             self.dense_teffloggfeh = torch.nn.Linear(96, 3, **self.factory_kwargs)
             self.dense_teffloggfeh_var = torch.nn.Linear(96, 3, **self.factory_kwargs)
             self.dense_aux_fullspec = torch.nn.Linear(96, 2, **self.factory_kwargs)
