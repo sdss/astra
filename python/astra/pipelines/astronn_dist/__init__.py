@@ -13,6 +13,7 @@ def astronn_dist(
     spectra: Iterable,
     #model_path: str = "$MWM_ASTRA/pipelines/astronn_dist/astroNN_gaia_dr17_model_3", # for TensorFlow version
     model_path: str = "$MWM_ASTRA/pipelines/astronn_dist/astroNN_dist_model_parameter.pt",  # for PyTorch version
+    #model_path: str = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6039136/software/git/astroNN_projects/astroNN_dist_model_parameter.pt",  # for PyTorch version
     parallel: Optional[bool] = True,
     batch_size: Optional[int] = 100,
     cpu_count: Optional[int] = 1,
