@@ -24,9 +24,14 @@ def bb(l,T,scale):
     return f 
 
 def line_info(wave,flux,err):
-    #flux=(flux/np.sum(flux))*np.size(flux)
-    #bin spectrum for anchor points 
-    binsize=5
+    #bin spectrum for anchor points
+    somma=np.sum(flux)
+    numero=np.size(flux)
+    flux_temp=(flux/somma)*numero
+    err_rel=err/flux
+    err=err_rel*flux_temp
+    flux=flux_temp
+    binsize=2
     xdata=[]
     ydata=[]
     edata=[]
