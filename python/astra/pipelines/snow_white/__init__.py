@@ -62,7 +62,7 @@ def snow_white(
             probs = kf.predict_proba(labels.reshape(1, -1))
             
             first = probs[0][kf.classes_==predictions[0]]
-            if first >= 0.4:
+            if first >= 0.5:
                 classification = predictions[0]
             else:
                 second = sorted(probs[0])[-2]
