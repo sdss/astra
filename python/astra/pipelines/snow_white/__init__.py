@@ -45,7 +45,7 @@ def snow_white(
     
     from astra.pipelines.snow_white import get_line_info_v3, fitting_scripts
 
-    with open(os.path.join(PIPELINE_DATA_DIR, 'training_file_LL'), 'rb') as f:
+    with open(os.path.join(PIPELINE_DATA_DIR, 'training_file'), 'rb') as f:
         kf = pickle._load(f, fix_imports=True)
 
     wref = np.load(os.path.join(PIPELINE_DATA_DIR, "wref.npy"))
