@@ -6,7 +6,7 @@ from astra.utils import expand_path
 
 PIPELINE_DATA_DIR = expand_path("$MWM_ASTRA/pipelines/snow_white")
 
-def train_classifier(n_jobs=1, input_dataset_basename="file_for_training.csv", output_basename="training_file"):
+def train_classifier(n_jobs=1, input_dataset_basename="file_for_training.csv", output_basename="training_file_v3"):
 
     dataset = pandas.read_csv(os.path.join(PIPELINE_DATA_DIR, input_dataset_basename))#'additional_results'
     array = dataset.values
