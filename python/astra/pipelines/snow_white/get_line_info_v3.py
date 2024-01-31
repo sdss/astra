@@ -12,6 +12,13 @@ from astra.utils import expand_path
 
 PIPELINE_DATA_DIR = expand_path(f"$MWM_ASTRA/pipelines/snow_white")
 
+h=6.626e-34
+c=2.997e18
+k=1.38e-23
+
+
+def ex_d(x, a,b):
+    return a * np.exp(b * (x**(-1/4)))
 
 def bb(l,T,scale):
     f = 2*5.955e10 / l#**5
@@ -24,9 +31,14 @@ def bb(l,T,scale):
     return f 
 
 def line_info(wave,flux,err):
-    #flux=(flux/np.sum(flux))*np.size(flux)
-    #bin spectrum for anchor points 
-    binsize=5
+    #bin spectrum for anchor points
+    somma=np.sum(flux)
+    numero=np.size(flux)
+    flux_temp=(flux/somma)*numero
+    err_rel=err/flux
+    err=err_rel*flux_temp
+    flux=flux_temp
+    binsize=2
     xdata=[]
     ydata=[]
     edata=[]
@@ -45,28 +57,19 @@ def line_info(wave,flux,err):
     #define fauter lists
     feature_list=['DA.features', 'DB.features', 'DQ.features', 'DZ.features', 'WDMS.features','Pec.features','hDQ.features']
 
-    #define anchor points for spline
+   #define anchor points for spline
     if np.max(wave_a)<8910:
-        #start_n=np.array([3850,3925.,4230.,4600.,5300, 6300.,6900., 7350.,8100.,(np.max(wa_original)-10.)])
-        #start_n=np.array([3850.,4230.,4600.,4975., 5300., 5700.,6200.,6900., 7350.,8100.,(np.max(wave_a)-10.)])
-        #start_n=np.array([3850.,4230.,4600., 5300., 5700.,6200.,6900., 7350.,8100.,(np.max(wave_a)-10.)])
         start_n=np.array([3850.,4230.,4600., 5300., 5700., 7350.,8100.,(np.max(wave_a)-10.)])
-        start_pec=np.array([6300.,6900., 7350.,8100])
-        #start_n=np.array([3850,3925.,4230.,4600.,5300, 6300.,6900., 7350.,8100.,(np.max(wa_original)-10.)])
+        start_pec=np.array([6000,6250.,6900., 7350.,8100])
 
     else:
-        #start_n=np.array([3850,3925.,4230.,4600.,5300, 6300.,6900., 7350.,8100.,8900.,(np.max(wa_original)-10.)])
-        #start_n=np.array([3850.,4230.,4600.,4975., 5300., 5700.,6200.,6900., 7350.,8100.,8900.,(np.max(wave_a)-10.)])
-        #start_n=np.array([3850.,4230.,4600., 5300., 5700.,6200.,6900., 7350.,8100.,8900.,(np.max(wave_a)-10.)])
         start_n=np.array([3850.,4230.,4600., 5300., 5700., 7350.,8100.,8900.])#,(np.max(wave_a)-10.)])
-        start_pec=np.array([6300.,6900., 7350.,8900])
-    #define anchor points for BB
-    start_wdms=np.array([4230.,4600.,5300, 6300.])#., 7350.])
-    #(np.max(wave_a)-10.)])#4750
+        start_pec=np.array([6000,6250.,6900., 7350.,8900])
+    #define anchor points for WDMS line
+    start_wdms=np.array([4600.,5100,5700, 6250.])#4230.
 
     # interpolate on predefined wavelength interval and range
-    #print(np.min(wave),"BOOM")
-    standard_wave=np.arange(3850,8300,1)
+    standard_wave=np.arange(3850,8300,1)#8300
     w_m=scipy.interpolate.interp1d(wave_a,flux_a)
     w_err=scipy.interpolate.interp1d(wave_a,err_a)
     flux=w_m(standard_wave)
@@ -76,103 +79,87 @@ def line_info(wave,flux,err):
     fluxes=[]
     errs=[]
     for xxx in start_n:
-        interv=flux_a[(wave_a>=xxx-5) & (wave_a<=xxx+5)]
-        int_err=err_a[(wave_a>=xxx-5) & (wave_a<=xxx+5)]
+        interv=flux_a[(wave_a>=xxx-10) & (wave_a<=xxx+10)]#5
+        int_err=err_a[(wave_a>=xxx-10) & (wave_a<=xxx+10)]
         try:
             fluxes.append(np.average(interv,weights=1/(int_err**2)))
         except:
             fluxes.append(np.average(interv))
-        errs.append(np.median(int_err))
+        errs.append(np.mean(int_err))
     fluxes=np.array(fluxes)
     start_n=np.array(start_n)
     errs=np.array(errs)
 
     t0=[10000,1e-8]
-    #tout = least_squares(bb_fit, t0, args = ([fluxes]),method='dogbox')
-    #T,bla=scipy.optimize.curve_fit(bb,start_n,fluxes,[10000,1e-8],sigma=errs)    
-    #print(T)
-    #print(fluxes)
-    #print(start_n)
-    #fluxes = fluxes[~np.isnan(fluxes)]
-    #start_n=start_n[~np.isnan(fluxes)]
-
-    #func_poly = np.polyfit(start_n,fluxes,7)
-    #p = np.poly1d(func_poly)
-    #y=p(wave)
-    spline = splrep(start_n,fluxes,w=1/errs,k=3)
-    y = splev(wave,spline)
-
-    #z = np.polyfit(start_n, np.log(fluxes), deg=1, w=np.sqrt(fluxes))
-    #p = np.poly1d(z)
-    #y= np.exp(p(wave))
-
-
-
     
-    #plt.plot(wa_original,y,c="g")
-    #bbdw=bb(wave,T[0],T[1])
-   
-    #bbwd=bb(wa_original,T[0],T[1])
-    #plt.plot(wa_original,bbwd)
+
+    s = scipy.interpolate.InterpolatedUnivariateSpline(start_n,fluxes,w=1/errs)#,s=1)#InterpolatedUnivariateSpline
+    y=s(wave)
+
 
     fluxes_wdms=[]
     errs_wdms=[]
     for xxx in start_wdms:
         interv=flux_a[(wave_a>=xxx-10) & (wave_a<=xxx+10)]
         int_err=err_a[(wave_a>=xxx-10) & (wave_a<=xxx+10)]
-        fluxes_wdms.append(np.mean(interv))
-        errs_wdms.append(np.median(int_err))
+        try:
+            fluxes_wdms.append(np.average(interv,weights=1/(int_err**2)))
+        except:
+            fluxes_wdms.append(np.average(interv))
+        errs_wdms.append(np.mean(int_err))
     fluxes_wdms=np.array(fluxes_wdms)
     start_wdms=np.array(start_wdms)
     errs_wdms=np.array(errs_wdms)
+    
 
-    T_wdms1,bla=scipy.optimize.curve_fit(bb,start_wdms,fluxes_wdms,[10000,1e-8],sigma=errs_wdms)
-    residuals = fluxes_wdms- bb(start_wdms, T_wdms1[0],T_wdms1[1])
-    ss_res1 = np.sum(residuals**2)
-
-    T_wdms2,bla=scipy.optimize.curve_fit(bb,start_wdms,fluxes_wdms,[6000,1e-8],sigma=errs_wdms)
-    bbwdms=bb(wave,T_wdms2[0],T_wdms2[1])
-    residuals = fluxes_wdms- bb(start_wdms, T_wdms2[0],T_wdms2[1])
-    ss_res2 = np.sum(residuals**2)
-    if ss_res2<ss_res1:
-        T_wdms=T_wdms2
-    else:
-        T_wdms=T_wdms1
+    
+    #p0 = (1,1)# start with values near those we expect
+    #params, cv = scipy.optimize.curve_fit(ex_d,start_wdms,fluxes_wdms, p0)
+    #a,b = params
+    #bbwdms=ex_d(wave,a,b)
+    try:
+        T_wdms,bla=scipy.optimize.curve_fit(bb,start_wdms,fluxes_wdms,[12000,1e-10],sigma=errs_wdms)
+    except:
+        T_wdms,bla=scipy.optimize.curve_fit(bb,start_wdms,fluxes_wdms,[6000,1e-10],sigma=errs_wdms)
     bbwdms=bb(wave,T_wdms[0],T_wdms[1])
 
+
+    
     fluxes_pec=[]
     errs_pec=[]
     for xxx in start_pec:
-        interv=flux_a[(wave_a>=xxx-10) & (wave_a<=xxx+10)]
-        int_err=err_a[(wave_a>=xxx-10) & (wave_a<=xxx+10)]
-        fluxes_pec.append(np.mean(interv))
-        errs_pec.append(np.median(int_err))
+
+        interv=flux_a[(wave_a>=xxx-15) & (wave_a<=xxx+15)]
+        int_err=err_a[(wave_a>=xxx-15) & (wave_a<=xxx+15)]
+        try:
+            fluxes_pec.append(np.average(interv,weights=1/(int_err**2)))
+        except:
+            fluxes_pec.append(np.average(interv))
+        errs_pec.append(np.mean(int_err))
     fluxes_pec=np.array(fluxes_pec)
     start_pec=np.array(start_pec)
-    errs_pec=np.array(errs_pec)
-    print(start_pec,fluxes_pec)
-    T_pec1,bla=scipy.optimize.curve_fit(bb,start_pec,fluxes_pec,[10000,1e-8],sigma=errs_pec)
+    errs_pec=np.array(errs_pec)*10
+
+    #p0 = (1,1)
+
+    #params, cv = scipy.optimize.curve_fit(ex_d,start_pec,fluxes_pec, p0)
+    #a,b = params
+    #bbpec=ex_d(wave,a, b)
+    try:
+        T_pec1,bla=scipy.optimize.curve_fit(bb,start_pec,fluxes_pec,[12000,1e-10],sigma=errs_pec)
+    except:
+        T_pec1,bla=scipy.optimize.curve_fit(bb,start_pec,fluxes_pec,[6000,1e-10],sigma=errs_pec)
     residuals = fluxes_pec- bb(start_pec, T_pec1[0],T_pec1[1])
     ss_res1 = np.sum(residuals**2)
-    T_pec2,bla=scipy.optimize.curve_fit(bb,start_pec,fluxes_pec,[6000,1e-8],sigma=errs_pec)    
-    residuals = fluxes_pec- bb(start_pec, T_pec2[0],T_pec2[1])
-    ss_res2 = np.sum(residuals**2)
-    if ss_res2<ss_res1:
-        T_pec=T_pec2
-    else:
-        T_pec=T_pec2
+    #T_pec2,bla=scipy.optimize.curve_fit(bb,start_pec,fluxes_pec,[6000,1e-13])#,sigma=errs_pec)    
+    #residuals = fluxes_pec- bb(start_pec, T_pec2[0],T_pec2[1])
+    #ss_res2 = np.sum(residuals**2)
+    #if ss_res2<ss_res1:
+    #    T_pec=T_pec2
+    #else:
+    T_pec=T_pec1
     bbpec=bb(wave,T_pec[0],T_pec[1])
-
-    
-
-
-    #wa=np.hstack((s_1,s_2,s_4,s_5,s_6))#,s_7))
-    #flux=np.hstack((f_1,f_2,f_4,f_5,f_6))#,f_7))
-    #sigma=np.hstack((e_1,e_2,e_4,e_5,e_6))#,e_7))
-
-    #func_poly = np.polyfit(wa, flux,3)
-    #p = np.poly1d(func_poly)
-    #ybest=p(wa_original)
+    bbpec[bbpec<1e-10]=1e-1
 #===================Halpha core====================================
     #f_s=flux[np.logical_and(wave>6540,wave<6580)]
     #f_s=flux[(np.logical_and(wave>6540,wave<6555))|(np.logical_and(wave>6570,wave<6585))]
@@ -190,16 +177,20 @@ def line_info(wave,flux,err):
     #plt.plot(wave,bbwdms,c="m")
     #plt.plot(wave,bbpec,c="g")
 
+    #plt.scatter(start_wdms,fluxes_wdms,c="m",zorder=3)
+    #plt.scatter(start_pec,fluxes_pec,c="g",zorder=3)
     #plt.scatter(start_n,fluxes,c="r",zorder=3)
+
     #plt.scatter(np.mean(wave[(wave>6555)&(wave<6570)]),np.max(flux[(wave>6555)&(wave<6570)]),c="g")
     #plt.scatter(np.mean(wave[(wave>6550)&(wave<6580)]),np.mean(flux[(wave>6550)&(wave<6580)]),c="k")
     #plt.show()
+    #print(BOOOOM)
 #===================================================
     result={}
     for elem in feature_list:
         type=elem.rstrip('.features')
         features=[]
-        start,end=np.loadtxt(os.path.join(PIPELINE_DATA_DIR, elem),skiprows=1,delimiter='-', usecols=(0,1),unpack=True)
+        start,end=np.loadtxt(elem,skiprows=1,delimiter='-', usecols=(0,1),unpack=True)
         for xxx in range(np.size(start)):
             if type=="WDMS":
                 f_s=flux[np.logical_and(wave>start[xxx],wave<end[xxx])]
@@ -235,19 +226,15 @@ def line_info(wave,flux,err):
                 #print(ratio_line)
                 features.extend(ratio_line)
         features=np.array(features)
-    
+        
 #------------------------------------------------------------------------------------------------------------------
         result[type]=features
-   
-    all_lines=np.concatenate((result['DA'],result['DB'],result['DQ'],result['DZ'],result['WDMS'],result['Pec'],result['hDQ'],emission),axis=None)
-    
+    #print(emission,"HERE")
+    emission2=np.mean(flux[np.logical_and(wave>6500,wave<6630)])/np.mean(y[np.logical_and(wave>6500,wave<6630)])
+    all_lines=np.concatenate((result['DA'],result['DB'],result['DQ'],result['DZ'],result['WDMS'],result['Pec'],result['hDQ'],emission,emission2),axis=None)#,emission2
+    #print(all_lines)
     # all_lines=np.array([result['DA'][0],result['DA'][1],result['DA'][2],result['DA'][3],result['DA'][4],result['DA'][5],result['DB'][0],result['DB'][1],result['DB'][2],result['DB'][3],result['DB'][4],result['DB'][5],result['DB'][6],result['DB'][7],result['DB'][8],result['DB'][9],result['DB'][10],result['DB'][11],result['DB'][12],result['DQ'][0],result['DQ'][1],result['DZ'][0],result['DZ'][1],result['WDMS'][0],result['WDMS'][1],result['WDMS'][2],result['WDMS'][3]])
     
     return all_lines
-        
-    #print(result['DA'])
-    #outfile.write(('%s,%f,%f,%f,%f,%f,%f,')%(nome,result['DA'][0],result['DA'][1],result['DA'][2],result['DA'][3],result['DA'][4],result['DA'][5]))
-    #outfile.write(('%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,')%(result['DB'][0],result['DB'][1],result['DB'][2],result['DB'][3],result['DB'][4],result['DB'][5],result['DB'][6],result['DB'][7],result['DB'][8],result['DB'][9],result['DB'][10],result['DB'][11],result['DB'][12]))
-    #outfile.write(('%f,%f,')%(result['DQ'][0],result['DQ'][1]))
-    #outfile.write(('%f,%f\n')%(result['DZ'][0],result['DZ'][1]))
+ 
 

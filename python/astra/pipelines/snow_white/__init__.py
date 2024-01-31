@@ -45,7 +45,7 @@ def snow_white(
     
     from astra.pipelines.snow_white import get_line_info_v3, fitting_scripts
 
-    with open(os.path.join(PIPELINE_DATA_DIR, 'training_file_LL'), 'rb') as f:
+    with open(os.path.join(PIPELINE_DATA_DIR, 'training_file_v3'), 'rb') as f:
         kf = pickle._load(f, fix_imports=True)
 
     wref = np.load(os.path.join(PIPELINE_DATA_DIR, "wref.npy"))
@@ -62,7 +62,7 @@ def snow_white(
             probs = kf.predict_proba(labels.reshape(1, -1))
             
             first = probs[0][kf.classes_==predictions[0]]
-            if first >= 0.4:
+            if first >= 0.5:
                 classification = predictions[0]
             else:
                 second = sorted(probs[0])[-2]
