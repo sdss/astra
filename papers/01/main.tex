@@ -31,13 +31,26 @@
 \shortauthors{Casey et al.}
 \newcommand{\documentname}{\textsl{Article}}
 \newcommand{\sectionname}{Section}
-\newcommand{\astra}{\code{Astra}}
+\newcommand{\astra}{\texttt{Astra}}
+\newcommand{\Astra}{\astra}
+\newcommand{\pipeline}[1]{\texttt{#1}}
+
+\newcommand{\APOGEENet}{\pipeline{APOGEENet}}
+\newcommand{\BOSSNet}{\pipeline{BOSSNet}}
+
+\newcommand{\pytorch}{PyTorch}
+
 
 % math macros
-\newcommand{\todo}[1]{\textcolor{green}{#1}}
+\newcommand{\todo}[1]{\textcolor{orange}{#1}}
 \newcommand{\unit}[1]{\mathrm{#1}}
 \newcommand{\mps}{\unit{m\,s^{-1}}}
 \newcommand{\kmps}{\unit{km\,s^{-1}}}
+
+\newcommand{\teff}{T_\mathrm{eff}}
+\newcommand{\logg}{\log_{10}(g)}
+\newcommand{\mh}{[\mathrm{M/H}]}
+
 
 \sloppy\sloppypar\raggedbottom\frenchspacing
 \begin{document}
@@ -50,7 +63,7 @@
 
 \author{others}
 
-\begin{abstract}\noindent
+\begin{abstract}
 
 \end{abstract}
 
@@ -70,11 +83,12 @@
 
 \section{Methods}\label{sec:method}
 
+
 \subsection{Design}
 
-- What does \Astra\ need to do, other than just to run a \texttt{for} loop over all the data?
+- What does \Astra need to do, other than just to run a loop over all the data?
 - Needs to look for new reduced data products (either via on disk, or through a database).
-- With each new data product, it records a database entry of that spectrum, so that every spectrum has a unique referenced `spectrum_index' in the database.
+- With each new data product, it records a database entry of that spectrum, so that every spectrum has a unique referenced spectrum index in the database.
 - It needs to link that spectrum to an astronomical source. How this is achieved has varied over time, but has since stabilised with the introduction of SDSS ID.
 - If we do not already have ancillary metadata for that object, then it needs to find and ingest that data. The ancillary data includes:
     - astrometry;
@@ -83,6 +97,14 @@
     - identifiers to other catalogs, etc.
 - If this spectrum is a combined spectrum from multiple visits or exposures, then Astra needs to go and find those visits and ingest those spectra. It needs to link those spectra to this combined spectrum.
 - Needs to include relevant information from the data reduction pipeline, and any upstream information (e.g., radial velocities)
+
+Why does it need to do all this? 
+Because there will be multiple versions of the reduction for the data, and we want to be able to analyse all of those spectra and keep the results together in a database. Every spectrum in the database needs to be able to find the location of the spectrum on disk.
+
+In the end, the output files that \astra\ prepares for a data release will be database exports of subsets of the data (e.g., for a specific data reduction version, range of observation dates, and telescope). 
+
+\subsection{Self-documenting data files}
+foo
 
 \subsection{Pipelines}
 Here we include a short description of all pipelines included in \astra. 
@@ -114,18 +136,86 @@ Custom reader and writer functions to execute FERRE were added to \astra\ to han
 
 \subsection{ASPCAP} \label{sec:methods-aspcap}
 
+ASPCAP is the APOGEE Stellar Parameter and Chemical Abundances Pipeline \citep{aspcap} that was developed and used by the APOGEE survey in SDSS-IV.\footnote{Those unfamiliar to SDSS may appreciate knowing that there is an APOGEE instrument \emph{and} an APOGEE survey. If not explicitly specified, when referring to APOGEE we mean the APOGEE instrument.}
+
+
+The ASPCAP and FERRE codes are often described as being synonymous, but there is a clear delineation between the two. FERRE \citep[and Section \ref{sec:methods-ferre}][]{ferre} performs $\chi^2$ minimisation between an observed spectrum and some model grid. FERRE is not usually used to simultaneously estimate both the stellar parameters and detailed chemical abundances. ASPCAP refers to the procedure to estimate stellar parameters and chemical abundances of a star by calling FERRE multiple times.
+
+In the context of SDSS, only APOGEE spectra are analysed with ASPCAP, but ASPCAP has been used for other surveys \citep{who}. 
+
+
+ASPCAP is probably the most comprehensive pipeline that is integrated in \Astra, and has gone through the most refactoring. Here we will provide a slightly longer-than-average description of ASPCAP so that we can highlight differences in the ASPCAP version in \Astra.
+
+There are three sequential stages in ASPCAP: the coarse stage, the stellar parameter stage, and the chemical abundances stage. The co 
+
+
+
 \subsection{The Payne} \label{sec:methods-the-payne}
+
 \subsection{The Cannon} \label{sec:methods-the-cannon}
+
+
 \subsection{The Classifier} \label{sec:methods-the-classifier}
+
+
 \subsection{Snow White} \label{sec:methods-snow-white}
+
+The `Snow White' pipeline exclusively analyses white dwarf spectra, which are usually observed with the BOSS 
+spectrograph. % todo: how many white dwarfs observed with BOSS compared to APOGEE or both?
+`Snow White' measures the equivalent width of \todo{N} lines, and uses a pre-trained random forest \citep{RF} to classify white dwarfs into their sub-types. For white dwarfs that are classified as primarily DA-type, the stellar parameters are fit by interpolating a grid of \citep{who} model spectra and minimising the $\chi^2$ difference between the model and data.
+
+% todos here
+- what model grid is used?
+- which lines are used?
+- continuum normalisation?
+- linear interpolation? in how many dimensions
+- PCA compression?
+- what are the different classification methods and meanings? (there is some structure to this based on the types and probabilistic classifications)
+
 \subsection{MDwarfType} \label{sec:methods-m-dwarf-type}
+
+The `MDwarfType' pipeline classifies M-dwarfs based on an empirical library of \todo{N} spectra of late K- and M-type stars. The empirical library was constructed by Lepine et al. from observations taken at \todo{where}. The \todo{N} spectra have been continuum-rectified by taking the \todo{mean flux between X and Y}.
+
+Most M-dwarf stars in Milky Way Mapper are observed by BOSS (\todo{percent}). We normalise the BOSS observations in the same way that the empirical library has been normalised. We compute the $\chi^2$ difference between the observed spectrum and all \todo{N} templates, and report the best-fitting $\chi^2$ value and template type. The template type includes the spectral classification, as well as a so-called `sub-type' which is used as a coarse proxy for an M-dwarf metallicity.
+
+The `MDwarfType` pipeline is only executed on main-sequence type stars that have been assigned to a carton that is studying M-dwarf stars. That list includes \todo{here}. \todo{Any additional photometric cut that we put on these?}.
+
+% todo citation literature for all the Lepine group stuff.
+
+% todo: a figure of the empirical spectra?
+
 \subsection{HotPayne} \label{sec:methods-hot-payne}
+
 \subsection{APOGEENet} \label{sec:methods-apogee-net}
+
+\APOGEENet\ is a convolutional neural network for estimating stellar parameters ($\teff$, $\logg$, $\mh$) from APOGEE spectra \citep{apogeenet}. Previous versions of \APOGEENet\ required infrared photometry and astrometry (e.g., parallax to compute absolute magnitudes), and in those versions the results were sensitive to missing data. The current version of \APOGEENet\ is version 3, which does not require auxillary photometry. 
+
+\APOGEENet\ is trained on high quality labels from SDSS-IV DR17 \citep{dr17}. 
+
+It is implemented in \pytorch\ and is most efficiently executed on a graphics processing unit (GPU). \Astra\ can readily orchestrate tasks across CPU or GPU clusters, and the default is for \APOGEENet\ to be executed on shared GPU infrastructure at Utah.
+
+\todo{- network structure}
+
+Only minor technical changes were made to the \APOGEENet\ pipeline in \Astra. A task function was written to execute spectra, and we added a load balancer to better handle CPU/GPU bottlenecks.
+
 \subsection{BOSSNet} \label{sec:methods-boss-net}
+
+\BOSSNet\ is a convolutional neural network for estimating stellar parameters ($\teff$, $\logg$, $\mh$) from BOSS spectra \citep{bossnet}. \BOSSNet\ is the natural extension to optical spectra from the same group that developed \APOGEENet. Like the current version of \APOGEENet, no auxillary photometry or astrometry is required by \BOSSNet.
+
+\todo{
+- network structure
+- training set for bossnet
+- testing set
+}
 
 \section{Results}\label{sec:results}
 
-\section{Discussion}\label{sec:discussion}
+- Refer to Don Schneider stuff
+
+- Comments on individual pipeline results? I guess just flagging st
+
+
+\section{Discussion} \label{sec:discussion}
 
 
 \section{Conclusions}
