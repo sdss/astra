@@ -1,0 +1,146 @@
+\documentclass[modern]{aastex631}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+
+% page and document setup
+\renewcommand{\twocolumngrid}{}
+\addtolength{\topmargin}{-0.35in}
+\addtolength{\textheight}{0.6in}
+\setlength{\parindent}{3.5ex}
+\renewcommand{\paragraph}[1]{\medskip\par\noindent\textbf{#1}~---}
+
+% figure setup
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage[framemethod=tikz]{mdframed}
+\usetikzlibrary{shadows}
+\definecolor{captiongray}{HTML}{555555}
+\mdfsetup{%
+  innertopmargin=2ex,
+  innerbottommargin=1.8ex,
+  linecolor=captiongray,
+  linewidth=0.5pt,
+  roundcorner=1pt,
+  shadow=false,
+}
+\newlength{\figurewidth}
+\setlength{\figurewidth}{0.75\textwidth}
+
+% text macros
+\shorttitle{Astra}
+\shortauthors{Casey et al.}
+\newcommand{\documentname}{\textsl{Article}}
+\newcommand{\sectionname}{Section}
+\newcommand{\astra}{\code{Astra}}
+
+% math macros
+\newcommand{\todo}[1]{\textcolor{green}{#1}}
+\newcommand{\unit}[1]{\mathrm{#1}}
+\newcommand{\mps}{\unit{m\,s^{-1}}}
+\newcommand{\kmps}{\unit{km\,s^{-1}}}
+
+\sloppy\sloppypar\raggedbottom\frenchspacing
+\begin{document}
+
+\title{\Huge Astra}
+
+\author[0000-0003-0174-0564]{Andrew R. Casey}
+\affiliation{School of Physics \& Astronomy, Monash University}
+\affiliation{Centre of Excellence for Astrophysics in Three Dimensions (ASTRO-3D)}
+
+\author{others}
+
+\begin{abstract}\noindent
+
+\end{abstract}
+
+\keywords{Foo --- Bar}
+
+\section*{}\clearpage
+\section{Introduction}\label{sec:intro}
+- In SDSS-V we are using the APOGEE instrument (infrared high res) and the BOSS instrument to observe N many stars as part of MWM
+- In SDSS-V we are observing a wider range of stellar types than what was observed in SDSS-IV. Not just giants.
+- The typical pipeline that would be suitable for FGKM stars is not suitable for things like white dwarfs.
+- This means we end up needing to have multiple pipelines to analyse stars, at least those of different types.
+- But since we will have more than one pipeline, we have taken a more elaborate approach to have multiple pipelines for all kinds of stars.
+- The reasons for this are:
+    - Stellar surveys tend to show substantial systematics with respect to each other
+    - 'Allowing room' for multiple different pipelines is intended to encourage the development of new methods.
+- This document describes the approach taken for the analysis of stellar parameters in SDSS-V.
+
+\section{Methods}\label{sec:method}
+
+\subsection{Design}
+
+- What does \Astra\ need to do, other than just to run a \texttt{for} loop over all the data?
+- Needs to look for new reduced data products (either via on disk, or through a database).
+- With each new data product, it records a database entry of that spectrum, so that every spectrum has a unique referenced `spectrum_index' in the database.
+- It needs to link that spectrum to an astronomical source. How this is achieved has varied over time, but has since stabilised with the introduction of SDSS ID.
+- If we do not already have ancillary metadata for that object, then it needs to find and ingest that data. The ancillary data includes:
+    - astrometry;
+    - photometry;
+    - targeting information;
+    - identifiers to other catalogs, etc.
+- If this spectrum is a combined spectrum from multiple visits or exposures, then Astra needs to go and find those visits and ingest those spectra. It needs to link those spectra to this combined spectrum.
+- Needs to include relevant information from the data reduction pipeline, and any upstream information (e.g., radial velocities)
+
+\subsection{Pipelines}
+Here we include a short description of all pipelines included in \astra. 
+In general we reference the original papers of those pipelines for detailed explanations, however, we do list any modifications made to those pipelines.
+All pipelines have been modified to some degree. In some cases only basic refactoring took place to make the functions compatible with how other pipelines are executed. Some pipelines perform some kind of functionality which we refactored because \astra\ includes that functionality as a common tool, and by refactoring the pipeline we were able to make easy tests of different choices (e.g., how continuum is modelled). In the most extreme cases, the pipeline has been re-written in it's entirety from scratch, whilst keeping the same approach.
+
+\subsection{FERRE} \label{sec:methods-ferre}
+
+FERRE \citep[or FERRE]{ferre} % \todo with the reverse R
+is a FORTRAN tool to compare model spectra with observations.
+The model spectra should be some rectilinear (evenly spaced) grid of spectra which you want to compare against models.
+In the typical use case in \astra, the model grid is convolved to the expected spectral resolution and wavelength sampling of the data.
+For a given observed spectrum, the best-fit model is found by interpolating a multi-dimensional grid of spectra.
+For computational reasons, and to avoid the so-called `noding' effects \citep{CITE}, the grid of model spectra is stored in a compressed form.
+
+FERRE includes some options when fitting spectra, including the initial guess, and any dimensions to be frozen. For more details see \citet{CITE}.
+The continuum is optionally fit simultaneously with the stellar parameters, or can be performed before executing FERRE.
+The best-fitting spectrum is found by an optimization routine (Nelder-Mead?).
+
+%Only minimal changes were made to the FERRE code, but more substantive changes were made to the inputs that went in to FERRE (e.g., how ASPCAP is executed).
+%Only minimal changes were made to the FERRE code, but more substantive changes were made to how FERRE was executed (e.g., see Section \ref{sec:aspcap-methods}).
+The only changes made to FERRE were on the formats of output files. We added the \todo{input name} to output files to ensure that we could correctly order the results from all files when FERRE was being executed in parallel. 
+Previously FERRE would correctly sort all files at the end of execution, but this sorting implementation was unexpectedly inefficient. 
+After adding the FERRE input name to each row of the output files and the standard output, we disabled the concluding sorts.
+Adding the input name to the standard output also allowed \astra\ to better track the time spent analysing per spectrum, and the joint overheads.
+
+FERRE can be executed as a single task in \astra, but it is more often executed as just one step in the analysis.
+Custom reader and writer functions to execute FERRE were added to \astra\ to handle the three ways in which FERRE is usually executed: for a coarse estimate of stellar parameters; a detailed fit of all stellar parameters; or by estimating the abundances. These populate different database tables. 
+
+\subsection{ASPCAP} \label{sec:methods-aspcap}
+
+\subsection{The Payne} \label{sec:methods-the-payne}
+\subsection{The Cannon} \label{sec:methods-the-cannon}
+\subsection{The Classifier} \label{sec:methods-the-classifier}
+\subsection{Snow White} \label{sec:methods-snow-white}
+\subsection{MDwarfType} \label{sec:methods-m-dwarf-type}
+\subsection{HotPayne} \label{sec:methods-hot-payne}
+\subsection{APOGEENet} \label{sec:methods-apogee-net}
+\subsection{BOSSNet} \label{sec:methods-boss-net}
+
+\section{Results}\label{sec:results}
+
+\section{Discussion}\label{sec:discussion}
+
+
+\section{Conclusions}
+
+\paragraph{Software}
+\texttt{numpy} \citep{numpy} ---
+\texttt{matplotlib} \citep{matplotlib}.
+
+\paragraph{Acknowledgements}
+It is a pleasure to thank
+-- people
+for valuable discussions and input.
+
+\begin{thebibliography}{dummy}
+\bibitem[Kelson(2003)]{kelson} Kelson, D.~D.\ 2003, \pasp, 115, 688. doi:10.1086/375502
+\end{thebibliography}
+
+\end{document}
