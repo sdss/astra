@@ -146,7 +146,29 @@ In the context of SDSS, only APOGEE spectra are analysed with ASPCAP, but ASPCAP
 
 ASPCAP is probably the most comprehensive pipeline that is integrated in \Astra, and has gone through the most refactoring. Here we will provide a slightly longer-than-average description of ASPCAP so that we can highlight differences in the ASPCAP version in \Astra.
 
-There are three sequential stages in ASPCAP: the coarse stage, the stellar parameter stage, and the chemical abundances stage. The co 
+The most notable difference in the ASPCAP implementation in \Astra\ is that it has been entirely re-written in Python. The ASPCAP implementation used in SDSS-IV was written in IDL. While \Astra\ could have executed the existing IDL pipeline, there were numerous technical reasons that motivated a rewrite. Institutional memory of the existing IDL pipeline was limited, and the existing implementation planned executions on a per-plate basis -- a concept which was to change with the new fiber positioners in SDSS-V. Some re-structering of the code would be required to handle changes in file paths, data models, etc. Having a Python based version also gave more flexibility to experiment and improve the code. 
+
+
+ASPCAP executes FERRE many times using different grids, where each grid might cover some subset of stellar parameter space. The hot star grid is convolved to a representative spectral resolution of 22,500, but the other grids are convolved with four different line spread functions. The fiber used to observe the target (or the mean fiber from multiple observations) determines which of the four convolved grids will be used.
+
+There are three sequential stages in ASPCAP: 
+  the coarse stage, 
+  the stellar parameter stage, and 
+  the chemical abundances stage. 
+At the start of the coarse stage, it is useful if there is an initial guess of the stellar parameters for soem given spectrum. In SDSS-IV, the Doppler estimate of the stellar parameters was often used as the initial guess. In SDSS-V we use the stellar parameters from \APOGEENet\ if available (for that spectrum, or alternatively for that star), and revert to the Doppler estimate if there are no \APOGEENet\ results available. A bitmask flag is recorded to indicate the source of the initial guess.
+
+Given the initial guess, we consider whether each grid spans that position in stellar parameters. If it does-- and if the LSF matches that for the fiber, or it is the hot star grid -- then that grid will be used to estimate coarse stellar parameters for the given spectrum. Because the grids used will overlap in stellar parameters \citep{dr17-grids}, it is frequent that the same spectrum will be analysed twice during the coarse stellar parameter stage. 
+
+In the special case where no initial guess is available, \emph{all} grids with a suitable LSF will be used in the coarse parameter stage. 
+
+
+Multiple dimensions of the FERRE grid are held fixed during the coarse stellar parameter stage. For main-sequence grids, we \todo{fix [C/M], [N/M], [$\alpha$/M] = 0}. \todo{Microturbulence is also kept fixed based on the following relation.}. For giant star grids, we fix \todo{X, Y, and Z}.
+
+After all FERRE executions are complete for the coarse stage, iwe gather the results to determine    
+
+
+
+
 
 
 
