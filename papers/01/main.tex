@@ -37,6 +37,7 @@
 
 \newcommand{\APOGEENet}{\pipeline{APOGEENet}}
 \newcommand{\BOSSNet}{\pipeline{BOSSNet}}
+\newcommand{\LineForest}{\pipeline{LineForest}}
 
 \newcommand{\pytorch}{PyTorch}
 
@@ -64,7 +65,7 @@
 \author{others}
 
 \begin{abstract}
-
+something
 \end{abstract}
 
 \keywords{Foo --- Bar}
@@ -83,19 +84,43 @@
 
 \section{Methods}\label{sec:method}
 
+The primary purpose of \Astra\ is to analyze all Milky Way Mapper spectra with any relevant pipelines. 
+While simple in theory, more effort is required to make those results easily accessible.
+
+\Astra\ uses a database to store information about astronomical sources, spectra, and results. 
+While some of this information is also stored in the SDSS-V central database (e.g., targeting, catalog, or reduction tables),
+duplicating it into \Astra's schema allows for \Astra\ to be executed independent of the SDSS-V database.
+
+Reduced spectra are ingested into \Astra\ daily. For each new spectrum, \Astra\ ensures that it has all the requisite keywords to locate the file that stores that spectrum on disk. A database record is created for the spectrum where it is given a unique spectrum primary key (\texttt{spectrum\_pk}), regardless of what \emph{kind} of spectrum it is (e.g., APOGEE visit -- \texttt{apVisit}, BOSS \texttt{specLite}, etc). Given a spectrum primary key \Astra\ can resolve the type of spectrum it is, read it from disk, and access any metadata about the astronomical source. This provides a clean access pathway such that individual pipelines to build upon. The spectrum tables include  metadata from the image headers (or data reduction outputs), as well as some computed quantities that were requested by the collaboration (e.g., barycentric velocity, fraction of night time at the observation mid-point). 
+
+If the spectrum being ingested is a so-called \emph{derivative} product (e.g., a spectrum that is combined from many individual visits), then \Astra\ parses the header information of that spectrum to find those individual visits and ingest them too. The individual visits and the derivative product are then linked in the database.
+
+The next step in the ingestion process is to link that spectrum to a unique source. This procedure is more stable now with the introduction of SDSS identifiers, as \Astra\ would need to ingest and seamlessly link spectra from current and former SDSS generations, across different telescopes, and catalog identifiers.
+%Often this is not a trivial procedure, as \Astra\ needs to ingest and seamlessly link spectra from current and former SDSS generations, across different telescopes and instruments, and catalog identifiers. 
+For SDSS-V spectra we use the catalog identifier specified for the observation.\footnote{If no catalog identifier is available, we use the Gaia source identifier in the image headers, or the 2MASS identifier for SDSS-IV data. In both cases we use this external identifier to find the SDSS-V catalog entry, and then perform all subsequent cross-matches.} For good technical reasons, an astronomical source can have multiple catalog identifiers: some across different targeting versions, or some within the same targeting version. However, the same astronomical source might also have two SDSS identifiers (\texttt{sdss\_id}). In such cases we take the smaller value as the representative SDSS identifier, and we record all linked catalog identifiers that \Astra\ could find across different targeting versions.
+
+If the SDSS identifier is not already present in the \Astra\ database then a new record will be added to the \texttt{Source} table. This table has one entry per astronomical source, and includes relevant internal or external identifiers, as well as astrometry, photometry, and metadata from other surveys. The primary key is defined by a \texttt{source\_pk} column, and the SDSS identifier (\texttt{sdss\_id}) is just one optional identifier. This allows \Astra\ to analyze spectra for sources that do not necessarily have a SDSS identifier (e.g., the Sun). Later in the ingestion process, any sources with missing information will be efficiently filled in bulk so as to avoid individual queries when spectra are ingested. 
+
+The auxillary data that are added to \Astra's source table includes: HEALPix, astrometry and photometry from Gaia, TIC (v8) identifiers, TWOMASS photometry, unWISE photometry, GLIMPSE photometry, stellar parameters from Gaia XP spectra, Bailer-Jones distances, reddening estimates (by numerous methods, see Section~\ref{sec:dust}), the number of sources that are nearby on the sky, and all SDSS-V carton assignments. There is a benefit to having all carton assignments in a format that can be easily queried, but we wanted to avoid duplicating the many-to-many relationship tables that currently describe the carton assignments in SDSS-V. For these reasons, \Astra\ stores all carton assignments in a single column as a bytearray. This allows for a flexible (expanding) storage of all carton assignments as a sequence of integers. This  serves as a representation of the carton assignments so that pipelines can efficiently query sources by cartons (or other attribute).
+
+
+Analysis results from analysis pipelines are stored in their own database table. Each result table includes a reference to the spectrum primary key, which can be used to link to the unique source and it's associated metadata. The output summary files that SDSS users have become accustomed to are simply a database join across source, spectrum, and result tables, possibly with restrictions by observation date and a version of the data reduction pipeline. For these reasons, every column in an \Astra\ table has an associated human-readable definition and units. The units and definition are populated into the \Astra\ output tables as comments, ensuring consistent definitions of column names and units across all output data products. The complete data model glossary is listed in Appendix~\ref{appendix:glossary}.
+
+
+\subsection{Derivative data products: mwmVisit and mwmStar}
+
+
+
+\todo{
+These things have to go somewhere:
+- how pipelines can take whatever files they want
+- running things through the cli
+- hierarchy of data products -> what gets produced by what?
+}
+
 
 \subsection{Design}
 
-- What does \Astra need to do, other than just to run a loop over all the data?
-- Needs to look for new reduced data products (either via on disk, or through a database).
-- With each new data product, it records a database entry of that spectrum, so that every spectrum has a unique referenced spectrum index in the database.
-- It needs to link that spectrum to an astronomical source. How this is achieved has varied over time, but has since stabilised with the introduction of SDSS ID.
-- If we do not already have ancillary metadata for that object, then it needs to find and ingest that data. The ancillary data includes:
-    - astrometry;
-    - photometry;
-    - targeting information;
-    - identifiers to other catalogs, etc.
-- If this spectrum is a combined spectrum from multiple visits or exposures, then Astra needs to go and find those visits and ingest those spectra. It needs to link those spectra to this combined spectrum.
 - Needs to include relevant information from the data reduction pipeline, and any upstream information (e.g., radial velocities)
 
 Why does it need to do all this? 
@@ -210,7 +235,7 @@ Since highly regularised models can be trained efficiently via coordinate descen
 
 
 
-\subsection{The Classifier} \label{sec:methods-the-classifier}
+%\subsection{The Classifier} \label{sec:methods-the-classifier}
 
 
 \subsection{Snow White} \label{sec:methods-snow-white}
@@ -267,7 +292,15 @@ Only minor technical changes were made to the \APOGEENet\ pipeline in \Astra. A 
 
 \subsection{AstroNN} \label{sec:methods-astro-nn}
 
-\subsection{CORV}
+\newcommand{\astronn}{\texttt{AstroNN}}
+
+\astronn\ estimates the astrophysical labels given some stellar spectrum \citep{leung}.
+
+
+We used a PyTorch representation of the network due to TensorFlow version incompatibilities. No other substantive changes were made. 
+
+
+\subsection{CORV} \label{sec:methods-corv}
 
 The COmpact Radial Velocity (\texttt{corv}) code computes radial velocities for compact objects. Presently it only computes radial velocities for sources that the \texttt{SnowWhite} pipeline has classified as a DA-type white dwarf, and \texttt{SnowWhite} is only executed on sources that were assigned to a white dwarf carton (\todo{name them}).
 
@@ -299,7 +332,6 @@ In \todo{IPL-3}, the Slam was executed on any source that was assigned to either
 \end{itemize}
 
 
-\subsection{
 \section{Results}\label{sec:results}
 
 - Refer to Don Schneider stuff
@@ -311,6 +343,10 @@ In \todo{IPL-3}, the Slam was executed on any source that was assigned to either
 
 
 \section{Conclusions}
+
+
+% Appendix: Flags?
+% Appendix: Stellar cartons?
 
 \paragraph{Software}
 \texttt{numpy} \citep{numpy} ---
