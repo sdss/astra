@@ -275,11 +275,28 @@ CORV fits the hydrogen lines of DA-type white dwarfs either by linearly interpol
 
 \subsection{LineForest} \label{sec:methods-line-forest}
 
-\LineForest\ measures the integrated strength of up to 52 strong transitions in the BOSS wavelength region. A complete description of \LineForest\ can be foudn in \citet{somewhere}. The transitions include hydrogen line (Balmer H1-17, Paschen 7-17), strong calcium lines (Ca H, K, Ca II triplet), He I and II lines, as well as N, S, Fe, O, and Li. A pre-set window is used around each line to determine the strength of the line relative to the local continuum (usually 50 or 200\,\AA). 
-
+\LineForest\ measures the integrated strength of up to 52 strong transitions in the BOSS wavelength region. \LineForest\ is executed on the per-MJD BOSS visits, and on the combined BOSS spectrum of anything that looks like a star (see Targeting section). A complete description of \LineForest\ can be foudn in \citet{somewhere}. The transitions include hydrogen line (Balmer H1-17, Paschen 7-17), strong calcium lines (Ca H, K, Ca II triplet), He I and II lines, as well as N, S, Fe, O, and Li. A pre-set window is used around each line to determine the strength of the line relative to the local continuum (usually 50 or 200\,\AA). The equivalent width of each transition is reported, as well as metrics related to the detection significance, and percentiles of the equivalent width. 
 
 
 \subsection{SLAM} \label{sec:methods-slam}
+
+The Stellar Labels Machine (SLAM) is a \todo{...}.
+
+It only considers spectra between 6417 and 8910\,\AA. 
+
+Using a model trained on ASPCAP labels from DR16.
+
+The Slam performs an initial normalization of the BOSS spectrum and re-samples it to the wavelength of the model grid using a cubic spline. An initial estimate of the stellar parameters is then found by a $\chi^2$ match to the grid, which is then refined by optimizing the stellar parameters. This version of the Slam is trained on ASPCAP labels from DR16, and only $\teff$ and $\mh$ are reported (with their associated uncertainties and covariances).
+
+
+In \todo{IPL-3}, the Slam was executed on any source that was assigned to either the solar neighbourhood census carton (\texttt{mwm\_snc}) or the young stellar object carton (\texttt{mwm\_yso}), or if it met the following criteria:
+\begin{itemize}
+	\item has a reported G-band magnitude from Gaia DR3;
+	\item has a reported RP-band magnitude from Gaia DR3;
+	\item has a non-negative parallax in Gaia DR3;
+	\item has $(G - RP) > 0.56$; and
+	\item has an absolute G-band magnitude greater than 5.553
+\end{itemize}
 
 
 \subsection{
