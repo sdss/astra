@@ -164,17 +164,50 @@ In the special case where no initial guess is available, \emph{all} grids with a
 
 Multiple dimensions of the FERRE grid are held fixed during the coarse stellar parameter stage. For main-sequence grids, we \todo{fix [C/M], [N/M], [$\alpha$/M] = 0}. \todo{Microturbulence is also kept fixed based on the following relation.}. For giant star grids, we fix \todo{X, Y, and Z}.
 
-After all FERRE executions are complete for the coarse stage, iwe gather the results to determine    
+When multiple FERRE executions have taken place for a single spectrum in the coarse stage, the best set of coarse stellar parameters is found by comparing the (penalized) $\chi^2$ of different solutions. The penalized value takes the original $\chi^2$ value and multiplies it if specific conditions are met. For example, if the effective temperature or surface gravity is within the last node of a grid edge, it is multiplied by 5. If those parameters are within 1/8th of the edge grid spacing, it is multiplied by 10. If FERRE fails to report an effecive temperature or surface gravity, it is multiplied by 20. The final condition is for stars with FERRE-reported $\teff < 3900$\,K and if the GK-type grid was used. In that condition, the $\chi^2$ is penalized by 10. 
 
 
+%The results from each FERRE execution are stored in the \Astra\ database, but these are not usually acces
+
+\subsubsection{Stellar Parameters Stage}
+
+All stellar parameters are allowed to vary in this stage. The best result from the coarse stage is used as an initial guess in the stellar parameter stage, and the FERRE grid where that coarse stage was reported is taken as the grid to use in the stellar parameter stage. 
+
+Like in SDSS-IV, a pseudo-continuum normalisation is performed before the stellar parameter stage. We take the best-fitting result from the coarse stage and divide the model spectrum by the observed one on a per-chip basis. We interpolate over bad pixels (e.g., extremely low, high, or non-finite flux) and compute a median filter of the `ratio spectrum' with a filter width of 151 pixels. This matches the approach used in SDSS-IV, but the implementation can lead to slightly different results. The median filter of the ratio spectrum is then assumed to be the continuum for the stellar parameters stage. 
+
+The biggest source of differences in stellar parameters between the ASPCAP implementation used in SDSS-IV, and the Python version implemented in \Astra, likely arise from different choices of initial guesses (e.g., using \APOGEENet\ instead of Doppler) and minor adjustments to how the median filter is applied for the pre-continuum step.
+
+\subsubsection{Chemical abundances stage}
 
 
+In the chemical abundances stage of ASPCAP the stellar parameters are held fixed to the values found in the earlier stage, and the abundances are determined by allowing metallicity-sensitive dimension to vary. The technical details about how this is done is the same as in SDSS-IV (e.g., through \texttt{TTIES} keywords and freezing parameters). 
 
+In SDSS-IV the median filtering procedure is also applied before the chemical abundances stage (using the best-fitting result from the stellar parameter stage). The \Astra\ implementation does the same thing, but it does not allow FERRE to adjust the continuum during the chemical abundances stage. The logic is that some chemical abundances are only inferred from a very small number of pixels, and if we also allow a fourth order polynomial to vary while trying to fit a chemical abundance to a few pixels, the problem will be too degenerate. For this reason, the ASPCAP version in \Astra\ will perform the pre-continuum step before the chemical abundances stage, but it will then disable any continuum-fitting options in FERRE. 
+
+
+\subsubsection{ASCPAP results}
+
+A single spectrum analysed by ASPCAP might involve 30 or more FERRE executions: a few in the coarse stage, one in the stellar parameter stage, and the remainder during the chemical abundances stage.
+
+The results from each FERRE execution are available in the \Astra\ database, but are not usually made available to users through output tables. Most users want the stellar parameters estimated during the stellar parameter stage, and a summary of abundances from the executions made during the chemical abundances stage.
+
+For these reasons, a final task queries the results from the different FERRE tables and creates a usable table of stellar parameters and chemical abundances, with primary keys linking to the individual tasks. 
+
+\todo{Corrections made. What elements do we incldue this time round?}
 
 
 \subsection{The Payne} \label{sec:methods-the-payne}
 
 \subsection{The Cannon} \label{sec:methods-the-cannon}
+
+The Cannon \citep{Ness,thecannon} is a data-driven method for estimating stellar labels ($\teff$, $\logg$, chemical abundances,and more). The implementation of The Cannon in \Astra\ is suitable for use with either APOGEE or BOSS spectra. Since all the spectra in the \Astra\ database are linked to other survey identifiers, one can easily train a new model with The Cannon that uses published labels from a previous SDSS data release. 
+
+The Cannon implementation in \Astra\ is trained by using the coordinate descent algorithm, which differs from how previous implementations were optimised. Coordinate descent seems to be efficient for small or large models, and the CPU cost to train a model does not vary substantially with increasing regularisation. In practice, previous implementations seemed to have a higher CPU cost as the regularisation strength grew. Coordinate descent also seems to produce sparser models with more interpretable flux derivatives.
+
+\todo{Fixing s2 after the fact}
+
+Since highly regularised models can be trained efficiently via coordinate descent, the new implementation of The Cannon in \astra\ allows for grid searches in the regularization strength $\lambda$. The default grid search behaviour is to place uniform-in-log values of $\Lambda$ between $10^{-8}$ and $10^{-1}$, and train a model at each regularization strength. We then compute the $\chi^2$ of the validation set (distinct from the training set) by predicting the spectra of the validation set -- with the validation labels -- and computing the $\chi^2$ difference. Like \citet{Casey} and elsewhere, we find there is a minima where an increasing regularization strength produces a sparser model that also makes better predictions of spectra. We take the minima of this to be the regularization strength. 
+
 
 
 \subsection{The Classifier} \label{sec:methods-the-classifier}
@@ -210,6 +243,8 @@ The `MDwarfType` pipeline is only executed on main-sequence type stars that have
 
 \subsection{APOGEENet} \label{sec:methods-apogee-net}
 
+\todo{We have versions 2 and 3 in astra}
+
 \APOGEENet\ is a convolutional neural network for estimating stellar parameters ($\teff$, $\logg$, $\mh$) from APOGEE spectra \citep{apogeenet}. Previous versions of \APOGEENet\ required infrared photometry and astrometry (e.g., parallax to compute absolute magnitudes), and in those versions the results were sensitive to missing data. The current version of \APOGEENet\ is version 3, which does not require auxillary photometry. 
 
 \APOGEENet\ is trained on high quality labels from SDSS-IV DR17 \citep{dr17}. 
@@ -230,6 +265,24 @@ Only minor technical changes were made to the \APOGEENet\ pipeline in \Astra. A 
 - testing set
 }
 
+\subsection{AstroNN} \label{sec:methods-astro-nn}
+
+\subsection{CORV}
+
+The COmpact Radial Velocity (\texttt{corv}) code computes radial velocities for compact objects. Presently it only computes radial velocities for sources that the \texttt{SnowWhite} pipeline has classified as a DA-type white dwarf, and \texttt{SnowWhite} is only executed on sources that were assigned to a white dwarf carton (\todo{name them}).
+
+CORV fits the hydrogen lines of DA-type white dwarfs either by linearly interpolating spectra from an existing grid, or by directly fitting voigt profiles to the hydrogen lines. In data release 19, the \todo{voigt profile results} are used. The reported results include radial velocity (and associated error), effective temperature, surface gravity, and other metadata. No substantive changes were made to this code; the minimal amount of refactoring necessary was done.
+
+\subsection{LineForest} \label{sec:methods-line-forest}
+
+\LineForest\ measures the integrated strength of up to 52 strong transitions in the BOSS wavelength region. A complete description of \LineForest\ can be foudn in \citet{somewhere}. The transitions include hydrogen line (Balmer H1-17, Paschen 7-17), strong calcium lines (Ca H, K, Ca II triplet), He I and II lines, as well as N, S, Fe, O, and Li. A pre-set window is used around each line to determine the strength of the line relative to the local continuum (usually 50 or 200\,\AA). 
+
+
+
+\subsection{SLAM} \label{sec:methods-slam}
+
+
+\subsection{
 \section{Results}\label{sec:results}
 
 - Refer to Don Schneider stuff
