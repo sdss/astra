@@ -56,7 +56,10 @@
 \sloppy\sloppypar\raggedbottom\frenchspacing
 \begin{document}
 
-\title{\Huge Astra}
+%\title{\Huge Stellar parameter determination for the Milky Way Mapper (SDSS)}
+%\title{\Huge Data analysis strategy for the Milky Way Mapper (SDSS)}
+%\title{Inferring stellar parameters and chemical abundances for the Sloan Digital Sky Survey's Milky Way Mapper}
+\title{Inferring stellar parameters and chemical abundances from the Milky Way Mapper in the Sloan Digital Sky Survey}
 
 \author[0000-0003-0174-0564]{Andrew R. Casey}
 \affiliation{School of Physics \& Astronomy, Monash University}
@@ -64,28 +67,86 @@
 
 \author{others}
 
+
 \begin{abstract}
-something
+\noindent The fifth generation of the Sloan Digital Sky Survey (SDSS) benefits from a panoptic view of the galaxy from both hemispheres.
+The Milky Way Mapper is one of the three Mappers of SDSS-V, where it is using the BOSS (optical) and APOGEE (infrared) spectrographs to acquire millions of spectra across the entire stellar life cycle: from pre-main-sequence stars to stellar cinders.
+The broader range of spectral types introduces more data analysis requirements than earlier surveys using the BOSS or APOGEE instruments.
+\todo{Something about systematic differences in stellar spectra.}
+Here we describe how we use \todo{X} analysis pipelines to infer stellar parameters and chemical abundances from Milky Way Mapper spectra, and the strategy to select one set of pipeline measurements per spectrum.
+While this process adds complexity to the analysis, it ensures we must address systematic differences between pipelines.
+\todo{Some closing remark.}
 \end{abstract}
 
-\keywords{Foo --- Bar}
+\keywords{God's --- Work}
+
 
 \section*{}\clearpage
-\section{Introduction}\label{sec:intro}
-- In SDSS-V we are using the APOGEE instrument (infrared high res) and the BOSS instrument to observe N many stars as part of MWM
-- In SDSS-V we are observing a wider range of stellar types than what was observed in SDSS-IV. Not just giants.
-- The typical pipeline that would be suitable for FGKM stars is not suitable for things like white dwarfs.
-- This means we end up needing to have multiple pipelines to analyse stars, at least those of different types.
-- But since we will have more than one pipeline, we have taken a more elaborate approach to have multiple pipelines for all kinds of stars.
-- The reasons for this are:
-    - Stellar surveys tend to show substantial systematics with respect to each other
-    - 'Allowing room' for multiple different pipelines is intended to encourage the development of new methods.
-- This document describes the approach taken for the analysis of stellar parameters in SDSS-V.
+\section{Introduction} \label{sec:intro}
+The Sloan Digital Sky Survey (SDSS) is now in it's fifth generation, with each seeking to address new questions in astrophysics.
+The current generation is organised by three so-called Mapper programs -- Black Hole Mapper, Local Volume Mapper, and Milky Way Mapper -- for which an overview can be found in \citet{kollmeier}.
+The Black Hole Mapper and Milky Way Mapper share the 2.5 meter telescope at Apache Point Observatory, and the 2.5 meter du Pont telescope at Las Campanas Observatory.
+Both telescopes are equipped with nearly identical setups. A new robotic fibre positioner (FPS) system is used to configure up to 1500 fibers across a field of view, replacing the human-plugged plates that were extensively used in SDSS-IV.
+The fibers are then fed to two spectrographs at each telescope, with 500 fibers fed to the BOSS low-resolution optical spectrograph, and 298 fibers fed to the APOGEE high-resolution infrared spectrograph.
+
+\todo{A paragraph about scientific justification for MWM}
+
+The scientific objectives encompassed by the Milky Way Mapper require that we observe a wider range of spectral types than red giant branch stars, which composed most of the objects in the SDSS-IV APOGEE survey.
+
+The data analysis approach we adopt in MWM is different to all other large stellar spectroscopic surveys.
+Instead of using a single analysis pipeline \citep{galah}, or combining results from multiple pipelines \citep{ges}, we chose to use multiple pipelines with the intent to report only one set of those results per spectrum.
+There are two primary reasons for this strategy.
+
+First, the increasing volume and quality of stellar spectra has highlighted the magnitude of systematic errors between surveys, and pipelines. While some discrepancies can be readily discounted due to spectra covering different wavelength ranges, the Gaia-ESO Survey experiment has clearly demonstrated that experienced spectroscopists can report statistically significant abundance differences even when controlling for the choice of stellar photosphere, line list, and continuum normalisation.
+These comparisons, and many like them in the literature [cite], highlight that unquantified systematic uncertainties are present in spectroscopic analyses, and they have the capacity to limit the inferences that we want to make about the universe.
+For these reasons, if we want to make measurements from spectra and use them to infer things about the Milky Way, then we should have a reliable estimate of the total uncertainties in those measurements.
+Secondly, the large range of spectral types targeted by MWM requires multiple pipelines, as the assumptions that make an analysis suitable for M-dwarfs may not generally be applicable for white dwarfs.
+While this is an extreme example, there are regions of parameter space where there is no justified specific boundary to motivate the use of one analysis method or another.
+
+One advantage in adopting a structure where we expect that there will be many pipelines analysing a given star is that there is minimal burden for adding another pipeline. Contrast the psychology to a survey with a single pipeline\footnote{Perhaps that of a student}, where there is a relatively high barrier for entry for new methods to prevail. For these reasons, we hope to encourage innovation and change in how we analyse spectroscopic data (writ large), and this document reflects the current organisational structure for data analysis in MWM.
+
+We briefly describe the analysis pipelines used in Section~\ref{sec:method}, where we highlight any functional changes to the existing implementation. We also describe the software that orchestrates the execution of these pipelines (\texttt{Astra}), including the common tools, \todo{etc}. In Section~\ref{ref:results} we outline the results. \todo{Blah Blah}
 
 \section{Methods}\label{sec:method}
 
-The primary purpose of \Astra\ is to analyze all Milky Way Mapper spectra with any relevant pipelines. 
-While simple in theory, more effort is required to make those results easily accessible.
+\Astra\ is the software we use to orchestrate and execute all analysis pipelines on Milky Way Mapper spectra. 
+It is responsible for producing well-documented science-ready data products from reduced spectra, and making those products available to the collaboration and the public.
+While the primary purpose of executing all pipelines on spectra is simple in theory, some effort is required: to meet the computational requirements of each pipeline; to efficiently orchestrate those analyses; and to make the results accessible.
+
+%After the data reduction pipelines are complete, 
+%  is the code that does everything from data reduction to data releases. It orchestrates
+%analysis of all MWM optical and infrared spectra, including over a dozen different spectral
+%analysis pipelines. This includes statistical consistency checks, noise models, pouring in
+%metadata from all different places, etc. It creates all the data products for the MWM data
+%releases.
+%Multiple analysis pipelines are required to span the wide range of spectral types targeted by
+%MWM. Astra is the software that orchestrates how stellar parameters and chemical
+%abundances are measured from optical and infrared spectra. This proposed technical paper
+%describes the implementation, methods, and performance of Astra and those pipelines.
+
+\subsection{Tasks} \label{ref:tasks}
+
+\Astra\ is written in the Python programming language \citep{python}, but the pipelines it executes are written in a mix of Python, Julia, and FORTRAN. 
+Pipelines are interfaced with \Astra\ by defining one or more `tasks': these are Python functions that might expect some input data (e.g., a spectrum) and it yields (generates) some measurements.
+There are some technical requirements to define a task.
+However, once defined, a task can be easily executed on a CPU/GPU cluster, through the command line, or in an interactive shell or notebook environment.
+
+All \Astra\ tasks are `decorated' with a special Python function (\texttt{astra.task}). This has a specific technical meaning. If the function $f(x)$ is decorated with $g(...)$, then when the function $f(x)$ is called it actually executes the function $g(f, x)$, allowing $g(...)$ to modify the behaviour of the function.
+\Astra\ does this to handle the execution of tasks and writing of results in a consistent way.
+For example, the decorator can determine whether the code should be executed immediately, or queued to a compute cluster. It can parallelise the execution of the code in different ways. And it can write the results from the pipeline in efficiently batched queries, and attach useful metadata to each execution (e.g., CPU time spent, joint overheads). This means that the scientist who developed the pipeline does not need to spend time on technical details related to execution (e.g., parallelising or scaling the code; writing SQL queries or formatting output files; or testing code in different compute environments): they can focus on ensuring the pipeline works correctly, and \Astra\ will scale it to all MWM data.
+
+
+
+\subsection{Common tools}
+
+
+\subsection{Data models}
+
+\subsection{Organisation}
+
+\subsection{Execution}
+
+\subsection{Pipelines}
 
 \Astra\ uses a database to store information about astronomical sources, spectra, and results. 
 While some of this information is also stored in the SDSS-V central database (e.g., targeting, catalog, or reduction tables),
@@ -109,6 +170,8 @@ Analysis results from analysis pipelines are stored in their own database table.
 
 \subsection{Derivative data products: mwmVisit and mwmStar}
 
+\subsection{Common tools: continuum normalisation}
+\subsection{Airflow orchestration}
 
 
 \todo{
