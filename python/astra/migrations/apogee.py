@@ -2134,7 +2134,6 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
             # Source information,
             Visit.gaiadr2_sourceid.alias("gaia_dr2_source_id"),
             CatalogToGaia_DR3.target_id.alias("gaia_dr3_source_id"),
-            #Catalog.catalogid.alias("catalogid"),
             Catalog.version_id.alias("version_id"),
             Catalog.lead,
             Catalog.ra,
@@ -2167,7 +2166,6 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
         #.where(Visit.pk == 9025065)
         .dicts()
     )
-
 
     for row in tqdm(q_without_rvs.iterator(), total=limit or 1, desc="Retrieving bad spectra"):
         basename = row.pop("file")

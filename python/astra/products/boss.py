@@ -98,6 +98,9 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, n_res
             pixel_flags=visit["pixel_flags"]
         )
     
+    if not any(in_stack):
+        return (None, None)
+    
     # Co-add the spectra
     # No co
     coadd_flux, coadd_ivar, coadd_pixel_flags, *_ = pixel_weighted_spectrum(

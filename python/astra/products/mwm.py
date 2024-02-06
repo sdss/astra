@@ -128,6 +128,7 @@ def create_mwmVisit_and_mwmStar_products(
                 boss_coadd = boss_visit = None
                 log.exception(f"Exception preparing BOSS spectra for {source} and {telescope}")
                 
+            
             coadd_boss_hdu = _create_single_model_hdu([boss_coadd], BossCombinedSpectrum, observatory, "BOSS", **star_kwds)
             visit_boss_hdu = _create_single_model_hdu(boss_visit, BossRestFrameVisitSpectrum, observatory, "BOSS", **visit_kwds)        
             
