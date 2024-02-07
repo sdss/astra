@@ -11,15 +11,16 @@ const global_ferre_mask = parse.(Bool, readlines("ferre_mask.dat"));
 gridfile = ENV["GROK_GRID_FILE"]
 const all_vals = [h5read(gridfile, "Teff_vals"),
                   h5read(gridfile, "logg_vals"),
-                  h5read(gridfile, "vmic_vals"),
+                  #h5read(gridfile, "vmic_vals"),
                   h5read(gridfile, "metallicity_vals")]
+const vmic_index = 5 # 1 km/s        
 
-const labels = ["Teff", "logg", "vmic", "metallicity"]
+const labels = ["Teff", "logg", "metallicity"] 
 const model_spectra = let 
     spectra = h5read(gridfile, "spectra")
     # this corrected mask fixes my off-by-one error in the grid generation
     corrected_mask = [global_ferre_mask[2:end] ; false]
-    spectra[corrected_mask, :, :,  :, :]
+    spectra[corrected_mask, :, :, vmic_index, :]
 end
 model_spectra[isnan.(model_spectra)] .= Inf; # NaNs (failed syntheses) will mess up the grid search.
 const ferre_wls = (10 .^ (4.179 .+ 6e-6 * (0:8574)))[global_ferre_mask]
@@ -46,13 +47,13 @@ interpolate_spectrum = let
     #cool_itp = cubic_spline_interpolation(xs, model_spectra[:, coolmask, :, :, :])
 
     xs = rangify.((1:sum(global_ferre_mask), all_vals[1][.! coolmask], all_vals[2:end]...))
-    hot_itp = cubic_spline_interpolation(xs, model_spectra[:, .!coolmask, :, :, :])
-
-    function itp(Teff, logg, vmic, metallicity)
+    hot_itp = cubic_spline_interpolation(xs, model_spectra[:, .!coolmask, :, :]) 
+    
+    function itp(Teff, logg, metallicity) 
         if Teff < T_pivot
             #cool_itp(1:sum(global_ferre_mask), Teff, logg, vmic, metallicity)
         else
-            hot_itp(1:sum(global_ferre_mask), Teff, logg, vmic, metallicity)
+            hot_itp(1:sum(global_ferre_mask), Teff, logg, metallicity)
         end
     end
 end
@@ -100,7 +101,7 @@ function analyse_spectrum(flux, ivar, pixel_mask)
     ivar = view(ivar, pixel_mask)
 
     # find closed node in the grid of synthetic spectra
-    chi2 = sum((view(model_spectra, pixel_mask, :, :, :, :) .- flux).^2 .* ivar, dims=1)
+    chi2 = sum((view(model_spectra, pixel_mask, :, :, :) .- flux).^2 .* ivar, dims=1)
     best_inds = collect(Tuple(argmin(chi2)))[2:end]
     best_node = getindex.(all_vals, best_inds)
     println("best node: ", best_node)
@@ -109,17 +110,40 @@ function analyse_spectrum(flux, ivar, pixel_mask)
     lower_bounds = [first.(all_vals) ; 0.0]
     upper_bounds = [last.(all_vals) ; 500.0]
     p0 = [best_node ; 25.0]
-    itp_res = optimize(lower_bounds, upper_bounds, p0) do p
+
+    #itp_res = optimize(lower_bounds, upper_bounds, p0) do p
+    #    if any(.! (lower_bounds .<= p .<= upper_bounds))
+    #        @info "cost function called on OOB params $p"
+    #        return 1.0 * length(flux) # nice high chi2
+    #    end
+    #    interpolated_spectrum = interpolate_spectrum(p[1:3]...)[pixel_mask]
+    #    model_spectrum = apply_rotation(interpolated_spectrum, p[4])
+    #    sum(@. (flux - model_spectrum)^2 .* ivar)
+    #end
+
+    function f(p)
         if any(.! (lower_bounds .<= p .<= upper_bounds))
             #@info "cost function called on OOB params $p"
             return 1.0 * length(flux) # nice high chi2
         end
-        interpolated_spectrum = interpolate_spectrum(p[1:4]...)[pixel_mask]
-        model_spectrum = apply_rotation(interpolated_spectrum, p[5])
+        #println(p)
+        interpolated_spectrum = interpolate_spectrum(p[1:3]...)[pixel_mask]
+        model_spectrum = apply_rotation(interpolated_spectrum, p[4])
         sum(@. (flux - model_spectrum)^2 .* ivar)
     end
 
+    #itp_res = optimize(f, p0, NelderMead())
+    itp_res = optimize(f, lower_bounds, upper_bounds, p0, NelderMead())
+
     println("stellar params: ", itp_res.minimizer)
+
+    # de-mask it based on pixel mask
+    model_flux = zeros(length(pixel_mask))
+    if any(.! (lower_bounds .<= itp_res.minimizer .<= upper_bounds))
+        @info "optimised value is out of bounds"
+    else
+        model_flux[pixel_mask] .= apply_rotation(interpolate_spectrum(itp_res.minimizer[1:3]...)[pixel_mask], itp_res.minimizer[4])
+    end    
 
     #fixed_params = Dict(["Teff", "logg", "vmic", "m_H"] .=> itp_res.minimizer)
     #detailed_abundances = map(elements_to_fit) do el
@@ -141,7 +165,7 @@ function analyse_spectrum(flux, ivar, pixel_mask)
     #sol = synthesize(atm, linelist, A_X, [synth_wls])
     #model_flux = LSF * (sol.flux ./ sol.cntm)
 
-    best_node, itp_res.minimizer, zeros(length(elements_to_fit)), zeros(length(ferre_wls))#detailed_abundances, model_flux
+    best_node, itp_res.minimizer, zeros(length(elements_to_fit)), model_flux #detailed_abundances, model_flux
 end
 
 """
@@ -164,4 +188,5 @@ function read_mwmStar(file, hdu_index; minimum_flux_sigma=0.05, bad_pixel_mask=1
         flux, ivar, pixel_mask
     end
 end
+
 end # module

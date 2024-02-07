@@ -15,7 +15,7 @@ end
 # fill with NaNs initially, so that which stars were skipped is clear
 const Nspec = length(paths)
 const Nwl = length(Grok.ferre_wls)
-const best_nodes = zeros(4, Nspec) .* NaN 
+const best_nodes = zeros(length(Grok.all_vals), Nspec) .* NaN 
 const stellar_params = zeros(length(Grok.all_vals) + 1, Nspec) .* NaN
 const detailed_abundances = zeros(length(Grok.elements_to_fit), Nspec) .* NaN
 const best_fit_spectra = zeros(Nwl, Nspec) .* NaN

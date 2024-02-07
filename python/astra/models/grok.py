@@ -102,8 +102,8 @@ class Grok(BaseModel, PipelineOutputMixin):
     ni_h = FloatField(null=True, help_text="Nickel abundance [dex]")
     e_ni_h = FloatField(null=True, help_text="Error on nickel abundance [dex]")
 
-    #> Output path
-    hdf5_path = TextField(help_text="Path to output file") ## TODO
+    #> Path references
+    output_path = TextField(help_text="Path to output file")
     row_index = IntegerField(help_text="Index of result in output file")
     
     #> Summary Statistics

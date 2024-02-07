@@ -12,6 +12,7 @@ from typing import Optional, Iterable, Union
 from astra import task, __version__
 from astra.utils import log, expand_path
 
+from astra.models import ASPCAP
 from astra.models.grok import Grok
 from astra.models.mwm import (ApogeeCombinedSpectrum, ApogeeRestFrameVisitSpectrum)
 
@@ -26,21 +27,31 @@ def unmask(array, fill_value=np.nan):
     return unmasked_array
 
 
-
-
 @task
 def grok(
     spectra: Optional[Iterable[Union[ApogeeCombinedSpectrum, ApogeeRestFrameVisitSpectrum]]] = (
         ApogeeCombinedSpectrum
         .select()
+        .distinct(ApogeeCombinedSpectrum.spectrum_pk)
         .join(Grok, JOIN.LEFT_OUTER, on=(ApogeeCombinedSpectrum.spectrum_pk == Grok.spectrum_pk))
-        .where(Grok.spectrum_pk.is_null())
+        .switch(ApogeeCombinedSpectrum)
+        .join(ASPCAP, on=(ApogeeCombinedSpectrum.source_pk == ASPCAP.source_pk))
+        .where(
+            Grok.spectrum_pk.is_null()
+        &   (6000 >= ASPCAP.teff) & (ASPCAP.teff >= 5000)
+        &   (5 >= ASPCAP.logg) & (ASPCAP.logg >= 3)
+        &   (0.5 >= ASPCAP.m_h_atm) & (ASPCAP.m_h_atm >= -1)
+        )        
     ),
     page=None,
     limit=None,
-    n_jobs=128,
+    n_jobs=32,
     **kwargs
 ) -> Iterable[Grok]:
+    """
+    
+    Note: currently the default is to find things that ASPCAP says are in the range of the grid, and to only use Combined (mwmStar) spectra
+    """
     
     if limit is not None and isinstance(spectra, ModelSelect):
         if page is not None:
@@ -68,15 +79,21 @@ def grok(
         with open(get_input_path(i), "w") as fp:
             fp.write(prepare_input_list(chunk))
 
+    env = os.environ.copy()
+    env.setdefault("GROK_GRID_FILE", expand_path("$MWM_ASTRA/pipelines/Grok/dense_grid_2023_12.h5"))
+
     processes = []
     for i in range(n_jobs):
+        print(get_input_path(i), get_output_path(i))
         process = subprocess.Popen(
-            ["julia", "protogrok.jl", get_input_path(i), get_output_path(i)],
+            ["julia", "run_grok.jl", get_input_path(i), get_output_path(i)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            cwd="/uufs/chpc.utah.edu/common/home/u6020307/astra/python/astra/pipelines/grok/"
+            cwd="/uufs/chpc.utah.edu/common/home/u6020307/astra/python/astra/pipelines/grok/",
+            env=env,
         )
         processes.append(process)
+    
     
     # wait for processes to finish
     with tqdm(total=n_spectra, unit="spectra") as pb:
@@ -95,6 +112,7 @@ def grok(
                             yield Grok(
                                 spectrum_pk=spectrum.spectrum_pk,
                                 source_pk=spectrum.source_pk,
+                                output_path=output_path,
                                 flag_runtime_failure=True
                             )
                             pb.update()                        
@@ -116,7 +134,13 @@ def post_process_grok(spectra, output_path):
     # parse the output file
     elements = ("mg_h", "na_h", "al_h") # TODO: these should either be given to protogrok, or parsed from it, or something
     #label_names = ("teff", "logg", "v_micro", "m_h")
-    label_names = ("teff", "logg", "v_micro", "m_h", "v_sini")
+    label_names = (
+        "teff", 
+        "logg", 
+        #"v_micro", 
+        "m_h",
+        "v_sini"
+    )
 
     with h5.File(output_path, "r") as fp:
         for i, spectrum in enumerate(spectra):
@@ -124,7 +148,7 @@ def post_process_grok(spectra, output_path):
             kwds = dict(
                 spectrum_pk=spectrum.spectrum_pk,
                 source_pk=spectrum.source_pk,
-                hdf5_path=output_path,
+                output_path=output_path,
                 row_index=i,
                 t_elapsed=fp["runtimes"][i],
             )
@@ -167,3 +191,48 @@ def prepare_input_list(spectra):
         hdu = 3 if spectrum.telescope.lower().startswith("apo") else 4
         lines.append(f"{hdu} {expand_path(spectrum.path)}")
     return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    
+    from astra.models import Source
+    from astra.models.mwm import ApogeeCombinedSpectrum
+    from astra.pipelines.grok import grok
+    
+    #sol = Source.get(sdss4_apogee_id="VESTA")
+    
+    spectrum = ApogeeCombinedSpectrum.get()
+    
+    from astra.models import ASPCAP
+    
+    spectra = list(
+        ApogeeCombinedSpectrum
+        .select()
+        .join(ASPCAP, on=(ApogeeCombinedSpectrum.source_pk == ASPCAP.source_pk))
+        .where(
+            (6000 >= ASPCAP.teff) 
+        &   (ASPCAP.teff >= 5000)
+        &   (5 >= ASPCAP.logg)
+        &   (ASPCAP.logg >= 3)
+        &   (ASPCAP.m_h_atm >= -1)
+        &   (ASPCAP.m_h_atm <= 0.5)
+        )
+        .limit(1)
+    )
+    
+    results = list(grok(spectra))
+    
+    
+    # export the grok file
+    from astra.models.grok import Grok
+    from astra.models.mwm import ApogeeCombinedSpectrum
+    from astra.products.pipeline_summary import create_astra_all_star_product, ignore_field_name_callable
+    
+    def ignore_field(name):
+        return ignore_field_name_callable(name) or (name in ("input_spectrum_pks", ))
+    
+    create_astra_all_star_product(
+        Grok,
+        apogee_spectrum_model=ApogeeCombinedSpectrum,
+        ignore_field_name_callable=ignore_field
+    )
