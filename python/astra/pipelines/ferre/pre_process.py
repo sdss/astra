@@ -240,18 +240,29 @@ def pre_process_ferre(
     n_obj = len(batch_names)
     return (pwd, n_obj, skipped)
 
+'''
+    bad_pixel_flux_value: float = 1e-4,
+    bad_pixel_error_value: float = 1e10,
+    skyline_sigma_multiplier: float = 100,
+    min_sigma_value: float = 0.05,
+    spike_threshold_to_inflate_uncertainty: float = 3,
+'''
 
 
 def inflate_errors_at_bad_pixels(
     flux,
     e_flux,
     bitfield,
-    skyline_sigma_multiplier,
-    bad_pixel_flux_value,
-    bad_pixel_error_value,
-    spike_threshold_to_inflate_uncertainty,
-    min_sigma_value,
+    skyline_sigma_multiplier=100,
+    bad_pixel_flux_value=1e-4,
+    bad_pixel_error_value=1e10,
+    spike_threshold_to_inflate_uncertainty=3,
+    min_sigma_value=0.05,
 ):
+    
+    flux = np.copy(flux)
+    e_flux = np.copy(e_flux)
+    
     # Inflate errors around skylines,
     skyline_mask = (bitfield & 4096) > 0 # significant skyline
     e_flux[skyline_mask] *= skyline_sigma_multiplier

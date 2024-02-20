@@ -46,13 +46,17 @@ class Grok(BaseModel, PipelineOutputMixin):
     t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
     tag = TextField(default="", index=True, help_text=Glossary.tag)
 
-    #> Nearest Node
-    grid_teff = FloatField(null=True, help_text="Nearest node in effective temperature [K]")
-    grid_logg = FloatField(null=True, help_text="Nearest node in surface gravity [dex]")
-    grid_m_h = FloatField(null=True, help_text="Nearest node in metallicity [dex]")
-    grid_v_micro = FloatField(null=True, help_text="Nearest node in microturbulence [km/s]")
+    #> Coarse estimates
+    coarse_teff = FloatField(null=True, help_text="Coarse estimate of effective temperature [K]")
+    coarse_logg = FloatField(null=True, help_text="Coarse estimate of surface gravity [dex]")
+    coarse_c_m = FloatField(null=True, help_text="Coarse estimate of [C/M] [dex]")
+    coarse_m_h = FloatField(null=True, help_text="Coarse estimate of [M/H] [dex]")
+    coarse_n_m = FloatField(null=True, help_text="Coarse estimate of [N/M] [dex]")
+    coarse_v_micro = FloatField(null=True, help_text="Coarse estimate of microturbulence [km/s]")
+    coarse_v_sini = FloatField(null=True, help_text="Coarse estimate of v sini [km/s]")
+    coarse_chi2 = FloatField(null=True, help_text="\chi2 value of coarse estimate")
 
-    #> Stellar Labels
+    #> Stellar labels
     teff = FloatField(null=True, help_text=Glossary.teff)
     e_teff = FloatField(null=True, help_text=Glossary.e_teff)
     logg = FloatField(null=True, help_text=Glossary.logg)
@@ -61,6 +65,10 @@ class Grok(BaseModel, PipelineOutputMixin):
     e_v_micro = FloatField(null=True, help_text=Glossary.e_v_micro)
     m_h = FloatField(null=True, help_text=Glossary.m_h)
     e_m_h = FloatField(null=True, help_text=Glossary.e_m_h)
+    c_m = FloatField(null=True, help_text=Glossary.c_m)
+    e_c_m = FloatField(null=True, help_text=Glossary.e_c_m)
+    n_m = FloatField(null=True, help_text=Glossary.n_m)
+    e_n_m = FloatField(null=True, help_text=Glossary.e_n_m)
     v_sini = FloatField(null=True, help_text=Glossary.v_sini)
     e_v_sini = FloatField(null=True, help_text=Glossary.e_v_sini)
     
@@ -103,12 +111,12 @@ class Grok(BaseModel, PipelineOutputMixin):
     e_ni_h = FloatField(null=True, help_text="Error on nickel abundance [dex]")
 
     #> Path references
-    output_path = TextField(help_text="Path to output file")
-    row_index = IntegerField(help_text="Index of result in output file")
+    #output_path = TextField(help_text="Path to output file")
+    #row_index = IntegerField(help_text="Index of result in output file")
     
     #> Summary Statistics
     chi2 = FloatField(null=True, help_text=Glossary.chi2)
-    rchi2 = FloatField(null=True, help_text=Glossary.rchi2)
+    #rchi2 = FloatField(null=True, help_text=Glossary.rchi2)
     result_flags = BitField(default=0, help_text="Flags describing the results")
     flag_runtime_failure = result_flags.flag(2**0, help_text="Runtime failure")
 
