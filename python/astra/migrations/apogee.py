@@ -2082,6 +2082,7 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
     )
     
 
+    catalogids_with_missing_sdss_ids = set()
     source_data, spectrum_data, matched_sdss_ids = (OrderedDict(), [], {})
     for row in tqdm(q.iterator(), total=limit or 1, desc="Retrieving spectra"):
         basename = row.pop("file")
@@ -2092,7 +2093,11 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
 
         if catalogid in source_data:
             # make sure the only difference is SDSS_ID
-            matched_sdss_ids[catalogid] = min(this_source_data["sdss_id"], source_data[catalogid]["sdss_id"])
+            if this_source_data["sdss_id"] is None and source_data[catalogid]["sdss_id"] is None:
+                log.warning(f"Source is missing SDSS_ID: {source_data[catalogid]}")
+                catalogids_with_missing_sdss_ids.add(catalogid)
+            else:
+                matched_sdss_ids[catalogid] = min(this_source_data["sdss_id"], source_data[catalogid]["sdss_id"])
         else:
             source_data[catalogid] = this_source_data
             matched_sdss_ids[catalogid] = this_source_data["sdss_id"]
@@ -2106,6 +2111,10 @@ def migrate_apvisit_from_sdss5_apogee_drpdb(
             "prefix": basename.lstrip()[:2],
             **row
         })
+        
+    if catalogids_with_missing_sdss_ids:
+        log.warning(f"{len(catalogids_with_missing_sdss_ids)} sources are missing SDSS_IDs:")
+        log.warning(f"\t{', '.join(map(str, catalogids_with_missing_sdss_ids))}")
 
     q_without_rvs = (
         Visit.select(
