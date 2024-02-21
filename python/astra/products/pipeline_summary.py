@@ -13,7 +13,7 @@ get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
 
 def ignore_field_name_callable(field_name):
     return (
-        (field_name.lower() in ("pk", )) 
+        (field_name.lower() in ("pk", "input_spectrum_pks")) 
     or  field_name.lower().startswith("rho_")
     )
     

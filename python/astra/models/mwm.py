@@ -465,7 +465,11 @@ class ApogeeCombinedSpectrum(MWMStarMixin, SpectrumMixin):
     )
     flux = PixelArray(ext=get_apogee_ext, transform=transform_flat, help_text=Glossary.flux)
     ivar = PixelArray(ext=get_apogee_ext, transform=transform_flat, help_text=Glossary.ivar)
-    pixel_flags = PixelArray(ext=get_apogee_ext, transform=transform_flat, help_text=Glossary.pixel_flags)
+    pixel_flags = PixelArray(
+        ext=get_apogee_ext, 
+        transform=lambda x, *_: np.array(x, dtype=np.uint64).flatten(), 
+        help_text=Glossary.pixel_flags
+    )
     
     #> NMF Continuum Model
     continuum = PixelArray(ext=get_apogee_ext, transform=transform_flat, help_text=Glossary.continuum)
