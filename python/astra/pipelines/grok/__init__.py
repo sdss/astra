@@ -28,6 +28,7 @@ def grok(
     use_median_ratio: Optional[bool] = False,
     use_nmf_flux: Optional[bool] = True,
     limit: Optional[int] = None,
+    n_workers: Optional[int] = 0,
     **kwargs
 ) -> Iterable[Grok]:
     """
@@ -109,6 +110,10 @@ def grok(
     # supply a mask to Grok to ignore totally masked pixels
     if mask is None:
         mask = np.ones_like(flux, dtype=bool)
+
+    if n_workers > 0:
+        print("starting julia worker processes")
+        jl.Grok.ensure_workers(n_workers)
             
     # Load the grid.
     print("loading grid")

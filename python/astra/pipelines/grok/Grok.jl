@@ -5,10 +5,23 @@ using SparseArrays: spzeros # used for crazy continuum adjustment
 using Statistics: median
 using FastRunningMedian
 using Polynomials
+using Distributed
+using SharedArrays
 
 _data_dir = joinpath(@__DIR__, "../data") 
 _data_dir = @__DIR__
 # TODO addprocs
+
+"""
+Make sure that there are at least `n` workers available.  
+"""
+function ensure_workers(n)
+    if nworkers() < n
+        addprocs(n - nworkers())
+    elseif nworkers() > n
+        @warn "$n workers requested, but there are already $(nworkers()) workers. Will you run out of memory?"
+    end
+end
 
 #####################################################################
 # TODO these should be excised from the module
@@ -83,26 +96,7 @@ function apply_smoothing_filter!(flux, kernel_width=150;
 end
 
 """
-This can be sped up significantly
-"""
-function moving_median(f; bandwidth=151)
-    @assert isodd(bandwidth)
-    half_bandwidth = (bandwidth - 1) ÷ 2
-    lb = 1 - half_bandwidth
-    ub = 1 + half_bandwidth
-
-    medians = similar(f) 
-    for i in 1:length(f)
-        medians[i] = median(f[max(lb, 1) : min(ub, end)])
-        lb += 1
-        ub += 1
-    end
-    
-    medians
-end
-
-"""
-This loads a grok model grid.
+This loads a grok model grid into a SharedArray.
 """
 function load_grid(grid_path; use_subset=true, v_sinis=nothing, ε=0.6, fill_non_finite=10.0)
     model_spectra = h5read(grid_path, "spectra")
@@ -119,17 +113,6 @@ function load_grid(grid_path; use_subset=true, v_sinis=nothing, ε=0.6, fill_non
     c_ms = h5read(grid_path, "c_m_vals")
     n_ms = h5read(grid_path, "n_m_vals")
 
-
-    #if !isnothing(fix_vmic)
-    #    index = findfirst(v_mics .== fix_vmic)
-    #    model_spectra = model_spectra[:, :, :, index, :, 3, 3]
-    #    labels = ["teff", "logg", "m_h"]#, "c_m", "n_m"]
-    #    grid_points = [teffs, loggs, m_hs]#, c_ms, n_ms]
-    #    print("fixing on vmic, c, m")
-    #else
-    #    labels = ["teff", "logg", "v_micro", "m_h", "c_m", "n_m"]
-    #    grid_points = [teffs, loggs, v_mics, m_hs, c_ms, n_ms]
-    #end
     if use_subset
         model_spectra = model_spectra[:, :, :, 2, :, 3, 3]
         grid_points = [teffs, loggs, m_hs]
@@ -166,7 +149,12 @@ function load_grid(grid_path; use_subset=true, v_sinis=nothing, ε=0.6, fill_non
         
         model_spectra = reshape(_model_spectra, (size(model_spectra, 1), length.(grid_points)...))
     end
-    (labels, grid_points, model_spectra)
+
+    # put model spectra in a shared array
+    spectra = SharedArray{Float64}(dims(model_spectra))
+    spectra .= model_spectra
+
+    (labels, grid_points, spectra)
 end
 
 function load_old_grid(grid_path; fix_vmic=nothing, fill_non_finite=10.0, fix_off_by_one=false, 
@@ -228,24 +216,14 @@ function load_old_grid(grid_path; fix_vmic=nothing, fill_non_finite=10.0, fix_of
     (labels, grid_points, model_spectra)
 end
 
-function _normal_pdf(Δ, σ; cuttoff=3) 
-    if abs(Δ) > cuttoff * 3σ
-        0.0
-    else
-        exp(-0.5 * Δ^2 / σ^2)
-    end
-end
-
 function get_best_subgrid(masked_model_spectra, slicer, flux, ivar, convF, use_median_ratio, ferre_mask)
 
     model_f  = view(masked_model_spectra, :, slicer...) 
 
     corrected_model_f = if use_median_ratio
-        #continua = (flux[ferre_mask, :] ./ model_f)
         continua = (convF[ferre_mask, :] ./ model_f)
         stacked_continua = reshape(continua, (size(continua, 1), :))
         for i in 1:size(stacked_continua, 2)
-            #stacked_continua[:, i] .= moving_median(stacked_continua[:, i])
             stacked_continua[:, i] .= running_median(stacked_continua[:, i], 151)
         end
         @assert continua[:] == stacked_continua[:] #TODO remove
@@ -283,7 +261,6 @@ function get_best_nodes(grid, fluxes, ivars, nmf_fluxes; use_median_ratio=false,
         @showprogress desc="conv'ing inverse models" for i in 1:size(stacked_model_spectra, 2)
             apply_smoothing_filter!(view(convolved_inv_model_flux, :, i))
         end
-        #convolved_model_flux = reshape(convolved_inv_model_flux, size(model_spectra))
         masked_model_spectra = (stacked_model_spectra .* convolved_inv_model_flux)[ferre_mask, :]
         # reshape back. These have the convolved inverse model flux divided out already
         # (so the name is slightly wrong)
@@ -292,10 +269,7 @@ function get_best_nodes(grid, fluxes, ivars, nmf_fluxes; use_median_ratio=false,
         masked_model_spectra = model_spectra[ferre_mask, (1:s for s in size(model_spectra)[2:end])...]
     end
 
-    # iterate over the obbserved spectra
-    out = Array{Any}(undef, length(fluxes))
-    p = Progress(length(fluxes); dt=1.0, desc="finding best-fit nodes")
-    for (i, (flux, ivar, nmf_flux)) in enumerate(zip(fluxes, ivars, nmf_fluxes))
+    @showprogress pmap(fluxes, ivars, nmf_fluxes) do flux, ivar, nmf_flux
         if !use_median_ratio
             convF = copy(nmf_flux)
             fill_chip_gaps!(convF)
@@ -309,9 +283,8 @@ function get_best_nodes(grid, fluxes, ivars, nmf_fluxes; use_median_ratio=false,
 
         slicer = [unique([range(start=1, step=first(refinement_levels), stop=stop)...; stop]) for stop in grid_dims]
         index, chi2 = get_best_subgrid(masked_model_spectra, slicer, flux, ivar, convF, use_median_ratio, ferre_mask)
-        
-        for refinement_level in refinement_levels[2:end]
             
+        for refinement_level in refinement_levels[2:end]
             # create a slicer to take a volume around the current index
             n_points_per_side = max.(minimum_nodes_per_dimension / 2, grid_dims ./ (2 * refinement_level))
 
@@ -323,7 +296,7 @@ function get_best_nodes(grid, fluxes, ivars, nmf_fluxes; use_median_ratio=false,
             s_indices = max.(e_indices .- max.(e_indices .- s_indices, minimum_nodes_per_dimension), 1)
 
             slicer = [[range(start=start, stop=stop)...] for (start, stop) in zip(s_indices, e_indices)]
-            
+                
             index, chi2 = get_best_subgrid(masked_model_spectra, slicer, flux, ivar, convF, use_median_ratio, ferre_mask)
 
             #print(refinement_level, " ", n_points_per_side, " ", s_indices, " ", e_indices, "\n")
@@ -332,26 +305,11 @@ function get_best_nodes(grid, fluxes, ivars, nmf_fluxes; use_median_ratio=false,
         end
 
         # fit a quadratic in each dimension
-
-        #best_fit_node = getindex.(grid_points, index)
-        #splines = map(1:length(best_fit_node)) do index_index
-        #    # the best-fit index for each dimension, but a colon for the one that this spline is over
-        #    slice = [rel_index[1:index_index-1] ; : ; rel_index[index_index+1:end]]
-
-        #    Korg.CubicSplines.CubicSpline(grid_points[index_index][slicer[index_index]], chi2[1, slice...])
-        #end
-        
-        #out[i] = (best_fit_node,
-        # minimum(chi2),
-        # model_spectra[:, index...],
-        # #splines
-        # )
-
         best_fit_value = []
         for i in 1:length(index)
             dims = [1:(1 + length(index))...] # the offset here and next is to handle the singleton dimension
             deleteat!(dims, i + 1)
-        
+            
             x = grid_points[i][slicer[i]]
             y = [minimum(chi2, dims=dims)...]
 
@@ -382,53 +340,10 @@ function get_best_nodes(grid, fluxes, ivars, nmf_fluxes; use_median_ratio=false,
             push!(best_fit_value, x_min)
         end
 
-        # TODO: return convolved nmf flux
-        out[i] = (
-            best_fit_value, 
-            minimum(chi2), 
-            model_spectra[:, index...],
-        )
-        next!(p)
-    end
-    finish!(p)
-    out
-end
-
-#=
-   STUFF TO INTERPOLATE SPECTRA
-"""
-Convert an array to a range if it is possible to do so.
-"""
-function rangify(a::AbstractRange)
-    a
-end
-function rangify(a::AbstractVector)
-    minstep, maxstep = extrema(diff(a))
-    @assert minstep ≈ maxstep
-    range(a[1], a[end]; length=length(a))
-end
-
-# set up a spectrum interpolator
-interpolate_spectrum = let 
-    T_pivot = 3000 # TODO change this to 4000 when the grid is updated
-    coolmask = all_vals[1] .< T_pivot
-
-    # uncomment this to use grids that go below the temperature pivot
-    #xs = rangify.((1:sum(global_ferre_mask), all_vals[1][coolmask], all_vals[2:end]...))
-    #cool_itp = cubic_spline_interpolation(xs, model_spectra[:, coolmask, :, :, :])
-
-    xs = rangify.((1:sum(global_ferre_mask), all_vals[1][.! coolmask], all_vals[2:end]...))
-    hot_itp = cubic_spline_interpolation(xs, model_spectra[:, .!coolmask, :, :]) 
-    
-    function itp(Teff, logg, metallicity) 
-        if Teff < T_pivot
-            #cool_itp(1:sum(global_ferre_mask), Teff, logg, vmic, metallicity)
-        else
-            hot_itp(1:sum(global_ferre_mask), Teff, logg, metallicity)
-        end
+        # TODO: return convolved nmf flux?
+        (best_fit_value, minimum(chi2), model_spectra[:, index...])
     end
 end
-=#
 
 #=
      STUFF FOR LIVE SYNTHESIS
