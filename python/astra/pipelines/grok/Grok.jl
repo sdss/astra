@@ -98,7 +98,8 @@ end
 """
 This loads a grok model grid into a SharedArray.
 """
-function load_grid(grid_path; use_subset=true, v_sinis=nothing, ε=0.6, fill_non_finite=10.0)
+function load_grid(grid_path; use_subset=true, v_sinis=nothing, ε=0.6, fill_non_finite=10.0, 
+                   metallicity_parameter_name="m_h_vals")
     model_spectra = h5read(grid_path, "spectra")
 
     if !isnothing(fill_non_finite)
@@ -109,7 +110,7 @@ function load_grid(grid_path; use_subset=true, v_sinis=nothing, ε=0.6, fill_non
     teffs = h5read(grid_path, "Teff_vals")
     loggs = h5read(grid_path, "logg_vals")
     v_mics = h5read(grid_path, "vmic_vals")
-    m_hs = h5read(grid_path, "m_h_vals")
+    m_hs = h5read(grid_path, metallicity_parameter_name)
     c_ms = h5read(grid_path, "c_m_vals")
     n_ms = h5read(grid_path, "n_m_vals")
 
@@ -155,65 +156,6 @@ function load_grid(grid_path; use_subset=true, v_sinis=nothing, ε=0.6, fill_non
     spectra .= model_spectra
 
     (labels, grid_points, spectra)
-end
-
-function load_old_grid(grid_path; fix_vmic=nothing, fill_non_finite=10.0, fix_off_by_one=false, 
-                   v_sinis=nothing, ε=0.6)
-    model_spectra = h5read(grid_path, "spectra")
-
-    if !isnothing(fill_non_finite)
-        model_spectra[isnan.(model_spectra)] .= fill_non_finite
-    end
-
-    # TODO make it possible to not hardcode the specific parameters?
-    teffs = h5read(grid_path, "Teff_vals")
-    loggs = h5read(grid_path, "logg_vals")
-    v_mics = h5read(grid_path, "vmic_vals")
-    m_hs = h5read(grid_path, "metallicity_vals")
-
-    if !isnothing(fix_vmic)
-        index = findfirst(v_mics .== fix_vmic)
-        model_spectra = model_spectra[:, :, :, index, :]
-        labels = ["teff", "logg", "m_h"]
-        grid_points = [teffs, loggs, m_hs]
-    else
-        labels = ["teff", "logg", "v_micro", "m_h"]
-        grid_points = [teffs, loggs, v_mics, m_hs]
-    end
-
-    if fix_off_by_one
-        # TODO audit this
-        model_spectra[2:end, :, :, :, :] .= model_spectra[1:end-1, :, :, :, :]
-    end
-
-    if !isnothing(v_sinis)
-
-        # make it a matrix with each row a spectrum
-        model_spectra = reshape(model_spectra, (size(model_spectra, 1), :))
-
-        _model_spectra = Array{Float64}(undef, (size(model_spectra, 1),  
-                                                prod(collect(size(model_spectra)[2:end])),
-                                                length(v_sinis)))
-
-        # apply each kernel to model spectra to add a new dimention to the grid
-        for (i, v_sini) in enumerate(v_sinis)
-            for j in 1:size(model_spectra, 2)
-                rotF = apply_rotation(model_spectra[:, j], v_sini, ε=ε)
-                if all(rotF .== 0)
-                    println("all null")
-                end
-                _model_spectra[:, j, i] = rotF #apply_rotation(model_spectra[:, j], v_sini, ε=ε)
-            end
-            # apply the kernel to each spectrum
-            #_model_spectra[:, :, i] = kernel * model_spectra
-        end
-
-        push!(grid_points, v_sinis)
-        push!(labels, "v_sini")
-        
-        model_spectra = reshape(_model_spectra, (size(model_spectra, 1), length.(grid_points)...))
-    end
-    (labels, grid_points, model_spectra)
 end
 
 function get_best_subgrid(masked_model_spectra, slicer, flux, ivar, convF, use_median_ratio, ferre_mask)
