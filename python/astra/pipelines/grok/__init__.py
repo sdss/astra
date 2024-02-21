@@ -198,14 +198,6 @@ def inflate_errors_at_bad_pixels(
 
 
 if __name__ == '__main__':
-    '''
-    fluxes, ivars, t = read_tayar_files()
-
-    best_fit_nodes = Grok.get_best_nodes(fluxes, ivars, "../../grok_old/korg_grid_old.h5")
-    print(best_fit_nodes)
-
-    '''
-    
     # Let's do the kepler ajacent field
     from astra.models import ApogeeCoaddedSpectrumInApStar, Source
     sdss4_apogee_ids = """
@@ -498,16 +490,6 @@ if __name__ == '__main__':
         .join(Source, on=(Source.pk == ApogeeCombinedSpectrum.source_pk))
         .where(Source.sdss4_apogee_id.in_(sdss4_apogee_ids))
     )
-    
-    '''
-    results = list(grok(
-        spectra, 
-        use_nmf_flux=True, 
-        fix_v_micro=None, 
-        v_sinis=[0, 5, 10, 20, 30, 50, 100], 
-        use_median_ratio=True
-    ))
-    '''
     
     results = list(grok(
         spectra,
