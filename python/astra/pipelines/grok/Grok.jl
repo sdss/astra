@@ -2,8 +2,7 @@ module Grok
 using HDF5, Optim, FITSIO, Interpolations, Korg, ProgressMeter
 using DSP: gaussian, conv  # used for vsini and continuum adjustment
 using SparseArrays: spzeros # used for crazy continuum adjustment
-using Statistics: median
-using FastRunningMedian
+using FastRunningMedian: running_median
 using Polynomials
 using Distributed
 using SharedArrays
@@ -99,7 +98,8 @@ end
 This loads a grok model grid into a SharedArray.
 """
 function load_grid(grid_path; use_subset=true, v_sinis=nothing, ε=0.6, fill_non_finite=10.0, 
-                   metallicity_parameter_name="m_h_vals")
+                   use_median_ratio=false, old_grid=false, 
+                   metallicity_parameter_name= (old_grid ? "metallicity_vals" : "m_h_vals"))
     model_spectra = h5read(grid_path, "spectra")
 
     if !isnothing(fill_non_finite)
@@ -111,14 +111,18 @@ function load_grid(grid_path; use_subset=true, v_sinis=nothing, ε=0.6, fill_non
     loggs = h5read(grid_path, "logg_vals")
     v_mics = h5read(grid_path, "vmic_vals")
     m_hs = h5read(grid_path, metallicity_parameter_name)
-    c_ms = h5read(grid_path, "c_m_vals")
-    n_ms = h5read(grid_path, "n_m_vals")
 
-    if use_subset
+    if old_grid
+        model_spectra = model_spectra[:, :, :, 2, :]
+        grid_points = [teffs, loggs, m_hs]
+        labels = ["teff", "logg", "m_h"]
+    elseif use_subset
         model_spectra = model_spectra[:, :, :, 2, :, 3, 3]
         grid_points = [teffs, loggs, m_hs]
-        labels = ["teff", "logg", "m_h"]#, "c_m", "n_m"]
+        labels = ["teff", "logg", "m_h"]
     else
+        c_ms = h5read(grid_path, "c_m_vals")
+        n_ms = h5read(grid_path, "n_m_vals")
         labels = ["teff", "logg", "v_micro", "m_h", "c_m", "n_m"]
         grid_points = [teffs, loggs, v_mics, m_hs, c_ms, n_ms]
     end
@@ -151,9 +155,27 @@ function load_grid(grid_path; use_subset=true, v_sinis=nothing, ε=0.6, fill_non
         model_spectra = reshape(_model_spectra, (size(model_spectra, 1), length.(grid_points)...))
     end
 
-    # put model spectra in a shared array
-    spectra = SharedArray{Float64}(dims(model_spectra))
-    spectra .= model_spectra
+    # apply the global ferre mask, and (if not using a running media of the ratio) divide out a 
+    # moving mean
+    filtered_spectra = if use_median_ratio
+        model_spectra[ferre_mask, (1:s for s in size(model_spectra)[2:end])...]
+    else
+        # reshape the model spectra to be a 2D array w/ first dimension corresponding to wavelength 
+        # and apply the global ferre mask
+        stacked_model_spectra = reshape(model_spectra, (size(model_spectra, 1), :))
+        convolved_inv_model_flux = 1 ./ stacked_model_spectra
+        @showprogress desc="conv'ing inverse models" for i in 1:size(stacked_model_spectra, 2)
+            apply_smoothing_filter!(view(convolved_inv_model_flux, :, i))
+        end
+        filtered_spectra = (stacked_model_spectra .* convolved_inv_model_flux)[ferre_mask, :]
+        # reshape back. These have the convolved inverse model flux divided out already
+        # (so the name is slightly wrong)
+        reshape(filtered_spectra, (size(filtered_spectra, 1), size(model_spectra)[2:end]...))
+    end
+
+    # put model spectra in a shared array TODO make this memory-efficient
+    spectra = SharedArray{Float64}(size(filtered_spectra))
+    spectra .= filtered_spectra
 
     (labels, grid_points, spectra)
 end
@@ -163,6 +185,7 @@ function get_best_subgrid(masked_model_spectra, slicer, flux, ivar, convF, use_m
     model_f  = view(masked_model_spectra, :, slicer...) 
 
     corrected_model_f = if use_median_ratio
+        # if using running median of flux/model ratio, we have to do it now
         continua = (convF[ferre_mask, :] ./ model_f)
         stacked_continua = reshape(continua, (size(continua, 1), :))
         for i in 1:size(stacked_continua, 2)
@@ -194,22 +217,8 @@ function get_best_nodes(grid, fluxes, ivars, nmf_fluxes; use_median_ratio=false,
     ivars = Vector{Float64}.(collect.(ivars))
     nmf_fluxes = Vector{Float64}.(collect.(nmf_fluxes))
 
-    labels, grid_points, model_spectra = grid 
-
-    # reshape the model spectra to be a 2D array w/ first dimension corresponding to wavelength
-    if !use_median_ratio
-        stacked_model_spectra = reshape(model_spectra, (size(model_spectra, 1), :))
-        convolved_inv_model_flux = 1 ./ stacked_model_spectra
-        @showprogress desc="conv'ing inverse models" for i in 1:size(stacked_model_spectra, 2)
-            apply_smoothing_filter!(view(convolved_inv_model_flux, :, i))
-        end
-        masked_model_spectra = (stacked_model_spectra .* convolved_inv_model_flux)[ferre_mask, :]
-        # reshape back. These have the convolved inverse model flux divided out already
-        # (so the name is slightly wrong)
-        masked_model_spectra = reshape(masked_model_spectra, (size(masked_model_spectra, 1), size(model_spectra)[2:end]...))
-    else
-        masked_model_spectra = model_spectra[ferre_mask, (1:s for s in size(model_spectra)[2:end])...]
-    end
+    # if we are not using a median ratio, the grid should be pre-filtered with a moving mean.
+    labels, grid_points, masked_model_spectra = grid 
 
     @showprogress pmap(fluxes, ivars, nmf_fluxes) do flux, ivar, nmf_flux
         if !use_median_ratio
