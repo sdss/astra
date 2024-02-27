@@ -250,8 +250,9 @@ def snow_white(
                     ]
                 ).writeto(result.absolute_path, overwrite=True)
                     
-                if plot:                
-                    lines_s_o,lines_m_o,mod_n_o=fitting_scripts.fit_func((best_T2,best_g2,shift2),
+                if plot:
+                    if initial==0:
+                        lines_s_o,lines_m_o,mod_n_o=fitting_scripts.fit_func((best_T2,best_g2,shift2),
                                                                     spec_n,l_crop,emu,wref,mode=1)
                     fig=plt.figure(figsize=(8,5))
                     ax1 = plt.subplot2grid((1,4), (0, 3),rowspan=3)
@@ -260,8 +261,9 @@ def snow_white(
                         min_p   = lines_s[i][:,0][lines_s[i][:,1]==np.min(lines_s[i][:,1])][0]
                         ax1.plot(lines_s[i][:,0]-min_p,lines_s[i][:,1]+step,color='k')
                         ax1.plot(lines_s[i][:,0]-min_p,lines_m[i]+step,color='r')
-                        min_p_o = lines_s_o[i][:,0][lines_s_o[i][:,1]==np.min(lines_s_o[i][:,1])][0]                        
-                        ax1.plot(lines_s_o[i][:,0]-min_p_o,lines_m_o[i]+step,color='g')
+                        if initial ==0:
+                            min_p_o = lines_s_o[i][:,0][lines_s_o[i][:,1]==np.min(lines_s_o[i][:,1])][0]                        
+                            ax1.plot(lines_s_o[i][:,0]-min_p_o,lines_m_o[i]+step,color='g')
                         step+=0.5
                     xticks = ax1.xaxis.get_major_ticks()
                     ax1.set_xticklabels([])
@@ -270,15 +272,15 @@ def snow_white(
                     ax2 = plt.subplot2grid((3,4), (0, 0),colspan=3,rowspan=2)
                     ax2.plot(full_spec[:,0],full_spec[:,1],color='k')
                     ax2.plot(mod_n[:,0]+shift,(mod_n[:,1]/adjust),color='r')
-                
-                    check_f_model_o=mod_n_o[:,1][(mod_n_o[:,0]>4500.) & (mod_n_o[:,0]<4550.)]
-                    adjust_o=np.average(check_f_model_o)/np.average(check_f_spec)
-                    ax2.plot(mod_n_o[:,0]+shift,mod_n_o[:,1]/adjust_o,color='g')
+                    if initial ==0:
+                        check_f_model_o=mod_n_o[:,1][(mod_n_o[:,0]>4500.) & (mod_n_o[:,0]<4550.)]
+                        adjust_o=np.average(check_f_model_o)/np.average(check_f_spec)
+                        ax2.plot(mod_n_o[:,0]+shift2,mod_n_o[:,1]/adjust_o,color='g')
 
                     ax2.set_ylabel(r'F$_{\lambda}$ [erg cm$^{-2}$ s$^{-1} \AA^{-1}$]',fontsize=12)
                     ax2.set_xlabel(r'Wavelength $(\AA)$',fontsize=12)
                     ax2.set_xlim([3400,5600])
-                    ax2.set_ylim(0, 2 * np.nanmax(mod_n_o[:,1]/adjust_o))
+                    ax2.set_ylim(0, 2 * np.nanmax(mod_n[:,1]/adjust))
                     ax3 = plt.subplot2grid((3,4), (2, 0),colspan=3,rowspan=1,sharex=ax2)
 
                     flux_i = interpolate.interp1d(mod_n[:,0]+shift,mod_n[:,1]/adjust,kind='linear')(full_spec[:,0])
