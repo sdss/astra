@@ -160,10 +160,17 @@ def snow_white(
                 best_ge=new_best.params['logg'].stderr
                 shift2=new_best.params['rv'].value
                 chi2=new_best.redchi #can easily get a chi2 
-                
-                if initial ==0: #if initial guess not from photometric result need to repeat for hot/cold solution
+
+                if initial ==1:
+                    esult_kwds.update(
+                        teff=best_T,
+                        e_teff=best_Te,
+                        logg=best_g/100,
+                        e_logg=best_ge/100)
+                    
+                elif initial ==0: #if initial guess not from photometric result need to repeat for hot/cold solution
                     fit_params = lmfit.Parameters()
-                    fit_params['logg'] = lmfit.Parameter(name="logg",value=800,min=701,max=949)
+                    fit_params['logg'] = lmfit.Parameter(name="logg",value=800,min=701,max=949) #stick with logg 800
                     fit_params['rv'] = lmfit.Parameter(name="rv",value=0.2, min=-80, max=80)
         
                     if first_T <=13000.:
@@ -176,53 +183,51 @@ def snow_white(
                         second_T= tmp_Tg[tmp_chi==np.min(tmp_chi)][0][0]
                         fit_params['teff'] = lmfit.Parameter(name="teff",value=second_T,min=3000,max=13000)
 
-                second_g=800 #stick with logg 800
-                if second_T>=16000 and second_T<=40000:
-                    line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop.dat'),skiprows=1)
-                elif second_T>=8000 and second_T<16000:
-                    line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_cool.dat'),skiprows=1)
-                elif second_T<8000:
-                    line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_vcool.dat'),skiprows=1)
-                elif second_T>40000:
-                    line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_hot.dat'),skiprows=1)
-                l_crop = line_crop[(line_crop[:,0]>spec_w.min()) & (line_crop[:,1]<spec_w.max())]
+                    if second_T>=16000 and second_T<=40000:
+                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop.dat'),skiprows=1)
+                    elif second_T>=8000 and second_T<16000:
+                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_cool.dat'),skiprows=1)
+                    elif second_T<8000:
+                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_vcool.dat'),skiprows=1)
+                    elif second_T>40000:
+                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_hot.dat'),skiprows=1)
+                    l_crop = line_crop[(line_crop[:,0]>spec_w.min()) & (line_crop[:,1]<spec_w.max())]
                 
                 #====================find second solution ==============================================
-                second_best= lmfit.minimize(fitting_scripts_v2.line_func_rv,fit_params,args=(spec_nl,l_crop,emu,wref),method="leastsq")
-                best_T2=second_best.params['teff'].value
-                best_Te2=second_best.params['teff'].stderr
-                best_g2=second_best.params['logg'].value
-                best_ge2=second_best.params['logg'].stderr
-                shift2=second_best.params['rv'].value
-                chi2_2=second_best.redchi #can easily get a chi2 
+                    second_best= lmfit.minimize(fitting_scripts_v2.line_func_rv,fit_params,args=(spec_nl,l_crop,emu,wref),method="leastsq")
+                    best_T2=second_best.params['teff'].value
+                    best_Te2=second_best.params['teff'].stderr
+                    best_g2=second_best.params['logg'].value
+                    best_ge2=second_best.params['logg'].stderr
+                    shift2=second_best.params['rv'].value
+                    chi2_2=second_best.redchi #can easily get a chi2 
 
                
                 #========================use gaia G mag and parallax to solve for hot vs cold solution
                 
-                T_true=fitting_scripts.hot_vs_cold(best_T,best_g/100,best_T2,best_g2/100,spectrum.source.plx or np.nan,spectrum.source.g_mag or np.nan,emu,wref)
-                if T_true==best_T:
-                    result_kwds.update(
-                        teff=best_T,
-                        e_teff=best_Te,
-                        logg=best_g/100,
-                        e_logg=best_ge/100,
-                        #v_rel=best_rv  # rv should not be an output of snow_white now
-                    )
-                elif T_true==best_T2:
-                    result_kwds.update(
-                        teff=best_T2,
-                        e_teff=best_Te2,
-                        logg=best_g2/100,
-                        e_logg=best_ge2/100,
-                        #v_rel=best_rv2
-                    )
-
+                    T_true=fitting_scripts.hot_vs_cold(best_T,best_g/100,best_T2,best_g2/100,spectrum.source.plx or np.nan,spectrum.source.g_mag or np.nan,emu,wref)
+                    if T_true==best_T:
+                        result_kwds.update(
+                            teff=best_T,
+                            e_teff=best_Te,
+                            logg=best_g/100,
+                            e_logg=best_ge/100,
+                            #v_rel=best_rv  # rv should not be an output of snow_white now
+                        )
+                    elif T_true==best_T2:
+                        result_kwds.update(
+                            teff=best_T2,
+                            e_teff=best_Te2,
+                            logg=best_g2/100,
+                            e_logg=best_ge2/100,
+                            #v_rel=best_rv2
+                        )
                 result = SnowWhite(**result_kwds)
 
-#===============================================================fixed up to here==================================================
+#=========================================================still use old fit_func to generateretrieve model for plot==================================================
 
                 # Get and save the 2 best lines from the spec and model, and the full models
-                lines_s,lines_m,mod_n=fitting_scripts.fit_func((best_T,best_g,best_rv),
+                lines_s,lines_m,mod_n=fitting_scripts.fit_func((best_T,best_g,shift),
                                                         spec_n,l_crop,emu,wref,mode=1)
 
                 full_spec=np.stack((spectrum.wavelength,spectrum.flux,spectrum.e_flux),axis=-1)
@@ -234,7 +239,7 @@ def snow_white(
                 check_f_model=mod_n[:,1][(mod_n[:,0]>4500.) & (mod_n[:,0]<4550.)]
                 adjust=np.average(check_f_model)/np.average(check_f_spec)
 
-                model_wavelength, model_flux = (mod_n[:,0]*(best_rv+c)/c, (mod_n[:,1]/adjust))
+                model_wavelength, model_flux = (mod_n[:,0]+shift, (mod_n[:,1]/adjust))
                 # resample
                 resampled_model_flux = interpolate.interp1d(model_wavelength, model_flux, kind='linear', bounds_error=False)(spectrum.wavelength)
 
@@ -246,18 +251,16 @@ def snow_white(
                 ).writeto(result.absolute_path, overwrite=True)
                     
                 if plot:                
-                
-                    lines_s_o,lines_m_o,mod_n_o=fitting_scripts.fit_func((best_T2,best_g2,best_rv),
-                                                                    spec_n,l_crop,emu,wref,mode=1)                
-
+                    lines_s_o,lines_m_o,mod_n_o=fitting_scripts.fit_func((best_T2,best_g2,shift2),
+                                                                    spec_n,l_crop,emu,wref,mode=1)
                     fig=plt.figure(figsize=(8,5))
                     ax1 = plt.subplot2grid((1,4), (0, 3),rowspan=3)
                     step = 0
                     for i in range(0,len(lines_s)): # plots Halpha (i=0) to H6 (i=5)
                         min_p   = lines_s[i][:,0][lines_s[i][:,1]==np.min(lines_s[i][:,1])][0]
-                        min_p_o = lines_s_o[i][:,0][lines_s_o[i][:,1]==np.min(lines_s_o[i][:,1])][0]
                         ax1.plot(lines_s[i][:,0]-min_p,lines_s[i][:,1]+step,color='k')
                         ax1.plot(lines_s[i][:,0]-min_p,lines_m[i]+step,color='r')
+                        min_p_o = lines_s_o[i][:,0][lines_s_o[i][:,1]==np.min(lines_s_o[i][:,1])][0]                        
                         ax1.plot(lines_s_o[i][:,0]-min_p_o,lines_m_o[i]+step,color='g')
                         step+=0.5
                     xticks = ax1.xaxis.get_major_ticks()
@@ -265,17 +268,12 @@ def snow_white(
                     ax1.set_yticklabels([])
 
                     ax2 = plt.subplot2grid((3,4), (0, 0),colspan=3,rowspan=2)
-                    #try:
-                    #    full_spec=np.loadtxt(sys.argv[1],usecols=(0,1),delimiter=",",unpack=True).transpose()
-                    #except:
-                    #    full_spec=np.loadtxt(sys.argv[1],usecols=(0,1),unpack=True).transpose()
-                    
                     ax2.plot(full_spec[:,0],full_spec[:,1],color='k')
-                    ax2.plot(mod_n[:,0]*(best_rv+c)/c,(mod_n[:,1]/adjust),color='r')
+                    ax2.plot(mod_n[:,0]+shift,(mod_n[:,1]/adjust),color='r')
                 
                     check_f_model_o=mod_n_o[:,1][(mod_n_o[:,0]>4500.) & (mod_n_o[:,0]<4550.)]
                     adjust_o=np.average(check_f_model_o)/np.average(check_f_spec)
-                    ax2.plot(mod_n_o[:,0]*(best_rv+c)/c,mod_n_o[:,1]/adjust_o,color='g')
+                    ax2.plot(mod_n_o[:,0]+shift,mod_n_o[:,1]/adjust_o,color='g')
 
                     ax2.set_ylabel(r'F$_{\lambda}$ [erg cm$^{-2}$ s$^{-1} \AA^{-1}$]',fontsize=12)
                     ax2.set_xlabel(r'Wavelength $(\AA)$',fontsize=12)
@@ -283,7 +281,7 @@ def snow_white(
                     ax2.set_ylim(0, 2 * np.nanmax(mod_n_o[:,1]/adjust_o))
                     ax3 = plt.subplot2grid((3,4), (2, 0),colspan=3,rowspan=1,sharex=ax2)
 
-                    flux_i = interpolate.interp1d(mod_n[:,0]*(best_rv+c)/c,mod_n[:,1]/adjust,kind='linear')(full_spec[:,0])
+                    flux_i = interpolate.interp1d(mod_n[:,0]+shift,mod_n[:,1]/adjust,kind='linear')(full_spec[:,0])
                     wave3=full_spec[:,0]
                     flux3=full_spec[:,1]/flux_i
                     binsize=1

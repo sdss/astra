@@ -271,8 +271,8 @@ def tmp_func_rv(_T, _g,_rv,_sn, _l, emu,wref,mode):
     for i in range(len(_l)):
         vv=_rv
         if mode!=2:
-            _l_c=_l*(vv+c)/c
-            m_wave_n_c=m_wave_n*(vv+c)/c
+            _l_c=_l+vv
+            m_wave_n_c=m_wave_n+vv
         else:
             _l_c=_l
             m_wave_n_c=m_wave_n
