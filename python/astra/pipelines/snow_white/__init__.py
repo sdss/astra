@@ -109,9 +109,9 @@ def snow_white(
                 log_H=np.array(tl[u'logg_H']).astype(float)
                 eT_H=np.array(tl[u'eteff_H']).astype(float)
                 elog_H=np.array(tl[u'elogg_H']).astype(float)
-                if GaiaID in sourceID: #if there is a photometric solution use that as starting point
-                    first_T=T_H[sourceID==GaiaID][0]
-                    first_g=log_H[sourceID==GaiaID][0]*100
+                if spectrum.source.gaia_dr3_source_id in sourceID: #if there is a photometric solution use that as starting point
+                    first_T=T_H[sourceID==spectrum.source.gaia_dr3_source_id][0]
+                    first_g=log_H[sourceID==spectrum.source.gaia_dr3_source_id][0]*100
                     initial=1
                 if first_T > 80000:
                     first_T=80000
