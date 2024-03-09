@@ -11,8 +11,51 @@ from astra.utils import expand_path
 
 PIPELINE_DATA_DIR = expand_path(f"$MWM_ASTRA/pipelines/snow_white")
 
+def da_line_normalize(spectra,l_crop,mod=True):
+    import matplotlib.pyplot as plt
+    sn_w=spectra[:,0]
+    cropped_w=[]
+    cropped_f=[]
+    cropped_e=[]
+    for i in range(len(l_crop)):
+        if not mod:
+            l_c0,l_c1 = l_crop[i,0],l_crop[i,1]
+            line = spectra[(sn_w>=l_c0)&(sn_w<=l_c1)]
+            init_f=np.mean(line[:,1][0:15])
+            end_f=np.mean(line[:,1][-15:])
+            init_w=np.mean(line[:,0][0:15])
+            end_w=np.mean(line[:,0][-15:])
+            
+        else:
+            l_c0,l_c1 = l_crop[i,0]-10,l_crop[i,1]+10
+            line = spectra[(sn_w>=l_c0)&(sn_w<=l_c1)]
+            init_f=np.max(line[:,1][0:30])
+            end_f=np.max(line[:,1][-30:])
+            init_w=line[:,0][line[:,1]==init_f][0]#np.max(line[:,0][0:20])
+            end_w=line[:,0][line[:,1]==end_f][0]#np.max(line[:,0][-20:])
+        z=np.polyfit([init_w,end_w], [init_f,end_f],1)
+        lin = np.poly1d(z)
+        cont=lin(line[:,0])
+        if not mod:
+            n_err=line[:,2]/cont
+            cropped_e.append(n_err)
+        n_flux=line[:,1]/cont
+        cropped_f.append(n_flux)
+        cropped_w.append(line[:,0])
+        #plt.plot(line[:,0],line[:,1])
+        #plt.plot(line[:,0],cont,c="r")
+        #plt.scatter([init_w,end_w], [init_f,end_f],c="r")
+        #plt.show()
+    all_cropped_w=np.concatenate((cropped_w),axis=0)
+    all_cropped_f=np.concatenate((cropped_f),axis=0)
+    if not mod:
+        all_cropped_e=np.concatenate((cropped_e),axis=0)
+        norm_lines=np.stack((all_cropped_w,all_cropped_f,all_cropped_e),axis=-1)
+    else:
+        norm_lines=np.stack((all_cropped_w,all_cropped_f),axis=-1)
+    return norm_lines
 
-def norm_spectra(spectra,model=True,add_infinity=False):
+def norm_spectra(spectra,model=True,add_infinity=False,mod=True):
     """
     Normalised spectra by DA  continuum regions 
     spectra of form array([wave,flux,error]) (err not necessary so works on models)
@@ -22,25 +65,20 @@ def norm_spectra(spectra,model=True,add_infinity=False):
         add_infinity=False : add a spline point at [inf,0]
     returns spectra, cont_flux
     """
-    
-    #start_n=np.array([3630,3675.,3770.,3796.,3835.,3895.,3995.,4180,4490.,4620.,5070.,5200.,
-     #                     5600.,6000.,7000.,7400.,7700.])#,8400.])
-    #end_n=np.array([3660,3725.,3795.,3830.,3885.,3960.,4075.,4240,4570.,4670.,5100.,5300.,
-     #                   5800.,6200.,7150.,7500.,7800.])#,8750.])
-    #n_range_s=np.array(['M','M','M','P','P','P','P','P','M','M','M','M','M','M','M','M','M'])#,'M'])
-    #if model==False:
-     #   start_n=np.array([3805,3835.,3895.,3995.,4180,4490.,4620.,5070.,5200.,
-      #                    5600.,6000.,7000.,7400.,7700.])
-       # end_n=np.array([3830,3885.,3960.,4075.,4240,4570.,4670.,5100.,5300.,
-        #                5800.,6100.,7150.,7500.,7800.])
-        #n_range_s=np.array(['P','P','P','P','P','P','M','M','M','M','M','M','M','M','M','M','M'])
-        #n_range_s=np.array(['M','M','M','M','M','M','M','M','M','M','M','M','M','M','M','M','M'])
-    #else:
-    start_n=np.array([3805,3835.,3895.,3995.,4180,4490.,4620.,5070.,5200.,
+    if mod:
+        start_n=np.array([3630,3675.,3770,3805,3835.,3895.,3995.,4210,4490.,4620.,5070.,5200.,
                       5600.,6000.,7000.,7400.,7700.])
-    end_n=np.array([3830,3885.,3960.,4075.,4240,4570.,4670.,5100.,5300.,
-                    5800.,6100.,7150.,7500.,7800.])
-    n_range_s=np.array(['P','P','P','P','P','M','M','M','M','M','M','M','M','M','M','M','M'])
+        end_n=np.array([3660,3725,3795,3830,3885.,3960.,4075.,4240,4570.,4670.,5100.,5300.,
+                        5800.,6100.,7150.,7500.,7800.])
+        n_range_s=np.array(['M','M','P','P','P','P','P','P','M','M','M','M','M','M','M','M','M','M','M','M'])
+    
+    else:
+        start_n=np.array([3700,3770,3835.,3900.,3995.,4180,4490.,5070.,5200.,
+                              5600.,6000.,6120,6300,6800,7000.,7400.,7700.])
+        end_n=np.array([3720,3795,3885.,3950,4075.,4240,4570.,5100.,5300.,
+                            5800.,6100.,6200,6340,6850,7150.,7500.,7800.])
+        n_range_s=np.array(['M','M','P','P','P','P','M','M','M','M','M','M','M','M','M','M','M','M'])
+    
     if len(spectra[0])>2:
         snr = np.zeros([len(start_n),3])
         spectra[:,2][spectra[:,2]==0.] = spectra[:,2].max()
@@ -76,9 +114,7 @@ def norm_spectra(spectra,model=True,add_infinity=False):
                             snr[j,0]= l[f==np.max(f)]
                     n=int(np.size(_s[:,1])/3.)
                     f_sort=np.sort(_s[:,1])
-                    #errs=[np.where(f==i) for i in f_sort]
                     top5=f_sort[-n:]
-                    #res = np.flatnonzero(np.isin(f, top5))  # NumPy v1.13+
                     snr[j,1]= np.average(top5)#,weights=[res])
                 #find mean and save
                 elif n_range_s[j]=='M':
@@ -86,7 +122,7 @@ def norm_spectra(spectra,model=True,add_infinity=False):
                 else: print('Unknown n_range_s, ignoring')
     snr = snr[ snr[:,0] != 0 ]
     #t parameter chosen by eye. Position of knots.
-    if snr[:,0].max() < 6460: knots = [4900,4100,4340,4500,4860,int(snr[:,0].max()-5)]
+    if snr[:,0].max() < 6460: knots =[4100,4340,4500,4860,int(snr[:,0].max()-5)]
     else: knots = [3885,4340,4900,6460,7500]
     if snr[:,0].min() > 3885:
         print('Warning: knots used for spline norm unsuitable for high order fitting')
@@ -112,12 +148,18 @@ def norm_spectra(spectra,model=True,add_infinity=False):
         if len(spectra[0])>2: 
             tck = interpolate.splrep(snr[:,0],snr[:,1], w=1/snr[:,2], t=knots, k=3)
         else: tck = interpolate.splrep(snr[:,0],snr[:,1], t=knots, k=3)
-    spline = interpolate.splrep(snr[:,0],snr[:,1],k=3)
-    cont_flux = interpolate.splev(wav,spline).reshape(wav.size, 1)   
-    #cont_flux = interpolate.splev(wav,tck).reshape(wav.size, 1)
-    spectra_ret = np.copy(spectra)
-    spectra_ret[:,1:] = spectra_ret[:,1:]/cont_flux
-    #spectra_ret=spectra[:,1]/cont_flux
+    if mod:
+        spline = interpolate.splrep(snr[:,0],snr[:,1],k=3)#,s=0.001)
+    else:
+        spline = interpolate.splrep(snr[:,0],snr[:,1],w=1/snr[:,2],k=3,s=3)
+    cont_flux = interpolate.splev(wav,spline)#.reshape(wav.size, 1)   
+    f_ret=spectra[:,1]/cont_flux
+    if mod:
+        spectra_ret=np.stack((spectra[:,0],f_ret),axis=-1)
+    else:
+        e_ret=spectra[:,0]/cont_flux
+        spectra_ret=np.stack((spectra[:,0],f_ret,e_ret),axis=-1)
+        
 #=======================plot for diagnostic============================
     #import matplotlib.pyplot as plt
     #print(spectra_ret)
@@ -128,6 +170,54 @@ def norm_spectra(spectra,model=True,add_infinity=False):
     #plt.show()
 #======================================================================
     return spectra_ret, cont_flux
+
+
+def line_func_rv(params,_sn, _l,emu,wref):
+    import lmfit
+    parvals = params.valuesdict()
+    _T = parvals['teff']
+    _g = parvals['logg']
+    _rv = parvals['rv']
+    recovered=generate_modelDA(_T,(_g),emu)
+    model=np.stack((wref,recovered),axis=-1)
+    model=convolve_gaussian_R(model,1700)
+    #model2=convolve_gaussian_R(model,2100)#5.487*2)
+    #m1=model1[model1[:,0]<=6000]
+    #m2=model2[model2[:,0]>6000]
+    #model=np.vstack((m1,m2))
+    model[:,0]=model[:,0]+_rv
+    _l=_l#+_rv
+    norm_model=da_line_normalize(model,_l)
+    m_wave_n, m_flux_n = norm_model[:,0], norm_model[:,1]
+    sn_w=_sn[:,0]
+    lines_m, lines_s, sum_l_chi2 = [],[],0
+    flux_s,err_s=[],[]
+    chi_line=[]
+    for i in range(len(_l)):
+        _l_c=_l
+        m_wave_n_c=m_wave_n
+        # Crop model and spec to line
+        l_c0,l_c1 = _l_c[i,0],_l_c[i,1]
+        l_m= m_flux_n[(m_wave_n>=l_c0-1)&(m_wave_n<=l_c1+1)]
+        l_m_w=m_wave_n[(m_wave_n>=l_c0-1)&(m_wave_n<=l_c1+1)]
+        l_s = _sn[(sn_w>=l_c0)&(sn_w<=l_c1)]
+        l_m= interpolate.interp1d(l_m_w,l_m,kind='linear')(l_s[:,0])
+        lines_m.append(l_m)
+        lines_s.append(l_s)       
+        flux_s.append(l_s[:,1])
+        err_s.append(l_s[:,2])
+        #chi_line.append(np.sum(((l_s[:,1]-l_m)/l_s[:,2])**2))#/np.size(l_m))
+    all_lines_m=np.concatenate((lines_m),axis=0)
+    all_lines_s=np.concatenate((flux_s),axis=0)
+    all_err_s=np.concatenate((err_s),axis=0)
+    #sum_l_chi2=np.array(((all_lines_s-all_lines_m)/all_err_s)**2)
+    #chi_line=np.array(chi_line)
+    #chi_line_s=np.sort(chi_line)
+    #chi_line_m = chi_line_s[:-1]
+    #chi_sum=np.mean(chi_line)
+    chi=np.array((all_lines_s-all_lines_m)/all_err_s)
+    return(sum_l_chi2)
+
 
 def fit_grid(specn,l_crop):
     #load normalised models and linearly interp models onto spectrum wave
@@ -181,8 +271,8 @@ def tmp_func_rv(_T, _g,_rv,_sn, _l, emu,wref,mode):
     for i in range(len(_l)):
         vv=_rv
         if mode!=2:
-            _l_c=_l*(vv+c)/c
-            m_wave_n_c=m_wave_n*(vv+c)/c
+            _l_c=_l+vv
+            m_wave_n_c=m_wave_n+vv
         else:
             _l_c=_l
             m_wave_n_c=m_wave_n
