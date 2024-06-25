@@ -7,6 +7,7 @@ using Polynomials
 using Distributed
 using SharedArrays
 
+
 _data_dir = joinpath(@__DIR__, "../data") 
 _data_dir = @__DIR__
 # TODO addprocs
@@ -97,9 +98,15 @@ end
 """
 This loads a grok model grid into a SharedArray.
 """
+<<<<<<< HEAD
 function load_grid(grid_path; use_subset=true, v_sinis=nothing, ε=0.6, fill_non_finite=10.0, 
                    use_median_ratio=false, old_grid=false, 
                    metallicity_parameter_name= (old_grid ? "metallicity_vals" : "m_h_vals"))
+=======
+
+
+function load_grid(grid_path; use_subset=true, v_sinis=nothing, ε=0.6, fill_non_finite=10.0)
+>>>>>>> dff23b1 (grok jl)
     model_spectra = h5read(grid_path, "spectra")
 
     if !isnothing(fill_non_finite)
@@ -155,6 +162,7 @@ function load_grid(grid_path; use_subset=true, v_sinis=nothing, ε=0.6, fill_non
         model_spectra = reshape(_model_spectra, (size(model_spectra, 1), length.(grid_points)...))
     end
 
+<<<<<<< HEAD
     # apply the global ferre mask, and (if not using a running media of the ratio) divide out a 
     # moving mean
     filtered_spectra = if use_median_ratio
@@ -176,10 +184,16 @@ function load_grid(grid_path; use_subset=true, v_sinis=nothing, ε=0.6, fill_non
     # put model spectra in a shared array TODO make this memory-efficient
     spectra = SharedArray{Float64}(size(filtered_spectra))
     spectra .= filtered_spectra
+=======
+    # put model spectra in a shared array
+    #spectra = SharedArray{Float64}(dims(model_spectra))
+    #spectra .= model_spectra
+>>>>>>> dff23b1 (grok jl)
 
-    (labels, grid_points, spectra)
+    (labels, grid_points, model_spectra)
 end
 
+<<<<<<< HEAD
 function get_best_subgrid(masked_model_spectra, slicer, flux, ivar, convF, use_median_ratio, ferre_mask)
 
     model_f  = view(masked_model_spectra, :, slicer...) 
@@ -197,6 +211,93 @@ function get_best_subgrid(masked_model_spectra, slicer, flux, ivar, convF, use_m
         # in this case, model_f already has the filtered model flux divided out
         model_f .* convF[ferre_mask]
     end
+=======
+
+function prepare_kernel(width=150, pixels=301)
+    sampled_kernel = gaussian(pixels, width/pixels)
+    sampled_kernel ./= sum(sampled_kernel) # normalize (everything should cancel in the end, but I'm paranoid)
+    offset = (length(sampled_kernel) - 1) ÷ 2
+    (sampled_kernel, offset)
+end
+
+function convolve_and_mask_model_spectra(model_spectra, kernel, offset)
+    stacked_model_spectra = reshape(model_spectra, (size(model_spectra, 1), :))
+    convolved_inv_model_flux = 1 ./ stacked_model_spectra
+    @showprogress desc="conv'ing inverse models" for i in 1:size(stacked_model_spectra, 2)
+        convolved_inv_model_flux[:, i] = conv(kernel, convolved_inv_model_flux[:, i])[offset+1 : end-offset]
+    end
+    masked_model_spectra = (stacked_model_spectra .* convolved_inv_model_flux)[ferre_mask, :]
+    masked_model_spectra = reshape(masked_model_spectra, (size(masked_model_spectra, 1), size(model_spectra)[2:end]...))
+    convolved_inv_model_flux = reshape(convolved_inv_model_flux, (8575, size(masked_model_spectra)[2:end]...))
+    (masked_model_spectra, convolved_inv_model_flux)
+end
+
+
+function load_old_grid(grid_path; fix_vmic=nothing, fill_non_finite=10.0, fix_off_by_one=false, 
+                   v_sinis=nothing, ε=0.6)
+    model_spectra = h5read(grid_path, "spectra")
+
+    if !isnothing(fill_non_finite)
+        model_spectra[isnan.(model_spectra)] .= fill_non_finite
+    end
+
+    # TODO make it possible to not hardcode the specific parameters?
+    teffs = h5read(grid_path, "Teff_vals")
+    loggs = h5read(grid_path, "logg_vals")
+    v_mics = h5read(grid_path, "vmic_vals")
+    m_hs = h5read(grid_path, "metallicity_vals")
+
+    if !isnothing(fix_vmic)
+        index = findfirst(v_mics .== fix_vmic)
+        model_spectra = model_spectra[:, :, :, index, :]
+        labels = ["teff", "logg", "m_h"]
+        grid_points = [teffs, loggs, m_hs]
+    else
+        labels = ["teff", "logg", "v_micro", "m_h"]
+        grid_points = [teffs, loggs, v_mics, m_hs]
+    end
+
+    if fix_off_by_one
+        # TODO audit this
+        model_spectra[2:end, :, :, :, :] .= model_spectra[1:end-1, :, :, :, :]
+    end
+
+    if !isnothing(v_sinis)
+
+        # make it a matrix with each row a spectrum
+        model_spectra = reshape(model_spectra, (size(model_spectra, 1), :))
+
+        _model_spectra = Array{Float64}(undef, (size(model_spectra, 1),  
+                                                prod(collect(size(model_spectra)[2:end])),
+                                                length(v_sinis)))
+
+        # apply each kernel to model spectra to add a new dimention to the grid
+        for (i, v_sini) in enumerate(v_sinis)
+            for j in 1:size(model_spectra, 2)
+                rotF = apply_rotation(model_spectra[:, j], v_sini, ε=ε)
+                if all(rotF .== 0)
+                    println("all null")
+                end
+                _model_spectra[:, j, i] = rotF #apply_rotation(model_spectra[:, j], v_sini, ε=ε)
+            end
+            # apply the kernel to each spectrum
+            #_model_spectra[:, :, i] = kernel * model_spectra
+        end
+
+        push!(grid_points, v_sinis)
+        push!(labels, "v_sini")
+        
+        model_spectra = reshape(_model_spectra, (size(model_spectra, 1), length.(grid_points)...))
+    end
+    (labels, grid_points, model_spectra)
+end
+
+function get_best_subgrid(masked_model_spectra, slicer, flux, ivar, convF, ferre_mask)
+
+    model_f  = view(masked_model_spectra, :, slicer...) 
+
+    corrected_model_f = model_f .* convF[ferre_mask]
+>>>>>>> dff23b1 (grok jl)
 
     chi2 = sum((corrected_model_f .- flux[ferre_mask, :]).^2 .* ivar[ferre_mask], dims=1)
     
@@ -212,49 +313,68 @@ end
 fluxes and ivar should be vectors or lists of the same length whose elements are vectors of length 
 8575.
 """
-function get_best_nodes(grid, fluxes, ivars, nmf_fluxes; use_median_ratio=false, refinement_levels=[4, 4, 2], minimum_nodes_per_dimension=3)
+function get_best_nodes(grid, fluxes, ivars, nmf_rectified_fluxes, continuums; refinement_levels=[4, 4, 2], minimum_nodes_per_dimension=3)
     fluxes = Vector{Float64}.(collect.(fluxes))
     ivars = Vector{Float64}.(collect.(ivars))
-    nmf_fluxes = Vector{Float64}.(collect.(nmf_fluxes))
+    nmf_rectified_fluxes = Vector{Float64}.(collect.(nmf_rectified_fluxes))
+    continuums = Vector{Float64}.(collect.(continuums))
 
+<<<<<<< HEAD
     # if we are not using a median ratio, the grid should be pre-filtered with a moving mean.
     labels, grid_points, masked_model_spectra = grid 
+=======
+    labels, grid_points, model_spectra = grid
+    kernel, offset = prepare_kernel()    
 
-    @showprogress pmap(fluxes, ivars, nmf_fluxes) do flux, ivar, nmf_flux
-        if !use_median_ratio
-            convF = copy(nmf_flux)
-            fill_chip_gaps!(convF)
-            apply_smoothing_filter!(convF)
-        else
-            convF = copy(nmf_flux)        
-        end
+    masked_model_spectra, convolved_inv_model_flux = convolve_and_mask_model_spectra(model_spectra, kernel, offset)
+>>>>>>> dff23b1 (grok jl)
 
-        # Get initial slice
-        grid_dims = size(masked_model_spectra)[2:end]
+
+    grid_dims = size(masked_model_spectra)[2:end]
+    out = Array{Any}(undef, length(fluxes))
+    j = 1
+    @showprogress pmap(fluxes, ivars, nmf_rectified_fluxes, continuums) do flux, ivar, nmf_rectified_flux, continuum
+
+        convF = conv(kernel, nmf_rectified_flux)[offset+1 : end-offset]
+        convF = convF .* continuum
+        # ignore first and last 200 pixels in chi2 calculation
+        # 50 pixels because the NMF model is cut off, and 150 for the width of the filter
+        ivar[ivar .< 1e-8] .= 0
+        ivar[1:201] .= 0
+        ivar[end-200:end] .= 0
+
+        ivar[convF .== 0] .= 0
+        ivar[flux .== 0] .= 0
 
         slicer = [unique([range(start=1, step=first(refinement_levels), stop=stop)...; stop]) for stop in grid_dims]
-        index, chi2 = get_best_subgrid(masked_model_spectra, slicer, flux, ivar, convF, use_median_ratio, ferre_mask)
-            
+        index, chi2 = get_best_subgrid(masked_model_spectra, slicer, flux, ivar, convF, ferre_mask)        
+        
+        #fig, ax = plt.subplots()
+        #ax.plot(ferre_wls, flux)
+        #ax.plot(ferre_wls[ferre_mask], masked_model_spectra[:, index...] .* convF[ferre_mask], c="tab:red")
+        #fig.savefig("/uufs/chpc.utah.edu/common/home/u6020307/tmp4.png")
+
+
         for refinement_level in refinement_levels[2:end]
             # create a slicer to take a volume around the current index
             n_points_per_side = max.(minimum_nodes_per_dimension / 2, grid_dims ./ (2 * refinement_level))
-
+        
             s_indices = Int.(floor.(max.(index .- n_points_per_side, 1)))
             e_indices = Int.(ceil.(min.(index .+ n_points_per_side, collect(grid_dims))))
-
+        
             # ensure that we have at least 3 points per dimension?
             e_indices = min.(s_indices .+ max.(e_indices .- s_indices, minimum_nodes_per_dimension), collect(grid_dims))
             s_indices = max.(e_indices .- max.(e_indices .- s_indices, minimum_nodes_per_dimension), 1)
-
+        
             slicer = [[range(start=start, stop=stop)...] for (start, stop) in zip(s_indices, e_indices)]
                 
-            index, chi2 = get_best_subgrid(masked_model_spectra, slicer, flux, ivar, convF, use_median_ratio, ferre_mask)
-
+            index, chi2 = get_best_subgrid(masked_model_spectra, slicer, flux, ivar, convF, ferre_mask)
+        
             #print(refinement_level, " ", n_points_per_side, " ", s_indices, " ", e_indices, "\n")
             #print(refinement_level, " ", e_indices .- s_indices, "\n")
             #print(index, " ", minimum(chi2), "\n")
         end
-
+        
         # fit a quadratic in each dimension
         best_fit_value = []
         for i in 1:length(index)
@@ -263,7 +383,7 @@ function get_best_nodes(grid, fluxes, ivars, nmf_fluxes; use_median_ratio=false,
             
             x = grid_points[i][slicer[i]]
             y = [minimum(chi2, dims=dims)...]
-
+        
             # fit a quadratic to the minima
             idx = argmin(y)
             si = max(1, idx-1)
@@ -275,25 +395,35 @@ function get_best_nodes(grid, fluxes, ivars, nmf_fluxes; use_median_ratio=false,
                     ei = si + 2
                 end
             end
-
+        
             poly = fit(x[si:ei], y[si:ei], 2)
 
-            if last(poly.coeffs) > 0
-                # if the quadratic is concave up, then the minimum is at the vertex
-                x_min = -poly.coeffs[2] / (2 * poly.coeffs[3])
-            else
-                # if the quadratic is concave down, then the minimum is at the edge
-                x_min = x[argmin(y)]
+            x_min = try
+                if last(poly.coeffs) > 0
+                    # if the quadratic is concave up, then the minimum is at the vertex
+                    -poly.coeffs[2] / (2 * poly.coeffs[3])
+                else
+                    # if the quadratic is concave down, then the minimum is at the edge
+                    x[argmin(y)]
+                end
+            catch e
+                println("fail ", si, " ", ei, " ", x, " ", y, "\n")
+
+                x[argmin(y)]
             end
 
+
+            x_min_clipped = max(x[1], min(x[end], x_min))
+            print("fit ", i, " ", x, " ", y, " ", poly, " ", x_min, " ", x_min_clipped, "\n")
+
             # clip it within the fitting range
-            x_min = max(x[1], min(x[end], x_min))
-            push!(best_fit_value, x_min)
+            push!(best_fit_value, x_min_clipped)
         end
 
-        # TODO: return convolved nmf flux?
-        (best_fit_value, minimum(chi2), model_spectra[:, index...])
+        out[j] = (best_fit_value, minimum(chi2), flux, ivar, model_spectra[:, index...], convF .* convolved_inv_model_flux[:, index...])
+        j += 1
     end
+    out        
 end
 
 #=
