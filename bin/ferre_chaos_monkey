@@ -17,11 +17,13 @@ def wc(path):
     return int(subprocess.check_output(["wc", "-l", path]).split()[0])
 
 def is_abundances_stage(pwd):
-    return False
     return "/abundances/" in pwd
 
+def is_abundances_stage_and_list_mode(pwd):
+    return is_abundances_stage(pwd) and os.path.exists(os.path.join(pwd, "input_list.nml"))
+
 def get_n_obj(pwd):
-    if is_abundances_stage(pwd):
+    if is_abundances_stage_and_list_mode(pwd):
         n_obj = wc(f"{pwd}/flux.input")
         n_executions = wc(f"{pwd}/input_list.nml")
         return int(n_obj * n_executions)
@@ -34,7 +36,7 @@ def get_n_obj(pwd):
 def get_n_obj_done(pwd, output_basename, started, include_previous):
     #abs_output_path = f"{pwd}/{output_basename}"
     last_updated, n_obj_done, n_obj_this_execution = (None, 0, 0)
-    if is_abundances_stage(pwd):
+    if is_abundances_stage_and_list_mode(pwd):
         output_paths = glob(f"{pwd}/*/{output_basename}*")
     else:
         output_paths = glob(f"{pwd}/{output_basename}*")
@@ -62,10 +64,10 @@ def get_n_obj_done(pwd, output_basename, started, include_previous):
     return (n_obj_done, n_obj_this_execution, last_updated)
 
 def get_stub(pwd):
-    *_, stage, short_grid_name = pwd.rstrip("/").split("/")
+    *_, blah, _,  stage, short_grid_name = pwd.rstrip("/").split("/")
 
     if "abundances" in pwd:
-        return f"{stage}/{short_grid_name}"
+        return f"{blah}/{stage}/{short_grid_name}"
     else:
         return f"{short_grid_name}"
     
@@ -75,7 +77,7 @@ def get_stub(pwd):
 @click.option("--output-basename", default="parameter.output", help="Basename of output path to check")
 @click.option("--wait-for-spectrum", default=600, help="Minimum seconds before killing a process")
 @click.option("--wait-for-startup", default=900, help="Minimum for-startup time seconds before killing a process")
-@click.option("--wait-after-no-ferre", default=300, help="How many consecutive seconds to wait after no FERRE processes are found")
+@click.option("--wait-after-no-ferre", default=1, help="How many consecutive seconds to wait after no FERRE processes are found")
 @click.option("--wait-factor", default=5*12, help="How many (estimated) standard deviations to wait before killing a process (note ferre updates in batches of 12)")
 @click.option("--wait-iter", default=10, help="Minimum iterations before killing a process")
 @click.option("--interval", default=10, help="How many seconds to wait between iterations")
@@ -260,7 +262,7 @@ def ferre_chaos_monkey(
                     subprocess.check_output(["touch", f"{pwd}/wait_for_clean_up"])
                     subprocess.check_output(["kill", "-9", f"{pid}"])     
                     
-                    if is_abundances_stage(pwd):
+                    if is_abundances_stage_and_list_mode(pwd):
                         input_list_path = f"{pwd}/{process_args[-1]}"
                                                         
                         try:
