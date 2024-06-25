@@ -5,19 +5,65 @@ from typing import Iterable, Optional, Sequence
 from peewee import JOIN, ModelSelect
 
 from astra import task
-from astra.models.grok import Grok
+from astra.models.grok import Grok, GrokRotation
 from astra.models.mwm import ApogeeCombinedSpectrum
 from astra.utils import log, expand_path
 
 # test - delete me
 
 @task
+def measure_vsini(
+    spectra: Optional[Iterable[ApogeeCombinedSpectrum]] = (
+        ApogeeCombinedSpectrum
+        .select()
+        .distinct(ApogeeCombinedSpectrum)
+        .join(GrokRotation, JOIN.LEFT_OUTER, on=(ApogeeCombinedSpectrum.spectrum_pk == GrokRotation.spectrum_pk))
+        .where(GrokRotation.spectrum_pk.is_null())
+        .order_by(ApogeeCombinedSpectrum.spectrum_pk)
+    ),    
+    limit=None
+) -> Iterable[GrokRotation]:
+    
+    from juliacall import Main as jl
+    # TODO dev it instead
+    jl.include(os.path.join(os.path.dirname(__file__), "Clam.jl"))
+    
+    if isinstance(spectra, ModelSelect):
+        if limit is not None:
+            spectra = spectra.limit(limit)
+        # Note: if you don't use the `.iterator()` you may get out-of-memory issues from the GPU nodes 
+        spectra = spectra.iterator()     
+    
+    for spectrum in spectra:
+        
+        flux = spectrum.flux
+        ivar = spectrum.ivar
+        
+        ivar[ivar < 1e-8] = 0
+        
+        flux = jl.pyconvert(jl.Vector[jl.Float64], flux)
+        ivar = jl.pyconvert(jl.Vector[jl.Float64], ivar)
+        
+        W, vsini, rectified_model_flux, continuum, chi2 = jl.estimate_vsini(flux, ivar)
+        
+        yield GrokRotation(
+            source_pk=spectrum.source_pk,
+            spectrum_pk=spectrum.spectrum_pk,
+            vsini=vsini,
+            chi2=chi2,
+            W=W            
+        )
+    
+
+@task
 def grok(
     spectra: Optional[Iterable[ApogeeCombinedSpectrum]] = (
         ApogeeCombinedSpectrum
         .select()
+        .distinct(ApogeeCombinedSpectrum)
         .join(Grok, JOIN.LEFT_OUTER, on=(ApogeeCombinedSpectrum.spectrum_pk == Grok.spectrum_pk))
         .where(Grok.spectrum_pk.is_null())
+        .order_by(ApogeeCombinedSpectrum.spectrum_pk)
     ),
     grid_path: Optional[str] = "$MWM_ASTRA/pipelines/Grok/big_grid_2024-12-20.h5",
     mask_path: Optional[str] = "$MWM_ASTRA/pipelines/Grok/ferre_mask.dat",
@@ -89,9 +135,11 @@ def grok(
         # Note: if you don't use the `.iterator()` you may get out-of-memory issues from the GPU nodes 
         spectra = spectra.iterator()     
     
-    fluxs, ivars, nmf_fluxs = ([], [], [])
+    pks = []
+    fluxs, ivars, nmf_rectified_model_flux, continuums = ([], [], [], [])
     for spectrum in tqdm(spectra):
         
+        pks.append((spectrum.spectrum_pk, spectrum.source_pk))
         flux, ivar = (spectrum.flux, spectrum.ivar)
                 
         if mask is not None:
@@ -103,11 +151,13 @@ def grok(
         fluxs.append(flux)
         ivars.append(ivar)
         if use_nmf_flux:
-            cf = np.copy(spectrum.nmf_rectified_model_flux * spectrum.continuum)
+            cf = np.copy(spectrum.nmf_rectified_model_flux)# * spectrum.continuum)
             cf[(~np.isfinite(cf)) | (cf <= 0)] = 1e-4            
-            nmf_fluxs.append(cf)
+            nmf_rectified_model_flux.append(cf)
         else:
-            nmf_fluxs.append(flux)
+            nmf_rectified_model_flux.append(flux)
+            
+        continuums.append(spectrum.continuum)
         
     # supply a mask to Grok to ignore totally masked pixels
     if mask is None:
@@ -127,27 +177,93 @@ def grok(
         ε=ε
     )
     print("loaded")
+    
+    # convolve
+    #kernel, offset = jl.Grok.prepare_kernel()
+    #masked_model_spectra = jl.Grok.convolve_and_mask_model_spectra(grid_flux, kernel, offset)
+
+    #Grok.get_best_nodes(grid, [flux], [ivar], [nmf_rectified_flux], [continuum])
+
+    grid_flux_ = np.array(grid_flux).reshape((8575, -1))
 
     results = jl.Grok.get_best_nodes(
         grid, 
         fluxs, 
         ivars, 
-        nmf_fluxs, 
-        use_median_ratio=use_median_ratio,
+        nmf_rectified_model_flux, 
+        continuums,
         refinement_levels=refinement_levels
     )
+    print(f"has {len(results)} results from {len(fluxs)}")
 
-    for spectrum, result in zip(spectra, results):
-        
-        coarse_params, coarse_chi2, model_spectrum = result 
-                
+    for pk, result in zip(pks, results):
+        spectrum_pk, source_pk = pk
+        coarse_params, coarse_chi2, flux, ivar, model_flux, continuum = result 
         result_dict = dict(
-            source_pk=spectrum.source_pk,
-            spectrum_pk=spectrum.spectrum_pk,
+            source_pk=source_pk,
+            spectrum_pk=spectrum_pk,
             coarse_chi2=coarse_chi2,
         )
         result_dict.update(dict(zip([f"coarse_{ln}" for ln in grid_labels], coarse_params)))
-        yield Grok(**result_dict)
+        
+        continuum = np.atleast_2d(continuum).T
+        flux = np.atleast_2d(flux).T
+        ivar = np.atleast_2d(ivar).T
+        
+        # first let's do the slicing like suggested by Adam
+        this_chi2 = np.sum((grid_flux_ * continuum - flux)**2 * ivar, axis=0).reshape(grid_flux.shape[1:])
+        this_index = np.unravel_index(np.argmin(this_chi2), this_chi2.shape)
+        
+        for i, label in enumerate(grid_labels):
+            result_dict[f"node_{label}"] = grid_points[i][this_index[i]]
+        
+            slicer = list(np.copy(this_index))
+            slicer[i] = slice(None)
+            x = np.array(grid_points[i])
+            y = this_chi2[tuple(slicer)]
+            
+            idx = np.argmin(y)
+            si = max(0, idx-1)
+            ei = min(len(x), idx+2)
+            if (ei - si) < 3:
+                if ei == len(x):
+                    si = len(x) - 3
+                else:
+                    ei = si + 3
+                
+            xf, yf = x[si:ei], y[si:ei]
+            
+            a, b, c = np.polyfit(xf, yf, 2)
+            if a > 0:
+                result_dict[f"slice_{label}"] = -b / (2 * a)
+            else:
+                result_dict[f"slice_{label}"] = x[idx]
+        
+
+            # now let's do minimum along this set of dimensions
+            axis = tuple(set(range(len(grid_labels))).difference({i}))
+                    
+            y = np.min(this_chi2, axis=axis)
+
+            idx = np.argmin(y)
+            si = max(0, idx-1)
+            ei = min(len(x), idx+2)
+            if (ei - si) < 3:
+                if ei == len(x):
+                    si = len(x) - 3
+                else:
+                    ei = si + 3
+                
+            xf, yf = x[si:ei], y[si:ei]
+            
+            a, b, c = np.polyfit(xf, yf, 2)            
+            if a > 0:
+                result_dict[f"quad_{label}"] = -b / (2 * a)
+            else:
+                result_dict[f"quad_{label}"] = x[idx]
+                                
+        yield Grok(**result_dict) 
+        print(result_dict)
 
 
 def inflate_errors_at_bad_pixels(

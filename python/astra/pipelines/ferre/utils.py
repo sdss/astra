@@ -884,7 +884,7 @@ def validate_initial_and_frozen_parameters(
 
 
     # Let's check the initial values are all within the grid boundaries.
-    # TODO: These should already be clipped. If we are hitting  this then it's a problem.
+    # TODO: These should already be clipped. If we are hitting this then it's a problem.
     lower_limit, upper_limit = grid_limits(headers)
     try:
         check_initial_parameters_within_grid_limits(
@@ -992,7 +992,7 @@ def format_ferre_input_parameters(*p, name="dummy"):
     """
     contents = f"{name:40s}"
     for each in p:
-        contents += f"{each:12.3f}"
+        contents += f"{each:12.5f}"
     contents += "\n"
     return contents
 
@@ -1067,6 +1067,12 @@ def read_control_file(path):
         ("NTHREADS", "NTHREADS"),
         ("OBSCONT", "OBSCONT"),
         ("COVPRINT", "COVPRINT"),
+        ("CONT", "CONT"),
+        ("INIT", "INIT"),
+        ("PCAPROJECT", "PCAPROJECT"),
+        ("PCACHI", "PCACHI"),
+        ("ALGOR", "ALGOR"),
+        ("ERRBAR", "ERRBAR"),
         ("SYNTHFILE(1)", "SYNTHFILE(1)"),
     ]
 
@@ -1076,6 +1082,9 @@ def read_control_file(path):
             for route, key in routes:
                 if line.strip().startswith(route):
                     meta[key] = line.split("=")[1].strip(" \n'")
+                    break
+            else:
+                None
 
     return meta
 

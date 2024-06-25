@@ -25,7 +25,7 @@ def write_pixel_array_with_names(path, names, data):
 
 LARGE = 1e10 # TODO: This is also defined in pre_process, move it common
 
-def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]:
+def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Iterable[dict]:
     """
     Post-process results from a FERRE execution.
 
@@ -90,6 +90,7 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
 
     offile_path = os.path.join(ref_dir, control_kwds["OFFILE"])
     # Load and sort the rectified model flux path because this happens in abundances when we would normally use skip_pixel_arrays=True
+    '''
     try:
         rectified_model_flux, names_with_missing_rectified_model_flux, output_rectified_model_flux_indices = read_and_sort_output_data_file(
             offile_path, 
@@ -103,12 +104,20 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
         is_missing_rectified_model_flux = np.ones(N, dtype=bool)
     else:
         is_missing_rectified_model_flux = ~np.all(np.isfinite(rectified_model_flux), axis=1)
+    '''
+    
+    print("WARNING: Using new verify_and_fix_output_flux_file")
+    parameter_input_path = os.path.join(dir, "parameter.input")
+    os.system(f"verify_and_fix_ferre_output_flux_file {parameter_input_path} {offile_path}")
+    is_missing_rectified_model_flux = ~np.isfinite(np.atleast_1d(np.loadtxt(offile_path, usecols=(1, ), dtype=float)))
+    names_with_missing_rectified_model_flux = input_names[is_missing_rectified_model_flux]
 
     if not skip_pixel_arrays:
-        flux = np.atleast_2d(np.loadtxt(os.path.join(ref_dir, control_kwds["FFILE"])))
-        e_flux = np.atleast_2d(np.loadtxt(os.path.join(ref_dir, control_kwds["ERFILE"])))
+        #flux = np.atleast_2d(np.loadtxt(os.path.join(ref_dir, control_kwds["FFILE"])))
+        #e_flux = np.atleast_2d(np.loadtxt(os.path.join(ref_dir, control_kwds["ERFILE"])))
                             
         sffile_path = os.path.join(ref_dir, control_kwds["SFFILE"])
+        '''
         try:
             rectified_flux, names_with_missing_rectified_flux, output_rectified_flux_indices = read_and_sort_output_data_file(
                 sffile_path,
@@ -120,9 +129,15 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
             log.exception(f"Exception when trying to read and sort {sffile_path}")
             names_with_missing_rectified_flux = input_names
             rectified_flux = np.nan * np.ones_like(flux)
-
+        '''
+        
+        os.system(f"verify_and_fix_ferre_output_flux_file {parameter_input_path} {sffile_path}")
+        names_with_missing_rectified_flux = input_names[~np.isfinite(np.loadtxt(sffile_path, usecols=(1, ), dtype=float))]
+        
+        '''
         model_flux_output_path = os.path.join(absolute_dir, "model_flux.output") # TODO: Should this be ref_dir?
         if os.path.exists(model_flux_output_path):
+            
             model_flux, *_ = read_and_sort_output_data_file(
                 model_flux_output_path,
                 input_names
@@ -131,13 +146,17 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
         else:
             log.warn(f"Cannot find model_flux output in {absolute_dir} ({model_flux_output_path})")
             model_flux = np.nan * np.ones_like(flux)
+        '''
+        model_flux_output_path = os.path.join(absolute_dir, "model_flux.output") # TODO: Should this be ref_dir?
+        os.system(f"verify_and_fix_ferre_output_flux_file {parameter_input_path} {model_flux_output_path}")
+        is_missing_model_flux = ~np.isfinite(np.atleast_1d(np.loadtxt(model_flux_output_path, usecols=(1, ), dtype=float)))
                         
         if len(names_with_missing_rectified_model_flux) > 0:
             log.warn(f"The following {len(names_with_missing_rectified_model_flux)} are missing model fluxes: {names_with_missing_rectified_model_flux}")
         if len(names_with_missing_rectified_flux) > 0:
             log.warn(f"The following {len(names_with_missing_rectified_flux)} are missing rectified fluxes: {names_with_missing_rectified_flux}")
 
-        is_missing_model_flux = ~np.all(np.isfinite(model_flux), axis=1)
+        #is_missing_model_flux = ~np.all(np.isfinite(model_flux), axis=1)
 
     else:
         is_missing_model_flux = np.zeros(N, dtype=bool)
@@ -224,6 +243,7 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
                 # Only warn when there are specific timings missing
                 log.warning(f"No FERRE timing for spectrum_pk={name_meta['spectrum_pk']}")
 
+        '''
         if not skip_pixel_arrays:
             snr = np.nanmedian(flux[i]/e_flux[i])
             result.update(
@@ -234,6 +254,7 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False) -> Iterable[dict]
                 rectified_flux=rectified_flux[i],
                 rectified_model_flux=rectified_model_flux[i],
             )
+        '''
 
         for j, parameter in enumerate(parameter_names):
 

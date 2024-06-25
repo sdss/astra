@@ -26,7 +26,7 @@ from astra.models.spectrum import Spectrum, SpectrumMixin
 from astra.models.the_payne import ThePayne
 from astra.models.the_cannon import TheCannon
 from astra.models.hot_payne import HotPayne
-from astra.models.madgics import ApogeeMADGICSVisitSpectrum
+#from astra.models.madgics import ApogeeMADGICSVisitSpectrum
 from astra.models.mwm import (
     BossCombinedSpectrum,
     BossRestFrameVisitSpectrum,

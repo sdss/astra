@@ -109,6 +109,7 @@ def aspcap(
         parent_dir=parent_dir,
         element_weight_paths=element_weight_paths,
         operator_kwds=operator_kwds,
+        #ferre_list_mode=True, # This can be supplied by the user
         **kwargs
     ))
     yield from create_aspcap_results(stellar_parameter_results, chemical_abundance_results)

@@ -2,7 +2,7 @@
 
 import os
 from collections import OrderedDict
-from peewee import BooleanField
+from peewee import BooleanField, JOIN
 from astropy.io import fits
 from astra import __version__
 from astra.utils import log, expand_path
@@ -355,9 +355,10 @@ def create_astra_all_visit_product(
             q = q.distinct(spectrum_model.spectrum_pk)
         
         if drp_spectrum_model != spectrum_model:
+            # LEFT OUTER join 
             q = (
                 q
-                .join(drp_spectrum_model, on=(spectrum_model.drp_spectrum_pk == drp_spectrum_model.spectrum_pk))
+                .join(drp_spectrum_model, JOIN.LEFT_OUTER, on=(spectrum_model.drp_spectrum_pk == drp_spectrum_model.spectrum_pk))
                 .switch(spectrum_model)
             )
             

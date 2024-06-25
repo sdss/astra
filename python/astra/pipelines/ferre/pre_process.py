@@ -12,7 +12,6 @@ import warnings
 
 # FERRE v4.8.8 src trunk : /uufs/chpc.utah.edu/common/home/sdss09/software/apogee/Linux/apogee/trunk/external/ferre/src
 
-
 def pre_process_ferre(
     pwd: str,
     header_path: str,
@@ -55,6 +54,7 @@ def pre_process_ferre(
     spike_threshold_to_inflate_uncertainty: float = 3,
     reference_pixel_arrays_for_abundance_run=False,
     write_input_pixel_arrays=True,
+    max_num_bad_pixels=2000,
     **kwargs
 ):
     
@@ -126,6 +126,7 @@ def pre_process_ferre(
     # TODO: use mask2
     mask = utils.get_apogee_pixel_mask()
     #assert np.all(mask == mask2)
+    has_warned_on_bad_pixels = False
 
     index, skipped, batch_names, batch_initial_parameters, batch_flux, batch_e_flux = (0, [], [], [], [], [])
     for (spectrum, initial_parameters) in tqdm(zip(spectra, all_initial_parameters), total=1, desc="Preparing spectra"):
@@ -145,7 +146,8 @@ def pre_process_ferre(
             except (ValueError, FileNotFoundError):
                 log.warning(f"Exception accessing pixel arrays for spectrum {spectrum}")
                 skipped.append(spectrum)
-                continue            
+                continue       
+            
 
             try:
                 pixel_flags = np.copy(spectrum.pixel_flags)
@@ -165,12 +167,24 @@ def pre_process_ferre(
                     min_sigma_value=min_sigma_value,
                 )
 
+
+            # Restrict by the number of bad pixels otherwise FERRE gets into trouble.
+            if max_num_bad_pixels is not None:
+                n_bad_pixels = np.sum((0 >= flux) | (e_flux >= 1e10))
+                if n_bad_pixels >= max_num_bad_pixels:
+                    if not has_warned_on_bad_pixels:
+                        log.warning(f"Spectrum {spectrum} has too many bad pixels ({n_bad_pixels} > {max_num_bad_pixels}). Other spectra like this in the same FERRE job will have their warnings suppressed.")
+                        has_warned_on_bad_pixels = True                        
+                    skipped.append(spectrum)
+                    continue
+                
             if pre_computed_continuum is not None:
                 flux /= pre_computed_continuum[index]
                 e_flux /= pre_computed_continuum[index]
             
             batch_flux.append(flux[mask])
             batch_e_flux.append(e_flux[mask])
+
 
         # make the initial flags 0 if None is given
         initial_flags = initial_parameters.pop("initial_flags") or 0
@@ -179,6 +193,9 @@ def pre_process_ferre(
         batch_names.append(utils.get_ferre_spectrum_name(index, spectrum.source_pk, spectrum.spectrum_pk, initial_flags, upstream_pk))
         batch_initial_parameters.append(initial_parameters)
         index += 1
+
+    if len(skipped) > 0:
+        log.warning(f"Skipping {len(skipped)} spectra ({100 * len(skipped) / len(spectra):.0f}%; of {len(spectra)})")
 
     if not batch_initial_parameters:
         return (pwd, 0, skipped)

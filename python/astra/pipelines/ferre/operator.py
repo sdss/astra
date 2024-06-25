@@ -37,14 +37,15 @@ CORE_TIME_COEFFICIENTS = {
     'sgGK': np.array([2.11366749, 0.94762965, 0.0215653,                1]),
     'sgM': np.array([ 2.07628319,  0.83709908, -0.00974312,             1]),
     'sdF': np.array([ 2.36062644e+00, 7.88815732e-01, -1.47683420e-03,  4]),
-    'sdGK': np.array([ 2.84815701,  0.88390584, -0.05891258,            4]),
+    'sdGK': np.array([ 2.84815701,  0.88390584, -0.05891258,            5]),
     'sdM': np.array([ 2.83218967,  0.76324445, -0.05566659,             4]),
+    
     # copied for turbospectrum #TODO
     'tBA': np.array([-0.11225854,  0.91822257,  0.        ,             1]),
     'tgGK': np.array([2.11366749, 0.94762965, 0.0215653 ,               1]),
     'tgM': np.array([ 2.07628319,  0.83709908, -0.00974312,             1]),
     'tdF': np.array([ 2.36062644e+00,  7.88815732e-01, -1.47683420e-03, 4]),
-    'tdGK': np.array([ 2.84815701,  0.88390584, -0.05891258,            4]),
+    'tdGK': np.array([ 2.84815701,  0.88390584, -0.05891258,            5]),
     'tdM': np.array([ 2.83218967,  0.76324445, -0.05566659,             4])    
 }
 
@@ -273,26 +274,6 @@ def setup_ferre_for_re_execution():
             lookup_stub_by_pid[proc.pid] = stub
             states[stub]["pids"].append(proc.pid)
 
-def load_balance(
-    stage_dir,
-    job_name="ferre",
-    input_nml_wildmask="*/input*.nml",
-    slurm_kwds=None,
-    post_interpolate_model_flux=True,
-    partition=True,
-    overwrite=True,
-    n_threads=32, # 42
-    max_nodes=0,
-    max_tasks_per_node=4, # 3
-    balance_threads=False,
-    cpus_per_node=128,
-    t_load_estimate=300, # 5 minutes est to load grid
-    chaos_monkey=True,
-    full_output=False,
-    experimental_abundances=False
-):
-    
-    slurm_kwds = slurm_kwds or DEFAULT_SLURM_KWDS
 
 def load_balancer(
     stage_dir,
@@ -526,7 +507,7 @@ def _load_balancer(
 
     # For merging partitions afterwards
     partitioned_pwds = flatten(parent_partitions.values())
-    output_basenames = ["stdout", "stderr", "rectified_model_flux.output", "parameter.output", "rectified_flux.output"]
+    output_basenames = ["stdout", "stderr", "rectified_model_flux.output", "parameter.output", "rectified_flux.output", "timing.csv"]
     if post_interpolate_model_flux:
         output_basenames.append("model_flux.output")
 
@@ -579,6 +560,8 @@ def _load_balancer(
                                 0
                             ])
                 else:
+                    # if we are in the abundances stage, we should execute it from the parent directory to avoid duplicates of the flux/e_flux file
+                    
                     flags = ""
                     executions.append([
                         f"{cwd}/parameter.output",
@@ -671,13 +654,14 @@ def _load_balancer(
         if max_nodes == 0:
             pid = Popen(["sh", slurm_path])
             log.info(f"Started job {i} (process={pid}) at {slurm_path}")
+            job_ids.append(pid)
         else:
             output = check_output(["sbatch", slurm_path]).decode("ascii")
             job_id = int(output.split()[3])
             log.info(f"Submitted slurm job {i} (jobid={job_id}) for {slurm_path}")
             job_ids.append(job_id)
 
-    if max_nodes == 0:
+    if not chaos_monkey:
         log.warning(f"FERRE chaos monkey not set up to run on this node. Please run it yourself.")            
 
     if full_output:
@@ -816,18 +800,36 @@ def monitor(
             log.warning(f"\t{os.path.dirname(output_path)}")
 
     if job_ids:# and pb.n >= n_spectra:
-        log.info(f"Checking that all Slurm jobs are complete")
-        while True:
-            queue = get_queue()
-            for job_id in job_ids:
-                if job_id in queue:
-                    log.info(f"\tJob {job_id} has status {queue[job_id]['status']}")
+        try:
+            int(job_ids[0])
+        except:
+            log.info("Waiting until processes are complete")
+            while True:
+                done = 0
+                for proc in job_ids:
+                    returncode = proc.poll()
+                    if returncode is None:
+                        continue
+                    else:
+                        done += 1
+                if done == len(job_ids):
+                    log.info(f"All processes are complete.")
+                    break                        
+                sleep(5)
+            
+        else:
+            log.info(f"Checking that all Slurm jobs are complete")
+            while True:
+                queue = get_queue()
+                for job_id in job_ids:
+                    if job_id in queue:
+                        log.info(f"\tJob {job_id} has status {queue[job_id]['status']}")
+                        break
+                else:
+                    log.info("All Slurm jobs complete.")
                     break
-            else:
-                log.info("All Slurm jobs complete.")
-                break
 
-            sleep(5)
+                sleep(5)
         
     log.info(f"Operator out.")
     return None
@@ -846,6 +848,7 @@ class FerreOperator:
         max_nodes=0,
         max_tasks_per_node=4,
         cpus_per_node=128,
+        experimental_abundances=False,
     ):
         """
         :param stage_dir:
@@ -884,7 +887,7 @@ class FerreOperator:
         self.post_interpolate_model_flux = post_interpolate_model_flux
         self.overwrite = overwrite
         self.slurm_kwds = slurm_kwds or DEFAULT_SLURM_KWDS
-
+        self.experimental_abundances = experimental_abundances
         self.input_nml_wildmask = input_nml_wildmask
         return None
 
@@ -899,8 +902,10 @@ class FerreOperator:
             overwrite=self.overwrite,
             n_threads=self.n_threads,
             max_nodes=self.max_nodes,
+            partition= not self.experimental_abundances,
             max_tasks_per_node=self.max_tasks_per_node,
             cpus_per_node=self.cpus_per_node,
+            experimental_abundances=self.experimental_abundances,
             full_output=True         
         )
 

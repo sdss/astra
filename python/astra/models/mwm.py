@@ -47,7 +47,7 @@ class MWMVisitMixin(BaseModel):
         )        
 
 get_boss_ext = lambda i: (dict(apo25m=1, lco25m=2)[i.telescope])
-get_apogee_ext = lambda i: (dict(apo25m=3, lco25m=4)[i.telescope])
+get_apogee_ext = lambda i: (dict(apo1m=3, apo25m=3, lco25m=4)[i.telescope])
 transform_flat = lambda x, *_: np.array(x).flatten()
 
 class BossRestFrameVisitSpectrum(MWMVisitMixin, SpectrumMixin):

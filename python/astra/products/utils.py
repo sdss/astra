@@ -402,7 +402,8 @@ def fits_column_kwargs(field, values, upper, name=None, default_n_pixels=0, warn
         BigIntegerField: lambda v: dict(format="K"),
         # We are assuming here that all foreign key fields are big integers
         ForeignKeyField: lambda v: dict(format="K"),
-        BitField: lambda v: dict(format="J"), # integer
+        #BitField: lambda v: dict(format="J"), # integer
+        BitField: lambda v: dict(format="K"), # 64-bit integer
         DateTimeField: lambda v: dict(format="A26"),
     }
     if isinstance(field, BasePixelArrayAccessor):

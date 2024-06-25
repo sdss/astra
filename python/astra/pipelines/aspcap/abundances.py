@@ -10,7 +10,7 @@ from astra import task
 from astra.utils import expand_path, log, list_to_dict
 from astra.models.spectrum import Spectrum
 from astra.models.aspcap import FerreStellarParameters, FerreChemicalAbundances
-from astra.pipelines.ferre.operator import FerreOperator
+from astra.pipelines.ferre.operator import FerreOperator, FerreMonitoringOperator
 from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
 from astra.pipelines.ferre.utils import (get_apogee_pixel_mask, parse_ferre_spectrum_name, read_ferre_headers, parse_header_path, get_input_spectrum_primary_keys)
@@ -50,12 +50,18 @@ def abundances(
     job_ids, executions = (
         FerreOperator(
             f"{parent_dir}/{STAGE}/", 
+            input_nml_wildmask="*/*/input*.nml",
+            experimental_abundances=True,
             **(operator_kwds or {})
         )
         .execute()
-    )(job_ids, executions).execute()
+    )
+    FerreMonitoringOperator(job_ids, executions).execute()
     
-    yield from post_abundances(parent_dir)
+    yield from post_abundances(
+        parent_dir, 
+        **kwargs
+    )
 
 
 @task
@@ -63,6 +69,7 @@ def pre_abundances(
     spectra: Iterable[Spectrum], 
     parent_dir: str, 
     element_weight_paths: str = "$MWM_ASTRA/pipelines/aspcap/masks/elements.list",
+    ferre_list_mode = False,
     **kwargs
 ) -> Iterable[FerreChemicalAbundances]:
     """
@@ -101,21 +108,22 @@ def pre_abundances(
         group_dir = "/".join(pwd.split("/")[:-1])
         group.setdefault(group_dir, [])
         group[group_dir].append(pwd[1 + len(group_dir):] + "/input.nml")
-        
-    # Create a parent input_list.nml file to use with the ferre.x -l flag.
-    for pwd, items in group.items():
-        input_list_path = f"{pwd}/input_list.nml"
-        log.info(f"Created grouped FERRE input file with {len(items)} dirs: {input_list_path}")
-        with open(expand_path(input_list_path), "w") as fp:
-            # Sometimes `wc` would not give the right amount of lines in a file, so we add a \n to the end
-            # https://unix.stackexchange.com/questions/314256/wc-l-not-returning-correct-value
-            fp.write("\n".join(items) + "\n")
     
+    if ferre_list_mode:
+        # Create a parent input_list.nml file to use with the ferre.x -l flag.
+        for pwd, items in group.items():
+            input_list_path = f"{pwd}/input_list.nml"
+            log.info(f"Created grouped FERRE input file with {len(items)} dirs: {input_list_path}")
+            with open(expand_path(input_list_path), "w") as fp:
+                # Sometimes `wc` would not give the right amount of lines in a file, so we add a \n to the end
+                # https://unix.stackexchange.com/questions/314256/wc-l-not-returning-correct-value
+                fp.write("\n".join(items) + "\n")
+        
     yield from []
 
 
 @task
-def post_abundances(parent_dir, ferre_list_mode=False, skip_pixel_arrays=True, **kwargs) -> Iterable[FerreChemicalAbundances]:
+def post_abundances(parent_dir, relative_mode=True, skip_pixel_arrays=True, **kwargs) -> Iterable[FerreChemicalAbundances]:
     """
     Collect the results from FERRE and create database entries for the abundance step.
 
@@ -128,11 +136,11 @@ def post_abundances(parent_dir, ferre_list_mode=False, skip_pixel_arrays=True, *
     for dir in map(os.path.dirname, get_input_nml_paths(parent_dir, f"{STAGE}/*")):
         
         # If the abundances were executed from the parent directory with the -l flag, you should use
-        if ferre_list_mode:
+        if relative_mode:
             ref_dir = os.path.dirname(dir)
         else:
             ref_dir = None
-        log.info(f"Post-processing FERRE results in {dir} {'with FERRE list mode' if ferre_list_mode else 'in standard mode'}")
+        log.info(f"Post-processing FERRE results in {dir} {'with FERRE list mode' if relative_mode else 'in standard mode'}")
         for kwds in post_process_ferre(dir, ref_dir, skip_pixel_arrays=skip_pixel_arrays, **kwargs):
             yield FerreChemicalAbundances(**kwds)    
 
@@ -252,7 +260,6 @@ def plan_abundances(
     # Load abundance keywords on demand.
     ferre_headers, abundance_keywords = ({}, {})
     lookup_spectrum_by_primary_key = { s.spectrum_pk: s for s in spectra }
-
     
     mask = get_apogee_pixel_mask()
     continuum_cache, continuum_cache_names = ({}, {})
@@ -286,7 +293,11 @@ def plan_abundances(
                 frozen_parameters, ferre_kwds = get_abundance_keywords(species, headers["LABEL"])
                 abundance_keywords[result.header_path][species] = (weight_path, frozen_parameters, ferre_kwds)
 
-        spectrum = lookup_spectrum_by_primary_key[result.spectrum_pk]
+        try:
+            spectrum = lookup_spectrum_by_primary_key[result.spectrum_pk]
+        except KeyError:
+            log.warning(f"Could not find spectrum {result.spectrum_pk} in the input list. Were previous analyses run in this same folder? Skipping..")
+            continue
 
         """
         # Apply continuum normalization, where we are just going to fix the observed

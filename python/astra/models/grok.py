@@ -19,12 +19,39 @@ from astra.models.pipeline import PipelineOutputMixin
 from astra.glossary import Glossary
 from astra.pipelines.ferre.utils import get_apogee_pixel_mask
 
+from playhouse.postgres_ext import ArrayField
+
 APOGEE_FERRE_MASK = get_apogee_pixel_mask()
 
 def unmask(array, fill_value=np.nan):
     unmasked_array = fill_value * np.ones(APOGEE_FERRE_MASK.shape)
     unmasked_array[APOGEE_FERRE_MASK] = array
     return unmasked_array
+
+class GrokRotation(BaseModel, PipelineOutputMixin):
+
+    """A result from the Grok pipeline."""
+
+    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False, help_text=Glossary.source_pk)
+    spectrum_pk = ForeignKeyField(
+        Spectrum, 
+        index=True, 
+        lazy_load=False,
+        help_text=Glossary.spectrum_pk
+    )
+    
+    #> Astra Metadata
+    task_pk = AutoField(help_text=Glossary.task_pk)
+    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
+    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
+    t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
+    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
+    tag = TextField(default="", index=True, help_text=Glossary.tag)
+        
+    vsini = FloatField(null=True)
+    chi2 = FloatField(null=True)
+    W = ArrayField(FloatField, null=True)
+
 
 class Grok(BaseModel, PipelineOutputMixin):
 
@@ -56,6 +83,23 @@ class Grok(BaseModel, PipelineOutputMixin):
     coarse_v_sini = FloatField(null=True, help_text="Coarse estimate of v sini [km/s]")
     coarse_chi2 = FloatField(null=True, help_text="\chi2 value of coarse estimate")
 
+    slice_teff = FloatField(null=True, help_text="Coarse estimate of effective temperature [K]")
+    slice_logg = FloatField(null=True, help_text="Coarse estimate of surface gravity [dex]")
+    slice_c_m = FloatField(null=True, help_text="Coarse estimate of [C/M] [dex]")
+    slice_m_h = FloatField(null=True, help_text="Coarse estimate of [M/H] [dex]")
+    slice_n_m = FloatField(null=True, help_text="Coarse estimate of [N/M] [dex]")
+    slice_v_micro = FloatField(null=True, help_text="Coarse estimate of microturbulence [km/s]")
+    slice_v_sini = FloatField(null=True, help_text="Coarse estimate of v sini [km/s]")
+
+    quad_teff = FloatField(null=True, help_text="Coarse estimate of effective temperature [K]")
+    quad_logg = FloatField(null=True, help_text="Coarse estimate of surface gravity [dex]")
+    quad_c_m = FloatField(null=True, help_text="Coarse estimate of [C/M] [dex]")
+    quad_m_h = FloatField(null=True, help_text="Coarse estimate of [M/H] [dex]")
+    quad_n_m = FloatField(null=True, help_text="Coarse estimate of [N/M] [dex]")
+    quad_v_micro = FloatField(null=True, help_text="Coarse estimate of microturbulence [km/s]")
+    quad_v_sini = FloatField(null=True, help_text="Coarse estimate of v sini [km/s]")
+
+
     #> Stellar labels
     teff = FloatField(null=True, help_text=Glossary.teff)
     e_teff = FloatField(null=True, help_text=Glossary.e_teff)
@@ -72,6 +116,7 @@ class Grok(BaseModel, PipelineOutputMixin):
     v_sini = FloatField(null=True, help_text=Glossary.v_sini)
     e_v_sini = FloatField(null=True, help_text=Glossary.e_v_sini)
     
+    '''
     #> Chemical abundances
     c_h = FloatField(null=True, help_text="Carbon abundance [dex]")
     e_c_h = FloatField(null=True, help_text="Error on carbon abundance [dex]")
@@ -109,7 +154,7 @@ class Grok(BaseModel, PipelineOutputMixin):
     e_co_h = FloatField(null=True, help_text="Error on cobalt abundance [dex]")
     ni_h = FloatField(null=True, help_text="Nickel abundance [dex]")
     e_ni_h = FloatField(null=True, help_text="Error on nickel abundance [dex]")
-
+    '''
     #> Path references
     #output_path = TextField(help_text="Path to output file")
     #row_index = IntegerField(help_text="Index of result in output file")

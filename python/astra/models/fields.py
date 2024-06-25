@@ -59,7 +59,7 @@ class BasePixelArrayAccessor(object):
     
     """A base pixel array accessor."""
 
-    def __init__(self, model, field, name, ext, column_name, transform=None, help_text=None):
+    def __init__(self, model, field, name, ext, column_name, transform=None, help_text=None, **kwargs):
         self.model = model
         self.field = field
         self.name = name
@@ -67,6 +67,7 @@ class BasePixelArrayAccessor(object):
         self.column_name = column_name 
         self.transform = transform
         self.help_text = help_text
+        self.kwargs = kwargs
         return None
 
     def __set__(self, instance, value):
