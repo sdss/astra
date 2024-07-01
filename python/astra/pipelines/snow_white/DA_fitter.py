@@ -27,20 +27,29 @@ hdul = fits.open(sys.argv[1])
 flux=hdul[1].data["FLUX"]*1e-17
 wave=10**(hdul[1].data["LOGLAM"])
 err=np.sqrt(hdul[1].data["IVAR"])*1e-17
-err[err==0.]=1e-10
+flux=flux[ivar!=0.]
+wave=wave[ivar!=0.]
+ivar=ivar[ivar!=0.]
+err=(1/np.sqrt(ivar))*1e-17
+wave=wave[(np.isnan(flux)==False)]
+err=err[(np.isnan(flux)==False)]
+flux=flux[(np.isnan(flux)==False)]
+err=err[(wave>=3650)&(wave<9800)]
+flux=flux[(wave>=3650)&(wave<9800)]
+wave=wave[(wave>=3650)&(wave<9800)]
 
 parallax=hdul[2].data["PARALLAX"]
 Gmag=hdul[2].data["GAIA_G_MAG"]
 wave_a=wave#/(1.0 + 2.735182e-4 + 131.4182/wave**2 + 2.76249e8/wave**4) #models are now in vacuum wavelength so no need for conversion
 
 #=============================Classify WD spectrum==========================
-with open('training_file_LL', 'rb') as f:
+with open('training_file_v3', 'rb') as f:
         kf = pickle._load(f,fix_imports=True)
 labels= get_line_info_v3.line_info(wave_a,flux,err)
 predictions = kf.predict(labels.reshape(1, -1))
 probs = kf.predict_proba(labels.reshape(1, -1))
 first= probs[0][kf.classes_==predictions[0]]
-if first >=0.4:
+if first >=0.5:
     p_class=predictions[0]
 else:
     second=sorted(probs[0])[-2]

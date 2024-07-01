@@ -17,7 +17,7 @@ for line in open("classified_clean"):
         lines=get_line_info_v3.line_info(wave,flux,err)
     except:
         continue
-    if np.size(lines)==1744:
+    if np.size(lines)==1750:
         with open("out_data.dat", "ab") as f:
             f.write(b"\n")
             np.savetxt(f, lines, delimiter=",",newline=" ")
