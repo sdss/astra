@@ -39,13 +39,15 @@ def weighted_average(x, e_x):
     return (np.sum(x * ivar) * sum_var, np.sqrt(sum_var))
 
 
-def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, n_res=5, fill_values=None):
+def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2ds=None, n_res=5, fill_values=None):
     q = (
         source
         .boss_visit_spectra
     )
     if telescope is not None:
         q = q.where(BossVisitSpectrum.telescope == telescope)
+    if run2ds is not None:
+        q = q.where(BossVisitSpectrum.run2d.in_(run2ds))
 
     q = q.order_by(BossVisitSpectrum.mjd.asc())
 
@@ -53,8 +55,7 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, n_res
     
     visits = []
     v_rads, e_v_rads, in_stack = ([], [], [])
-    for spectrum in q.iterator():   
-        
+    for spectrum in q.iterator():           
         visit = {}
         for name, field in visit_fields.items():
             if name in ("pk", "v_astra"):
@@ -98,79 +99,79 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, n_res
             pixel_flags=visit["pixel_flags"]
         )
     
-    if not any(in_stack):
-        return (None, None)
-    
-    # Co-add the spectra
-    # No co
-    coadd_flux, coadd_ivar, coadd_pixel_flags, *_ = pixel_weighted_spectrum(
-        visit_flux[in_stack],
-        visit_ivar[in_stack],
-        visit_pixel_flags[in_stack],
-    )
-    bad_edge = (coadd_wavelength < 3650)
-    coadd_flux[bad_edge] = np.nan
-    coadd_ivar[bad_edge] = 0
-    
-    # Compute star-level statistics:        
-    coadd_snr = coadd_flux * np.sqrt(coadd_ivar)
-    coadd_snr = np.mean(coadd_snr[coadd_ivar > 0])
-        
-    v_rad, e_v_rad = weighted_average(v_rads, e_v_rads)
-    std_v_rad = np.std(v_rads)
-    median_e_v_rad = np.median(e_v_rads)
-    n_good_rvs = len(v_rads)
-    
-    xcsao_params = {}
-    for key in ("teff", "logg", "fe_h"):
-        y, e_y = weighted_average(
-            [v[f"xcsao_{key}"] for u, v in zip(in_stack, visits) if u],
-            [v[f"xcsao_e_{key}"] for u, v in zip(in_stack, visits) if u]
+    if any(in_stack):                
+        # Co-add the spectra
+        coadd_flux, coadd_ivar, coadd_pixel_flags, *_ = pixel_weighted_spectrum(
+            visit_flux[in_stack],
+            visit_ivar[in_stack],
+            visit_pixel_flags[in_stack],
         )
-        xcsao_params[f"xcsao_{key}"] = y
-        xcsao_params[f"xcsao_e_{key}"] = e_y
-    xcsao_params["xcsao_mean_rxc"] = np.mean([v["xcsao_rxc"] for u, v in zip(in_stack, visits) if u])
-    
-    # Run NMF on the coadd spectrum.
-    (coadd_continuum, ), meta = boss_continuum_model.fit(coadd_flux, coadd_ivar, full_output=True)
-    
-    # create the coadd spectrum object
-    coadd_spectrum = BossCombinedSpectrum(
-        source_pk=source.pk,
-        release=spectrum.release,
-        telescope=telescope,
-        healpix=source.healpix or spectrum.healpix,
-        sdss_id=source.sdss_id,
-        run2d=spectrum.run2d,
-        min_mjd=min([v["mjd"] for v in visits]),
-        max_mjd=max([v["mjd"] for v in visits]),
-        n_visits=len(visits),
-        n_good_visits=sum(in_stack),
-        n_good_rvs=n_good_rvs,
-        v_rad=v_rad,
-        e_v_rad=e_v_rad,
-        std_v_rad=std_v_rad,
-        median_e_v_rad=median_e_v_rad,    
-        snr=coadd_snr,
-        zwarning_flags=zwarning_flags,
-        gri_gaia_transform_flags=gri_gaia_transform_flags,        
-        nmf_rchi2=meta["rchi2"],
-        **xcsao_params,
-    )
+        bad_edge = (coadd_wavelength < 3650)
+        coadd_flux[bad_edge] = np.nan
+        coadd_ivar[bad_edge] = 0
+        
+        # Compute star-level statistics:        
+        coadd_snr = coadd_flux * np.sqrt(coadd_ivar)
+        coadd_snr = np.mean(coadd_snr[coadd_ivar > 0])
+            
+        v_rad, e_v_rad = weighted_average(v_rads, e_v_rads)
+        std_v_rad = np.std(v_rads)
+        median_e_v_rad = np.median(e_v_rads)
+        n_good_rvs = len(v_rads)
+        
+        xcsao_params = {}
+        for key in ("teff", "logg", "fe_h"):
+            y, e_y = weighted_average(
+                [v[f"xcsao_{key}"] for u, v in zip(in_stack, visits) if u],
+                [v[f"xcsao_e_{key}"] for u, v in zip(in_stack, visits) if u]
+            )
+            xcsao_params[f"xcsao_{key}"] = y
+            xcsao_params[f"xcsao_e_{key}"] = e_y
+        xcsao_params["xcsao_mean_rxc"] = np.mean([v["xcsao_rxc"] for u, v in zip(in_stack, visits) if u])
+        
+        # Run NMF on the coadd spectrum.
+        (coadd_continuum, ), meta = boss_continuum_model.fit(coadd_flux, coadd_ivar, full_output=True)
+        
+        # create the coadd spectrum object
+        coadd_spectrum = BossCombinedSpectrum(
+            source_pk=source.pk,
+            release=spectrum.release,
+            telescope=telescope,
+            healpix=source.healpix or spectrum.healpix,
+            sdss_id=source.sdss_id,
+            run2d=spectrum.run2d,
+            min_mjd=min([v["mjd"] for v in visits]),
+            max_mjd=max([v["mjd"] for v in visits]),
+            n_visits=len(visits),
+            n_good_visits=sum(in_stack),
+            n_good_rvs=n_good_rvs,
+            v_rad=v_rad,
+            e_v_rad=e_v_rad,
+            std_v_rad=std_v_rad,
+            median_e_v_rad=median_e_v_rad,    
+            snr=coadd_snr,
+            zwarning_flags=zwarning_flags,
+            gri_gaia_transform_flags=gri_gaia_transform_flags,        
+            nmf_rchi2=meta["rchi2"],
+            **xcsao_params,
+        )
 
-    coadd_spectrum.flux = coadd_flux
-    coadd_spectrum.ivar = coadd_ivar
-    coadd_spectrum.pixel_flags = coadd_pixel_flags
-    coadd_spectrum.continuum = coadd_continuum
-    coadd_spectrum.nmf_rectified_model_flux = meta["rectified_model_flux"]
-    
-    # Now compute continuum coefficients for the visits, conditioned on the model rectified flux    
-    theta, visit_continuum = boss_continuum_model._theta_step(
-        visit_flux, 
-        visit_ivar, 
-        coadd_spectrum.nmf_rectified_model_flux
-    )
-    
+        coadd_spectrum.flux = coadd_flux
+        coadd_spectrum.ivar = coadd_ivar
+        coadd_spectrum.pixel_flags = coadd_pixel_flags
+        coadd_spectrum.continuum = coadd_continuum
+        coadd_spectrum.nmf_rectified_model_flux = meta["rectified_model_flux"]
+        
+        # Now compute continuum coefficients for the visits, conditioned on the model rectified flux    
+        theta, visit_continuum = boss_continuum_model._theta_step(
+            visit_flux, 
+            visit_ivar, 
+            coadd_spectrum.nmf_rectified_model_flux
+        )
+    else:
+        coadd_spectrum = None
+        visit_continuum = np.nan * np.ones_like(visit_flux)
+
     # create the visit spectrum objects
     visit_spectra = []
     for i, visit in enumerate(visits):
@@ -186,12 +187,17 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, n_res
         visit_spectrum.continuum = visit_continuum[i]
         visit_spectra.append(visit_spectrum)
     
-    for spectrum_pk, spectrum in enumerate_new_spectrum_pks([coadd_spectrum] + visit_spectra):
+    save_spectra = []
+    if coadd_spectrum is not None:
+        save_spectra.append(coadd_spectrum)
+    save_spectra.extend(visit_spectra)
+
+    for spectrum_pk, spectrum in enumerate_new_spectrum_pks(save_spectra):
         spectrum.spectrum_pk = spectrum_pk
-        
-    coadd_spectrum.save()
+    
+    if coadd_spectrum is not None:
+        coadd_spectrum.save()
     if visit_spectra:
         BossRestFrameVisitSpectrum.bulk_create(visit_spectra)
             
     return (coadd_spectrum, visit_spectra)
-

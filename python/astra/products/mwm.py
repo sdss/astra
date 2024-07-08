@@ -9,6 +9,7 @@ from astra import task, __version__
 from astra.utils import log
 from astra.models import Source
 from datetime import datetime
+import warnings
 from astra.models.fields import BasePixelArrayAccessor
 from astra.models.mwm import (
     MWMStarMixin, MWMVisitMixin,
@@ -29,19 +30,31 @@ DEFAULT_STAR_IGNORE_FIELD_NAMES = ("pk", "sdss5_target_flags", "source", "source
 DEFAULT_VISIT_IGNORE_FIELD_NAMES = tuple(list(DEFAULT_STAR_IGNORE_FIELD_NAMES) + ["wavelength"])
 
 
+from astra.products.mwm_summary import DEFAULT_MWM_WHERE
 from astra.products.apogee import prepare_apogee_resampled_visit_and_coadd_spectra
 from astra.products.boss import prepare_boss_resampled_visit_and_coadd_spectra
 
 
 @task
-def create_all_mwm_products(page=None, limit=None, max_workers=1, **kwargs):
-    
+def create_all_mwm_products(apreds=("dr17", "1.3"), run2ds=("v6_1_3", ), page=None, limit=None, max_workers=1, **kwargs):
+    warnings.simplefilter("ignore") # astropy fits warnings
+
     q = (
         Source
         .select()
-        .where(Source.sdss_id.is_null(False))
-        .order_by(Source.pk.asc())
+        .where(
+            Source.sdss_id.is_null(False)
+        &   DEFAULT_MWM_WHERE
+        )
     )
+    # TODO: Do a query to get sources with any kind of thing?
+    if apreds is not None and isinstance(apreds, str):
+        apreds = (apreds, )
+    if run2ds is not None and isinstance(run2ds, str):
+        run2ds = (run2ds, )
+
+    q = q.order_by(Source.pk.desc())
+
     if page is not None and limit is not None:
         q = q.paginate(page, limit)
         total = limit
@@ -57,7 +70,7 @@ def create_all_mwm_products(page=None, limit=None, max_workers=1, **kwargs):
         
         futures = []
         for source in tqdm(q, total=total, desc="Submitting"):
-            futures.append(executor.submit(create_mwmVisit_and_mwmStar_products, source))
+            futures.append(executor.submit(create_mwmVisit_and_mwmStar_products, source, apreds, run2ds))
         
         completed = []
         with tqdm(total=len(futures)) as pb:
@@ -66,20 +79,21 @@ def create_all_mwm_products(page=None, limit=None, max_workers=1, **kwargs):
                 pb.update()
 
     else:   
-        for source in tqdm(q, desc="Creating"):     
+        for source in tqdm(q, total=total, desc="Creating"):     
             try:
-                create_mwmVisit_and_mwmStar_products(source, **kwargs)
+                create_mwmVisit_and_mwmStar_products(source, apreds, run2ds, **kwargs)
             except:
                 log.exception(f"Exception trying to create mwmVisit/mwmStar products for {source}")
                 raise 
-            else:
-                source.updated_mwm_visit_mwm_star_products = datetime.now()
-                source.save()
     yield None
 
 
+from astra.utils import Profiler    
+
 def create_mwmVisit_and_mwmStar_products(
     source,
+    apreds=None,
+    run2ds=None,
     star_ignore_field_names=DEFAULT_STAR_IGNORE_FIELD_NAMES,
     visit_ignore_field_names=DEFAULT_VISIT_IGNORE_FIELD_NAMES,
     fill_values=None,
@@ -88,11 +102,11 @@ def create_mwmVisit_and_mwmStar_products(
     debug=False
 ):
     try:
-            
+        
         # use a fake ApogeeCombinedSpectrum to get the right path
         mwmStar_path = BossCombinedSpectrum(sdss_id=source.sdss_id, v_astra=__version__).absolute_path
         mwmVisit_path = ApogeeRestFrameVisitSpectrum(sdss_id=source.sdss_id, v_astra=__version__).absolute_path
-        
+
         if overwrite:
             for model in (BossCombinedSpectrum, ApogeeCombinedSpectrum, BossRestFrameVisitSpectrum, ApogeeRestFrameVisitSpectrum):
                 model.delete().where(model.source_pk == source.pk).execute()
@@ -100,11 +114,13 @@ def create_mwmVisit_and_mwmStar_products(
             if os.path.exists(mwmStar_path) or os.path.exists(mwmVisit_path):
                 log.warning(f"Skipping {source} because {mwmStar_path} or {mwmVisit_path} already exists")
                 return None
-            
-        cards, original_names = create_source_primary_hdu_cards(source, context="spectra")    
-        mwmVisit_hdus = [create_source_primary_hdu_from_cards(source, cards, original_names), None, None, None, None]
-        mwmStar_hdus = [create_source_primary_hdu_from_cards(source, cards, original_names), None, None, None, None]
         
+        cards, original_names = create_source_primary_hdu_cards(source, context="spectra")    
+
+        mwmVisit_hdus = [create_source_primary_hdu_from_cards(source, cards, original_names), None, None, None, None]
+
+        mwmStar_hdus = [create_source_primary_hdu_from_cards(source, cards, original_names), None, None, None, None]
+            
         star_kwds = dict(
             include_dispersion_cards=True,
             ignore_field_names=star_ignore_field_names,
@@ -113,7 +129,7 @@ def create_mwmVisit_and_mwmStar_products(
         )
         visit_kwds = dict(
             include_dispersion_cards=True,
-            ignore_field_names=visit_ignore_field_names,
+            ignore_field_names=star_ignore_field_names,
             fill_values=fill_values,
             upper=upper,
         )            
@@ -123,24 +139,25 @@ def create_mwmVisit_and_mwmStar_products(
             observatory = telescope[:3].upper()
             
             try:
-                boss_coadd, boss_visit = prepare_boss_resampled_visit_and_coadd_spectra(source, telescope)    
+                boss_coadd, boss_visit = prepare_boss_resampled_visit_and_coadd_spectra(source, telescope, run2ds)    
             except FileNotFoundError:
                 boss_coadd = boss_visit = None
-                log.exception(f"Exception preparing BOSS spectra for {source} and {telescope}")
+                log.exception(f"Exception preparing BOSS spectra for {source} / {telescope} / {run2ds}")
                 
-            
             coadd_boss_hdu = _create_single_model_hdu([boss_coadd], BossCombinedSpectrum, observatory, "BOSS", **star_kwds)
+
             visit_boss_hdu = _create_single_model_hdu(boss_visit, BossRestFrameVisitSpectrum, observatory, "BOSS", **visit_kwds)        
             
             try:
-                apogee_coadd, apogee_visit = prepare_apogee_resampled_visit_and_coadd_spectra(source, telescope)
+                apogee_coadd, apogee_visit = prepare_apogee_resampled_visit_and_coadd_spectra(source, telescope, apreds)
             except FileNotFoundError:
                 apogee_coadd = apogee_visit = None
-                log.exception(f"Exception preparing APOGEE spectra for {source} and {telescope}")
+                log.exception(f"Exception preparing APOGEE spectra for {source} / {telescope} / {apreds}")
             
             coadd_apogee_hdu = _create_single_model_hdu([apogee_coadd], ApogeeCombinedSpectrum, observatory, "APOGEE", **star_kwds)        
-            visit_apogee_hdu = _create_single_model_hdu(apogee_visit, ApogeeRestFrameVisitSpectrum, observatory, "APOGEE", **visit_kwds)
             
+            visit_apogee_hdu = _create_single_model_hdu(apogee_visit, ApogeeRestFrameVisitSpectrum, observatory, "APOGEE", **visit_kwds)
+                        
             # Order is: BOSS APO, BOSS LCO, APOGEE APO, APOGEE LCO
             mwmVisit_hdus[1 + i] = visit_boss_hdu
             mwmVisit_hdus[3 + i] = visit_apogee_hdu
@@ -173,7 +190,10 @@ def create_mwmVisit_and_mwmStar_products(
         if debug:
             raise
     else:
+        source.updated_mwm_visit_mwm_star_products = datetime.now()
+        source.save()
         return source        
+
 
 def _create_single_model_hdu(
     results,

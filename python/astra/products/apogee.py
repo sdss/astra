@@ -21,11 +21,11 @@ apogee_continuum_model = ApogeeNMFContinuum()
 apogee_continuum_model.components[:, np.all(apogee_continuum_model.components == 0, axis=0)] = np.nan # clip the edges that we don't model :-)
 
 
-def prepare_apogee_resampled_visit_and_coadd_spectra(source, telescope=None, fill_value=None):
-    return prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, telescope=telescope, fill_values=fill_value)
+def prepare_apogee_resampled_visit_and_coadd_spectra(source, telescope=None, apreds=None, fill_value=None):
+    return prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, telescope=telescope, apreds=apreds, fill_values=fill_value)
 
 
-def prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, telescope=None, fill_values=None):
+def prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, telescope=None, apreds=None, fill_values=None):
 
     # Get a SDSS spectrum first by sorting by release
     sdss_id = source.sdss_id
@@ -36,6 +36,8 @@ def prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, telesco
     )
     if telescope is not None:
         q = q.where(ApogeeCoaddedSpectrumInApStar.telescope.startswith(telescope))
+    if apreds is not None:
+        q = q.where(ApogeeCoaddedSpectrumInApStar.apred.in_(apreds))
         
     q = (
         q
@@ -104,6 +106,9 @@ def prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, telesco
     if telescope is not None:
         q = q.where(ApogeeVisitSpectrum.telescope.startswith(telescope))
 
+    if apreds is not None:
+        q = q.where(ApogeeVisitSpectrum.apred.in_(apreds))
+        
     q = (
         q
         .order_by(ApogeeVisitSpectrum.mjd.asc())
@@ -141,6 +146,9 @@ def prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, telesco
     )
     if telescope is not None:
         q = q.where(ApogeeVisitSpectrumInApStar.telescope.startswith(telescope))
+    
+    if apreds is not None:
+        q = q.where(ApogeeVisitSpectrumInApStar.apred.in_(apreds))
         
     apvisit_in_apstar_spectra = { r.pk: r for r in q.iterator() }
 

@@ -366,7 +366,7 @@ def add_category_comments(hdu, models, original_names, upper, use_ttype=True):
             category_comments_added.append(field_name)
     return None
 
-def add_category_headers(hdu, models, original_names, upper, use_ttype=True, suppress_warnings=False):
+def add_category_headers(hdu, models, original_names, upper, use_ttype=True, suppress_warnings=True):
     category_headers_added = []
     list_original_names = list(original_names.values())
     for model in models:
