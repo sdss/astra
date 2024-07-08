@@ -430,7 +430,14 @@ def compute_n_neighborhood(
 ):
     #"Sources within 3\" and G_MAG < G_MAG_source + 5"
     
-    from astra.migrations.sdss5db.catalogdb import Gaia_DR3
+    from astra.migrations.sdss5db.catalogdb import Gaia_DR3 as _Gaia_DR3
+    from sdssdb.peewee.sdss5db import SDSS5dbDatabaseConnection
+
+    class Gaia_DR3(_Gaia_DR3):
+
+        class Meta:
+            table_name = 'gaia_dr3_source'
+            database = SDSS5dbDatabaseConnection(profile="operations")    
 
     q = (
         Source
