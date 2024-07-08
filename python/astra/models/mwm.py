@@ -366,7 +366,8 @@ class BossCombinedSpectrum(MWMStarMixin, SpectrumMixin):
                     "v_astra",                    
                     "healpix",
                     "sdss_id",                    
-                    "telescope"
+                    "telescope",
+                    "run2d"
                 ),
                 True,
             ),
@@ -486,7 +487,8 @@ class ApogeeCombinedSpectrum(MWMStarMixin, SpectrumMixin):
                     "v_astra",                    
                     "healpix",
                     "sdss_id",                    
-                    "telescope"
+                    "telescope",
+                    "apred"
                 ),
                 True,
             ),
