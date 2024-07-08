@@ -34,11 +34,19 @@ class Operator(BaseOperator):
     
 
     def where_by_execution_date(self, input_model, context):
+        """
         where_by_execution_date = {
             "mjd": lambda m: m.mjd.between(Time(context["prev_execution_date"]).mjd, Time(context["next_execution_date"]).mjd),
             "date_obs": lambda m: m.date_obs.between(Time(context["prev_execution_date"]).datetime, Time(context["next_execution_date"]).datetime),
             "max_mjd": lambda m: m.max_mjd.between(Time(context["prev_execution_date"]).mjd, Time(context["next_execution_date"]).mjd),
         }
+        """
+        where_by_execution_date = {
+            "mjd": lambda m: (m.mjd > Time(context["prev_execution_date"]).mjd) & (m.mjd <= Time(context["next_execution_date"]).mjd),
+            "date_obs": lambda m: (m.date_obs > Time(context["prev_execution_date"]).datetime) & (m.date_obs <= Time(context["next_execution_date"]).datetime),
+            "max_mjd": lambda m: (m.max_mjd > Time(context["prev_execution_date"]).mjd) & (m.max_mjd <= Time(context["next_execution_date"]).mjd),
+        }
+
         if context["next_execution_date"] is not None and context["prev_execution_date"] is not None:
             for k, f in where_by_execution_date.items():
                 if hasattr(input_model, k):
