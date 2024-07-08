@@ -42,7 +42,6 @@ class Source(BaseModel):
     healpix = IntegerField(null=True, help_text="HEALPix (128 side)")
     
     #> Targeting Provenance 
-    carton_0 = TextField(default="", help_text="Highest priority carton name")
     lead = TextField(null=True, help_text="Lead catalog used for cross-match")
     version_id = IntegerField(null=True, help_text="SDSS catalog version for targeting")
     catalogid = BigIntegerField(null=True, help_text=Glossary.catalogid)

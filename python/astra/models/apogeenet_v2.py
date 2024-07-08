@@ -155,7 +155,7 @@ class ApogeeNetV2(BaseModel, PipelineOutputMixin):
             self.flag_e_logg_large = True
         if self.e_fe_h > 0.5:
             self.flag_e_fe_h_large = True
-        if np.log10(self.raw_e_teff) > 2.7:
+        if np.log10(self.e_teff) > 2.7:
             self.flag_e_teff_large = True
 
         if meta is None or not np.all(np.isfinite(meta)) or missing_photometry:
@@ -168,7 +168,7 @@ class ApogeeNetV2(BaseModel, PipelineOutputMixin):
                 self.flag_result_unreliable = True
             
         return None
-
+    
 
 def apply_noise_model():
     

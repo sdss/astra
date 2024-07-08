@@ -257,6 +257,10 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     @classmethod
     def get_path_template(cls, release, telescope):
         if release == "sdss5":
+            #if apred == "1.3":
+            #    # I fucking hate this project.
+            #    template = "$SAS_BASE_DIR/../sdss51/sdsswork/mwm/apogee/spectro/redux/ipl-3-{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits"
+            #else:
             return "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/apVisit-{apred}-{telescope}-{plate}-{mjd}-{fiber:0>3}.fits"
         else:
             if telescope == "apo1m":
@@ -373,10 +377,13 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
 
     @property
     def path(self):
-        template = {
-            "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
-            "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits"
-        }[self.release]
+        if self.apred == "1.3":
+            template = "$SAS_BASE_DIR/../sdss51/sdsswork/mwm/apogee/spectro/redux/ipl-3-{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits"
+        else:
+            template = {
+                "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
+                "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits"
+            }[self.release]
 
         kwds = self.__data__.copy()
         if self.release == "sdss5":
