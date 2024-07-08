@@ -7,7 +7,7 @@ from sdsstools.configuration import get_config
 from astra.utils import log, Timer
 
 NAME = "astra"
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 @decorator
 def task(function, *args, **kwargs):
@@ -35,8 +35,9 @@ def task(function, *args, **kwargs):
     """
 
     if not isgeneratorfunction(function):
-        raise TypeError("Tasks must be generators that `yield` results.")
+        log.warning(f"Tasks should be generators that `yield` results, but {function} does not `yield`.")
 
+    write_to_database = kwargs.pop("write_to_database", True)
     frequency = kwargs.pop("frequency", 300)
     result_frequency = kwargs.pop("result_frequency", 100_000)
     batch_size = kwargs.pop("batch_size", 1000)
@@ -67,7 +68,6 @@ def task(function, *args, **kwargs):
                         # already saved from downstream task wrapper
                         # TODO: should we save this?
                         #result.save()
-
                         yield result                        
                     else:
                         results.append(result)
@@ -83,7 +83,7 @@ def task(function, *args, **kwargs):
                     raise
             
             else:
-                if timer.check_point or n_results_since_last_check_point >= result_frequency:
+                if write_to_database and (timer.check_point or n_results_since_last_check_point >= result_frequency):
                     with timer.pause():
 
                         # Add estimated overheads to each result.
@@ -108,13 +108,14 @@ def task(function, *args, **kwargs):
     # - what the total time elapsed was
     # - what the true cost of overhead time was (before and after yielding results)
     timer.add_overheads(results)
-    try:
-        # Write any remaining results to the database.
-        _bulk_insert(results, batch_size, re_raise_exceptions)
-    except:
-        log.exception(f"Exception trying to insert results to database:")
-        if re_raise_exceptions:
-            raise
+    if write_to_database:
+        try:
+            # Write any remaining results to the database.
+            _bulk_insert(results, batch_size, re_raise_exceptions)
+        except:
+            log.exception(f"Exception trying to insert results to database:")
+            if re_raise_exceptions:
+                raise
 
     yield from results
 
