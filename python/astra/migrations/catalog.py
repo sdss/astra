@@ -119,21 +119,22 @@ def migrate_bailer_jones_distances(
                 
                 update.append(source)
             
-            n_updated += (
-                Source
-                .bulk_update(
-                    update,
-                    fields=[
-                        Source.r_med_geo,
-                        Source.r_lo_geo,
-                        Source.r_hi_geo,
-                        Source.r_med_photogeo,
-                        Source.r_lo_photogeo,
-                        Source.r_hi_photogeo,
-                        Source.bailer_jones_flags,
-                    ]
+            if len(update) > 0:
+                n_updated += (
+                    Source
+                    .bulk_update(
+                        update,
+                        fields=[
+                            Source.r_med_geo,
+                            Source.r_lo_geo,
+                            Source.r_hi_geo,
+                            Source.r_med_photogeo,
+                            Source.r_lo_photogeo,
+                            Source.r_hi_photogeo,
+                            Source.bailer_jones_flags,
+                        ]
+                    )
                 )
-            )
 
             pb.update(batch_size)
     
@@ -252,6 +253,9 @@ def migrate_zhang_stellar_parameters(where=None, batch_size: Optional[int] = 500
 
     from astra.migrations.sdss5db.catalogdb import CatalogdbModel, Gaia_DR3, BigIntegerField, ForeignKeyField
 
+    # Sigh, this catalog is on operations, but not pipelines.
+    from sdssdb.peewee.sdss5db import SDSS5dbDatabaseConnection
+
     class Gaia_Stellar_Parameters(CatalogdbModel):
 
         gdr3_source_id = BigIntegerField(primary_key=True)
@@ -264,7 +268,7 @@ def migrate_zhang_stellar_parameters(where=None, batch_size: Optional[int] = 500
 
         class Meta:
             table_name = 'gaia_stellar_parameters'
-
+            database = SDSS5dbDatabaseConnection(profile="operations")
 
     log.info(f"Migrating Zhang et al. stellar parameters")
     q = (
@@ -808,8 +812,19 @@ def migrate_gaia_dr3_astrometry_and_photometry(where = None, limit: Optional[int
         Limit the update to `limit` records. Useful for testing.
     """
 
-    from astra.migrations.sdss5db.catalogdb import Gaia_DR3
+    from astra.migrations.sdss5db.catalogdb import Gaia_DR3 as _Gaia_DR3
 
+    # Just as I said would happen, the commonly used tables have not been copied over to the pipelines database.
+    # The pipelines database has introduced more difficulties and edge cases than what it has fixed.
+    from sdssdb.peewee.sdss5db import SDSS5dbDatabaseConnection
+
+    class Gaia_DR3(_Gaia_DR3):
+
+        class Meta:
+            table_name = "gaia_dr3_source"
+            database = SDSS5dbDatabaseConnection(profile="operations")
+
+    
     log.info(f"Updating Gaia astrometry and photometry")
 
     # Retrieve sources which have gaia identifiers but not astrometry
@@ -897,9 +912,15 @@ def migrate_gaia_dr3_astrometry_and_photometry(where = None, limit: Optional[int
 
     updated_sources = []
     for source in q:
-        for k, v in gaia_data[source.gaia_dr3_source_id].items():
-            setattr(source, k, v or np.nan)
-        updated_sources.append(source)
+        try:
+            z = gaia_data[source.gaia_dr3_source_id]
+        except KeyError:
+            log.warning(f"Source pk={source} seems to have an incorrect Gaia DR3 source identifier: {source.gaia_dr3_source_id} (sdss_id={source.sdss_id})")
+            continue
+        else:
+            for k, v in z.items():
+                setattr(source, k, v or np.nan)
+            updated_sources.append(source)
 
     updated = 0
     for chunk in chunked(updated_sources, batch_size):
