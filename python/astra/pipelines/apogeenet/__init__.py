@@ -321,14 +321,14 @@ def apogeenet(
             
             log_G,log_Teff,FeH,log_G_std,log_Teff_std,Feh_std = make_prediction(flux, e_flux, None, num_uncertainty_draws,model,device)
         except:
-            log.exception(f"Exception when running ANet on {spectrum}")    
-            yield ANet(
+            log.exception(f"Exception when running ApogeeNet on {spectrum}")    
+            yield ApogeeNet(
                 spectrum_pk=spectrum.spectrum_pk,
                 source_pk=spectrum.source_pk,
                 flag_runtime_exception=True
             )
         else:
-            yield ANet(
+            yield ApogeeNet(
                 spectrum_pk=spectrum.spectrum_pk,
                 source_pk=spectrum.source_pk,
                 fe_h=FeH,
@@ -336,15 +336,9 @@ def apogeenet(
                 logg=log_G,
                 e_logg=log_G_std,
                 teff=10**log_Teff,
-                #e_teff=10**log_Teff_std, 
-                #e_teff=10^logteff*e_logteff*ln(10)
                 e_teff=10**log_Teff * log_Teff_std * np.log(10)                
             )
             
-            # to make correction in psql:
-            #update a_net set e_teff=teff * log10(e_teff) * 2.302585092994046 where task_pk = 1;     
-            # then check, and apply to all with task_pk > 1
-
 
 '''
 path = expand_path(
