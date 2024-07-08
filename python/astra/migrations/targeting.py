@@ -34,7 +34,6 @@ def migrate_carton_assignments_to_bigbitfield(
     where=None,
     batch_size=500,
     limit=None,
-    from_cache=False
 ):
 
     bit_mapping = {}
@@ -42,7 +41,6 @@ def migrate_carton_assignments_to_bigbitfield(
         row_as_dict = dict(zip(row.keys(), row.values()))
         bit_mapping[row_as_dict["carton_pk"]] = row_as_dict
 
-    # Retrieve sources which have gaia identifiers but not astrometry
     q = (
         Source
         .select()
@@ -59,52 +57,61 @@ def migrate_carton_assignments_to_bigbitfield(
     updated = 0
     total = limit or Source.select().where(where).count()
     
-    if from_cache:
-        import pickle
-        with open(expand_path("~/20230926.pkl"), "rb") as fp:
-            q_cartons = pickle.load(fp)
+    from astra.migrations.sdss5db.targetdb import Target, CartonToTarget
+    from astra.migrations.sdss5db.catalogdb import CatalogdbModel
 
-    else:
-        from astra.migrations.sdss5db.targetdb import Target, CartonToTarget, Assignment
-        from astra.migrations.sdss5db.catalogdb import CatalogdbModel
+    class SDSS_ID_Flat(CatalogdbModel):
+        class Meta:
+            table_name = "sdss_id_flat"
 
-        class SDSS_ID_Flat(CatalogdbModel):
-            class Meta:
-                table_name = "sdss_id_flat"
-
-        q_cartons = (
-            SDSS_ID_Flat
-            .select(
-                SDSS_ID_Flat.sdss_id,
-                CartonToTarget.carton_pk,
-            )
-            .join(Target, on=(SDSS_ID_Flat.catalogid == Target.catalogid))
-            .join(CartonToTarget, on=(Target.pk == CartonToTarget.target_pk))
-            .join(Assignment, on=(Assignment.carton_to_target_pk == CartonToTarget.pk))
-            .tuples()
-            .iterator()
+    q_cartons = (
+        SDSS_ID_Flat
+        .select(
+            SDSS_ID_Flat.sdss_id,
+            CartonToTarget.carton_pk,
         )
+        .join(Source, on=(SDSS_ID_Flat.sdss_id == Source.sdss_id))
+        .switch(SDSS_ID_Flat)
+        .join(Target, on=(SDSS_ID_Flat.catalogid == Target.catalogid))
+        .join(CartonToTarget, on=(Target.pk == CartonToTarget.target_pk))
+        .tuples()
+        .iterator()
+    )
 
     missing, update, sources = (set(), {}, {})
     for source in tqdm(q, desc="Preparing sources", total=1):
         sources[source.sdss_id] = source
 
-    n_skipped, n_applied = (0, 0)
-    for sdss_id, carton_pk in tqdm(q_cartons, total=len(q_cartons) if from_cache else 1, desc="Assiging cartons to sources"):
+    n_skipped, n_applied, not_marked = (0, 0, {})
+    for sdss_id, carton_pk in tqdm(q_cartons, total=1, desc="Assiging cartons to sources"):
         try:
             s = sources[sdss_id]
         except:
             missing.add(sdss_id)
             n_skipped += 1
         else:
-            s.sdss5_target_flags.set_bit(bit_mapping[carton_pk]["bit"])
-            update[sdss_id] = s
-            n_applied += 1
-    
+            try:
+                bit = bit_mapping[carton_pk]["bit"]
+            except KeyError:
+                if carton_pk not in not_marked:
+                    not_marked.setdefault(carton_pk, [])
+                    log.warning(f"No bit mapping for carton pk={carton_pk} and sdss_id={sdss_id} (source_pk={s.pk})")
+                not_marked[carton_pk].append(sdss_id)
+                n_skipped += 1
+            else:
+                s.sdss5_target_flags.set_bit(bit)
+                update[sdss_id] = s
+                n_applied += 1        
+
     log.info(f"Flagged {n_applied} source-carton assignments, and skipped {n_skipped} ({len(missing)} sources missing)")
+    
+    if len(not_marked) > 0:
+        log.warning(f"There were {len(not_marked)} cartons that we did not update because the bit was not in the semaphore file")
+        for carton_pk, sdss_ids in not_marked.items():
+            log.warning(f"  Carton pk={carton_pk} had {len(sdss_ids)} (e.g., {sdss_ids[0]}) and no bit exists in the semaphore file")
 
     if len(missing) > 0:
-        log.warning(f"There were {len(missing)} sdss_ids with target assignments that are not in Astra's database")
+        log.warning(f"There were {len(missing)} sdss_ids with target assignments that are not in Astra's database (e.g., {missing[0]})")
 
     updated = 0
     with tqdm(desc="Updating", total=len(update)) as pb:
@@ -121,4 +128,4 @@ def migrate_carton_assignments_to_bigbitfield(
             )
             pb.update(batch_size)
 
-    return updated
+    return (updated, missing, not_marked)
