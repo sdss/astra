@@ -474,6 +474,7 @@ def fits_column_kwargs(field, values, upper, name=None, default_n_pixels=0, warn
 
 
 def warn_on_long_name_or_comment(field, warn_comment_length=47, warn_total_length=65):
+    return None 
     total = len(field.name)
     if field.help_text is not None:
         if len(field.help_text) > warn_comment_length:

@@ -7,7 +7,7 @@ from sdsstools.configuration import get_config
 from astra.utils import log, Timer
 
 NAME = "astra"
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 @decorator
 def task(function, *args, **kwargs):

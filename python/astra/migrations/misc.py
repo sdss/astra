@@ -353,49 +353,86 @@ def compute_casagrande_irfm_effective_temperatures(
 
 
 def update_visit_spectra_counts(batch_size=10_000):
-    
-    # TODO: Switch this to distinct on (mjd, telescope, fiber) etc if you are including multiple reductions
-    q_apogee_counts = (
-        Source
+
+    sq_apogee = (
+        ApogeeVisitSpectrum
         .select(
-            Source.pk,
+            ApogeeVisitSpectrum.pk,
+            ApogeeVisitSpectrum.source_pk,
+            ApogeeVisitSpectrum.telescope, 
+            ApogeeVisitSpectrum.mjd, 
+            ApogeeVisitSpectrum.fiber,
+            ApogeeVisitSpectrum.plate,
+            ApogeeVisitSpectrum.field,            
+        )
+        .distinct(
+            ApogeeVisitSpectrum.source_pk,
+            ApogeeVisitSpectrum.telescope, 
+            ApogeeVisitSpectrum.mjd, 
+            ApogeeVisitSpectrum.fiber,
+            ApogeeVisitSpectrum.plate,
+            ApogeeVisitSpectrum.field,                 
+        )    
+    )
+    q_apogee_counts = (
+        ApogeeVisitSpectrum
+        .select(
+            ApogeeVisitSpectrum.source_pk,
             fn.count(ApogeeVisitSpectrum.pk).alias("n_apogee_visits"),
             fn.min(ApogeeVisitSpectrum.mjd).alias("apogee_min_mjd"),
             fn.max(ApogeeVisitSpectrum.mjd).alias("apogee_max_mjd"),
         )
-        .join(ApogeeVisitSpectrum, JOIN.LEFT_OUTER, on=(Source.pk == ApogeeVisitSpectrum.source_pk))
-        .group_by(Source.pk)
+        .join(sq_apogee, on=(sq_apogee.c.pk == ApogeeVisitSpectrum.pk))
+        .group_by(ApogeeVisitSpectrum.source_pk)
         .dicts()
     )
-    q_boss_counts = (
-        Source
+
+    sq_boss = (
+        BossVisitSpectrum
         .select(
-            Source.pk,
+            BossVisitSpectrum.pk,
+            BossVisitSpectrum.source_pk,
+            BossVisitSpectrum.telescope,
+            BossVisitSpectrum.mjd,
+            BossVisitSpectrum.fieldid,
+            BossVisitSpectrum.plateid,
+        )
+        .distinct(
+            BossVisitSpectrum.source_pk,
+            BossVisitSpectrum.telescope,
+            BossVisitSpectrum.mjd,
+            BossVisitSpectrum.fieldid,
+            BossVisitSpectrum.plateid,
+        )
+    )
+
+    q_boss_counts = (
+        BossVisitSpectrum
+        .select(
+            BossVisitSpectrum.source_pk,
             fn.count(BossVisitSpectrum.pk).alias("n_boss_visits"),
             fn.min(BossVisitSpectrum.mjd).alias("boss_min_mjd"),
-            fn.max(BossVisitSpectrum.mjd).alias("boss_max_mjd"),            
+            fn.max(BossVisitSpectrum.mjd).alias("boss_max_mjd"),
         )
-        .join(BossVisitSpectrum, JOIN.LEFT_OUTER, on=(Source.pk == BossVisitSpectrum.source_pk))
-        .group_by(Source.pk)
+        .join(sq_boss, on=(sq_boss.c.pk == BossVisitSpectrum.pk))       
+        .group_by(BossVisitSpectrum.source_pk)
         .dicts()
     )
-    
+
     # merge counts
     all_counts = {}
-    for each in q_apogee_counts:
-        all_counts[each.pop("pk")] = each
+    for each in tqdm(q_apogee_counts, total=0):
+        all_counts[each.pop("source")] = each
     
-    for each in q_boss_counts:
-        all_counts[each.pop("pk")].update(each)
-        
-    q = { s.pk: s for s in Source.select() }
+    for each in tqdm(q_boss_counts, total=0):
+        source_pk = each.pop("source")
+        all_counts.setdefault(source_pk, {})
+        all_counts[source_pk].update(each)
     
     update = []
-    for pk, counts in all_counts.items():
-        s = q[pk]
-        for k, v in counts.items():
+    for s in tqdm(Source.select().iterator(), total=0):
+        for k, v in all_counts.get(s.pk, {}).items():
             setattr(s, k, v)
-            
         update.append(s)
     
     with tqdm(total=len(update)) as pb:

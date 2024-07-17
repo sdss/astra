@@ -291,7 +291,7 @@ def fix_version_id_edge_cases(version_ids=(13, 24, )):
             except IntegrityError:
                 failed.append(source)
                 
-                log.info(f"Failed to update {source} (sdss_id={source.sdss_id}) to {q_source} (sdss_id={q_source.sdss_id}). Updating dependencies.")
+                log.info(f"Failed to update {source} (sdss_id={source.sdss_id}) to sdss_id={q_source['sdss_id']}. Updating dependencies.")
                 existing_source_pk = Source.get(sdss_id=source.sdss_id).pk
                 for expr, field in source.dependencies():
                     for item in field.model.select().where(expr):
@@ -305,7 +305,10 @@ def fix_version_id_edge_cases(version_ids=(13, 24, )):
         else:
             log.warning(f"Could not find updated source for {source}")
 
-    raise a        
+    log.info(f"Deleting {len(sources_for_deletion)} sources")
+    for item in sources_for_deletion:
+        item.delete_instance()
+        
     return (updated, failed)
 
 
@@ -611,6 +614,7 @@ def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[
     migrate_sdss4_dr17_metadata_from_headers()
     
     return None
+    
     
 def migrate_sdss4_dr17_metadata_from_headers():
 
@@ -1747,6 +1751,10 @@ def migrate_new_apvisit_from_sdss5_apogee_drpdb(
                 spectrum.std_v_rad = float(metadata["VSCATTER"])
                 spectrum.median_e_v_rad = float(metadata.get("VERR_MED", np.nan))
                 spectrum.spectrum_flags = metadata["STARFLAG"]
+
+                # The MJDS in the apStar file only list the MJDs that were included in the stack. 
+                # But there could be other MJDs which were not included in the stack.
+                # TODO: To be consistent elsewhere we should probably not update these based on 
                 spectrum.min_mjd = min(mjds)
                 spectrum.max_mjd = max(mjds)
 
@@ -1915,6 +1923,13 @@ def migrate_1p3_apvisit_from_sdss5_apogee_drpdb(
         that were inserted.
     """
 
+    # 1.3 was run many times, and there are "old" 1.3 results in the database that are incorrect in that
+    # the paths dont exist anymore, everything is wrong, blah. the records should have been removed from
+    # the APOGEE DRP database, but they haven't and they wont. so we need to only select things from the 
+    # "good" run. fml
+    from astropy.time import Time
+    created_after = Time(60440, format="mjd").datetime 
+
     from astra.migrations.sdss5db.apogee_drpdb import Star, Visit, RvVisit
     from astra.migrations.sdss5db.catalogdb import (
         Catalog,
@@ -1943,6 +1958,7 @@ def migrate_1p3_apvisit_from_sdss5_apogee_drpdb(
         .where(
             (RvVisit.apred_vers == apred)
         &   (RvVisit.catalogid > 0) # Some RM_COSMOS fields with catalogid=0 (e.g., apogee_drp.visit = 7494220)
+        &   (RvVisit.created > created_after)
         )  
         .group_by(RvVisit.visit_pk)
         .order_by(RvVisit.visit_pk.desc())
@@ -1976,6 +1992,7 @@ def migrate_1p3_apvisit_from_sdss5_apogee_drpdb(
             &   (RvVisit.starver == ssq.c.max)
             )
         )
+        .where(RvVisit.created > created_after)
     )
     if rvvisit_where is not None:
         sq = (
@@ -2061,6 +2078,7 @@ def migrate_1p3_apvisit_from_sdss5_apogee_drpdb(
         .switch(Catalog)
         .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(Catalog.catalogid == SDSS_ID_Flat.catalogid))
         .join(SDSS_ID_Stacked, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
+        .where(Visit.created > created_after)
         .dicts()
     )
 
@@ -2203,8 +2221,12 @@ SDSS_ID (from APOGEE DRP): {apogee_drp_sdss_id}
         .switch(Catalog)
         .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(Catalog.catalogid == SDSS_ID_Flat.catalogid))
         .join(SDSS_ID_Stacked, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
-        .where(RvVisit.pk.is_null() & (Visit.apred_vers == apred) & (Visit.catalogid > 0))
-        #.where(Visit.pk == 9025065)
+        .where(
+            RvVisit.pk.is_null() 
+        &   (Visit.apred_vers == apred) 
+        &   (Visit.catalogid > 0)
+        &   (Visit.created > created_after)
+        )
         .dicts()
     )
 

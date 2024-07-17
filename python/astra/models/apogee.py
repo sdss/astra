@@ -366,8 +366,9 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
     # Healpix is only used in SDSS-V, and may not appear in this data product keywords group (since it appears in Source).
     # Here we repeat it because the APOGEE DRP has a habit of incorrectly computing healpix, so we need to store their version so that we can access paths.
     healpix = IntegerField(null=True, help_text=Glossary.healpix)
-    field = TextField(null=True, help_text=Glossary.field) # not used in SDSS-V
-    prefix = TextField(null=True, help_text=Glossary.prefix) # not used in SDSS-V
+    # field is not used in SDSS-V, but we need a non-null default value otherwise postgres allows rows with same values in all other fields of an index
+    field = TextField(default="", null=False, help_text=Glossary.field) 
+    prefix = TextField(default="", null=False, help_text=Glossary.prefix) # not used in SDSS-V
     plate = TextField(help_text=Glossary.plate)
     mjd = IntegerField(help_text=Glossary.mjd)
     fiber = IntegerField(help_text=Glossary.fiber)
@@ -377,13 +378,13 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
 
     @property
     def path(self):
-        if self.apred == "1.3":
-            template = "$SAS_BASE_DIR/../sdss51/sdsswork/mwm/apogee/spectro/redux/ipl-3-{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits"
-        else:
-            template = {
-                "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
-                "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits"
-            }[self.release]
+        #if self.apred == "1.3":
+        #    template = "$SAS_BASE_DIR/../sdss51/sdsswork/mwm/apogee/spectro/redux/ipl-3-{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits"
+        #else:
+        template = {
+            "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
+            "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits"
+        }[self.release]
 
         kwds = self.__data__.copy()
         if self.release == "sdss5":
@@ -403,7 +404,7 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
                     "apstar",
                     "obj",
                     "telescope",
-                    "healpix",
+                    #"healpix",
                     "field",
                     "prefix",
                     "plate",
@@ -468,8 +469,9 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     obj = TextField(help_text=Glossary.obj)
     telescope = TextField(help_text=Glossary.telescope)
     healpix = IntegerField(null=True, help_text=Glossary.healpix) 
-    field = TextField(null=True, help_text=Glossary.field) # not used in SDSS-V
-    prefix = TextField(null=True, help_text=Glossary.prefix) # not used in SDSS-V    
+    # see comment earlier about nullables with field/prefix
+    field = TextField(null=False, default="", help_text=Glossary.field) # not used in SDSS-V
+    prefix = TextField(null=False, default="", help_text=Glossary.prefix) # not used in SDSS-V
 
     #> Observing Span
     min_mjd = IntegerField(null=True, help_text="Minimum MJD of visits")
@@ -562,7 +564,7 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
                     "apstar",
                     "obj",
                     "telescope",
-                    "healpix",
+                    #"healpix",
                     "field",
                     "prefix",
                 ),

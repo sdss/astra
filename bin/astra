@@ -182,7 +182,8 @@ def migrate(apred, run2d, limit, include_dr17):
 @click.option("--slurm-profile", default=None, help="Use Slurm profile specified in Astra config file. If None is given, it will default to the profile for the task name, or `default`.")
 @click.option("--slurm-dir", default=None)
 @click.option("--limit", default=None, type=int)
-def create_mwm_products(slurm_profile, slurm_dir, limit):
+@click.option("--nodes", default=1, type=int)
+def create_mwm_products(slurm_profile, slurm_dir, limit, nodes):
 
     import os
     from astra import config, log
@@ -228,6 +229,8 @@ def create_mwm_products(slurm_profile, slurm_dir, limit):
         ).count()
 
     n_proc = 32
+    raise a
+    
     items_per_page = limit // n_proc + 1
     commands = []
     for page in range(1, n_proc + 1):

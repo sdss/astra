@@ -1,6 +1,7 @@
 """"Functions for creating summary pipeline products (e.g., astraAllStarASPCAP, astraAllVisitASPCAP)."""
 
 import os
+import warnings
 from collections import OrderedDict
 from peewee import BooleanField, JOIN
 from astropy.io import fits

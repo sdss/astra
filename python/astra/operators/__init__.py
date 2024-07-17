@@ -33,25 +33,24 @@ class Operator(BaseOperator):
         return None
     
 
-    def where_by_execution_date(self, input_model, context):
-        """
-        where_by_execution_date = {
-            "mjd": lambda m: m.mjd.between(Time(context["prev_execution_date"]).mjd, Time(context["next_execution_date"]).mjd),
-            "date_obs": lambda m: m.date_obs.between(Time(context["prev_execution_date"]).datetime, Time(context["next_execution_date"]).datetime),
-            "max_mjd": lambda m: m.max_mjd.between(Time(context["prev_execution_date"]).mjd, Time(context["next_execution_date"]).mjd),
-        }
-        """
-        where_by_execution_date = {
-            "mjd": lambda m: (m.mjd > Time(context["prev_execution_date"]).mjd) & (m.mjd <= Time(context["next_execution_date"]).mjd),
-            "date_obs": lambda m: (m.date_obs > Time(context["prev_execution_date"]).datetime) & (m.date_obs <= Time(context["next_execution_date"]).datetime),
-            "max_mjd": lambda m: (m.max_mjd > Time(context["prev_execution_date"]).mjd) & (m.max_mjd <= Time(context["next_execution_date"]).mjd),
-        }
+    def where_by_execution_date(self, input_model, context, left_key="prev_execution_date", right_key="execution_date"):
 
-        if context["next_execution_date"] is not None and context["prev_execution_date"] is not None:
+        # A decision was made here.
+        # If you cut between prev_execution_date and next_execution_date then it actually runs the same stuff 3x because a DAG on a daily frequency will
+        # search 24 hrs before and 24 hrs after.
+
+        # You can do between prev_execution_date and execution_date to get up until the current execution (probably the right thing), or you could do
+        # a 'look ahead' between execution_date and next_execution_date.
+
+        where_by_execution_date = {
+            "mjd": lambda m: (Time(context[left_key]).mjd <= m.mjd) & (m.mjd < Time(context[right_key]).mjd),
+            "date_obs": lambda m: (Time(context[left_key]).dat <= m.date_obs) & (m.date_obs < Time(context[right_key]).datetime),
+            "max_mjd": lambda m: (Time(context[left_key]).mjd <= m.max_mjd) & (m.max_mjd < Time(context[right_key]).mjd),
+        }
+        if context[left_key] is not None and context[right_key] is not None:
             for k, f in where_by_execution_date.items():
                 if hasattr(input_model, k):
-                    log.info(f"Restricting {input_model} by {k} between {context['prev_execution_date']} and {context['next_execution_date']}")
-                    print(type(context['prev_execution_date']), context['prev_execution_date'])
+                    log.info(f"Restricting {input_model} to have {k} between: {context[left_key]} <= {k} < {context[right_key]}")
                     return f(input_model)
                 
         return None

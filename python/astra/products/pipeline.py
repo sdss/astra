@@ -1,6 +1,7 @@
 """"Functions for creating pipeline products (e.g., astraStarASPCAP, astraVisitASPCAP)."""
 
 import os
+import warnings
 from astropy.io import fits
 from peewee import JOIN
 from tqdm import tqdm
@@ -82,21 +83,23 @@ def create_star_pipeline_products_for_all_sources(
     :param overwrite: [optional]
         Overwrite the path if it already exists.
     """
-    return _create_pipeline_products_for_all_sources(
-        pipeline_model=pipeline_model,
-        output_template=ASTRA_STAR_TEMPLATE,
-        boss_spectrum_model=boss_spectrum_model,
-        apogee_spectrum_model=apogee_spectrum_model,        
-        boss_where=boss_where,
-        apogee_where=apogee_where,
-        ignore_field_names=ignore_field_names,
-        name_conflict_strategy=name_conflict_strategy,
-        include_dispersion_cards=False,
-        upper=upper,
-        limit=limit,
-        fill_values=fill_values,
-        overwrite=overwrite
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return _create_pipeline_products_for_all_sources(
+            pipeline_model=pipeline_model,
+            output_template=ASTRA_STAR_TEMPLATE,
+            boss_spectrum_model=boss_spectrum_model,
+            apogee_spectrum_model=apogee_spectrum_model,        
+            boss_where=boss_where,
+            apogee_where=apogee_where,
+            ignore_field_names=ignore_field_names,
+            name_conflict_strategy=name_conflict_strategy,
+            include_dispersion_cards=False,
+            upper=upper,
+            limit=limit,
+            fill_values=fill_values,
+            overwrite=overwrite
+        )
 
 def create_visit_pipeline_products_for_all_sources(
     pipeline_model,
@@ -159,21 +162,23 @@ def create_visit_pipeline_products_for_all_sources(
     :param overwrite: [optional]
         Overwrite the path if it already exists.
     """
-    return _create_pipeline_products_for_all_sources(
-        pipeline_model=pipeline_model,
-        output_template=ASTRA_VISIT_TEMPLATE,
-        boss_spectrum_model=boss_spectrum_model,
-        apogee_spectrum_model=apogee_spectrum_model,        
-        boss_where=boss_where,
-        apogee_where=apogee_where,
-        include_dispersion_cards=True,
-        ignore_field_names=ignore_field_names,
-        name_conflict_strategy=name_conflict_strategy,
-        upper=upper,
-        limit=limit,
-        fill_values=fill_values,
-        overwrite=overwrite
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return _create_pipeline_products_for_all_sources(
+            pipeline_model=pipeline_model,
+            output_template=ASTRA_VISIT_TEMPLATE,
+            boss_spectrum_model=boss_spectrum_model,
+            apogee_spectrum_model=apogee_spectrum_model,        
+            boss_where=boss_where,
+            apogee_where=apogee_where,
+            include_dispersion_cards=True,
+            ignore_field_names=ignore_field_names,
+            name_conflict_strategy=name_conflict_strategy,
+            upper=upper,
+            limit=limit,
+            fill_values=fill_values,
+            overwrite=overwrite
+        )
 
 
 def create_star_pipeline_product(
@@ -246,23 +251,25 @@ def create_star_pipeline_product(
         If `True`, return a two-length tuple containing the path and the HDU list,
         otherwise just return the path.     
     """
-    return _create_pipeline_product(
-        source=source,
-        pipeline_model=pipeline_model,
-        output_template=ASTRA_STAR_TEMPLATE,
-        boss_spectrum_model=boss_spectrum_model,
-        apogee_spectrum_model=apogee_spectrum_model,
-        boss_where=boss_where,
-        apogee_where=apogee_where,    
-        ignore_field_names=ignore_field_names,
-        name_conflict_strategy=name_conflict_strategy,
-        include_dispersion_cards=True,
-        upper=upper,
-        fill_values=fill_values,
-        limit=limit,
-        overwrite=overwrite,
-        full_output=full_output,                  
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return _create_pipeline_product(
+            source=source,
+            pipeline_model=pipeline_model,
+            output_template=ASTRA_STAR_TEMPLATE,
+            boss_spectrum_model=boss_spectrum_model,
+            apogee_spectrum_model=apogee_spectrum_model,
+            boss_where=boss_where,
+            apogee_where=apogee_where,    
+            ignore_field_names=ignore_field_names,
+            name_conflict_strategy=name_conflict_strategy,
+            include_dispersion_cards=True,
+            upper=upper,
+            fill_values=fill_values,
+            limit=limit,
+            overwrite=overwrite,
+            full_output=full_output,                  
+        )
 
     
 def create_visit_pipeline_product(
@@ -335,23 +342,25 @@ def create_visit_pipeline_product(
         If `True`, return a two-length tuple containing the path and the HDU list,
         otherwise just return the path.     
     """
-    return _create_pipeline_product(
-        source=source,
-        pipeline_model=pipeline_model,
-        output_template=ASTRA_VISIT_TEMPLATE,
-        boss_spectrum_model=boss_spectrum_model,
-        apogee_spectrum_model=apogee_spectrum_model,
-        boss_where=boss_where,
-        apogee_where=apogee_where,    
-        ignore_field_names=ignore_field_names,
-        name_conflict_strategy=name_conflict_strategy,
-        include_dispersion_cards=True,
-        upper=upper,
-        fill_values=fill_values,
-        limit=limit,
-        overwrite=overwrite,
-        full_output=full_output,                  
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return _create_pipeline_product(
+            source=source,
+            pipeline_model=pipeline_model,
+            output_template=ASTRA_VISIT_TEMPLATE,
+            boss_spectrum_model=boss_spectrum_model,
+            apogee_spectrum_model=apogee_spectrum_model,
+            boss_where=boss_where,
+            apogee_where=apogee_where,    
+            ignore_field_names=ignore_field_names,
+            name_conflict_strategy=name_conflict_strategy,
+            include_dispersion_cards=True,
+            upper=upper,
+            fill_values=fill_values,
+            limit=limit,
+            overwrite=overwrite,
+            full_output=full_output,                  
+        )
 
 
 def _get_output_product_path(output_template, pipeline, sdss_id, source_pk=None):
@@ -469,6 +478,7 @@ def _create_pipeline_product(
             #.join(Source, on=(pipeline_model.source_pk_id == Source.pk), attr="__source")
             .where(spectrum_model.source_pk == source.pk) # note: spectrum_model.source_pk but pipeline_models are soure_pk_id eeeek whoops sorry
             .where(telescope_where)
+            .where(pipeline_model.v_astra == __version__)
         )
         if instrument_where is not None:
             q = q.where(instrument_where)
