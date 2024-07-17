@@ -77,7 +77,7 @@ def get_stub(pwd):
 @click.option("--output-basename", default="parameter.output", help="Basename of output path to check")
 @click.option("--wait-for-spectrum", default=600, help="Minimum seconds before killing a process")
 @click.option("--wait-for-startup", default=900, help="Minimum for-startup time seconds before killing a process")
-@click.option("--wait-after-no-ferre", default=1, help="How many consecutive seconds to wait after no FERRE processes are found")
+@click.option("--wait-after-no-ferre", default=60, help="How many consecutive seconds to wait after no FERRE processes are found")
 @click.option("--wait-factor", default=5*12, help="How many (estimated) standard deviations to wait before killing a process (note ferre updates in batches of 12)")
 @click.option("--wait-iter", default=10, help="Minimum iterations before killing a process")
 @click.option("--interval", default=10, help="How many seconds to wait between iterations")
@@ -102,14 +102,18 @@ def ferre_chaos_monkey(
     states, lookup_stub_by_pid, last_pids, time_when_all_ferre_completed, removed_leftover = ({}, {}, None, None, False)
     for iteration in count(start=1):        
         try:
-            # outer loop for protection
-                
-            try:
-                pids = subprocess.check_output(["pidof", executable]).decode("ascii").split()
-            except subprocess.CalledProcessError:
+            # outer loop for protection                
+            pids = subprocess.check_output(["ferre_pids"]).decode("ascii").split()
+
+            if len(pids) == 0:
                 if time_when_all_ferre_completed is None:
                     removed_leftover = False
                     click.echo(f"FERRE executions complete. Will wait for {wait_after_no_ferre}s before exiting.")
+                    click.echo(f"last_pids={last_pids}")
+                    click.echo(f"states={states}")
+                else:
+                    click.echo(f"Checked again. No FERRE executions.")
+
                 # No current FERRE executions.
                 time_when_all_ferre_completed = time_when_all_ferre_completed or time()            
                 

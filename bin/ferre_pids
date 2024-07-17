@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# Get PIDs of processes containing "ferre.x"
+pids=$(ps -ef | grep "ferre.x" | grep -v grep | awk '{print $2}')
+echo "$pids"

@@ -218,24 +218,46 @@ def create_mwm_products(slurm_profile, slurm_dir, limit, nodes):
     if limit is None:
         from astra.models import Source
         from astra.products.mwm_summary import DEFAULT_MWM_WHERE
+        from astra.models.apogee import ApogeeVisitSpectrum
+        from astra.models.boss import BossVisitSpectrum
+        from peewee import JOIN
 
-        limit = (
+        apreds = ("1.3", "dr17")
+        run2ds = ("v6_1_3", )
+
+        q_apogee = (
+            ApogeeVisitSpectrum
+            .select(ApogeeVisitSpectrum.source_pk)
+            .distinct(ApogeeVisitSpectrum.source_pk)
+            .where(ApogeeVisitSpectrum.apred.in_(apreds))
+            .alias("q_apogee")
+        )
+        q_boss = (
+            BossVisitSpectrum
+            .select(BossVisitSpectrum.source_pk)
+            .distinct(BossVisitSpectrum.source_pk)
+            .where(BossVisitSpectrum.run2d.in_(run2ds))
+            .alias("q_boss")
+        )
+
+        q = (
             Source
             .select()
+            .distinct(Source.pk)
             .where(
                 Source.sdss_id.is_null(False)
             &   DEFAULT_MWM_WHERE
             )
-        ).count()
+            .join(q_apogee, JOIN.LEFT_OUTER, on=(q_apogee.c.source_pk == Source.pk))
+            .switch(Source)
+            .join(q_boss, JOIN.LEFT_OUTER, on=(q_boss.c.source_pk == Source.pk))
+            .where(
+                (~q_apogee.c.source_pk.is_null())
+            |   (~q_boss.c.source_pk.is_null())
+            )
+        )     
 
-    n_proc = 32
-    raise a
-    
-    items_per_page = limit // n_proc + 1
-    commands = []
-    for page in range(1, n_proc + 1):
-        commands.append(f"astra execute astra.products.mwm.create_all_mwm_products --page {page} --limit {items_per_page} &")
-    commands.append("wait")
+        limit = q.count()
 
     import sys
     if slurm_dir is None:
@@ -267,17 +289,32 @@ def create_mwm_products(slurm_profile, slurm_dir, limit, nodes):
             f"export VECLIB_MAXIMUM_THREADS={python_threads}",
             f"export NUMEXPR_NUM_THREADS={python_threads}"            
         ]
-    slurm_job = SlurmJob(
-        [
-            SlurmTask(pre_execute_commands + commands)
-        ],
-        job_name,
-        dir=slurm_dir,
-        **slurm_kwds,
-    )
-    slurm_job_pk = slurm_job.submit()
 
-    click.echo(f"{slurm_job_pk}")
+    n_proc = 32    
+    limit_per_proc = limit // (n_proc * nodes) + 1
+    page_count = 0
+    for node in range(nodes):
+        commands = []
+        for page in range(1, n_proc + 1):
+            commands.append(f"astra execute astra.products.mwm.create_all_mwm_products --page {page + page_count} --limit {limit_per_proc} &")
+        page_count += page
+        commands.append("wait")
+
+        this_slurm_dir = os.path.join(slurm_dir, f"{node}")
+        os.makedirs(this_slurm_dir, exist_ok=True)
+        os.chmod(this_slurm_dir, 0o755)
+
+        slurm_job = SlurmJob(
+            [
+                SlurmTask(pre_execute_commands + commands)
+            ],
+            f"{job_name}_{node}",
+            dir=this_slurm_dir,
+            **slurm_kwds,
+        )
+        slurm_job_pk = slurm_job.submit()
+
+        click.echo(f"{slurm_job_pk}")
     sys.exit(0)    
 
 
