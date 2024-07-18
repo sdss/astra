@@ -42,10 +42,14 @@ class Operator(BaseOperator):
         # You can do between prev_execution_date and execution_date to get up until the current execution (probably the right thing), or you could do
         # a 'look ahead' between execution_date and next_execution_date.
 
+        # It would seem like the int()s that follow are superfluous, but they are ABSOLUTELY NECESSARY.
+        # This is because the .mjd attribute is a np.float64, which gets passed to SQL as a bool, and means we end up getting
+        # spectra multiple times in different executions.
+
         where_by_execution_date = {
-            "mjd": lambda m: (Time(context[left_key]).mjd <= m.mjd) & (m.mjd < Time(context[right_key]).mjd),
-            "date_obs": lambda m: (Time(context[left_key]).dat <= m.date_obs) & (m.date_obs < Time(context[right_key]).datetime),
-            "max_mjd": lambda m: (Time(context[left_key]).mjd <= m.max_mjd) & (m.max_mjd < Time(context[right_key]).mjd),
+            "mjd": lambda m: (int(Time(context[left_key]).mjd) <= m.mjd) & (m.mjd < int(Time(context[right_key]).mjd)),
+            "date_obs": lambda m: (Time(context[left_key]).datetime <= m.date_obs) & (m.date_obs < Time(context[right_key]).datetime),
+            "max_mjd": lambda m: (int(Time(context[left_key]).mjd) <= m.max_mjd) & (m.max_mjd < int(Time(context[right_key]).mjd)),
         }
         if context[left_key] is not None and context[right_key] is not None:
             for k, f in where_by_execution_date.items():
