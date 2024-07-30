@@ -190,7 +190,7 @@ def line_info(wave,flux,err):
     for elem in feature_list:
         type=elem.rstrip('.features')
         features=[]
-        start,end=np.loadtxt(elem,skiprows=1,delimiter='-', usecols=(0,1),unpack=True)
+        start,end=np.loadtxt(f"{PIPELINE_DATA_DIR}/{elem}",skiprows=1,delimiter='-', usecols=(0,1),unpack=True)
         for xxx in range(np.size(start)):
             if type=="WDMS":
                 f_s=flux[np.logical_and(wave>start[xxx],wave<end[xxx])]

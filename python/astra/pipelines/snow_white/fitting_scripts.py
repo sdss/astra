@@ -216,7 +216,7 @@ def line_func_rv(params,_sn, _l,emu,wref):
     #chi_line_m = chi_line_s[:-1]
     #chi_sum=np.mean(chi_line)
     chi=np.array((all_lines_s-all_lines_m)/all_err_s)
-    return(sum_l_chi2)
+    return(chi)
 
 
 def fit_grid(specn,l_crop):
@@ -276,7 +276,7 @@ def tmp_func_rv(_T, _g,_rv,_sn, _l, emu,wref,mode):
         else:
             _l_c=_l
             m_wave_n_c=m_wave_n
-        m_flux_n_i_c = interpolate.interp1d(m_wave_n_c,m_flux_n,kind='linear')(sn_w)
+        m_flux_n_i_c = interpolate.interp1d(m_wave_n_c,m_flux_n,kind='linear',bounds_error=False)(sn_w)
      
 #==========================================================================================        
         #    import matplotlib.pyplot as plt

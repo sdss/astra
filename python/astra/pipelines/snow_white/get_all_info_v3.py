@@ -1,8 +1,12 @@
 #out_names=open("out_names.csv","w")
 import numpy as np
 import get_line_info_v3
-outfile=open("out_data.dat", "ab")
-out_names=open("out_names.csv","w")
+
+
+PIPELINE_DATA_DIR = expand_path(f"$MWM_ASTRA/pipelines/snow_white")
+
+outfile=open(f"{PIPELINE_DATA_DIR}/out_data.dat", "ab")
+out_names=open(f"{PIPELINE_DATA_DIR}/out_names.csv","w")
 i=1
 for line in open("classified_clean"):
 

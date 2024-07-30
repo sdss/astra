@@ -83,6 +83,11 @@ class SnowWhite(BaseModel, PipelineOutputMixin):
     
     #> Metadata
     result_flags = BitField(default=0, help_text="Result flags")
+    flag_low_snr = result_flags.flag(2**0, "Results are suspect because S/N <= 8")
+    flag_unconverged = result_flags.flag(2**1, "Fit did not converge")
+    flag_teff_grid_edge_bad = result_flags.flag(2**2, help_text="TEFF is edge of grid")
+    flag_logg_grid_edge_bad = result_flags.flag(2**3, help_text="LOGG is edge of grid")
+    flag_no_flux = result_flags.flag(2**4, help_text="Spectrum has no flux")
 
     #> Spectral Data
     wavelength = PixelArray(

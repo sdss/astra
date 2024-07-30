@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 import lmfit
 from typing import Iterable, Optional
-
+import pandas as pd
 
 from astra import __version__, task
 from astra.utils import log, expand_path
@@ -20,7 +20,7 @@ from astra.models.snow_white import SnowWhite
 
 
 PIPELINE_DATA_DIR = expand_path(f"$MWM_ASTRA/pipelines/snow_white")
-
+LARGE = 1e3
 
 @task
 def snow_white(
@@ -35,7 +35,8 @@ def snow_white(
         &   SnowWhite.spectrum_pk.is_null()
         )        
     ), 
-    plot=True
+    plot=True,
+    debug=False
 ) -> Iterable[SnowWhite]:
     """
     Classify white dwarf types based on their spectra, and fit stellar parameters to DA-type white dwarfs.
@@ -49,6 +50,10 @@ def snow_white(
     with open(os.path.join(PIPELINE_DATA_DIR, 'training_file_v3'), 'rb') as f:
         kf = pickle._load(f, fix_imports=True)
 
+    # An unbelievable hack that we have to make.
+    for est in kf.estimators_:
+        est.monotonic_cst = None
+
     wref = np.load(os.path.join(PIPELINE_DATA_DIR, "wref.npy"))
 
     # Once again, we hhave to put this stupid hack in
@@ -57,8 +62,19 @@ def snow_white(
         emu = pickle.load(pickle_file)
 
     for spectrum in spectra:
+
+        if np.sum(spectrum.flux) == 0:
+            yield SnowWhite(
+                source_pk=spectrum.source_pk,
+                spectrum_pk=spectrum.spectrum_pk,  
+                flag_no_flux=True
+            )
+            continue
+            
         try:                
-            labels = get_line_info_v3.line_info(spectrum.wavelength, spectrum.flux, spectrum.e_flux)
+            e_flux = np.copy(spectrum.e_flux)
+            e_flux[~np.isfinite(e_flux)] = LARGE
+            labels = get_line_info_v3.line_info(spectrum.wavelength, spectrum.flux, e_flux)
             predictions = kf.predict(labels.reshape(1, -1))
             probs = kf.predict_proba(labels.reshape(1, -1))
             
@@ -86,7 +102,7 @@ def snow_white(
 
             else:
                 # Fit DA-type
-                spectra=np.stack((spectrum.wavelength,spectrum.flux,spectrum.e_flux),axis=-1)
+                spectra=np.stack((spectrum.wavelength,spectrum.flux,e_flux),axis=-1)
                 spectra = spectra[(np.isnan(spectra[:,1])==False) & (spectra[:,0]>3600)& (spectra[:,0]<9800)]
                 spec_w=spectrum.wavelength
 
@@ -151,7 +167,7 @@ def snow_white(
                     elif first_T>40000:
                         line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_hot.dat'),max_rows=6)
                     l_crop = line_crop[(line_crop[:,0]>spec_w.min()) & (line_crop[:,1]<spec_w.max())]
-                    new_best= lmfit.minimize(fitting_scripts_v2.line_func_rv,fit_params,args=(spec_nl,l_crop,emu,wref))
+                    new_best= lmfit.minimize(fitting_scripts.line_func_rv,fit_params,args=(spec_nl,l_crop,emu,wref))
 
 
                 best_T=new_best.params['teff'].value
@@ -194,7 +210,7 @@ def snow_white(
                     l_crop = line_crop[(line_crop[:,0]>spec_w.min()) & (line_crop[:,1]<spec_w.max())]
                 
                 #====================find second solution ==============================================
-                    second_best= lmfit.minimize(fitting_scripts_v2.line_func_rv,fit_params,args=(spec_nl,l_crop,emu,wref),method="leastsq")
+                    second_best= lmfit.minimize(fitting_scripts.line_func_rv,fit_params,args=(spec_nl,l_crop,emu,wref),method="leastsq")
                     best_T2=second_best.params['teff'].value
                     best_Te2=second_best.params['teff'].stderr
                     best_g2=second_best.params['logg'].value
@@ -222,13 +238,19 @@ def snow_white(
                             e_logg=best_ge2/100,
                             #v_rel=best_rv2
                         )
+                if spectrum.snr <= 8:
+                    result_kwds["flag_low_snr"] = True
+
                 result = SnowWhite(**result_kwds)
 
 #=========================================================still use old fit_func to generateretrieve model for plot==================================================
 
                 # Get and save the 2 best lines from the spec and model, and the full models
-                lines_s,lines_m,mod_n=fitting_scripts.fit_func((best_T,best_g,shift),
-                                                        spec_n,l_crop,emu,wref,mode=1)
+                shift = shift2 # ARC: unsure whether thisi 
+                lines_s,lines_m,mod_n=fitting_scripts.fit_func(
+                    (best_T,best_g,shift),
+                    spec_n,l_crop,emu,wref,mode=1
+                )
 
                 full_spec=np.stack((spectrum.wavelength,spectrum.flux,spectrum.e_flux),axis=-1)
                 full_spec = full_spec[(np.isnan(full_spec[:,1])==False) & (full_spec[:,0]>3500)& (full_spec[:,0]<7900)]
@@ -243,12 +265,13 @@ def snow_white(
                 # resample
                 resampled_model_flux = interpolate.interp1d(model_wavelength, model_flux, kind='linear', bounds_error=False)(spectrum.wavelength)
 
-                os.makedirs(os.path.dirname(result.absolute_path), exist_ok=True)
+                output_path = expand_path(f"$MWM_ASTRA/{__version__}/pipelines/snow_white/model_flux/{spectrum.source.sdss_id}-{result.spectrum_pk}.fits")
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
                 fits.HDUList([
                     fits.PrimaryHDU(), 
                     fits.ImageHDU(resampled_model_flux)
                     ]
-                ).writeto(result.absolute_path, overwrite=True)
+                ).writeto(output_path, overwrite=True)
                     
                 if plot:
                     if initial==0:
@@ -301,7 +324,7 @@ def snow_white(
                     ax3.set_xlim([3400,5600])
                     ax3.set_ylim([0.95,1.04])
                     
-                    figure_path = expand_path(f"$MWM_ASTRA/{__version__}/pipelines/snow_white/{spectrum.source.sdss_id}-{spectrum.spectrum_pk}.png")
+                    figure_path = expand_path(f"$MWM_ASTRA/{__version__}/pipelines/snow_white/figures/{spectrum.source.sdss_id}-{spectrum.spectrum_pk}.png")
                     os.makedirs(os.path.dirname(figure_path), exist_ok=True)
                     fig.savefig(figure_path)
                     plt.close("all")
@@ -311,13 +334,5 @@ def snow_white(
 
         except:
             log.exception(f"Exception on spectrum={spectrum}")
-            
-
-'''
-    #=======================plotting===============================================
-    if plot == True:
-
-'''
-
-
-    
+            if debug:
+                raise
