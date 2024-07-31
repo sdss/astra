@@ -174,7 +174,7 @@ def snow_white(
                 best_Te=new_best.params['teff'].stderr
                 best_g=new_best.params['logg'].value
                 best_ge=new_best.params['logg'].stderr
-                shift2=new_best.params['rv'].value
+                shift=new_best.params['rv'].value
                 chi2=new_best.redchi #can easily get a chi2 
 
                 if initial ==1:
@@ -246,7 +246,6 @@ def snow_white(
 #=========================================================still use old fit_func to generateretrieve model for plot==================================================
 
                 # Get and save the 2 best lines from the spec and model, and the full models
-                shift = shift2 # ARC: unsure whether thisi 
                 lines_s,lines_m,mod_n=fitting_scripts.fit_func(
                     (best_T,best_g,shift),
                     spec_n,l_crop,emu,wref,mode=1
