@@ -107,8 +107,8 @@ class SnowWhite(BaseModel, PipelineOutputMixin):
     # TODO: have a consistent name for this, like intermediate_output_path (e.g., see SLAM model)
     @property
     def path(self):
-        return f"$MWM_ASTRA/{__version__}/pipelines/snow_white/{self.spectrum_pk}.fits"
-
+        folders = f"{str(self.source.sdss_id)[-4:-2]:0>2}/{str(self.source.sdss_id)[-2:]:0>2}"
+        return f"$MWM_ASTRA/{__version__}/pipelines/snow_white/{folders}/{self.source.sdss_id}-{self.spectrum_pk}.fits"
 
 
 
