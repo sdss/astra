@@ -47,12 +47,10 @@ def snow_white(
     
     from astra.pipelines.snow_white import get_line_info_v3, fitting_scripts
 
-    with open(os.path.join(PIPELINE_DATA_DIR, 'training_file_v3'), 'rb') as f:
+    #with open(os.path.join(PIPELINE_DATA_DIR, 'training_file_v3'), 'rb') as f:
+    with open(os.path.join(PIPELINE_DATA_DIR, '20240801_training_file'), 'rb') as f:        
         kf = pickle._load(f, fix_imports=True)
 
-    # An unbelievable hack that we have to make.
-    for est in kf.estimators_:
-        est.monotonic_cst = None
 
     wref = np.load(os.path.join(PIPELINE_DATA_DIR, "wref.npy"))
 
@@ -63,15 +61,16 @@ def snow_white(
 
     for spectrum in spectra:
 
-        if np.sum(spectrum.flux) == 0:
-            yield SnowWhite(
-                source_pk=spectrum.source_pk,
-                spectrum_pk=spectrum.spectrum_pk,  
-                flag_no_flux=True
-            )
-            continue
-            
         try:                
+
+            if np.sum(spectrum.flux) == 0:
+                yield SnowWhite(
+                    source_pk=spectrum.source_pk,
+                    spectrum_pk=spectrum.spectrum_pk,  
+                    flag_no_flux=True
+                )
+                continue
+
             e_flux = np.copy(spectrum.e_flux)
             e_flux[~np.isfinite(e_flux)] = LARGE
             labels = get_line_info_v3.line_info(spectrum.wavelength, spectrum.flux, e_flux)
@@ -264,7 +263,9 @@ def snow_white(
                 # resample
                 resampled_model_flux = interpolate.interp1d(model_wavelength, model_flux, kind='linear', bounds_error=False)(spectrum.wavelength)
 
-                output_path = expand_path(f"$MWM_ASTRA/{__version__}/pipelines/snow_white/model_flux/{spectrum.source.sdss_id}-{result.spectrum_pk}.fits")
+                folders = f"{str(spectrum.source.sdss_id)[-4:-2]:0>2}/{str(spectrum.source.sdss_id)[-2:]:0>2}"
+
+                output_path = expand_path(f"$MWM_ASTRA/{__version__}/pipelines/snow_white/{folders}/{spectrum.source.sdss_id}-{result.spectrum_pk}.fits")
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
                 fits.HDUList([
                     fits.PrimaryHDU(), 
@@ -323,7 +324,7 @@ def snow_white(
                     ax3.set_xlim([3400,5600])
                     ax3.set_ylim([0.95,1.04])
                     
-                    figure_path = expand_path(f"$MWM_ASTRA/{__version__}/pipelines/snow_white/figures/{spectrum.source.sdss_id}-{spectrum.spectrum_pk}.png")
+                    figure_path = expand_path(f"$MWM_ASTRA/{__version__}/pipelines/snow_white/{folders}/{spectrum.source.sdss_id}-{spectrum.spectrum_pk}.png")
                     os.makedirs(os.path.dirname(figure_path), exist_ok=True)
                     fig.savefig(figure_path)
                     plt.close("all")
