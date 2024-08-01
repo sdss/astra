@@ -519,7 +519,8 @@ def compute_n_neighborhood(
                 batch_update.append(batch_sources[source_id])
                 
             n_updated += len(batch_update)
-            Source.bulk_update(batch_update, fields=[Source.n_neighborhood])
+            if len(batch_update) > 0:
+                Source.bulk_update(batch_update, fields=[Source.n_neighborhood])                
             pb.update(batch_size)
             
     return n_updated            

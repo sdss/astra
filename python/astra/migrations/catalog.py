@@ -142,7 +142,7 @@ def migrate_bailer_jones_distances(
 
 
 def migrate_gaia_synthetic_photometry(
-    where=(Source.gaia_dr3_source_id.is_null(False)), 
+    where=(Source.gaia_dr3_source_id.is_null(False) & Source.g_sdss_mag.is_null()), 
     batch_size=500, 
     limit=None
 ):
@@ -191,7 +191,7 @@ def migrate_gaia_synthetic_photometry(
                     Gaia_dr3_synthetic_photometry_gspc.z_sdss_mag,
                     Gaia_dr3_synthetic_photometry_gspc.z_sdss_flag.alias("z_sdss_mag_flag"),
                     Gaia_dr3_synthetic_photometry_gspc.y_ps1_mag,
-                    Gaia_dr3_synthetic_photometry_gspc.y_ps1_flag.alias("y_ps1_flag_mag"),                    
+                    Gaia_dr3_synthetic_photometry_gspc.y_ps1_flag.alias("y_ps1_mag_flag"),                    
                     
                 )
                 .where(Gaia_dr3_synthetic_photometry_gspc.source_id.in_([s.gaia_dr3_source_id for s in chunk]))
@@ -205,41 +205,49 @@ def migrate_gaia_synthetic_photometry(
                 source = sources[source_id]
 
                 for key, value in record.items():
+                    if value is None:
+                        if key.endswith("_mag"):
+                            value = np.nan
+                        elif key.endswith("_flag"):
+                            value = 0
+
                     setattr(source, key, value)
                 
                 update.append(source)
             
-            n_updated += (
-                Source
-                .bulk_update(
-                    update,
-                    fields=[
-                        Source.c_star,
-                        Source.u_jkc_mag,
-                        Source.u_jkc_mag_flag,                    
-                        Source.b_jkc_mag,
-                        Source.b_jkc_mag_flag,                    
-                        Source.v_jkc_mag,
-                        Source.v_jkc_mag_flag,                                        
-                        Source.r_jkc_mag,
-                        Source.r_jkc_mag_flag,                                        
-                        Source.i_jkc_mag,
-                        Source.i_jkc_mag_flag,                                                        
-                        Source.u_sdss_mag,
-                        Source.u_sdss_mag_flag,
-                        Source.g_sdss_mag,
-                        Source.g_sdss_mag_flag,
-                        Source.r_sdss_mag,
-                        Source.r_sdss_mag_flag,
-                        Source.i_sdss_mag,
-                        Source.i_sdss_mag_flag,
-                        Source.z_sdss_mag,
-                        Source.z_sdss_mag_flag,
-                        Source.y_ps1_mag,
-                        Source.y_ps1_mag_flag,   
-                    ]
+            if len(update) > 0:
+                    
+                n_updated += (
+                    Source
+                    .bulk_update(
+                        update,
+                        fields=[
+                            Source.c_star,
+                            Source.u_jkc_mag,
+                            Source.u_jkc_mag_flag,                    
+                            Source.b_jkc_mag,
+                            Source.b_jkc_mag_flag,                    
+                            Source.v_jkc_mag,
+                            Source.v_jkc_mag_flag,                                        
+                            Source.r_jkc_mag,
+                            Source.r_jkc_mag_flag,                                        
+                            Source.i_jkc_mag,
+                            Source.i_jkc_mag_flag,                                                        
+                            Source.u_sdss_mag,
+                            Source.u_sdss_mag_flag,
+                            Source.g_sdss_mag,
+                            Source.g_sdss_mag_flag,
+                            Source.r_sdss_mag,
+                            Source.r_sdss_mag_flag,
+                            Source.i_sdss_mag,
+                            Source.i_sdss_mag_flag,
+                            Source.z_sdss_mag,
+                            Source.z_sdss_mag_flag,
+                            Source.y_ps1_mag,
+                            Source.y_ps1_mag_flag,   
+                        ]
+                    )
                 )
-            )
 
             pb.update(batch_size)
     
@@ -799,7 +807,21 @@ def migrate_gaia_source_ids(
         
 
 
-def migrate_gaia_dr3_astrometry_and_photometry(where = None, limit: Optional[int] = None, batch_size: Optional[int] = 500):
+def migrate_gaia_dr3_astrometry_and_photometry(
+    where = (
+        (
+            Source.g_mag.is_null()
+        |   Source.bp_mag.is_null()
+        |   Source.rp_mag.is_null()
+        )
+        &   (
+            Source.gaia_dr3_source_id.is_null(False)
+        &   (Source.gaia_dr3_source_id > 0)
+        )
+    ), 
+    limit: Optional[int] = None, 
+    batch_size: Optional[int] = 500
+):
     """
     Migrate Gaia DR3 astrometry and photometry from the SDSS-V database for any sources (`astra.models.Source`)
     that have a Gaia DR3 source identifier (`astra.models.Source.gaia_dr3_source_id`) but are missing Gaia
@@ -832,23 +854,11 @@ def migrate_gaia_dr3_astrometry_and_photometry(where = None, limit: Optional[int
         Source
         .select(Source.gaia_dr3_source_id)
         .distinct()
-        .where(
-            (
-                Source.g_mag.is_null()
-            |   Source.bp_mag.is_null()
-            |   Source.rp_mag.is_null()
-            )
-            &   (
-                Source.gaia_dr3_source_id.is_null(False)
-            &   (Source.gaia_dr3_source_id > 0)
-            )
-        )
+        .where(where)
         .order_by(
             Source.gaia_dr3_source_id.asc()
         )
     )
-    if where is not None:
-        q = q.where(where)
     
     q = (
         q
