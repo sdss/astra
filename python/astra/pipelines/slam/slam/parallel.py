@@ -25,7 +25,7 @@ Aims
 
 from copy import deepcopy
 import numpy as np
-from ipyparallel import Client
+#from ipyparallel import Client
 
 
 def launch_ipcluster_dv(profile="default", targets="all", block=True, max_engines=None):
