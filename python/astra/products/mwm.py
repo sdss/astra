@@ -39,19 +39,51 @@ from astra.products.boss import prepare_boss_resampled_visit_and_coadd_spectra
 def create_all_mwm_products(apreds=("dr17", "1.3"), run2ds=("v6_1_3", ), page=None, limit=None, max_workers=1, **kwargs):
     warnings.simplefilter("ignore") # astropy fits warnings
 
-    q = (
-        Source
-        .select()
-        .where(
-            Source.sdss_id.is_null(False)
-        &   DEFAULT_MWM_WHERE
-        )
-    )
-    # TODO: Do a query to get sources with any kind of thing?
-    if apreds is not None and isinstance(apreds, str):
+    from astra.models.apogee import ApogeeVisitSpectrum
+    from astra.models.boss import BossVisitSpectrum
+    from peewee import JOIN
+
+
+    if isinstance(apreds, str):
         apreds = (apreds, )
-    if run2ds is not None and isinstance(run2ds, str):
+    if isinstance(run2ds, str):
         run2ds = (run2ds, )
+
+    if apreds is not None and run2ds is not None:
+        q_apogee = (
+            ApogeeVisitSpectrum
+            .select(ApogeeVisitSpectrum.source_pk)
+            .distinct(ApogeeVisitSpectrum.source_pk)
+            .where(ApogeeVisitSpectrum.apred.in_(apreds))
+            .alias("q_apogee")
+        )
+        q_boss = (
+            BossVisitSpectrum
+            .select(BossVisitSpectrum.source_pk)
+            .distinct(BossVisitSpectrum.source_pk)
+            .where(BossVisitSpectrum.run2d.in_(run2ds))
+            .alias("q_boss")
+        )
+
+        q = (
+            Source
+            .select()
+            .distinct(Source.pk)
+            .where(
+                Source.sdss_id.is_null(False)
+            &   DEFAULT_MWM_WHERE
+            )
+            .join(q_apogee, JOIN.LEFT_OUTER, on=(q_apogee.c.source_pk == Source.pk))
+            .switch(Source)
+            .join(q_boss, JOIN.LEFT_OUTER, on=(q_boss.c.source_pk == Source.pk))
+            .where(
+                (~q_apogee.c.source_pk.is_null())
+            |   (~q_boss.c.source_pk.is_null())
+            )
+        )       
+
+    else:
+        raise NotImplementedError
 
     q = q.order_by(Source.pk.desc())
 
@@ -88,8 +120,6 @@ def create_all_mwm_products(apreds=("dr17", "1.3"), run2ds=("v6_1_3", ), page=No
     yield None
 
 
-from astra.utils import Profiler    
-
 def create_mwmVisit_and_mwmStar_products(
     source,
     apreds=None,
@@ -120,7 +150,7 @@ def create_mwmVisit_and_mwmStar_products(
         mwmVisit_hdus = [create_source_primary_hdu_from_cards(source, cards, original_names), None, None, None, None]
 
         mwmStar_hdus = [create_source_primary_hdu_from_cards(source, cards, original_names), None, None, None, None]
-            
+    
         star_kwds = dict(
             include_dispersion_cards=True,
             ignore_field_names=star_ignore_field_names,
@@ -129,7 +159,7 @@ def create_mwmVisit_and_mwmStar_products(
         )
         visit_kwds = dict(
             include_dispersion_cards=True,
-            ignore_field_names=star_ignore_field_names,
+            ignore_field_names=visit_ignore_field_names,
             fill_values=fill_values,
             upper=upper,
         )            
@@ -143,6 +173,8 @@ def create_mwmVisit_and_mwmStar_products(
             except FileNotFoundError:
                 boss_coadd = boss_visit = None
                 log.exception(f"Exception preparing BOSS spectra for {source} / {telescope} / {run2ds}")
+                if debug:
+                    raise
                 
             coadd_boss_hdu = _create_single_model_hdu([boss_coadd], BossCombinedSpectrum, observatory, "BOSS", **star_kwds)
 
@@ -153,6 +185,8 @@ def create_mwmVisit_and_mwmStar_products(
             except FileNotFoundError:
                 apogee_coadd = apogee_visit = None
                 log.exception(f"Exception preparing APOGEE spectra for {source} / {telescope} / {apreds}")
+                if debug:
+                    raise
             
             coadd_apogee_hdu = _create_single_model_hdu([apogee_coadd], ApogeeCombinedSpectrum, observatory, "APOGEE", **star_kwds)        
             
@@ -185,6 +219,8 @@ def create_mwmVisit_and_mwmStar_products(
             mwmVisit = fits.HDUList(mwmVisit_hdus)
             mwmVisit.writeto(mwmVisit_path, overwrite=True)        
             log.info(f"Created {mwmVisit_path}")
+        else:
+            log.info(f"No mwmVisit created for {mwmVisit_path}")
     except:
         log.exception(f"Exception on source {source}")
         if debug:
