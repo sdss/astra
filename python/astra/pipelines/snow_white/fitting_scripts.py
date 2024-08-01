@@ -210,13 +210,13 @@ def line_func_rv(params,_sn, _l,emu,wref):
     all_lines_m=np.concatenate((lines_m),axis=0)
     all_lines_s=np.concatenate((flux_s),axis=0)
     all_err_s=np.concatenate((err_s),axis=0)
-    #sum_l_chi2=np.array(((all_lines_s-all_lines_m)/all_err_s)**2)
+    sum_l_chi2=np.array(((all_lines_s-all_lines_m)/all_err_s)**2)
     #chi_line=np.array(chi_line)
     #chi_line_s=np.sort(chi_line)
     #chi_line_m = chi_line_s[:-1]
     #chi_sum=np.mean(chi_line)
-    chi=np.array((all_lines_s-all_lines_m)/all_err_s)
-    return(chi)
+    #chi=np.array((all_lines_s-all_lines_m)/all_err_s)
+    return(sum_l_chi2)
 
 
 def fit_grid(specn,l_crop):
