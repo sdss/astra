@@ -337,7 +337,7 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
 
     import os
     import sys
-    from astra import config
+    from astra import config, __version__
     from astra.utils import expand_path, log, callable
 
     import pickle
@@ -516,7 +516,12 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
         except:
             raise ValueError(f"Cannot infer output model for task {f}, is it missing a type annotation?")
 
-        # Query for spectra that does not have a result in this output model
+        # Query for spectra that does not have a result in this output model, for this astra version
+        where = output_model.spectrum_pk.is_null()
+        if hasattr(spectrum_model, "v_astra"):
+            print(f"Restricting {spectrum_model} to have v_astra={__version__}")
+            where = where & (spectrum_model.v_astra == __version__)
+
         iterable = (
             spectrum_model
             .select(
@@ -530,7 +535,7 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
             )
             .switch(spectrum_model)
             .join(Source, attr="source") # convenience to pre-fetch .source attribute on everything
-            .where(output_model.spectrum_pk.is_null())
+            .where(where)
         )
         if page:
             iterable = (
