@@ -14,10 +14,11 @@ from specutils import Spectrum1D
 from specutils.manipulation import SplineInterpolatedResampler
 from collections import OrderedDict
 
-from typing import Iterable
+from typing import Iterable, Optional
 
 from astra.models.boss import BossVisitSpectrum
 from astra.models.line_forest import LineForest
+from peewee import ModelSelect
 
 LINES = [
     ['H_alpha',      'hlines.model', 6562.8, 200],
@@ -75,7 +76,7 @@ LINES = [
 ]
 
 @task
-def line_forest(spectra: Iterable[BossVisitSpectrum], steps: int = 128, reps: int = 100, max_workers: int = 16) -> Iterable[LineForest]:
+def line_forest(spectra: Iterable[BossVisitSpectrum], steps: int = 128, reps: int = 100, max_workers: int = 1, limit: Optional[int] = None, **kwargs) -> Iterable[LineForest]:
     """
     Measure spectral line strengths.
 
@@ -91,7 +92,13 @@ def line_forest(spectra: Iterable[BossVisitSpectrum], steps: int = 128, reps: in
     :param max_workers:
         Maximum number of workers to use.
     """
-    
+
+    if isinstance(spectra, ModelSelect) and limit is not None:
+        spectra = spectra.limit(limit)
+
+    if isinstance(spectra, ModelSelect):
+        spectra = spectra.iterator()
+
     executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
 
     futures = []
@@ -187,13 +194,13 @@ def _line_forest(spectrum, steps, reps, debug=False):
                                 f"abs_percentiles_{name.lower()}": np.round(np.percentile(predictions[1:,1][a],[16,50,84]),4),
                             }) 
             except:
-                log.exception(f"Exception when measuring {name} for spectrum {spectrum}")
+                log.exception(f"Exception when measuring {name} for spectrum {spectrum.__class__} {spectrum.pk}")
                 if debug:
                     raise
                 continue
                             
     except:
-        log.warning(f"Exception when running line_forest for spectrum {spectrum}")
+        log.warning(f"Exception when running line_forest for spectrum {spectrum.__class__} {spectrum.pk}")
         if debug:
             raise 
         return None
