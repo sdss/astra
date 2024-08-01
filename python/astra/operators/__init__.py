@@ -74,6 +74,8 @@ class Operator(BaseOperator):
             q = (
                 input_model
                 .select()
+                .join(models.Source, on=(input_model.source_pk == models.Source.pk))
+                .switch(input_model)
                 .join(
                     output_model,
                     JOIN.LEFT_OUTER,
@@ -82,7 +84,12 @@ class Operator(BaseOperator):
             )
             where = output_model.spectrum_pk.is_null()
             for k, v in (self.where or {}).items():
-                where = where & (getattr(input_model, k) == v)
+                try:
+                    lhs = getattr(input_model, k)
+                except:
+                    lhs = getattr(models.Source, k)
+                
+                where = where & (lhs == v)
 
             where_by_execution_date = self.where_by_execution_date(input_model, context)
             if where_by_execution_date is not None:
