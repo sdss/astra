@@ -3,6 +3,8 @@
 import numpy as np
 from typing import Optional, Union, Tuple, List
 
+from astra.utils import expand_path
+
 class Continuum:
 
     """A base class to represent the stellar continuum."""
