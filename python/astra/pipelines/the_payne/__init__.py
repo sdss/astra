@@ -29,7 +29,8 @@ def the_payne(
         mask="$MWM_ASTRA/pipelines/ThePayne/cannon_apogee_pixels.npy",
     ),
     page=None,
-    limit=None
+    limit=None,
+    debug=False,
 ) -> Iterable[ThePayne]:
 
     if isinstance(spectra, ModelSelect):
@@ -87,6 +88,8 @@ def the_payne(
         
         except:
             log.exception(f"Exception when fitting spectrum {spectrum}")
+            if debug:
+                raise
             yield ThePayne(
                 spectrum_pk=spectrum.spectrum_pk,
                 source_pk=spectrum.source_pk,

@@ -484,9 +484,15 @@ class ThePayne(BaseModel, PipelineOutputMixin):
     model_flux = PaynePixelArray(help_text=Glossary.model_flux)
     continuum = PaynePixelArray(help_text=Glossary.continuum)
     
-    @property    
+    #@property    
+    #def intermediate_output_path(self):
+    #    folders = f"{str(self.source_pk)[-4:-2]:0>2}/{str(self.source_pk)[-2:]:0>2}"
+    #    return f"$MWM_ASTRA/{self.v_astra}/pipelines/ThePayne/intermediate/{folders}/{self.source_pk}-{self.spectrum_pk}.pkl"
+
+    @property
     def intermediate_output_path(self):
-        return f"$MWM_ASTRA/{self.v_astra}/pipelines/ThePayne/{self.source_pk}-{self.spectrum_pk}.pkl"
+        folders = f"{str(self.spectrum_pk)[-4:-2]:0>2}/{str(self.spectrum_pk)[-2:]:0>2}"
+        return f"$MWM_ASTRA/{self.v_astra}/pipelines/ThePayne/intermediate/{folders}/{self.spectrum_pk}.pkl"
         
     
     
