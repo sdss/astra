@@ -566,6 +566,7 @@ def _create_pipeline_products_for_all_sources(
         .join(boss_spectrum_model, JOIN.LEFT_OUTER, on=(pipeline_model.spectrum_pk == boss_spectrum_model.spectrum_pk))
         .switch(pipeline_model)
         .join(apogee_spectrum_model, JOIN.LEFT_OUTER, on=(pipeline_model.spectrum_pk == apogee_spectrum_model.spectrum_pk))
+        .where(pipeline_model.v_astra == __version__)
     )
     if boss_where is not None and apogee_where is not None:
         q = q.where((boss_where) | (apogee_where))
