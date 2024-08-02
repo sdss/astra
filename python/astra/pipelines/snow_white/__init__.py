@@ -263,9 +263,7 @@ def snow_white(
                 # resample
                 resampled_model_flux = interpolate.interp1d(model_wavelength, model_flux, kind='linear', bounds_error=False)(spectrum.wavelength)
 
-                folders = f"{str(spectrum.source.sdss_id)[-4:-2]:0>2}/{str(spectrum.source.sdss_id)[-2:]:0>2}"
-
-                output_path = expand_path(f"$MWM_ASTRA/{__version__}/pipelines/snow_white/{folders}/{spectrum.source.sdss_id}-{result.spectrum_pk}.fits")
+                output_path = expand_path(result.intermediate_output_path)
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
                 fits.HDUList([
                     fits.PrimaryHDU(), 
@@ -324,8 +322,7 @@ def snow_white(
                     ax3.set_xlim([3400,5600])
                     ax3.set_ylim([0.95,1.04])
                     
-                    figure_path = expand_path(f"$MWM_ASTRA/{__version__}/pipelines/snow_white/{folders}/{spectrum.source.sdss_id}-{spectrum.spectrum_pk}.png")
-                    os.makedirs(os.path.dirname(figure_path), exist_ok=True)
+                    figure_path = output_path[:-4] + ".png"
                     fig.savefig(figure_path)
                     plt.close("all")
 

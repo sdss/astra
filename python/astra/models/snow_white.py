@@ -7,17 +7,54 @@ from peewee import (
     DateTimeField
 )
 import datetime
+from astropy.io import fits
 from astra import __version__
+from astra.utils import expand_path
 from astra.models.base import BaseModel
 from astra.models.fields import BitField
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
 from astra.models.fields import PixelArray, BitField, LogLambdaArrayAccessor
+from astra.models.fields import BitField, PixelArray, BasePixelArrayAccessor, LogLambdaArrayAccessor
 
 from astra.glossary import Glossary
 
 from playhouse.postgres_ext import ArrayField
+
+class IntermediatePixelArrayAccessor(BasePixelArrayAccessor):
+    
+    def __get__(self, instance, instance_type=None):
+        if instance is not None:
+            try:
+                return instance.__pixel_data__[self.name]
+            except (AttributeError, KeyError):
+                # Load them all.
+                instance.__pixel_data__ = {}
+
+                with fits.open(expand_path(instance.intermediate_output_path)) as image:
+                    model_flux = image[1].data
+                
+                instance.__pixel_data__.setdefault("model_flux", model_flux)
+                
+                return instance.__pixel_data__[self.name]
+
+        return self.field
+
+
+
+
+class IntermediatePixelArray(PixelArray):
+    
+    def __init__(self, ext=None, column_name=None, transform=None, accessor_class=IntermediatePixelArrayAccessor, help_text=None, **kwargs):
+        super(IntermediatePixelArray, self).__init__(
+            ext=ext,
+            column_name=column_name,
+            transform=transform,
+            accessor_class=accessor_class,
+            help_text=help_text,
+            **kwargs
+        )
 
 
 class SnowWhite(BaseModel, PipelineOutputMixin):
@@ -99,16 +136,15 @@ class SnowWhite(BaseModel, PipelineOutputMixin):
         ),
         help_text=Glossary.wavelength
     )    
-    model_flux = PixelArray(
+    model_flux = IntermediatePixelArray(
         ext=1,
         help_text=Glossary.model_flux,
     )
 
-    # TODO: have a consistent name for this, like intermediate_output_path (e.g., see SLAM model)
     @property
-    def path(self):
-        folders = f"{str(self.source.sdss_id)[-4:-2]:0>2}/{str(self.source.sdss_id)[-2:]:0>2}"
-        return f"$MWM_ASTRA/{__version__}/pipelines/snow_white/{folders}/{self.source.sdss_id}-{self.spectrum_pk}.fits"
+    def intermediate_output_path(self):
+        folders = f"{str(self.spectrum_pk)[-4:-2]:0>2}/{str(self.spectrum_pk)[-2:]:0>2}"
+        return f"$MWM_ASTRA/{self.v_astra}/pipelines/snow_white/{folders}/{self.spectrum_pk}.fits"
 
 
 
