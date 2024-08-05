@@ -71,9 +71,12 @@ def snow_white(
                 )
                 continue
 
+            flux = np.copy(spectrum.flux)
+
             e_flux = np.copy(spectrum.e_flux)
             e_flux[~np.isfinite(e_flux)] = LARGE
-            labels = get_line_info_v3.line_info(spectrum.wavelength, spectrum.flux, e_flux)
+
+            labels = get_line_info_v3.line_info(spectrum.wavelength, flux, e_flux)
             predictions = kf.predict(labels.reshape(1, -1))
             probs = kf.predict_proba(labels.reshape(1, -1))
             
@@ -101,7 +104,7 @@ def snow_white(
 
             else:
                 # Fit DA-type
-                spectra=np.stack((spectrum.wavelength,spectrum.flux,e_flux),axis=-1)
+                spectra=np.stack((spectrum.wavelength,flux,e_flux),axis=-1)
                 spectra = spectra[(np.isnan(spectra[:,1])==False) & (spectra[:,0]>3600)& (spectra[:,0]<9800)]
                 spec_w=spectrum.wavelength
 
@@ -250,7 +253,7 @@ def snow_white(
                     spec_n,l_crop,emu,wref,mode=1
                 )
 
-                full_spec=np.stack((spectrum.wavelength,spectrum.flux,spectrum.e_flux),axis=-1)
+                full_spec=np.stack((spectrum.wavelength,flux,e_flux),axis=-1)
                 full_spec = full_spec[(np.isnan(full_spec[:,1])==False) & (full_spec[:,0]>3500)& (full_spec[:,0]<7900)]
                 
 

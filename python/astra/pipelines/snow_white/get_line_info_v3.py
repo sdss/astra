@@ -34,10 +34,16 @@ def line_info(wave,flux,err):
     #bin spectrum for anchor points
     somma=np.sum(flux)
     numero=np.size(flux)
-    flux_temp=(flux/somma)*numero
-    err_rel=err/flux
-    err=err_rel*flux_temp
-    flux=flux_temp
+
+    #flux_temp=(flux/somma)*numero
+    #err_rel=err/flux
+    #err=err_rel*flux_temp
+    #flux=flux_temp
+
+    scaling = (numero / somma)
+    err = err * scaling
+    flux = flux * scaling
+
     binsize=2
     xdata=[]
     ydata=[]
@@ -48,6 +54,8 @@ def line_info(wave,flux,err):
             ydata.append(np.average(flux[i:i+binsize],weights=1/((err[i:i+binsize])**2)))
         except:
             ydata.append(np.mean(flux[i:i+binsize]))
+
+        assert np.isfinite(ydata[-1])
         edata.append(np.median(err[i:i+binsize]))
     wave_a=np.array(xdata)
     flux_a=np.array(ydata)
