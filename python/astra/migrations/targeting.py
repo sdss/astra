@@ -34,6 +34,7 @@ def migrate_carton_assignments_to_bigbitfield(
     where=None,
     batch_size=500,
     limit=None,
+    full_output=False
 ):
 
     bit_mapping = {}
@@ -128,4 +129,6 @@ def migrate_carton_assignments_to_bigbitfield(
             )
             pb.update(batch_size)
 
-    return (updated, missing, not_marked)
+    if full_output:
+        return (updated, missing, not_marked)
+    return updated
