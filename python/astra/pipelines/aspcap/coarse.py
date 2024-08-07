@@ -260,14 +260,36 @@ def plan_coarse_stellar_parameters(
             initial_flags = FerreCoarse(flag_initial_guess_at_grid_center=True).initial_flags 
             assert initial_flags > 0, "Have the initial flag definitions changed for `astra.models.aspcap.FerreCoarse`?"
 
-            log.warning(f"No suitable initial guess found for {spectrum} (from inputs {input_initial_guess}). Starting at all grid centers.")
-            for logg, teff in unique_grid_centers:
-                centered_initial_guess = input_initial_guess.copy()
-                centered_initial_guess.update(teff=teff, logg=logg)
+            # Check if all the nput initial guess values are finite.
+            check_keys = ("teff", "logg", "m_h", "log10_v_micro", "c_m", "n_m", "log10_v_sini", "alpha_m")
+            if np.all(np.isfinite([input_initial_guess[k] for k in check_keys])):
+                log.warning(f"No suitable initial guess found for {spectrum} (from inputs {input_initial_guess}). Will start from closest grid.")
 
-                for header_path, meta, headers in yield_suitable_grids(all_headers, strict=True, **centered_initial_guess):
+                # Find the closest grid center
+                closest_grid_center_index = np.argmin(np.sum((unique_grid_centers - np.array([input_initial_guess["logg"], input_initial_guess["teff"]]))**2, axis=1))
+
+                # Adjust the initial guess to be in the limits of that grid.
+                adjusted_initial_guess = input_initial_guess.copy()
+                from astra.pipelines.ferre.utils import TRANSLATE_LABELS
+                for hp, h in all_headers.items():
+                    grid_center = np.mean(np.vstack([h["LLIMITS"], h["ULIMITS"]]), axis=0)[-2:]
+                    if np.allclose(unique_grid_centers[closest_grid_center_index], grid_center):
+
+                        for translated_label, label in TRANSLATE_LABELS.items():
+                            if label not in h["LABEL"]: continue
+
+                            k = h["LABEL"].index(label)
+                            lower, upper = (h["LLIMITS"][k], h["ULIMITS"][k])
+                            ptp = (upper - lower)
+
+                            adjusted_initial_guess[translated_label] = np.clip(adjusted_initial_guess[translated_label], lower + 0.05 * ptp, upper - 0.05 * ptp)
+
+                        break
+                    
+                # Now yield results given the adjusted guess
+                for header_path, meta, headers in yield_suitable_grids(all_headers, strict=True, **adjusted_initial_guess):
                     spectrum_primary_keys_with_at_least_one_initial_guess.add(spectrum.spectrum_pk)                    
-                    initial_guess = clip_initial_guess(centered_initial_guess, headers)
+                    initial_guess = clip_initial_guess(adjusted_initial_guess, headers)
 
                     frozen_parameters = dict()
                     if meta["spectral_type"] != "BA":
@@ -292,6 +314,41 @@ def plan_coarse_stellar_parameters(
                     )
 
                     all_kwds.append(kwds)
+
+            else:
+                log.warning(f"No suitable initial guess found for {spectrum} (from inputs {input_initial_guess}). Starting at all grid centers.")
+
+                for logg, teff in unique_grid_centers:
+                    centered_initial_guess = input_initial_guess.copy()
+                    centered_initial_guess.update(teff=teff, logg=logg)
+
+                    for header_path, meta, headers in yield_suitable_grids(all_headers, strict=True, **centered_initial_guess):
+                        spectrum_primary_keys_with_at_least_one_initial_guess.add(spectrum.spectrum_pk)                    
+                        initial_guess = clip_initial_guess(centered_initial_guess, headers)
+
+                        frozen_parameters = dict()
+                        if meta["spectral_type"] != "BA":
+                            frozen_parameters.update(c_m=True, n_m=True)
+                            if meta["gd"] == "d" and meta["spectral_type"] == "F":
+                                frozen_parameters.update(alpha_m=True)
+
+                        kwds = dict(
+                            spectra=spectrum,
+                            header_path=header_path,
+                            frozen_parameters=frozen_parameters,
+                            initial_teff=initial_guess["teff"],
+                            initial_logg=initial_guess["logg"], 
+                            initial_log10_v_sini=initial_guess["log10_v_sini"],
+                            initial_log10_v_micro=initial_guess["log10_v_micro"],
+                            initial_m_h=initial_guess["m_h"],
+                            initial_alpha_m=initial_guess["alpha_m"],
+                            initial_c_m=initial_guess["c_m"],
+                            initial_n_m=initial_guess["n_m"],
+                            initial_flags=initial_flags,
+                            weight_path=weight_path,
+                        )
+
+                        all_kwds.append(kwds)
     
     # Anything that has no suitable initial guess?
     spectra_with_no_initial_guess = [
