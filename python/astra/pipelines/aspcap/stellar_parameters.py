@@ -219,7 +219,7 @@ def plan_stellar_parameters(
     executor = concurrent.futures.ProcessPoolExecutor(max_workers)
 
     futures = []
-    for coarse_result in coarse_results_dict.values():
+    for coarse_result in tqdm(coarse_results_dict.values(), desc="Distributing work"):
         spectrum = lookup_spectrum_by_id[coarse_result.spectrum_pk]
         futures.append(executor.submit(_pre_compute_continuum, coarse_result, spectrum, pre_continuum))
 
