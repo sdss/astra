@@ -13,9 +13,9 @@ from astroNN.apogee import apogee_continuum
 def _prepare_data(spectrum):
     try:
         N, P = np.atleast_2d(spectrum.flux).shape
-        flux = np.nan_to_num(spectrum.flux).astype(np.float32).reshape((N, P))
-        e_flux = np.nan_to_num(spectrum.ivar**-0.5).astype(np.float32).reshape((N, P))
-        bitmask = np.nan_to_num(spectrum.pixel_flags).astype(bool).reshape((N, P))
+        flux = np.atleast_2d(spectrum.flux).reshape((N, P))
+        e_flux = np.atleast_2d(spectrum.ivar**-0.5).reshape((N, P))
+        bitmask = np.atleast_2d(spectrum.pixel_flags).reshape((N, P))
     except:
         return (spectrum.spectrum_pk, spectrum.source_pk, None, None)
 
