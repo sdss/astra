@@ -93,16 +93,28 @@ class Slam(BaseModel, PipelineOutputMixin):
     e_logg = FloatField(null=True, help_text=Glossary.e_logg)
     fe_h = FloatField(null=True, help_text=Glossary.fe_h)
     e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
+    fe_h_niu = FloatField(null=True, help_text="[Fe/H] calibrated from Niu et al. (2023)")
+    e_fe_h_niu = FloatField(null=True, help_text="Error on [Fe/H] calibrated from Niu et al. (2023)")
+    alpha_fe = FloatField(null=True, help_text=Glossary.alpha_fe)
+    e_alpha_fe = FloatField(null=True, help_text=Glossary.e_alpha_fe)
     
     #> Correlation Coefficients
     rho_teff_logg = FloatField(null=True, help_text=Glossary.rho_teff_logg)
     rho_teff_fe_h = FloatField(null=True, help_text=Glossary.rho_teff_fe_h)
+    rho_teff_fe_h_niu = FloatField(null=True) # 
+    rho_teff_alpha_fe = FloatField(null=True) #
+    rho_logg_fe_h_niu = FloatField(null=True)
+    rho_logg_alpha_fe = FloatField(null=True)
     rho_logg_fe_h = FloatField(null=True, help_text=Glossary.rho_logg_fe_h)
+    rho_fe_h_fe_h_niu = FloatField(null=True)
+    rho_fe_h_alpha_fe = FloatField(null=True)
 
     #> Initial Labels
     initial_teff = FloatField(null=True, help_text=Glossary.initial_teff)
     initial_logg = FloatField(null=True, help_text=Glossary.initial_logg)
     initial_fe_h = FloatField(null=True, help_text=Glossary.initial_fe_h)
+    initial_alpha_fe = FloatField(null=True, help_text=Glossary.initial_alpha_fe)
+    initial_fe_h_niu = FloatField(null=True, help_text=Glossary.initial_fe_h_niu)
 
     #> Metadata
     success = BooleanField(help_text="Optimizer returned successful value")
@@ -133,7 +145,8 @@ class Slam(BaseModel, PipelineOutputMixin):
     
     @property    
     def intermediate_output_path(self):
-        return f"$MWM_ASTRA/{self.v_astra}/pipelines/slam/{self.source_pk}-{self.spectrum_pk}.pkl"
+        folders = f"{str(self.spectrum_pk)[-4:-2]}/{str(self.spectrum_pk)[-2:]}"
+        return f"$MWM_ASTRA/{self.v_astra}/pipelines/slam/{folders}/{self.spectrum_pk}.pkl"
             
     @hybrid_property
     def flag_warn(self):

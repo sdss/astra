@@ -13,9 +13,11 @@ from tqdm import tqdm
 from astra import task, __version__
 from astra.utils import log, expand_path
 from astra.pipelines.slam.slam.normalization import normalize_spectra_block
+from astra.models import Spectrum
 from astra.models.slam import Slam
 from astra.models.spectrum import SpectrumMixin
 from astra.models.boss import BossVisitSpectrum
+from astra.models.mwm import BossCombinedSpectrum
 from astra.models.source import Source
 from astra.models.spectrum import SpectrumMixin
 from astra.models.slam import Slam
@@ -25,11 +27,18 @@ from peewee import fn
 @task
 def slam(
     spectra: Optional[Iterable[SpectrumMixin]] = (
-        BossVisitSpectrum
+        BossCombinedSpectrum
         .select()
         .join(Source)
-        .switch(BossVisitSpectrum)
-        .join(Slam, JOIN.LEFT_OUTER, on=(Slam.spectrum_pk == BossVisitSpectrum.spectrum_pk))
+        .switch(BossCombinedSpectrum)
+        .join(
+            Slam, 
+            JOIN.LEFT_OUTER, 
+            on=(
+                (Slam.spectrum_pk == BossCombinedSpectrum.spectrum_pk)
+            &   (Slam.v_astra == __version__)
+            )
+        )
         .where(
             Slam.spectrum_pk.is_null()
         &   (                
@@ -47,9 +56,11 @@ def slam(
             |   Source.assigned_to_program("mwm_snc")
             )
         )
+        &   (BossCombinedSpectrum.v_astra == __version__)
         )
     ),
-    model_path: str = "$MWM_ASTRA/pipelines/slam/ASPCAP_DR16_astra_wbinaryValid.dump",
+    #model_path: str = "$MWM_ASTRA/pipelines/slam/ASPCAP_DR16_astra_wbinaryValid.dump",
+    model_path: str = "$MWM_ASTRA/pipelines/slam/Train_FGK_LAMOST_M_BOSS_alpha_from_ASPCAP_teff_logg_from_ApogeeNet_nobinaries.dump",
     max_workers: Optional[int] = None
 ) -> Iterable[Slam]:
     """
@@ -58,15 +69,26 @@ def slam(
     
     model = load_model(model_path)
 
+
     executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
 
     futures = []
     for spectrum in tqdm(spectra, total=0, desc="Distributing"):
-        futures.append(executor.submit(_slam, spectrum, model))
+        '''
+        try:
+            args = (spectrum.source_pk, spectrum.spectrum_pk, spectrum.wavelength, np.atleast_2d(spectrum.flux), np.atleast_2d(spectrum.ivar), model)
+        except:
+            None
+        else:
+            futures.append(executor.submit(_slam, *args))
+        '''
+        futures.append(executor.submit(_slam, spectrum.source_pk, spectrum.spectrum_pk, model))
 
     with tqdm(total=len(futures), desc="Slamming") as pb:
         for future in concurrent.futures.as_completed(futures):
-            yield future.result()
+            r = future.result()
+            if r is not None:
+                yield r
             pb.update()
             
 
@@ -77,7 +99,8 @@ def load_model(model_path):
 
 
 def _slam(
-    spectrum, 
+    source_pk,
+    spectrum_pk, 
     model,
     dwave: float = 10.0,
     p_min: float = 1e-8,
@@ -88,10 +111,14 @@ def _slam(
     n_jobs: int = 1,
     verbose: int = 0,
 ):
+    spectrum = Spectrum.get(spectrum_pk).resolve()
 
-    wave = spectrum.wavelength
-    fluxs = np.atleast_2d(spectrum.flux)
-    ivars = np.atleast_2d(spectrum.ivar)
+    try:
+        wave = spectrum.wavelength
+        fluxs = np.atleast_2d(spectrum.flux)
+        ivars = np.atleast_2d(spectrum.ivar)
+    except:
+        return None
 
     N, P = fluxs.shape
     R = model.wave.size
@@ -138,7 +165,12 @@ def _slam(
     results_pred = model.predict_labels_multi(
         label_init, flux_norm, ivar_norm
     )
-    label_names = ("teff", "fe_h")
+    #label_pre[:,0] is the [Fe/H] calibrated from Niu et al.2023.
+    #label_pre[:,1] is the [Fe/H] calibrated directly from LAMOST FGK primary stars.
+    #label_pre[:,2] is the [alpha/M].
+    #label_pre[:,3] is the Teff.
+    #label_pre[:,4] is the logg.    
+    label_names = ("fe_h_niu", "fe_h", "alpha_fe", "teff", "logg")
     labels = np.array([label["x"] for label in results_pred])
 
     kwargs = (dict(zip(label_names, labels[0])))
@@ -171,6 +203,14 @@ def _slam(
             )
         )
     )
+    kwargs.update(
+        dict(
+            zip(
+                [f"rho_{label_names[j]}_{label_names[k]}" for j, k in zip(k, j)],
+                rho[0, j, k]
+            )
+        )
+    )    
 
     # Add optimisation keywords
     opt_keys = ("status", "success", "optimality")
@@ -236,12 +276,12 @@ def _slam(
         # Re-sample the predicted spectra back to the observed frame.
         resampled_continuum[i] = c(wave)
 
-
     result = Slam(
-        spectrum_pk=spectrum.spectrum_pk,
-        source_pk=spectrum.source_pk,
+        spectrum_pk=spectrum_pk,
+        source_pk=source_pk,
         **kwargs
     )
+
     path = expand_path(result.intermediate_output_path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as fp:
