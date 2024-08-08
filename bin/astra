@@ -365,9 +365,6 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
         else:
             _spectra.append(arg)
 
-    
-    
-
     # Do some cleverness about the task name.
     for prefix in ("", "astra.", "astra.pipelines.", f"astra.pipelines.{task}."):
         try:
@@ -517,7 +514,7 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
             raise ValueError(f"Cannot infer output model for task {f}, is it missing a type annotation?")
 
         # Query for spectra that does not have a result in this output model, for this astra version
-        where = output_model.spectrum_pk.is_null()
+        where = output_model.spectrum_pk.is_null() 
         if hasattr(spectrum_model, "v_astra"):
             print(f"Restricting {spectrum_model} to have v_astra={__version__}")
             where = where & (spectrum_model.v_astra == __version__)
@@ -531,12 +528,22 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
             .join(
                 output_model,
                 JOIN.LEFT_OUTER,
-                on=(spectrum_model.spectrum_pk == output_model.spectrum_pk)
+                on=(
+                    (spectrum_model.spectrum_pk == output_model.spectrum_pk)
+                &   (output_model.v_astra == __version__)
+                )
             )
             .switch(spectrum_model)
             .join(Source, attr="source") # convenience to pre-fetch .source attribute on everything
             .where(where)
         )
+        print(f"kwargs are {kwargs}")
+        if kwargs:
+            for k, v in kwargs.items():
+                if hasattr(spectrum_model, k):
+                    print(f"requiring {k} = {v}")
+                    iterable = iterable.where(getattr(spectrum_model, k) == v)
+                
         if page:
             iterable = (
                 iterable
