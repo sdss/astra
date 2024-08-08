@@ -12,7 +12,7 @@ if __name__ == "__main__":
 
     with fits.open(path) as image:
         hdu = image[hdu_index]
-
+        
         sql_create = f"CREATE TABLE myTable (\n"
 
         cards = iter(hdu.header.cards)
