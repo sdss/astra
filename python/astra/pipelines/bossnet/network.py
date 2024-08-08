@@ -65,7 +65,7 @@ class BossNetModel(torch.nn.Module):
     - torch.Tensor, Output tensor of shape (batch_size, 4).
     """
     def __init__(self) -> None:
-        super(BossNet, self).__init__()
+        super(BossNetModel, self).__init__()
 
         self.pos_enc = PositionalEncoding1D(1)
 
