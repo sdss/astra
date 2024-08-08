@@ -180,11 +180,12 @@ def create_mwmVisit_and_mwmStar_products(
 
             visit_boss_hdu = _create_single_model_hdu(boss_visit, BossRestFrameVisitSpectrum, observatory, "BOSS", **visit_kwds)        
             
+            # Here we are going to consider things just from the OBSERVATORY so that we include apo1m spectra with apo25m spectra
             try:
-                apogee_coadd, apogee_visit = prepare_apogee_resampled_visit_and_coadd_spectra(source, telescope, apreds)
+                apogee_coadd, apogee_visit = prepare_apogee_resampled_visit_and_coadd_spectra(source, observatory, apreds)
             except FileNotFoundError:
                 apogee_coadd = apogee_visit = None
-                log.exception(f"Exception preparing APOGEE spectra for {source} / {telescope} / {apreds}")
+                log.exception(f"Exception preparing APOGEE spectra for {source} / {observatory} / {apreds}")
                 if debug:
                     raise
             

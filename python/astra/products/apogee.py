@@ -35,7 +35,7 @@ def prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, telesco
         .where(ApogeeCoaddedSpectrumInApStar.source_pk == source.pk)
     )
     if telescope is not None:
-        q = q.where(ApogeeCoaddedSpectrumInApStar.telescope.startswith(telescope))
+        q = q.where(ApogeeCoaddedSpectrumInApStar.telescope.startswith(telescope.lower()))
     if apreds is not None:
         q = q.where(ApogeeCoaddedSpectrumInApStar.apred.in_(apreds))
         
@@ -104,7 +104,7 @@ def prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, telesco
         .where(ApogeeVisitSpectrum.source_pk == source.pk)
     )
     if telescope is not None:
-        q = q.where(ApogeeVisitSpectrum.telescope.startswith(telescope))
+        q = q.where(ApogeeVisitSpectrum.telescope.startswith(telescope.lower()))
 
     if apreds is not None:
         q = q.where(ApogeeVisitSpectrum.apred.in_(apreds))
@@ -145,7 +145,7 @@ def prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, telesco
         .where(ApogeeVisitSpectrumInApStar.source_pk == source.pk)        
     )
     if telescope is not None:
-        q = q.where(ApogeeVisitSpectrumInApStar.telescope.startswith(telescope))
+        q = q.where(ApogeeVisitSpectrumInApStar.telescope.startswith(telescope.lower()))
     
     if apreds is not None:
         q = q.where(ApogeeVisitSpectrumInApStar.apred.in_(apreds))
