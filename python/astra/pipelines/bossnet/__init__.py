@@ -346,7 +346,7 @@ def make_prediction(spectra, error, wavlen,num_uncertainty_draws,model,device):
     
     
 
-from astra import task
+from astra import task, __version__
 from astra.utils import log, expand_path
 
 from astra.models import BossVisitSpectrum
@@ -364,7 +364,14 @@ def bossnet(
     spectra: Optional[Iterable[BossVisitSpectrum]] = (
         BossVisitSpectrum
         .select()
-        .join(BossNet, JOIN.LEFT_OUTER, on=(BossVisitSpectrum.spectrum_pk == BossNet.spectrum_pk))
+        .join(
+            BossNet, 
+            JOIN.LEFT_OUTER, 
+            on=(
+                (BossVisitSpectrum.spectrum_pk == BossNet.spectrum_pk)
+            &   (BossNet.v_astra == __version__)
+            )
+        )
         .where(BossNet.spectrum_pk.is_null())
     ),
     num_uncertainty_draws: Optional[int] = 20

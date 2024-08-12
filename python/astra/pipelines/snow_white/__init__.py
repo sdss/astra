@@ -76,8 +76,13 @@ def snow_white(
             |   (spectrum.ivar == 0)
             |   (~np.isfinite(spectrum.flux))
             )
-            data_args = (spectrum.wavelength[~bad_pixel], spectrum.flux[~bad_pixel], spectrum.e_flux[~bad_pixel])
+            flux = np.copy(spectrum.flux)
+            flux[bad_pixel] = 0.01
+            e_flux = np.copy(spectrum.e_flux)
+            e_flux[bad_pixel] = LARGE
 
+            data_args = (spectrum.wavelength, flux, e_flux)
+            
             labels = get_line_info_v3.line_info(*data_args)
             predictions = kf.predict(labels.reshape(1, -1))
             probs = kf.predict_proba(labels.reshape(1, -1))

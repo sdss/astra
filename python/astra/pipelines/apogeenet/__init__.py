@@ -264,7 +264,7 @@ def reverse_inverse_error(inverse_error: np.array, default_error: int) -> np.arr
     error = np.where(np.isnan(error), 5 * median_error, error)
     return error
 
-from astra import task
+from astra import task, __version__
 from astra.utils import log, expand_path
 
 from astra.models import ApogeeCoaddedSpectrumInApStar, ApogeeVisitSpectrumInApStar
@@ -279,7 +279,14 @@ def apogeenet(
     spectra: Optional[Iterable[Union[ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar]]] = (
         ApogeeCoaddedSpectrumInApStar
         .select()
-        .join(ApogeeNet, JOIN.LEFT_OUTER, on=(ApogeeCoaddedSpectrumInApStar.spectrum_pk == ApogeeNet.spectrum_pk))
+        .join(
+            ApogeeNet, 
+            JOIN.LEFT_OUTER, 
+            on=(
+                (ApogeeCoaddedSpectrumInApStar.spectrum_pk == ApogeeNet.spectrum_pk)
+            &   (ApogeeNet.v_astra == __version__)
+            )
+        )
         .where(ApogeeNet.spectrum_pk.is_null())
     ),
     num_uncertainty_draws: Optional[int] = 20,

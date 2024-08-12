@@ -417,7 +417,12 @@ def _create_pipeline_product(
     
     kwds = dict(upper=upper, fill_values=fill_values)
     hdus = [create_source_primary_hdu(source, upper=upper)]
-        
+    from astra import models as astra_models
+    if isinstance(boss_spectrum_model, str):
+        boss_spectrum_model = getattr(astra_models, boss_spectrum_model)
+    if isinstance(apogee_spectrum_model, str):
+        apogee_spectrum_model = getattr(astra_models, apogee_spectrum_model)
+
     struct = [
         (
             boss_spectrum_model, 

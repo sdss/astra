@@ -56,6 +56,8 @@ class AstroNNdist(BaseModel, PipelineOutputMixin):
     flag_missing_extinction = result_flags.flag(2**2, help_text="Missing extinction")
     flag_no_result = result_flags.flag(2**11, help_text="Exception raised when loading spectra")
 
+    class Meta:
+        table_name = "astro_nn_dist"
 
     def apply_flags(self, meta=None, missing_photometry=False, missing_extinction=False):
         """
