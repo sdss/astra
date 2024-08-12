@@ -10,8 +10,8 @@ import lmfit
 import matplotlib.pyplot as plt
 import numpy as np
 
-from astra.pipelines.corv import utils
-from astra.pipelines.corv import models
+from . import utils
+from . import models
 
 def normalized_residual(wl, fl, ivar, corvmodel, params, fit_window = None):
     """
@@ -288,5 +288,7 @@ def fit_corv(wl, fl, ivar, corvmodel, xcorr_kw = {},
     bestparams = param_res.params.copy()
     
     rv, e_rv, redchi = fit_rv(wl, fl, ivar, corvmodel, bestparams, **xcorr_kw)
+    
+    param_res.params['RV'].value = rv
             
     return rv, e_rv, redchi, param_res
