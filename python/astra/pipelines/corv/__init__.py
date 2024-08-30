@@ -34,10 +34,9 @@ def corv(
             Corv.spectrum_pk.is_null()
         &   (SnowWhite.classification == "DA")
         &   (BossVisitSpectrum.run2d == "v6_1_3")
-        &   
         )
     ),
-    max_workers: Optional[int] = 4
+    max_workers: Optional[int] = 32
 ) -> Iterable[Corv]:
     """
     Fit the radial velocity and stellar parameters for white dwarfs.

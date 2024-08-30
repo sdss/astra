@@ -21,8 +21,40 @@ from astra.models.mwm import BossCombinedSpectrum
 from astra.models.source import Source
 from astra.models.spectrum import SpectrumMixin
 from astra.models.slam import Slam
-from peewee import fn
+from peewee import fn, ModelSelect
 
+q = (
+    BossCombinedSpectrum
+    .select()
+    .join(Source)
+    .switch(BossCombinedSpectrum)
+    .join(
+        Slam, 
+        JOIN.LEFT_OUTER, 
+        on=(
+            (Slam.spectrum_pk == BossCombinedSpectrum.spectrum_pk)
+        &   (Slam.v_astra == __version__)
+        )
+    )
+    .where(
+        (                
+            (
+                # From Zach Way, mwm-astra 413
+                Source.g_mag.is_null(False)
+            &   Source.rp_mag.is_null(False)
+            &   Source.plx.is_null(False)
+            &   (Source.plx > 0)
+            &   ((Source.g_mag - Source.rp_mag) > 0.56)
+            &   ((Source.g_mag + 5 + 5 * fn.log10(Source.plx/1000)) > 5.553)
+            )
+        |   (
+            Source.assigned_to_program("mwm_yso")
+        |   Source.assigned_to_program("mwm_snc")
+        )
+    )
+    &   (BossCombinedSpectrum.v_astra == __version__)
+    )    
+)
 
 @task
 def slam(
@@ -61,7 +93,9 @@ def slam(
     ),
     #model_path: str = "$MWM_ASTRA/pipelines/slam/ASPCAP_DR16_astra_wbinaryValid.dump",
     model_path: str = "$MWM_ASTRA/pipelines/slam/Train_FGK_LAMOST_M_BOSS_alpha_from_ASPCAP_teff_logg_from_ApogeeNet_nobinaries.dump",
-    max_workers: Optional[int] = None
+    max_workers: Optional[int] = None,
+    page=None,
+    limit=None,
 ) -> Iterable[Slam]:
     """
     Run the Stellar Labels Machine (SLAM) on the given spectra.
@@ -69,6 +103,33 @@ def slam(
     
     model = load_model(model_path)
 
+    if isinstance(spectra, ModelSelect):
+        spectra = (
+            spectra
+            .where(
+                (                
+                    (
+                        # From Zach Way, mwm-astra 413
+                        Source.g_mag.is_null(False)
+                    &   Source.rp_mag.is_null(False)
+                    &   Source.plx.is_null(False)
+                    &   (Source.plx > 0)
+                    &   ((Source.g_mag - Source.rp_mag) > 0.56)
+                    &   ((Source.g_mag + 5 + 5 * fn.log10(Source.plx/1000)) > 5.553)
+                    )
+                |   (
+                    Source.assigned_to_program("mwm_yso")
+                |   Source.assigned_to_program("mwm_snc")
+                    )
+                )                
+            )
+        )
+
+        if page is not None and limit is not None:
+            spectra = spectra.paginate(page, limit)
+        
+        elif limit is not None:
+            spectra = spectra.limit(limit)
 
     executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
 
@@ -95,7 +156,12 @@ def slam(
 
 @cache
 def load_model(model_path):
-    return load(expand_path(model_path))
+    # We have to put this path in otherwise slam wont load. fuck my life.
+    import sys
+    sys.path.insert(0, "/uufs/chpc.utah.edu/common/home/u6020307/astra/python/astra/pipelines/slam")
+    model = load(expand_path(model_path))
+    sys.path.pop(0)
+    return model
 
 
 def _slam(
@@ -143,7 +209,8 @@ def _slam(
     flux_norm, flux_cont = normalize_spectra_block(
         model.wave,
         flux_resamp,
-        (6147.0, 8910.0),
+        #(6147.0, 8910.0),
+        (6001.755, 8957.321),
         dwave=dwave,
         p=(p_min, p_max),
         q=q,
@@ -154,6 +221,9 @@ def _slam(
         verbose=verbose,
     )
     
+    flux_norm[flux_norm > 2] = 1
+    flux_norm[flux_norm < 0] = 0
+
     ivar_norm = flux_cont**2 * ivar_resamp
 
     ### Initial estimation: get initial estimate of parameters by chi2 best match
@@ -288,3 +358,6 @@ def _slam(
         pickle.dump((resampled_continuum, resampled_rectified_model_flux), fp)
         
     return result
+
+
+

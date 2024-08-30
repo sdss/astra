@@ -19,7 +19,7 @@ def _prepare_data(spectrum):
         e_flux = np.atleast_2d(spectrum.ivar**-0.5).reshape((N, P))
         bitmask = np.atleast_2d(spectrum.pixel_flags).reshape((N, P))
     except:
-        return (spectrum.spectrum_pk, spectrum.source_pk, None, None, None)
+        return (spectrum.spectrum_pk, spectrum.source_pk, None, None, None, None, None)
 
     #### continuum normalization
     P_new = 7514
@@ -104,6 +104,15 @@ def _inference(model, batch):
         #### record results
         mean_t_elapsed = (time() - t_init) / len(spectrum_pks)
         for i, (spectrum_pk, source_pk) in enumerate(zip(spectrum_pks, source_pks)):
+            dist = np.atleast_1d(pc.value)[i]
+            dist_err = np.atleast_1d(pc_err.value)[i]
+
+            if dist > 10**10:
+                dist = np.nan
+            if dist_err > 10**10:
+                dist_err = np.nan
+
+
             output = AstroNNdist(
                 spectrum_pk=spectrum_pk,
                 source_pk=source_pk,
@@ -111,11 +120,11 @@ def _inference(model, batch):
                 k_mag=all_meta[i][0],
                 ebv = all_meta[i][1],
                 a_k_mag=all_meta[i][2],
-                L_fakemag=float(fakemag),
+                L_fakemag=float(np.atleast_1d(fakemag)[i]),
                 #L_fakemag=float(fakemag_err['total']),
-                L_fakemag_err=float(fakemag_err),
-                dist=pc.value,
-                dist_err=pc_err.value,
+                L_fakemag_err=float(np.atleast_1d(fakemag_err)[i]),
+                dist=dist,
+                dist_err=dist_err,
             )
             output.apply_flags(all_meta[i], missing_photometry=missing_photometrys[i], missing_extinction=missing_extinctions[i])
             #print("+"*6, "(_inference) output:", output.__data__)

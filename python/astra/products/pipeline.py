@@ -31,6 +31,7 @@ def create_star_pipeline_products_for_all_sources(
     ignore_field_names=DEFAULT_STAR_IGNORE_FIELD_NAMES,
     name_conflict_strategy=None,
     upper=False,
+    page=None,
     limit=None,
     fill_values=None,
     overwrite=False,    
@@ -98,6 +99,7 @@ def create_star_pipeline_products_for_all_sources(
             upper=upper,
             limit=limit,
             fill_values=fill_values,
+            page=page,
             overwrite=overwrite
         )
 
@@ -110,6 +112,7 @@ def create_visit_pipeline_products_for_all_sources(
     ignore_field_names=DEFAULT_VISIT_IGNORE_FIELD_NAMES,
     name_conflict_strategy=None,
     upper=False,
+    page=None,
     limit=None,
     fill_values=None,
     overwrite=False,    
@@ -175,6 +178,7 @@ def create_visit_pipeline_products_for_all_sources(
             ignore_field_names=ignore_field_names,
             name_conflict_strategy=name_conflict_strategy,
             upper=upper,
+            page=page,
             limit=limit,
             fill_values=fill_values,
             overwrite=overwrite
@@ -555,6 +559,7 @@ def _create_pipeline_products_for_all_sources(
     include_dispersion_cards,
     upper,
     fill_values,
+    page,
     limit,
     overwrite,
 ):
@@ -562,7 +567,12 @@ def _create_pipeline_products_for_all_sources(
     # TODO: I'm not 100% sure this will work. Should try it, particularly with `boss_where` and `apogee_where`
 
     pipeline_model = resolve_model(pipeline_model)
-    
+    from astra import models as astra_models
+    if isinstance(boss_spectrum_model, str):
+        boss_spectrum_model = getattr(astra_models, boss_spectrum_model)
+    if isinstance(apogee_spectrum_model, str):
+        apogee_spectrum_model = getattr(astra_models, apogee_spectrum_model)
+
     q = (
         Source
         .select()
@@ -580,9 +590,11 @@ def _create_pipeline_products_for_all_sources(
     elif apogee_where is not None:
         q = q.where(apogee_where)
         
-    if limit is not None:
+    if page is not None and limit is not None:
+        q = q.paginate(page, limit)
+    elif limit is not None:
         q = q.limit(limit)
-
+    
     # TODO: Parallelize and chunk this.
     N_created, N_skipped, failures = (0, 0, [])
     for source in tqdm(q, desc="Creating pipeline products"):        

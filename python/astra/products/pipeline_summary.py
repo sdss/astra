@@ -17,7 +17,128 @@ def ignore_field_name_callable(field_name):
         (field_name.lower() in ("pk", "input_spectrum_pks")) 
     or  field_name.lower().startswith("rho_")
     )
+
+def create_astra_best_product(
+    where=None,
+    limit=None,
+    output_template="astraFrankenstein-{version}.fits",
+    ignore_field_name_callable=ignore_field_name_callable,
+    name_conflict_strategy=None,
+    distinct_spectrum_pk=False,
+    upper=False,
+    fill_values=None,
+    gzip=True,
+    overwrite=False,
+    full_output=False,
+):
+    """
+    Create an `astraBest` product containing the results from the 'best' pipeline per source.
+
+    :param where: [optional]
+        A `where` clause for the `Source.select()` query.
     
+    :param limit: [optional]
+        Specify an optional limit on the number of rows.
+    
+    :param ignore_field_name_callable: [optional]
+        A callable that returns `True` if a field name should be ignored.
+
+    :param name_conflict_strategy: [optional]
+        A callable that expects
+
+            `name_conflict_strategy(fields, name, field, model)`
+
+        where:
+    
+        - `fields` is a dictionary with field names as keys and fields as values,
+        - `name` is the conflicting field name (e.g., it appears already in `fields`),
+        - `field` is the conflicting field,
+        - `model` is the model where the conflicting `field` is bound to.
+    
+        This callable should update `fields` (or not).
+    
+    :param upper: [optional]
+        Specify all field names to be in upper case.
+    
+    :param fill_values: [optional]
+        Specify a fill value for each kind of column type.
+    
+    :param overwrite: [optional]
+        Overwrite the path if it already exists.
+    
+    :param full_output: [optional]
+        If `True`, return a two-length tuple containing the path and the HDU list,
+        otherwise just return the path.        
+    """
+        
+    from astra.models.best import MWMBest as pipeline_model
+
+    path = get_path(output_template.format(version=__version__))
+    check_path(path, overwrite)
+    
+    kwds = dict(
+        upper=upper, 
+        fill_values=fill_values, 
+        limit=limit,
+    )
+    hdus = [
+        fits.PrimaryHDU(header=get_basic_header())
+    ]
+        
+    og_fields = get_fields(
+        (Source, pipeline_model),
+        name_conflict_strategy=name_conflict_strategy,
+        ignore_field_name_callable=ignore_field_name_callable
+    )
+
+    # Try and insert fields for `flag_warn` and `flag_bad`.
+    fields = OrderedDict([])
+    for k, v in og_fields.items():
+        fields[k] = v
+        if k == "result_flags":
+            if hasattr(pipeline_model, "flag_warn"):
+                fields["flag_warn"] = BooleanField(default=False, help_text="Warning flag for results")
+            if hasattr(pipeline_model, "flag_bad"):
+                fields["flag_bad"] = BooleanField(default=False, help_text="Bad flag for results")        
+
+    header = get_basic_header()
+    
+    select_fields = []
+    for n, f in fields.items():
+        if n in ("flag_warn", "flag_bad"):
+            select_fields.append(getattr(pipeline_model, n).alias(n))
+        else:
+            select_fields.append(f)
+
+    q = (
+        pipeline_model
+        .select(*select_fields)
+        .join(Source)
+        .where(pipeline_model.v_astra == __version__)
+    )   
+
+    if where: # Need to check, otherwise it requires AND with previous where.
+        q = q.where(where)
+    
+    q = q.limit(limit).dicts()
+    
+    hdu = get_binary_table_hdu(
+        q,
+        header=header,
+        models=(Source, pipeline_model),
+        fields=fields,
+        **kwds
+    )
+    hdus.append(hdu)
+
+    hdu_list = fits.HDUList(hdus)
+    hdu_list.writeto(path, overwrite=overwrite)
+    if gzip:
+        os.system(f"gzip -f {path}")
+        path += ".gz"
+    
+    return (path, hdu_list) if full_output else path    
+
 
 def create_astra_all_star_product(
     pipeline_model,
@@ -167,6 +288,7 @@ def create_astra_all_star_product(
             .switch(spectrum_model)
             .join(Source, on=(Source.pk == spectrum_model.source_pk))
             #.where(spectrum_model.telescope.startswith(observatory))
+            .where(pipeline_model.v_astra == __version__)
         )
         if where: # Need to check, otherwise it requires AND with previous where.
             q = q.where(where)
@@ -368,6 +490,7 @@ def create_astra_all_visit_product(
             .join(pipeline_model, on=(pipeline_model.spectrum_pk == spectrum_model.spectrum_pk))
             .switch(spectrum_model)
             .join(Source, on=(Source.pk == spectrum_model.source_pk))
+            .where(pipeline_model.v_astra == __version__)
             #.where(spectrum_model.telescope.startswith(observatory))
         )
         if where: # Need to check, otherwise it requires AND with previous where.

@@ -17,6 +17,9 @@ from astropy.coordinates import SkyCoord
 from astropy import units as u
 
 
+from astra import __version__
+
+
 von = lambda v: v or np.nan
 
 def compute_w1mag_and_w2mag(
@@ -193,8 +196,7 @@ def compute_gonzalez_hernandez_irfm_effective_temperatures_from_vmk(
     
     giant_colour_range = [1.1, 3.4]
     giant_fe_h_range = [-4, 0.2]
-    
-    
+        
     q = (
         model
         .select(
@@ -202,6 +204,11 @@ def compute_gonzalez_hernandez_irfm_effective_temperatures_from_vmk(
             Source,
         )
         .join(Source, on=(model.source_pk == Source.pk), attr="_source")
+        .where(
+            (model.v_astra == __version__)
+        &   logg_field.is_null(False)
+        &   fe_h_field.is_null(False)
+        )
     )
     
     if where:
@@ -227,7 +234,7 @@ def compute_gonzalez_hernandez_irfm_effective_temperatures_from_vmk(
             row.flag_as_giant_for_irfm_teff = True
             
         theta = np.sum(B * np.array([1, X, X**2, X*fe_h, fe_h, fe_h**2]))
-        
+                
         row.irfm_teff = 5040/theta
         row.flag_out_of_v_k_bounds = not (valid_v_k[0] <= X <= valid_v_k[1])
         row.flag_out_of_fe_h_bounds = not (valid_fe_h[0] <= fe_h <= valid_fe_h[1])

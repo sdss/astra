@@ -87,10 +87,24 @@ class ApogeeNet(BaseModel, PipelineOutputMixin):
 def apply_result_flags():
     (
         ApogeeNet
+        .update(
+            raw_e_teff=ApogeeNet.e_teff,
+            raw_e_logg=ApogeeNet.e_logg,
+            raw_e_fe_h=ApogeeNet.e_fe_h
+        )
+        .where(
+            ApogeeNet.raw_e_teff.is_null()
+        &   (ApogeeNet.v_astra == __version__)
+        )
+        .execute()
+    )    
+    (
+        ApogeeNet
         .update(result_flags=ApogeeNet.flag_unreliable_teff.set())
         .where(
             (ApogeeNet.teff < 1700) | (ApogeeNet.teff > 100_000)
         )
+        .where(ApogeeNet.v_astra == __version__)
         .execute()
     )    
     (
@@ -99,6 +113,7 @@ def apply_result_flags():
         .where(
             (ApogeeNet.logg < -1) | (ApogeeNet.logg > 10)
         )
+        .where(ApogeeNet.v_astra == __version__)
         .execute()
     )    
     (
@@ -110,22 +125,20 @@ def apply_result_flags():
         |   (ApogeeNet.fe_h < -4)
         |   (ApogeeNet.fe_h > 2)
         )
+        .where(ApogeeNet.v_astra == __version__)
         .execute()
     )
     
+
 def apply_noise_model():
+
     (
         ApogeeNet
-        .update(e_teff=1.25 * ApogeeNet.raw_e_teff + 10)
-        .execute()
-    )
-    (
-        ApogeeNet
-        .update(e_logg=1.25 * ApogeeNet.raw_e_logg + 1e-2)
-        .execute()
-    )
-    (
-        ApogeeNet
-        .update(e_fe_h=1.25 * ApogeeNet.raw_e_fe_h + 1e-2)
+        .update(
+            e_teff=1.25 * ApogeeNet.raw_e_teff + 10,
+            e_logg=1.25 * ApogeeNet.raw_e_logg + 1e-2,
+            e_fe_h=ApogeeNet.raw_e_fe_h + 1e-2       
+        )
+        .where(ApogeeNet.v_astra == __version__)
         .execute()
     )

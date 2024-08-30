@@ -19,6 +19,7 @@ print("A")
 from astropy.table import Table
 print("A")
 from astra.utils import log, expand_path
+from astra import __version__
 print("A")
 
 import astropy.units as u
@@ -30,6 +31,12 @@ def clear_corrections(batch_size: int = 500):
     """
     # TODO: Have some reference columns of what fields we should use / update with raw_ prefixes?
     N_updated = 0
+    q = (
+        ASPCAP
+        .select()
+        .where(ASPCAP.v_astra == __version__)
+    )
+
     for chunk in chunked(ASPCAP.select(), batch_size):
         for result in chunk:
             result.teff = result.raw_teff
@@ -57,7 +64,12 @@ import matplotlib.pyplot as plt
 
 
 
+
+
 def apply_flags():
+
+
+    # TODO: Move all this to the construction of aspcap rows
     
     (
         ASPCAP
@@ -69,6 +81,7 @@ def apply_flags():
         &   (ASPCAP.raw_v_sini > 3)
         &   (ASPCAP.raw_v_sini.is_null(False))
         &   (ASPCAP.raw_v_sini != 'NaN')
+        &   (ASPCAP.v_astra == __version__)
         )
         .execute()
     )
@@ -78,6 +91,7 @@ def apply_flags():
         .where(
             (ASPCAP.raw_logg <= 3)
         &   (ASPCAP.raw_v_micro > 3)
+        &   (ASPCAP.v_astra == __version__)
         )
         .execute()
     )
@@ -87,8 +101,11 @@ def apply_flags():
             result_flags=ASPCAP.flag_ferre_fail.set(),
         )
         .where(
-            (ASPCAP.raw_teff <= 3000)
-        |   (ASPCAP.raw_logg < -1)
+            (
+                (ASPCAP.raw_teff <= 3000)
+            |   (ASPCAP.raw_logg < -1)
+            )
+        &   (ASPCAP.v_astra == __version__)
         )
         .execute()
     )
@@ -99,6 +116,7 @@ def apply_flags():
         )
         .where(
             (ASPCAP.ferre_log_snr_sq < 20)
+        &   (ASPCAP.v_astra == __version__)
         )
         .execute()
     )
@@ -107,17 +125,23 @@ def apply_flags():
         .update(
             result_flags=ASPCAP.flag_high_rchi2.set()
         )
-        .where(ASPCAP.rchi2 > 1000)
+        .where(
+            (ASPCAP.rchi2 > 1000)
+        &   (ASPCAP.v_astra == __version__)
+        )        
         .execute()
     )
     q = (
         ASPCAP
         .select(
             ASPCAP,
-            ApogeeCoaddedSpectrumInApStar.std_v_rad)
+            ApogeeCoaddedSpectrumInApStar.std_v_rad
+        )
         .join(ApogeeCoaddedSpectrumInApStar, on=(ASPCAP.spectrum_pk == ApogeeCoaddedSpectrumInApStar.spectrum_pk))
+        .where(
+            (ASPCAP.v_astra == __version__)
+        )
         .objects()
-        
     )
     with tqdm() as pb:            
         for chunk in chunked(q, 1000):
@@ -151,7 +175,395 @@ def apply_flags():
     )
     '''
 
+    import numpy as np
+    x_min, x_max, x_step = (2_500, 10_000, 50)
+    y_min, y_max, y_step = (-0.5, 5.5, 0.05)
+
+    q = list(
+        ASPCAP
+        .select()
+        .where(
+            (ASPCAP.v_astra == __version__)
+        &   (ASPCAP.raw_teff <= x_max)
+        &   (ASPCAP.raw_teff >= x_min)
+        &   (ASPCAP.raw_logg >= y_min)
+        &   (ASPCAP.raw_logg <= y_max)
+        &   ~(
+                ASPCAP.flag_high_v_sini
+            |   ASPCAP.flag_high_v_micro
+            |   ASPCAP.flag_unphysical_parameters
+            |   ASPCAP.flag_high_rchi2
+            |   ASPCAP.flag_low_snr
+            |   ASPCAP.flag_high_std_v_rad
+            |   ASPCAP.flag_teff_grid_edge_bad
+            |   ASPCAP.flag_logg_grid_edge_bad
+            |   ASPCAP.flag_ferre_fail
+            |   ASPCAP.flag_missing_model_flux
+            |   ASPCAP.flag_potential_ferre_timeout
+            |   ASPCAP.flag_no_suitable_initial_guess
+            |   ASPCAP.flag_spectrum_io_error            
+        )
+        )
+    )
+    data = np.array([(r.raw_teff, r.raw_logg) for r in q]).T
+
+    teff, logg = data
+
+    from scipy.stats import binned_statistic_2d
+
+
+    x_bins = np.linspace(x_min, x_max, 1 + int((x_max - x_min)/x_step))
+    y_bins = np.linspace(y_min, y_max, 1 + int((y_max - y_min)/y_step))
+
+    H, x_edges, y_edges, bin_numbers = binned_statistic_2d(
+        teff, logg, logg,
+        statistic="count",
+        bins=(x_bins, y_bins),
+        expand_binnumbers=True
+    )
+
+    for_updating = []
+    for i in tqdm(range(x_bins.size - 1)):
+        for j in range(y_bins.size - 1):
+            if H[i - 1, j - 1] <= 5:
+                in_bin = np.all(bin_numbers.T == np.array([i, j]), axis=1)
+                for index in np.where(in_bin)[0]:
+                    foo = q[index]
+                    foo.flag_suspicious_parameters = True
+                    for_updating.append(foo)
+
+    print(f"Setting {len(for_updating)}")
+    for chunk in chunked(for_updating, 1000):
+        ASPCAP.bulk_update(
+            chunk,
+            fields=[ASPCAP.result_flags]
+        )
     
+
+
+def apply_dr19_irfm_corrections():
+    # Main-sequence stars
+    teff_bounds = [
+        (0,     4000, 31.4673),
+        (4000,  7000, (1.4065e-4) * ASPCAP.raw_teff * ASPCAP.raw_teff - 1.4283 * ASPCAP.raw_teff + 3592.9544),
+        (7000, 100000, 486.8381)
+    ]
+    m_h_bounds = [
+        (-5, -0.75, -95.2568),
+        (-0.75, 0.50, 173.3117 * ASPCAP.raw_m_h_atm + 34.7270),
+        (0.50, 10, +121.3829)
+    ]
+
+    for teff_lower, teff_upper, teff_offset in teff_bounds:
+        for m_h_lower, m_h_upper, m_h_offset in m_h_bounds:
+            (
+                ASPCAP
+                .update(
+                    teff=ASPCAP.raw_teff - teff_offset - m_h_offset,
+                    irfm_teff_flags=ASPCAP.flag_as_dwarf_for_irfm_teff.set()
+                )
+                .where(
+                    (ASPCAP.v_astra == __version__)
+                &   (ASPCAP.raw_logg >= 3.8)
+                &   (ASPCAP.raw_teff >= teff_lower)
+                &   (teff_upper >= ASPCAP.raw_teff)
+                &   (ASPCAP.raw_m_h_atm >= m_h_lower)
+                &   (m_h_upper >= ASPCAP.raw_m_h_atm)                
+                )
+                .execute()                
+            )
+
+    # Giant stars
+    teff_bounds = [
+        (0,     3000, 360.6954),
+        (3000,  5750, (2.0370e-4) * ASPCAP.raw_teff * ASPCAP.raw_teff - 1.7968 * ASPCAP.raw_teff + 3917.8432),
+        (5750, 100000, 321.0579)
+    ]
+    m_h_bounds = [
+        (-5, -2.5, -192.4408),
+        (-2.5, 0.50, 85.4827 * ASPCAP.raw_m_h_atm + 21.2660),
+        (0.50, 10, +64.0073)
+    ]
+    for teff_lower, teff_upper, teff_offset in teff_bounds:
+        for m_h_lower, m_h_upper, m_h_offset in m_h_bounds:
+            (
+                ASPCAP
+                .update(
+                    teff=ASPCAP.raw_teff - teff_offset - m_h_offset,
+                    irfm_teff_flags=ASPCAP.flag_as_giant_for_irfm_teff.set()
+                )
+                .where(
+                    (ASPCAP.v_astra == __version__)
+                &   (ASPCAP.raw_logg < 3.8)
+                &   (ASPCAP.raw_teff >= teff_lower)
+                &   (teff_upper >= ASPCAP.raw_teff)
+                &   (ASPCAP.raw_m_h_atm >= m_h_lower)
+                &   (m_h_upper >= ASPCAP.raw_m_h_atm)                
+                )
+                .execute()                
+            )
+
+
+def apply_dr19_logg_corrections(batch_size: int = 500, limit: int = None):
+    """
+    Apply the DR19 logg corrections to the ASPCAP data model.
+    """
+
+    # First let's construct a classifier for the RC/RGB stars.
+    apokasc = Table.read(expand_path("$MWM_ASTRA/aux/external-catalogs/APOKASC_cat_v7.0.5.fits"))
+    
+    q = (
+        ASPCAP
+        .select(
+            ASPCAP,
+            Source.sdss4_apogee_id
+        )
+        .distinct(Source)
+        .join(Source)
+        .where(Source.sdss4_apogee_id.in_(list(apokasc["2MASS_ID"])))
+        .where(ASPCAP.v_astra == __version__)
+        .objects()
+    )
+    
+    fields = (
+        ASPCAP.raw_teff,
+        ASPCAP.raw_logg,
+        ASPCAP.raw_m_h_atm,
+        ASPCAP.raw_c_m_atm,
+        ASPCAP.raw_n_m_atm,
+        ASPCAP.raw_v_micro,
+    )
+    
+    for field in fields:
+        apokasc[field.name] = np.nan * np.ones(len(apokasc))
+    
+    for row in q:
+        mask = (apokasc["2MASS_ID"] == row.sdss4_apogee_id)
+        for field in fields:
+            apokasc[field.name][mask] = getattr(row, field.name)
+        
+    
+    clf = RandomForestClassifier(n_estimators=100, max_depth=10, random_state=0)
+
+    X = np.array([
+        apokasc["raw_teff"],
+        apokasc["raw_logg"],
+        apokasc["raw_m_h_atm"],
+        apokasc["raw_c_m_atm"],
+    ]).T
+    y = np.array(apokasc["APOKASC3_EVSTATES"])
+    
+    finite = np.isfinite(X).all(axis=1)
+    is_rc_or_rgb = (y == 1) | (y == 2)
+    
+    mask_clf = finite * is_rc_or_rgb
+    
+    clf.fit(X[mask_clf], y[mask_clf])
+    
+    cm = confusion_matrix(
+        y[mask_clf],
+        clf.predict(X[mask_clf]),
+    )
+    log.info(f"Confusion matrix:\n{cm}")
+        
+    norm_cm = confusion_matrix(
+        y[mask_clf],
+        clf.predict(X[mask_clf]),
+        normalize='true'
+    )
+    log.info(f"Normalized confusion matrix:\n{norm_cm}")
+    assert np.min(np.diag(norm_cm)) > 0.95, "You can do better than that..."
+
+    """
+    2024-08-26 14:22:09,344 [INFO]: Confusion matrix:
+    [[9095  119]
+    [ 159 5386]]
+    2024-08-26 14:22:09,475 [INFO]: Normalized confusion matrix:
+    [[0.98708487 0.01291513]
+    [0.02867448 0.97132552]]
+    """
+
+    # For all the RC stars, construct a corrector.
+    is_rc_for_fit = (
+        (apokasc["APOKASC3_EVSTATES"] == 2)
+    &   (apokasc["APOKASC3P_LOGG"] > 2.3)    
+    &   (apokasc["APOKASC3P_LOGG"] < 2.5) # remove secondary red clump
+    &   (apokasc["APOKASC3P_MASS"] >= 0) # remove other secondary red clump things    
+    &   (np.abs(apokasc["APOKASC3P_LOGG"] - apokasc["raw_logg"] + 0.2) < 0.2) # coarse outlier removal
+#    &   (apokasc["KALLINGER_EVSTATES"] != 2) # remove secondary red clump
+    )
+    
+    X = np.array([
+        apokasc["raw_logg"],
+    ]).T
+    
+    y = apokasc["APOKASC3P_LOGG"]
+    
+    mask_lm_rc = np.isfinite(X).all(axis=1) * is_rc_for_fit
+    
+    rc_offset = np.median(apokasc["raw_logg"][mask_lm_rc] - y[mask_lm_rc])
+
+    lm_rc = LinearRegression()
+    lm_rc.fit(np.atleast_2d(apokasc["raw_m_h_atm"][mask_lm_rc]).T, apokasc["raw_logg"][mask_lm_rc] - y[mask_lm_rc])
+
+
+    # For all the RGB stars, construct a corrector.
+    is_rgb_for_fit = (
+        (apokasc["APOKASC3_EVSTATES"] == 1)  
+    &   (apokasc["APOKASC3P_LOGG"] > -10)
+    &   (apokasc["APOKASC3P_LOGG"] < 3.25)
+    &   (apokasc["raw_logg"] < 3.25)
+    &   (
+            (apokasc["APOKASC3P_MASS"] > 0)
+        |   (apokasc["APOKASC3P_LOGG"] < 0.85)
+        )
+    )
+    
+    X = np.array([
+        apokasc["raw_m_h_atm"],
+        apokasc["raw_logg"],
+        #apokasc["raw_logg"]**2,
+    ]).T
+    y = apokasc["APOKASC3P_LOGG"]
+    
+    mask_lm_rgb = np.isfinite(X).all(axis=1) * is_rgb_for_fit
+    
+    lm_rgb = LinearRegression()
+    lm_rgb.fit(X[mask_lm_rgb], y[mask_lm_rgb])
+    
+    def logg_correction_dwarf(r):
+        return r.raw_logg - (-0.947 + 1.886e-4 * r.raw_teff + 0.410 * r.raw_m_h_atm) # Eq 2.
+
+    print(f"RC offset")
+    print(f"    logg = logg_raw - {rc_offset:.3f}")
+    print(f"RC function:")
+    print(f"    logg = logg_raw - ({lm_rc.coef_[0]:+.3f}[M/H]_raw,atm {lm_rc.intercept_:+.3f})")
+    print(f"RGB function:")
+    print(f"    logg = {lm_rgb.coef_[0]:+.3f}[M/H]_raw,atm {lm_rgb.coef_[1]:+.3f}logg_raw {lm_rgb.intercept_:+.3f}")
+
+    """
+    RC offset
+        logg = logg_raw - 0.185
+    RC function:
+        logg = logg_raw - (+0.144[M/H]_raw,atm +0.198)
+    RGB function:
+        logg = -0.233[M/H]_raw,atm +1.094logg_raw -0.377
+    """
+
+    #def logg_correction_dwarf(r):
+    #    return r.raw_logg - (-0.947 + 1.886e-4 * r.raw_teff + 0.410 * r.raw_m_h_atm) # Eq 2.
+
+    # Clear all (logg) calibrations
+    (
+        ASPCAP
+        .update(calibrated_flags=0)
+        .where(
+            (ASPCAP.v_astra == __version__)
+        )
+        .execute()
+    )
+
+    # Do MS first
+    (
+        ASPCAP
+        .update(
+            logg=ASPCAP.raw_logg - (-0.947 + 1.886e-4 * ASPCAP.raw_teff + 0.410 * ASPCAP.raw_m_h_atm),
+            calibrated_flags=ASPCAP.flag_as_dwarf_for_calibration.set()
+        )
+        .where(
+            (ASPCAP.v_astra == __version__)
+        &   (ASPCAP.raw_logg >= 3.8)
+        &   (ASPCAP.raw_teff >= 4250)
+        )
+        .execute()
+    )
+
+    # Do M-dwarfs
+    #raw_logg +( 1.6930001 + 5.2043072e-07 * pow(raw_teff - 3800,2) - 3.6010967e-04 * raw_teff - 1.7316068e+00 * raw_m_h_atm + 4.0915239e-04 * raw_m_h_atm * raw_teff)
+    (
+        ASPCAP
+        .update(
+            logg=ASPCAP.raw_logg + ( 1.6930001 + 5.2043072e-07 * fn.pow(ASPCAP.raw_teff - 3800,2) - 3.6010967e-04 * ASPCAP.raw_teff - 1.7316068e+00 * ASPCAP.raw_m_h_atm + 4.0915239e-04 * ASPCAP.raw_m_h_atm * ASPCAP.raw_teff),
+            calibrated_flags=ASPCAP.flag_as_m_dwarf_for_calibration.set()
+        )
+        .where(
+            (ASPCAP.v_astra == __version__)
+        &   (ASPCAP.raw_logg >= 3.8)
+        &   (ASPCAP.raw_teff <= 4250)
+        )
+        .execute()
+    )
+    '''
+    flag_as_m_dwarf_for_calibration
+    (
+        ASPCAP
+        .update(
+            calibrated_flags=ASPCAP.flag_as_m_dwarf_for_calibration.set(),
+            logg=ASPCAP.raw_logg - (-0.3183278 + -5.9076945e-07 * fn.pow(raw_teff-3800,2) + 4.2788306e-4 * (raw_teff-3800) + 2.1420905e-01 * raw_m_h_atm)
+        )
+    )
+    '''
+
+
+
+    # Now do evolved stars
+    q = (
+        ASPCAP
+        .select()
+        .where(
+            (ASPCAP.v_astra == __version__)
+        &   (ASPCAP.raw_logg < 3.8)
+        )
+    )
+
+    with tqdm(total=0, desc="Applying corrections") as pb:
+        for chunk in chunked(q, batch_size):
+            updated = []
+            for r in chunk:   
+                r.calibrated_flags = 0 # remove any previous classifications     
+                r.logg = r.raw_logg
+                
+                # evolved                            
+                X = np.atleast_2d([
+                    r.raw_teff,
+                    r.raw_logg,
+                    r.raw_m_h_atm,
+                    r.raw_c_m_atm,
+                ]).astype(float)
+                if np.isfinite(X).all():
+                    predicted_class, = clf.predict(X)
+                    if predicted_class == 1: # rgb
+                        r.flag_as_giant_for_calibration = True
+                        r.logg, = lm_rgb.predict(np.atleast_2d([
+                            r.raw_m_h_atm,
+                            r.raw_logg,                            
+                        ]))
+                    elif predicted_class == 2: # rc
+                        r.flag_as_red_clump_for_calibration = True
+                        #r.logg = r.raw_logg - rc_offset
+                        r.logg = r.raw_logg - lm_rc.predict(np.atleast_2d([r.raw_m_h_atm]))[0]
+                    else:
+                        raise ValueError("arrrgh")
+                else:
+                    r.logg = r.raw_logg
+                    
+                if np.isfinite(r.logg):
+                    updated.append(r)
+
+            if updated:      
+                fields = [ASPCAP.logg, ASPCAP.calibrated_flags]              
+                (
+                    ASPCAP
+                    .bulk_update(
+                        updated,
+                        fields=fields
+                    )
+                )
+            pb.update(batch_size)
+            
+    return None    
+
+
 def apply_ipl3_irfm_corrections():
         
     (
@@ -222,7 +634,7 @@ def apply_ipl3_irfm_corrections():
 def get_m_dwarf_callable():
     
     bp_rp_mann = np.array([3.245, -2.4309, 1.043, -0.2127, 0.01649])
-    bp_rp_mann_met = np.array([2.835, -1.893, 0.7860, -0.1594, 0.01243, 0.04417])
+    #bp_rp_mann_met = np.array([2.835, -1.893, 0.7860, -0.1594, 0.01243, 0.04417])
 
     from peewee import fn
     from astra.models import Source, ASPCAP
@@ -314,13 +726,18 @@ def apply_m_dwarf_logg_correction():
     
 
 def apply_solar_neighbourhood_abundance_corrections():
-    
+
+    from astra import __version__
+
     where = (
             (ASPCAP.snr > 50)
         &   (~ASPCAP.flag_bad)
-        &   (0.05 > ASPCAP.m_h_atm)
-        &   (ASPCAP.m_h_atm > -0.05)  
+        &   (0.05 > ASPCAP.raw_m_h_atm)
+        &   (ASPCAP.raw_m_h_atm > -0.05)  
         &   (Source.plx > 2)      
+        &   (6000 >= ASPCAP.raw_teff)
+        &   (ASPCAP.raw_teff >= 4000)
+        &   (ASPCAP.v_astra == __version__)
     )
     
     q_giants = Table(rows=list(
@@ -330,7 +747,8 @@ def apply_solar_neighbourhood_abundance_corrections():
             .switch(ASPCAP)
             .join(ApogeeCoaddedSpectrumInApStar, on=(ASPCAP.spectrum_pk == ApogeeCoaddedSpectrumInApStar.spectrum_pk))
             .where(
-                where & (ASPCAP.logg < 3.8)
+                where 
+            &   (ASPCAP.raw_logg < 3.8)
             )
             .dicts()
         )
@@ -343,20 +761,21 @@ def apply_solar_neighbourhood_abundance_corrections():
             .switch(ASPCAP)
             .join(ApogeeCoaddedSpectrumInApStar, on=(ASPCAP.spectrum_pk == ApogeeCoaddedSpectrumInApStar.spectrum_pk))
             .where(
-                where & (ASPCAP.logg >= 3.8)
+                where 
+            &   (ASPCAP.raw_logg >= 3.8)
             )
             .dicts()
         )    
     )
     print(len(q_giants), len(q_dwarfs))
     field_names = (
-        "raw_m_h_atm",
+        #"raw_m_h_atm",
         "raw_alpha_m_atm",
         "raw_al_h",
         "raw_ca_h",
         "raw_ce_h",
-        "raw_c_1_h",
-        "raw_c_h",
+        #"raw_c_1_h",
+        #"raw_c_h",
         "raw_co_h",
         "raw_cr_h",
         "raw_cu_h",
@@ -367,8 +786,8 @@ def apply_solar_neighbourhood_abundance_corrections():
         "raw_na_h",
         "raw_nd_h",
         "raw_ni_h",
-        "raw_n_h",
-        "raw_o_h",
+        #"raw_n_h",
+        #"raw_o_h",
         "raw_p_h",
         "raw_si_h",
         "raw_s_h",
@@ -395,20 +814,25 @@ def apply_solar_neighbourhood_abundance_corrections():
     
     import pickle
     from astra.utils import expand_path
-    from astra import __version__
-    with open(expand_path(f"$MWM_ASTRA/{__version__}/aux/snc_corrections.pkl"), "wb") as fp:
+    with open(expand_path(f"$MWM_ASTRA/{__version__}/aux/aspcap_snc_corrections.pkl"), "wb") as fp:
         pickle.dump(dict(giants=giant_vals, dwarfs=dwarf_vals), fp)
-        
+    
     (
         ASPCAP
         .update(**giant_kwds)
-        .where(ASPCAP.raw_logg < 3.8)
+        .where(
+            (ASPCAP.raw_logg < 3.8)
+        &   (ASPCAP.v_astra == __version__)
+        )
         .execute()
     )
     (
         ASPCAP
         .update(**dwarf_kwds)
-        .where(ASPCAP.raw_logg >= 3.8)
+        .where(
+            (ASPCAP.raw_logg >= 3.8)
+        &   (ASPCAP.v_astra == __version__)
+        )        
         .execute()
     )
 

@@ -104,7 +104,8 @@ def initial_guess(
     max_iter: Optional[int] = 10,
     max_step_size: Optional[Union[int, Sequence[int]]] = 8,
     full_output: Optional[bool] = False,
-    verbose: Optional[bool] = False,        
+    verbose: Optional[bool] = False,    
+    epsilon: Optional[float] = 1e-10    
 ) -> Sequence[float]:
     """
     Step through the grid of stellar parameters to find a good initial guess.
@@ -192,17 +193,20 @@ def initial_guess(
         rta = [rtai[ss] for rtai, ss in zip(rta_indices, current_slice)]
         
         shape = W_slice.shape[:-1]
-        for i, r in enumerate(rectified):
+        for i, (Ws, r) in enumerate(zip(W_slice.reshape((-1, W_slice.shape[-1])), rectified)):
+            if np.max(Ws) < epsilon: 
+                continue
             uri = np.unravel_index(i, shape)
             #uai = tuple([(rta[j] if isinstance(rta[j], int) else rta[j][_]) for j, _ in enumerate(uri)])
             uai = to_absolute_index(rta, uri)
+            print(i, uri, uai)
             if chi2[uai] < LARGE:
                 # We have computed this solution already.
                 continue
             x[uai] = lu_solve((lu, piv), ATCinv @ (log_flux[not_bad_pixel] - r[not_bad_pixel]))
             chi2[uai] = np.sum(((A[not_bad_pixel] @ x[uai] + r[not_bad_pixel]) - log_flux[not_bad_pixel])**2 * log_ivar[not_bad_pixel])
             n_evaluations += 1
-                        
+        
         # Get next slice
         relative_index = np.unravel_index(np.argmin(chi2[current_slice]), shape)
         #absolute_index = tuple([(rta[j] if isinstance(rta[j], int) else rta[j][_]) for j, _ in enumerate(relative_index)])
@@ -249,7 +253,7 @@ def initial_guess(
     ])    
 
     import matplotlib.pyplot as plt
-
+    
     
 
     raise a
@@ -412,10 +416,11 @@ def clam(
             H, 
             z, 
             z_ivar, 
-            fixed=(None, 2, 2, None, None, None, None),
-            verbose=False
+            fixed=(0, 2, 2, None, None, None, None),
+            verbose=True
         )
         p0_labels = p0[:n_labels]
+        return p0_labels
 
         '''
         ATCinv = Au.T * z_ivar[use]
@@ -500,8 +505,11 @@ def clam(
 
         return result
 
+    params = []
     for spectrum in tqdm(spectra):
-        yield Clam(**_fit_spectrum(spectrum))
+        params.append(_fit_spectrum(spectrum))
+    #for spectrum in tqdm(spectra):
+    #    yield Clam(**_fit_spectrum(spectrum))
 
     raise a
     with concurrent.futures.ThreadPoolExecutor(128) as executor:

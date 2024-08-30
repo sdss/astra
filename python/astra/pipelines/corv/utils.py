@@ -65,12 +65,12 @@ def lineplot(wl, fl, ivar, corvmodel, params, gap = 0.3, printparams = True,
     
         plt.text(0.97, 0.05, 
                  r'$T_{\mathrm{eff}} = %.0f \pm %.0f\ K$' % 
-                 (params['teff'].value, params['teff'].stderr),
+                 (params['teff'].value, params['teff'].stderr or np.nan),
     			transform = plt.gca().transAxes, fontsize = 14, ha = 'right')
     		
         plt.text(0.97, 0.12, 
                  r'$\log{g} = %.2f \pm %.2f $' % 
-                 (params['logg'].value, params['logg'].stderr),
+                 (params['logg'].value, params['logg'].stderr or np.nan),
     			transform = plt.gca().transAxes, fontsize = 14, ha = 'right')
     				 
         plt.text(0.97, 0.19, r'$\chi_r^2$ = %.2f' % (redchi),

@@ -30,6 +30,7 @@ def astronn_dist(
     parallel: Optional[bool] = True,
     batch_size: Optional[int] = 100,
     cpu_count: Optional[int] = 1,
+    **kwargs
 ) -> Iterable[AstroNNdist]:
     """
     Estimate astrophysical parameters for a stellar spectrum given a pre-trained neural network.
