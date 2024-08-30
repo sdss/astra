@@ -64,11 +64,207 @@ import matplotlib.pyplot as plt
 
 
 
+def flag_boundaries_and_abundances():
+    (
+        ASPCAP
+        .update(
+            teff=np.nan,
+            e_teff=np.nan,
+            logg=np.nan,
+            e_logg=np.nan,
+            m_h_atm=np.nan,
+            e_m_h_atm=np.nan,
+            c_m_atm=np.nan,
+            e_c_m_atm=np.nan,
+            n_m_atm=np.nan,
+            e_n_m_atm=np.nan,
+            v_micro=np.nan,
+            e_v_micro=np.nan,
+            alpha_m_atm=np.nan,
+            e_alpha_m_atm=np.nan,
+            v_sini=np.nan,
+            e_v_sini=np.nan,
+            result_flags=ASPCAP.flag_unphysical_parameters.set()            
+        )
+        .where(
+            (ASPCAP.v_astra == __version__)
+        &   (
+                (ASPCAP.raw_logg < -0.5)
+            |   (ASPCAP.raw_teff < 0)
+            |   (ASPCAP.raw_m_h_atm < -10)
+            |   (ASPCAP.raw_c_m_atm < -10)
+            |   (ASPCAP.raw_n_m_atm < -10)
+            |   (ASPCAP.raw_alpha_m_atm < -10)
+            )
+        )
+        .execute()
+    )
 
+    # Flag boundaries
+    bounds = (
+        (ASPCAP.raw_m_h_atm, ASPCAP.flag_m_h_atm_grid_edge_bad, ASPCAP.flag_m_h_atm_grid_edge_warn, -2.5, 1, 0.25),
+        (ASPCAP.raw_alpha_m_atm, ASPCAP.flag_alpha_m_grid_edge_bad, ASPCAP.flag_alpha_m_grid_edge_warn, -0.75, 1, 0.25),
+        (ASPCAP.raw_c_m_atm, ASPCAP.flag_c_m_atm_grid_edge_bad, ASPCAP.flag_c_m_atm_grid_edge_warn, -1.5, 1, 0.25),
+        (ASPCAP.raw_n_m_atm, ASPCAP.flag_n_m_atm_grid_edge_bad, ASPCAP.flag_n_m_atm_grid_edge_warn, -0.5, 2, 0.5),
+        (ASPCAP.raw_v_micro, ASPCAP.flag_v_micro_grid_edge_bad, ASPCAP.flag_v_micro_grid_edge_warn, 0.30, 4.8, 0.3),        
+        (ASPCAP.raw_v_sini, ASPCAP.flag_v_sini_grid_edge_bad, ASPCAP.flag_v_sini_grid_edge_warn, 2, 96, 1),
+    )
+    for field, bad_flag, warn_flag, lower, upper, step in bounds:
+        (
+            ASPCAP
+            .update(result_flags=warn_flag.set())
+            .where(
+                (ASPCAP.v_astra == __version__)
+            &   (
+                    (field < (lower + step))
+                |   (field > (upper - step))
+                )
+            )
+            .execute()
+        )
+        (
+            ASPCAP
+            .update(result_flags=bad_flag.set())
+            .where(
+                (ASPCAP.v_astra == __version__)
+            &   (
+                    (field < (lower + 1/8 * step))
+                |   (field > (upper - 1/8 * step))
+                )
+            )
+            .execute()
+        )        
+    
+    # Now let's do the abundances. 
+    abundance_bounds = [
+        ("al_h", ASPCAP.raw_al_h, -2.5, 1, 0.25),
+        ("c_12_13", ASPCAP.raw_c_12_13 - ASPCAP.raw_m_h_atm, -1.5, 1.0, 0.25),
+        ("ca_h", ASPCAP.raw_ca_h - ASPCAP.raw_m_h_atm, -0.75, 1, 0.25),
+        ("ce_h", ASPCAP.raw_ce_h, -2.5, 1, 0.25),
+        ("c_h", ASPCAP.raw_c_h - ASPCAP.raw_m_h_atm, -1.5, 1, 0.25),
+        ("co_h", ASPCAP.raw_co_h, -2.5, 1, 0.25),
+        ("cr_h", ASPCAP.raw_cr_h, -2.5, 1, 0.25),
+        ("cu_h", ASPCAP.raw_cu_h, -2.5, 1, 0.25),
+        ("fe_h", ASPCAP.raw_fe_h, -2.5, 1, 0.25),
+        ("k_h", ASPCAP.raw_k_h, -2.5, 1, 0.25),        
+        ("mg_h", ASPCAP.raw_mg_h - ASPCAP.raw_m_h_atm, -0.75, 1, 0.25),
+        ("mn_h", ASPCAP.raw_mn_h, -2.5, 1, 0.25),
+        ("na_h", ASPCAP.raw_na_h, -2.5, 1, 0.25),
+        ("nd_h", ASPCAP.raw_nd_h, -2.5, 1, 0.25),
+        ("ni_h", ASPCAP.raw_ni_h, -2.5, 1, 0.25),
+        ("n_h", ASPCAP.raw_n_h - ASPCAP.raw_m_h_atm, -0.5, 2, 0.5),
+        ("o_h", ASPCAP.raw_o_h - ASPCAP.raw_m_h_atm, -0.75, 1, 0.25),
+        ("p_h", ASPCAP.raw_p_h - ASPCAP.raw_m_h_atm, -2.5, 1, 0.25),
+        ("si_h", ASPCAP.raw_si_h - ASPCAP.raw_m_h_atm, -0.75, 1, 0.25),
+        ("s_h", ASPCAP.raw_s_h - ASPCAP.raw_m_h_atm, -0.75, 1, 0.25),
+        ("ti_h", ASPCAP.raw_ti_h - ASPCAP.raw_m_h_atm, -0.75, 1, 0.25),
+        ("v_h", ASPCAP.raw_v_h, -2.5, 1, 0.25),
+    ]
+    for field_name, lhs, lower, upper, step in abundance_bounds:
+        print("Doing", field_name)
+
+        flag_bad = getattr(ASPCAP, f"flag_{field_name}_bad_grid_edge")
+
+        (
+            ASPCAP
+            .update(**{f"{field_name}_flags": flag_bad.set()})
+            .where(
+                (ASPCAP.v_astra == __version__)
+            &   (
+                    (lhs < (lower + 1/8 * step))
+                |   (lhs > (upper - 1/8 * step))
+                )
+            )
+            .execute()
+        )
+
+        flag_warn = getattr(ASPCAP, f"flag_{field_name}_warn_grid_edge")
+        (
+            ASPCAP
+            .update(**{f"{field_name}_flags": flag_warn.set()})
+            .where(
+                (ASPCAP.v_astra == __version__)
+            &   (
+                    (lhs < (lower + step))
+                |   (lhs > (upper - step))
+                )
+            )
+            .execute()
+        )
+
+        flag_censored = getattr(ASPCAP, f"flag_{field_name}_censored_unphysical")
+        (
+            ASPCAP
+            .update(**{
+                f"{field_name}_flags": flag_censored.set(),
+                field_name: np.nan,
+                f"e_{field_name}": np.nan,
+            })
+            .where(
+                (ASPCAP.v_astra == __version__)
+            &   (lhs < (lower - 10))
+            )
+            .execute()
+        )
+
+
+def flag_upper_limits_by_hayes_2022():
+    from astropy.table import Table
+    coeff = Table.read(expand_path("$MWM_ASTRA/pipelines/aspcap/hayes_2022_upper_limit_coefficients.txt"), format="ascii")
+
+    solar = {
+        # Grevesse
+        "c": 8.66,
+        "n": 4.56,
+        "p": 5.36,
+    }
+
+    elements = set(coeff["Element"])
+    N_elements = len(elements)
+    elements = ("P", )
+    T = 5
+    with tqdm(total=T * N_elements) as pb:
+
+        for element in tqdm(elements):
+            print("Doing", element)
+
+            solar_value = solar[element.lower()]
+            mask = (coeff["Element"] == element)
+            field = getattr(ASPCAP, f"raw_{element.lower()}_h")
+            flags_field = getattr(ASPCAP, f"{element.lower()}_h_flags")
+
+            for t in range(1, T + 1):
+                row = coeff[mask][0]
+                rhs = (float(row[f"A_{t}"]) * (ASPCAP.raw_teff / 10000) + float(row[f"B_{t}"]))
+                where = (
+                    (solar_value + field) > rhs
+                )
+                if sum(mask) > 1:
+                    for row in coeff[mask][1:]:
+                        rhs = (float(row[f"A_{t}"]) * (ASPCAP.raw_teff / 10000) + float(row[f"B_{t}"]))
+                        where &= (
+                            (solar_value + field) > rhs
+                        )
+                
+                flag = getattr(ASPCAP, f"flag_{element.lower()}_h_upper_limit_t{t}")
+                (
+                    ASPCAP
+                    .update(**{f"{element.lower()}_h_flags": flag.set() })
+                    .where(
+                        (ASPCAP.v_astra == __version__)
+                    &   where
+                    )
+                    .execute()
+                )
+                pb.update()
+                
+            raise a
+                
+
+    # need to translate m_h abundances to A_X
+    # for each star we need to check if A
 
 def apply_flags():
-
-
     # TODO: Move all this to the construction of aspcap rows
     
     (
