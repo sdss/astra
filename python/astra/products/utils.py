@@ -197,10 +197,12 @@ def create_source_primary_hdu_cards(
         (" ", s("HDU Descriptions"), None),
         BLANK_CARD,
         ("COMMENT", "HDU 0: Summary information only", None),
-        ("COMMENT", f"HDU 1: BOSS {context} from Apache Point Observatory"),
-        ("COMMENT", f"HDU 2: BOSS {context} from Las Campanas Observatory"),
-        ("COMMENT", f"HDU 3: APOGEE {context} from Apache Point Observatory"),
-        ("COMMENT", f"HDU 4: APOGEE {context} from Las Campanas Observatory"),
+        ("COMMENT", f"HDU 1: BOSS {context}", None),
+        ("COMMENT", f"HDU 2: APOGEE {context}", None),
+        #("COMMENT", f"HDU 1: BOSS {context} from Apache Point Observatory"),
+        #("COMMENT", f"HDU 2: BOSS {context} from Las Campanas Observatory"),
+        #("COMMENT", f"HDU 3: APOGEE {context} from Apache Point Observatory"),
+        #("COMMENT", f"HDU 4: APOGEE {context} from Las Campanas Observatory"),
     ])
     
     return (cards, original_names)
@@ -561,11 +563,14 @@ def get_basic_header(
             (" ", s("HDU Descriptions"), None),
             BLANK_CARD,
             ("COMMENT", "HDU 0: Summary information only", None),
-            ("COMMENT", "HDU 1: BOSS spectra taken at Apache Point Observatory"),
-            ("COMMENT", "HDU 2: BOSS spectra taken at Las Campanas Observatory"),
-            ("COMMENT", "HDU 3: APOGEE spectra taken at Apache Point Observatory"),
-            ("COMMENT", "HDU 4: APOGEE spectra taken at Las Campanas Observatory"),
+            ("COMMENT", "HDU 1: BOSS spectra", None),
+            ("COMMENT", "HDU 2: APOGEE spectra", None),
         ])        
+        #("COMMENT", "HDU 1: BOSS spectra taken at Apache Point Observatory"),
+        #("COMMENT", "HDU 2: BOSS spectra taken at Las Campanas Observatory"),
+        #("COMMENT", "HDU 3: APOGEE spectra taken at Apache Point Observatory"),
+        #("COMMENT", "HDU 4: APOGEE spectra taken at Las Campanas Observatory"),
+
     return fits.Header(cards)    
 
 

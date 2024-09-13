@@ -319,6 +319,167 @@ def create_mwm_products(slurm_profile, slurm_dir, limit, nodes):
 
 
 @cli.command(context_settings=dict(ignore_unknown_options=True))
+@click.option("--slurm-profile", default=None, help="Use Slurm profile specified in Astra config file. If None is given, it will default to the profile for the task name, or `default`.")
+@click.option("--nodes", default=1)
+@click.option("--procs-per-node", default=1)
+@click.option("--limit", default=None)
+@click.option("--page", default=None)
+@click.argument("task", nargs=1)
+@click.argument("spectrum_type", nargs=1)
+@click.argument("kwargs_str", nargs=-1)
+def new_execute(slurm_profile, nodes, procs_per_node, limit, page, task, spectrum_type, kwargs_str):
+
+    import os
+    import numpy as np
+    import sys
+    from astra import config, __version__
+    from astra.utils import expand_path, log, callable
+
+    import pickle
+    from inspect import getfullargspec
+    from tqdm import tqdm
+    from peewee import chunked, JOIN
+
+    from astra import models
+    from astra.models.source import Source
+    from astra.models.spectrum import Spectrum, SpectrumMixin    
+
+
+    # Do some cleverness about the task name.
+    for prefix in ("", "astra.", "astra.pipelines.", f"astra.pipelines.{task}."):
+        try:
+            resolved_task = f"{prefix}{task}"
+            f = callable(resolved_task)
+        except:
+            None
+        else:
+            if prefix:
+                log.info(f"Resolved '{task}' -> '{resolved_task}'")
+            break
+    else:
+        # Raise exception on the no-prefix case.
+        f = callable(task)
+
+    kwargs = {}
+    for each in kwargs_str:
+        k, v = each.split("=")
+        kwargs[k.lstrip("-")] = v
+    
+
+    spectrum_model = getattr(models, spectrum_type)
+    try:
+        output_model = getfullargspec(f).annotations["return"].__args__[0]
+    except:
+        raise ValueError(f"Cannot infer output model for task {f}, is it missing a type annotation?")
+
+    # Query for spectra that does not have a result in this output model
+    iterable = (
+        spectrum_model
+        .select(
+            spectrum_model,
+            Source
+        )
+        .join(
+            output_model,
+            JOIN.LEFT_OUTER,
+            on=(
+                (spectrum_model.spectrum_pk == output_model.spectrum_pk)
+            &   (output_model.v_astra == __version__)
+            )
+        )
+        .switch(spectrum_model)
+        .join(Source, attr="source") # convenience to pre-fetch .source attribute on everything
+        .where(output_model.spectrum_pk.is_null())
+    )
+    for k, v in kwargs.items():
+        iterable = iterable.where(getattr(spectrum_model, k) == v)
+        print(f"requiring {k}={v}")
+
+    if os.environ.get("CLUSTER", False):
+        q = (
+            iterable
+            .paginate(int(page), int(limit))
+        )
+        # In Slurm environment, so just execute 
+        for item in tqdm(f(q), total=int(limit)):
+            None
+
+    else:
+        # Submit to Slurm
+        total = limit or iterable.count()
+
+        print(f"Found {total}")
+        from astra.utils.slurm import SlurmTask, SlurmJob
+
+        # Resolve slurm profile.
+        slurm_profile_config = config.get("slurm", dict(profiles={})).get("profiles", {})
+        if slurm_profile is not None:
+            if slurm_profile not in slurm_profile_config:
+                raise click.BadArgumentUsage(f"Cannot find Slurm profile '{slurm_profile}' in Astra config.")            
+        else:     
+            try_slurm_profile_names = (resolved_task, resolved_task.split(".")[-1], "default")
+            for slurm_profile in try_slurm_profile_names:
+                if slurm_profile in slurm_profile_config:
+                    log.info(f"Using Slurm profile '{slurm_profile}'")
+                    break
+            else:
+                raise click.BadOptionUsage(f"Cannot find any Slurm profile in Astra config. Use `--slurm-profile PROFILE` to specify. Tried: {', '.join(slurm_profile_config)}")
+            
+        slurm_kwds = slurm_profile_config[slurm_profile]
+
+        n_procs = procs_per_node * nodes
+        batch_size = int(np.ceil(total / (n_procs)))
+        
+        from datetime import datetime
+        from tempfile import mkdtemp
+
+        python_threads = slurm_kwds.pop("python_threads", 8)
+        if slurm_kwds is None:
+            pre_execute_commands = []
+        else:
+            pre_execute_commands = [
+                f"export OMP_NUM_THREADS={python_threads}",
+                f"export OPENBLAS_NUM_THREADS={python_threads}",
+                f"export MKL_NUM_THREADS={python_threads}",
+                f"export VECLIB_MAXIMUM_THREADS={python_threads}",
+                f"export NUMEXPR_NUM_THREADS={python_threads}"            
+            ]
+
+        start_page = 1
+
+        for node in range(nodes):
+
+            commands = []
+            for proc in range(procs_per_node):
+                
+                page = start_page + node * procs_per_node + proc
+                
+                command = f"astra new-execute --page {page} --limit {batch_size} {resolved_task} {spectrum_type} {' '.join(kwargs_str)}"
+                commands.append(command)
+            
+            prefix = f"{datetime.now().strftime('%Y-%m-%d')}-{resolved_task.split('.')[-1][:30]}-"
+            if page:
+                prefix += f"{node}-"
+            slurm_dir = mkdtemp(prefix=prefix, dir=expand_path(f"$PBS/"))
+            os.chmod(slurm_dir, 0o755)
+            log.info(f"Using Slurm directory: {slurm_dir}")    
+            job_name = f"{os.path.basename(slurm_dir)}"
+
+            slurm_job = SlurmJob(
+                [
+                    SlurmTask(pre_execute_commands + [c]) for c in commands
+                ],
+                job_name,
+                dir=slurm_dir,
+                **slurm_kwds,
+            )
+            slurm_job_pk = slurm_job.submit()
+            print(slurm_job_pk)
+
+    
+
+
+@cli.command(context_settings=dict(ignore_unknown_options=True))
 @click.option("--slurm", is_flag=True, default=False, help="Execute through Slurm (see --slurm-profile)")
 @click.option("--slurm-profile", default=None, help="Use Slurm profile specified in Astra config file. If None is given, it will default to the profile for the task name, or `default`.")
 @click.option("--slurm-dir", default=None)
@@ -539,10 +700,15 @@ def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spe
         )
         print(f"kwargs are {kwargs}")
         if kwargs:
+            for_deletion = []
             for k, v in kwargs.items():
                 if hasattr(spectrum_model, k):
                     print(f"requiring {k} = {v}")
                     iterable = iterable.where(getattr(spectrum_model, k) == v)
+                    for_deletion.append(k)
+            if for_deletion:
+                for k in for_deletion:
+                    kwargs.pop(k)                    
                 
         if page:
             iterable = (

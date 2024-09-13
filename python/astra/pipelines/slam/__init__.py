@@ -1,61 +1,24 @@
+__slam_version__ = "1.2019.0109.4"
+from .slam3 import Slam3 as SlamCode
+
+from .laspec.convolution import conv_spec, fwhm2resolution
+from .laspec.qconv import conv_spec_Gaussian
+from .laspec.normalization import normalize_spectrum, normalize_spectra_block
+from .laspec.binning import rebin
+
 import numpy as np
-from scipy.interpolate import interp1d
-from functools import cache
-from typing import Iterable, Optional
-from peewee import JOIN
-from joblib import load
-import pickle
-import os
-import concurrent.futures
 from tqdm import tqdm
-
-
-from astra import task, __version__
-from astra.utils import log, expand_path
-from astra.pipelines.slam.slam.normalization import normalize_spectra_block
-from astra.models import Spectrum
+from joblib import load
+from peewee import JOIN, fn, ModelSelect
+from astra import task, __version__, log
+from astra.utils import expand_path
+from astra.models import BossCombinedSpectrum
 from astra.models.slam import Slam
-from astra.models.spectrum import SpectrumMixin
-from astra.models.boss import BossVisitSpectrum
-from astra.models.mwm import BossCombinedSpectrum
-from astra.models.source import Source
-from astra.models.spectrum import SpectrumMixin
-from astra.models.slam import Slam
-from peewee import fn, ModelSelect
-
-q = (
-    BossCombinedSpectrum
-    .select()
-    .join(Source)
-    .switch(BossCombinedSpectrum)
-    .join(
-        Slam, 
-        JOIN.LEFT_OUTER, 
-        on=(
-            (Slam.spectrum_pk == BossCombinedSpectrum.spectrum_pk)
-        &   (Slam.v_astra == __version__)
-        )
-    )
-    .where(
-        (                
-            (
-                # From Zach Way, mwm-astra 413
-                Source.g_mag.is_null(False)
-            &   Source.rp_mag.is_null(False)
-            &   Source.plx.is_null(False)
-            &   (Source.plx > 0)
-            &   ((Source.g_mag - Source.rp_mag) > 0.56)
-            &   ((Source.g_mag + 5 + 5 * fn.log10(Source.plx/1000)) > 5.553)
-            )
-        |   (
-            Source.assigned_to_program("mwm_yso")
-        |   Source.assigned_to_program("mwm_snc")
-        )
-    )
-    &   (BossCombinedSpectrum.v_astra == __version__)
-    )    
-)
-
+from astropy.table import Table
+from typing import Iterable, Optional
+from astra.models import SpectrumMixin, Source
+#  
+#  According to the Bible, we’re roughly dealing with an absolute magnitude range M_G in [7.57, 13.35] for M dwarfs between 4000 and 3000 K. It might be worth including this cut when training/running the SLAM
 @task
 def slam(
     spectra: Optional[Iterable[SpectrumMixin]] = (
@@ -82,6 +45,7 @@ def slam(
                 &   (Source.plx > 0)
                 &   ((Source.g_mag - Source.rp_mag) > 0.56)
                 &   ((Source.g_mag + 5 + 5 * fn.log10(Source.plx/1000)) > 5.553)
+                #&   ((Source.g_mag + 5 + 5 * fn.log10(Source.plx/1000)) > 7.57)
                 )
             |   (
                 Source.assigned_to_program("mwm_yso")
@@ -90,274 +54,208 @@ def slam(
         )
         &   (BossCombinedSpectrum.v_astra == __version__)
         )
-    ),
-    #model_path: str = "$MWM_ASTRA/pipelines/slam/ASPCAP_DR16_astra_wbinaryValid.dump",
-    model_path: str = "$MWM_ASTRA/pipelines/slam/Train_FGK_LAMOST_M_BOSS_alpha_from_ASPCAP_teff_logg_from_ApogeeNet_nobinaries.dump",
-    max_workers: Optional[int] = None,
+    ), 
     page=None,
     limit=None,
-) -> Iterable[Slam]:
-    """
-    Run the Stellar Labels Machine (SLAM) on the given spectra.
-    """
-    
-    model = load_model(model_path)
+    n_jobs=128
+) -> Slam:
 
-    if isinstance(spectra, ModelSelect):
-        spectra = (
-            spectra
-            .where(
-                (                
-                    (
-                        # From Zach Way, mwm-astra 413
-                        Source.g_mag.is_null(False)
-                    &   Source.rp_mag.is_null(False)
-                    &   Source.plx.is_null(False)
-                    &   (Source.plx > 0)
-                    &   ((Source.g_mag - Source.rp_mag) > 0.56)
-                    &   ((Source.g_mag + 5 + 5 * fn.log10(Source.plx/1000)) > 5.553)
-                    )
-                |   (
-                    Source.assigned_to_program("mwm_yso")
-                |   Source.assigned_to_program("mwm_snc")
-                    )
-                )                
-            )
-        )
-
-        if page is not None and limit is not None:
+    if isinstance(spectra, ModelSelect) and limit is not None:
+        if page is not None:
+            print("paging")
             spectra = spectra.paginate(page, limit)
-        
-        elif limit is not None:
+        else:
+            print("limiting")
             spectra = spectra.limit(limit)
 
-    executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
+    wave_interp = Table.read(expand_path("$MWM_ASTRA/pipelines/slam/dM_train_wave_standard.csv"))['wave']
+    dump_path = expand_path("$MWM_ASTRA/pipelines/slam/Train_FGK_LAMOST_M_BOSS_alpha_from_ASPCAP_teff_logg_from_ApogeeNet_nobinaries.dump")
 
-    futures = []
-    for spectrum in tqdm(spectra, total=0, desc="Distributing"):
-        '''
-        try:
-            args = (spectrum.source_pk, spectrum.spectrum_pk, spectrum.wavelength, np.atleast_2d(spectrum.flux), np.atleast_2d(spectrum.ivar), model)
-        except:
-            None
-        else:
-            futures.append(executor.submit(_slam, *args))
-        '''
-        futures.append(executor.submit(_slam, spectrum.source_pk, spectrum.spectrum_pk, model))
-
-    with tqdm(total=len(futures), desc="Slamming") as pb:
-        for future in concurrent.futures.as_completed(futures):
-            r = future.result()
-            if r is not None:
-                yield r
-            pb.update()
-            
-
-
-@cache
-def load_model(model_path):
-    # We have to put this path in otherwise slam wont load. fuck my life.
     import sys
-    sys.path.insert(0, "/uufs/chpc.utah.edu/common/home/u6020307/astra/python/astra/pipelines/slam")
-    model = load(expand_path(model_path))
-    sys.path.pop(0)
-    return model
+    sys.path.insert(0, "/uufs/chpc.utah.edu/common/home/u6020307/astra/python/astra/pipelines/")
+    Pre = load(dump_path)
 
+    flux_boss = []
+    ivar_boss = []
+    used_spectra = []
+    for spectrum in tqdm(spectra, desc="Collecting"):
+        # only redshift if it is a visit spectrum (not a stack)
+        try:
+            if isinstance(spectrum, BossCombinedSpectrum):
+                wave = spectrum.wavelength
+            else:
+                wave = spectrum.wavelength / (1 + spectrum.xcsao_v_rad / 299792.458)
+            flux_n, invar_n = rebin(
+                wave, 
+                flux=spectrum.flux, 
+                flux_err=spectrum.e_flux,
+                wave_new=wave_interp
+            )
+            flux_boss.append(flux_n)
+            ivar_boss.append(invar_n)
+        except Exception:
+            log.exception(f"Failed to rebin spectrum {spectrum.spectrum_pk}")
+        else:
+            used_spectra.append(spectrum)
 
-def _slam(
-    source_pk,
-    spectrum_pk, 
-    model,
-    dwave: float = 10.0,
-    p_min: float = 1e-8,
-    p_max: float = 1e-7,
-    q: float = 0.7,
-    eps: float = 1e-19,
-    rsv_frac: float = 2,
-    n_jobs: int = 1,
-    verbose: int = 0,
-):
-    spectrum = Spectrum.get(spectrum_pk).resolve()
+    flux_boss = np.array(flux_boss)
+    ivar_boss = np.array(ivar_boss)
 
-    try:
-        wave = spectrum.wavelength
-        fluxs = np.atleast_2d(spectrum.flux)
-        ivars = np.atleast_2d(spectrum.ivar)
-    except:
-        return None
-
-    N, P = fluxs.shape
-    R = model.wave.size
-
-    flux_resamp = np.empty((N, R))
-    ivar_resamp = np.empty((N, R))
-    assert N == 1
-    for i in range(N):
-        # Note: One non-finite value given to scipy.interpolate.interp1d will cause the
-        #       entire interpolated output to be NaN. This is a known issue.
-        non_finite = ~np.isfinite(fluxs[i]) + ~np.isfinite(ivars[i])
-        _flux = np.copy(fluxs[i])
-        _flux[non_finite] = 0.0
-        _ivar = np.copy(ivars[i])
-        _ivar[non_finite] = 0.0
-
-        f = interp1d(wave, _flux, kind="cubic", bounds_error=None, fill_value=np.nan)
-        g = interp1d(wave, _ivar, kind="cubic", bounds_error=None, fill_value=0)
-        flux_resamp[i] = f(model.wave)
-        ivar_resamp[i] = g(model.wave)
-
+    print("normalizing spectra block")
     flux_norm, flux_cont = normalize_spectra_block(
-        model.wave,
-        flux_resamp,
-        #(6147.0, 8910.0),
-        (6001.755, 8957.321),
-        dwave=dwave,
-        p=(p_min, p_max),
-        q=q,
-        ivar_block=ivar_resamp,
-        eps=eps,
-        rsv_frac=rsv_frac,
-        n_jobs=n_jobs,
-        verbose=verbose,
+        wave_interp, flux_boss, 
+        (6001.755, 8957.321), 
+        10., 
+        p=(1E-8, 1E-7), 
+        #ivar_block=ivar_boss, # Dan doesn't use this, but there is an option for it.
+        q=0.7, eps=1E-19, rsv_frac=2., n_jobs=n_jobs, verbose=5
     )
+    flux_norm[flux_norm>2.] = 1
+    flux_norm[flux_norm<0] = 0
+    ivars_norm = (ivar_boss * flux_cont**2)
+
+    log.info("Predicting labels (first pass)")
+    Xinit = Pre.predict_labels_quick(flux_norm, ivars_norm, n_jobs=n_jobs, verbose=5)
+
+    SEP_1_LENGTH = len(flux_norm)
+
+    log.info("Predicting labels")
+    Rpred = Pre.predict_labels_multi(Xinit[0:SEP_1_LENGTH], flux_norm[0:SEP_1_LENGTH], ivars_norm[0:SEP_1_LENGTH],n_jobs=n_jobs,verbose=5)
+    Xpred = np.array([_["x"] for _ in Rpred])
+    Xpred_err = np.array([np.diag(_["pcov"]) for _ in Rpred])
+
+    #feh_niu,feh,alpha_m,teff,logg=(Xpred[:,_] for _ in range(5))
+    #feh_niu_err,feh_err,alpha_m_err,teff_err,logg_err=(Xpred_err[:,_] for _ in range(5))
+
+    for i, spectrum in enumerate(used_spectra):
+        kwds = dict(source_pk=spectrum.source_pk, spectrum_pk=spectrum.spectrum_pk)
+        kwds.update(
+            fe_h_niu=Xpred[i, 0],
+            e_fe_h_niu=Xpred_err[i, 0],
+            fe_h=Xpred[i, 1],
+            e_fe_h=Xpred_err[i, 1],
+            alpha_fe=Xpred[i, 2],
+            e_alpha_fe=Xpred_err[i, 2],
+            teff=Xpred[i, 3],
+            e_teff=Xpred_err[i, 3],
+            logg=Xpred[i, 4],
+            e_logg=Xpred_err[i, 4],
+
+            initial_fe_h_niu=Xinit[i, 0],
+            initial_fe_h=Xinit[i, 1],
+            initial_alpha_fe=Xinit[i, 2],
+            initial_teff=Xinit[i, 3],
+            initial_logg=Xinit[i, 4],
+            status=Rpred[i]["status"],
+            success=Rpred[i]["success"],
+            optimality=Rpred[i]["optimality"],
+            chi2=np.nan,
+            rchi2=np.nan
+        )
+        kwds.update(
+            flag_teff_outside_bounds=(kwds["teff"] < 2800) or (kwds["teff"] > 4500),
+            flag_fe_h_outside_bounds=(kwds["fe_h"] < -1) or (kwds["fe_h"] > 0.5),
+            flag_bad_optimizer_status=(kwds["status"] > 0 and kwds["status"] != 2) | (kwds["status"] < 0),
+        )
+        yield Slam(**kwds)
+
+
+
+if __name__ == "__main__":
+
+    from astra.models import Source, ASPCAP, BossVisitSpectrum, Slam, BossCombinedSpectrum
+    '''
+    spectra = list(
+        BossVisitSpectrum
+        .select()
+        .join(Source)
+        .join(ASPCAP)
+        .switch(BossVisitSpectrum)
+        .join(Slam, on=(BossVisitSpectrum.source_pk == Slam.source_pk))
+        .where(
+            (BossVisitSpectrum.run2d == "v6_1_3")
+        &   (ASPCAP.flag_as_m_dwarf_for_calibration)
+        &   (ASPCAP.v_astra == "0.6.0")
+        &   (Slam.v_astra == "0.6.0")
+        )
+
+        .limit(10)
+    )
+
+    spectra = list(
+        BossCombinedSpectrum
+        .select()
+        .join(Slam, on=(BossCombinedSpectrum.spectrum_pk == Slam.spectrum_pk))
+        .where(Slam.v_astra == "0.6.0")
+        .limit(100)
+    )
+    '''
+    from astropy.table import Table
+    from astra.utils import expand_path
+    t = Table.read(expand_path("$MWM_ASTRA/pipelines/slam/SLAM_test_astra_0.6.0.fits"))
+
+    spectra = list(
+        BossCombinedSpectrum
+        .select()
+        .where(BossCombinedSpectrum.spectrum_pk.in_(list(t["spectrum_pk"])))
+    )
+
+
+    from astra.pipelines.slam import slam
+    results = list(slam(spectra))
     
-    flux_norm[flux_norm > 2] = 1
-    flux_norm[flux_norm < 0] = 0
+    # match up to the rows in the table
+    import numpy as np
+    spectrum_pks = np.array([r.spectrum_pk for r in results])
 
-    ivar_norm = flux_cont**2 * ivar_resamp
+    t.sort("spectrum_pk")
+    t_spectrum_pks = np.array(t["spectrum_pk"])
 
-    ### Initial estimation: get initial estimate of parameters by chi2 best match
-    label_init = model.predict_labels_quick(
-        flux_norm, ivar_norm, n_jobs=1
-    )
+    indices = np.array([t_spectrum_pks.searchsorted(s) for s in spectrum_pks])
+    t = t[indices]
 
-    ### SLAM prediction: optimize parameters
-    results_pred = model.predict_labels_multi(
-        label_init, flux_norm, ivar_norm
-    )
-    #label_pre[:,0] is the [Fe/H] calibrated from Niu et al.2023.
-    #label_pre[:,1] is the [Fe/H] calibrated directly from LAMOST FGK primary stars.
-    #label_pre[:,2] is the [alpha/M].
-    #label_pre[:,3] is the Teff.
-    #label_pre[:,4] is the logg.    
-    label_names = ("fe_h_niu", "fe_h", "alpha_fe", "teff", "logg")
-    labels = np.array([label["x"] for label in results_pred])
+    assert np.all(np.array(t["spectrum_pk"]) == spectrum_pks)
 
-    kwargs = (dict(zip(label_names, labels[0])))
-    kwargs.update(
-        dict(zip(
-            [f"e_{ln}" for ln in label_names],
-            np.array([label["pstd"] for label in results_pred])[0]
-        ))
-    )
+    import matplotlib.pyplot as plt
 
-    # Add initial values.
-    kwargs.update(
-        dict(
-            zip(
-                [f"initial_{ln}" for ln in label_names],
-                label_init[0]
-            )
-        )
-    )
+    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+    label_names = [
+        ("teff_pre", "teff", "initial_teff"),
+        ("logg_pre", "logg", "initial_logg"),
+        ("feh_niu_pre", "fe_h_niu", "initial_fe_h_niu"),
+        ("alph_m_pre", "alpha_fe", "initial_alpha_fe")
+    ]
+    vrad = [getattr(r, "xcsao_v_rad") for r in spectra]
 
-    # Add correlation coefficients.
-    L = len(label_names)
-    j, k = np.triu_indices(L, 1)
-    rho = np.array([np.corrcoef(label["pcov"]) for label in results_pred])
-    kwargs.update(
-        dict(
-            zip(
-                [f"rho_{label_names[j]}_{label_names[k]}" for j, k in zip(j, k)],
-                rho[0, j, k]
-            )
-        )
-    )
-    kwargs.update(
-        dict(
-            zip(
-                [f"rho_{label_names[j]}_{label_names[k]}" for j, k in zip(k, j)],
-                rho[0, j, k]
-            )
-        )
-    )    
+    for i, ax in enumerate(axes.flat):
+        xlabel, ylabel, zlabel = label_names[i]
+        x = t[xlabel]
+        y = [getattr(r, ylabel) for r in results]
+        z = [getattr(r, zlabel) for r in results]
 
-    # Add optimisation keywords
-    opt_keys = ("status", "success", "optimality")
-    for key in opt_keys:
-        kwargs[key] = results_pred[0][key]
+        scat = ax.scatter(x, y, c=vrad)
+        plt.colorbar(scat, ax=ax)
 
-    # Add statistics.
-    prediction = model.predict_spectra(labels)
-    chi2 = np.sum((prediction - flux_norm) ** 2 * ivar_norm)
-    R_finite = np.sum(ivar_norm > 0)
-    rchi2 = chi2 / (R_finite - L - 1)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        limits = np.array([ax.get_xlim(), ax.get_ylim()])
+        limits = (np.min(limits), np.max(limits))
+        ax.plot(limits, limits, c="k", ls="--")
+        ax.set_xlim(limits)
+        ax.set_ylim(limits)
     
-    # Flags
-    flag_teff_outside_bounds = (kwargs["teff"] < 2800 or kwargs["teff"] > 4500)    
-    flag_fe_h_outside_bounds = (kwargs['fe_h'] < -1 or kwargs['fe_h'] > 0.5)
-    flag_bad_optimizer_status = (kwargs["status"] > 0 and kwargs["status"] != 2) | (kwargs["status"] < 0)
+
+
+    raise a
     
+
+    before = list(Slam.select().where(Slam.v_astra == "0.6.0").where(Slam.spectrum_pk.in_([s.spectrum_pk for s in spectra])))
+    after = list(slam(spectra))
+
+    index = np.argsort([s.spectrum_pk for s in spectra])
+    before_sorted = [before[i] for i in index]
+
+
+
+
     
-    kwargs.update(
-        chi2=chi2,
-        rchi2=rchi2,
-        flag_teff_outside_bounds=flag_teff_outside_bounds,
-        flag_fe_h_outside_bounds=flag_fe_h_outside_bounds,
-        flag_bad_optimizer_status=flag_bad_optimizer_status,
-        #warn_flag=warn_flag,
-        #bad_flag=bad_flag,
-    )
-
-    # Prepare model spectrum for final product.
-    model_continuum = flux_resamp / flux_norm
-
-    resampled_continuum = np.nan * np.ones((N, P))
-    resampled_rectified_model_flux = np.nan * np.ones((N, P))
-    if not np.all(np.isfinite(prediction)):
-        log.warning(f"Prediction values not all finite!")
-    if not np.all(np.isfinite(model_continuum[i])):
-        log.warning(f"Not all model continuum values finite!")
-
-    i = 0
-
-    finite_prediction = np.isfinite(prediction[i])
-    finite_model_continuum = np.isfinite(model_continuum[i])
-    if any(finite_prediction):
-
-        f = interp1d(
-            model.wave[finite_prediction], 
-            prediction[i][finite_prediction], 
-            kind="cubic", 
-            bounds_error=False, 
-            fill_value=np.nan
-        )
-        resampled_rectified_model_flux[i] = f(wave)
-
-    if any(finite_model_continuum): 
-        c = interp1d(
-            model.wave[finite_model_continuum], 
-            model_continuum[i][finite_model_continuum], 
-            kind="cubic", 
-            bounds_error=False, 
-            fill_value=np.nan
-        )
-
-        # Re-sample the predicted spectra back to the observed frame.
-        resampled_continuum[i] = c(wave)
-
-    result = Slam(
-        spectrum_pk=spectrum_pk,
-        source_pk=source_pk,
-        **kwargs
-    )
-
-    path = expand_path(result.intermediate_output_path)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wb") as fp:
-        pickle.dump((resampled_continuum, resampled_rectified_model_flux), fp)
-        
-    return result
-
-
-

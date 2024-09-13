@@ -1,0 +1,44 @@
+from io import BytesIO
+import json
+import os
+import sys
+try:
+    from urllib import quote
+except ImportError:  # pragma: no cover
+    from urllib.parse import quote
+
+config = json.loads('{{config_json}}')
+
+
+def lambda_handler(event, context):
+    """Main entry point for the lambda function.
+
+    This function builds a request using API Gateway's proxy integration
+    event, and invokes the WSGI application with it. The response is then
+    formatted according to the proxy integration requirements.
+    """
+    # load stage variables in the environment
+    for k, v in (event.get('stageVariables') or {}).items():
+        os.environ[k] = str(v)
+
+    # add predefined variables to the environment
+    os.environ['LAMBDA_VERSION'] = context.function_version
+
+    # set stage variables
+    stage = config['devstage']
+    split_arn = context.invoked_function_arn.split(':')
+    if len(split_arn) == 8 and split_arn[-1] in config['stage_environments']:
+        stage = split_arn[-1]
+    os.environ['STAGE'] = stage
+    for k, v in (config.get('environment') or {}).items():
+        os.environ[k] = str(v)
+    for k, v in (config['stage_environments'].get(stage) or {}).items():
+        os.environ[k] = str(v)
+
+    # invoke function
+    from {{module}} import {{app}} as app  # noqa
+    return run_lambda_function(event, context, app, config)
+
+
+def run_lambda_function(event, context, app, config):
+{{run_lambda_function}}

@@ -9,10 +9,6 @@ from astra import task, __version__, log
 from typing import Iterable, Sequence
 from peewee import fn, Value
 
-# Q for M-dwarf people:
-# Q: Calibration on the m-dwarfs
-# Q: Ordering here of YSOs first or M-dwarfs.
-
 # Q: Include MDwarfType classifications? for all things?
 #    https://sdss-wiki.atlassian.net/wiki/spaces/SCI/pages/177111227/M-dwarf+IPL-3+Parameter+Flags
 #    Nothing K-type, K7.5 probably OK, but on the edge.
@@ -20,7 +16,7 @@ from peewee import fn, Value
 
 
 
-# Q: Unique results by SOURCE, or by SOURCE + TELESCOPE?
+# Q: Unique results by SOURCE, or by SOURCE + TELECOPE?
 
 @task
 def best(apred=("dr17", "1.3"), run2d="v6_1_3") -> Iterable[MWMBest]:
@@ -33,16 +29,15 @@ def best(apred=("dr17", "1.3"), run2d="v6_1_3") -> Iterable[MWMBest]:
     query_order = [
         # Query Snow White, since we only ran that on white dwarf cartons
         # Q: Do we want to place any constraints on the Snow White model? Eg only 'good' results?
+        # Q: Do we want to include any CORV stellar parameters instead of Snow White?
+        # Q: Do we want to include any CORV radial velocities instead of Snow White?
         (
             "Query Snow White",
             _query_snow_white_coadd, {
                 "where": BossCombinedSpectrum.run2d.in_(run2d)
             }
         ),
-
-        # Q: Do we want to include any CORV stellar parameters instead of Snow White?
-        # Q: Do we want to include any CORV radial velocities instead of Snow White?
-                
+            
         # Query BOSSNet for HOT stars only, where results are deemed good.
         (
             "Query BOSSNet for hot stars",

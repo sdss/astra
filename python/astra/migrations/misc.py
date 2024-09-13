@@ -359,7 +359,11 @@ def compute_casagrande_irfm_effective_temperatures(
 
 
 
-def update_visit_spectra_counts(batch_size=10_000):
+def update_visit_spectra_counts(
+    apogee_where=None,
+    boss_where=None,
+    batch_size=10_000,    
+):
 
     sq_apogee = (
         ApogeeVisitSpectrum
@@ -381,6 +385,9 @@ def update_visit_spectra_counts(batch_size=10_000):
             ApogeeVisitSpectrum.field,                 
         )    
     )
+    if apogee_where is not None:
+        sq_apogee = sq_apogee.where(apogee_where)
+
     q_apogee_counts = (
         ApogeeVisitSpectrum
         .select(
@@ -412,7 +419,9 @@ def update_visit_spectra_counts(batch_size=10_000):
             BossVisitSpectrum.plateid,
         )
     )
-
+    if boss_where is not None:
+        sq_boss = sq_boss.where(boss_where)
+    
     q_boss_counts = (
         BossVisitSpectrum
         .select(

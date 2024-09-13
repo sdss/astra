@@ -33,3 +33,5 @@ from astra.models.mwm import (
     ApogeeCombinedSpectrum,
     ApogeeRestFrameVisitSpectrum,
 )
+
+from astra.models.astronn_dist import AstroNNdist

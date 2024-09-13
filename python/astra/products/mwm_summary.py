@@ -90,7 +90,10 @@ def ignore_field_name_callable(field_name):
     return field_name in ("pk", "input_spectrum_pks", )
 
 def create_mwm_targets_product(
-    where=DEFAULT_MWM_WHERE,
+    where=(
+        DEFAULT_MWM_WHERE
+    &   ((Source.n_apogee_visits > 0) | (Source.n_boss_visits > 0))
+    ),
     limit=None,
     output_template="mwmTargets-{version}.fits",
     ignore_field_name_callable=ignore_field_name_callable,
@@ -189,7 +192,10 @@ def create_mwm_targets_product(
 
 
 def create_mwm_all_star_product(
-    where=DEFAULT_MWM_WHERE,
+    where=(
+        DEFAULT_MWM_WHERE
+    &   ((Source.n_apogee_visits > 0) | (Source.n_boss_visits > 0))
+    ),
     limit=None,
     boss_where=None,
     apogee_where=None,
@@ -278,7 +284,10 @@ def create_mwm_all_star_product(
 
 
 def create_mwm_all_visit_product(
-    where=DEFAULT_MWM_WHERE,
+    where=(
+        DEFAULT_MWM_WHERE
+    &   ((Source.n_apogee_visits > 0) | (Source.n_boss_visits > 0))
+    ),
     limit=None,
     boss_where=None,
     apogee_where=None,
@@ -401,8 +410,8 @@ def _create_summary_product(
     all_fields = {}
     for model, hdu_where in struct:
 
-        instrument = model.__name__.split("Visit")[0].lower()
-
+        instrument = "BOSS" if "boss" in model.__name__.lower() else "APOGEE"
+        
         models = (Source, model)
         try:
             fields = all_fields[model]

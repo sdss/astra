@@ -359,6 +359,9 @@ class Glossary(BaseGlossary):
     ti_2_h = "[Ti/H] from singly ionized Ti lines [dex]"
     v_h = "[V/H] [dex]"
 
+    alpha_fe = "[alpha/fe] [dex]"
+    fe_h_niu = "[Fe/H] on Niu et al. (2023) scale [dex]"
+
     chi2 = "Chi-square value"
     rchi2 = "Reduced chi-square value"
     initial_flags = "Flags indicating source of initial guess"

@@ -107,18 +107,50 @@ def flag_boundaries_and_abundances():
         (ASPCAP.raw_c_m_atm, ASPCAP.flag_c_m_atm_grid_edge_bad, ASPCAP.flag_c_m_atm_grid_edge_warn, -1.5, 1, 0.25),
         (ASPCAP.raw_n_m_atm, ASPCAP.flag_n_m_atm_grid_edge_bad, ASPCAP.flag_n_m_atm_grid_edge_warn, -0.5, 2, 0.5),
         (ASPCAP.raw_v_micro, ASPCAP.flag_v_micro_grid_edge_bad, ASPCAP.flag_v_micro_grid_edge_warn, 0.30, 4.8, 0.3),        
-        (ASPCAP.raw_v_sini, ASPCAP.flag_v_sini_grid_edge_bad, ASPCAP.flag_v_sini_grid_edge_warn, 2, 96, 1),
+        (ASPCAP.raw_v_sini, ASPCAP.flag_v_sini_grid_edge_bad, ASPCAP.flag_v_sini_grid_edge_warn, None, 96, 1),
     )
     for field, bad_flag, warn_flag, lower, upper, step in bounds:
+        
+        # Clear existing flags.
+        (
+            ASPCAP
+            .update(result_flags=bad_flag.clear())
+            .where(
+                ASPCAP.v_astra == __version__
+            )
+            .execute()
+        )
+        (
+            ASPCAP
+            .update(result_flags=warn_flag.clear())
+            .where(ASPCAP.v_astra == __version__)
+            .execute()
+        )
+
+        if lower is None:
+            warn_where = (field > (upper - step))
+            bad_where = (field > (upper - 1/8 * step))
+        elif upper is None:
+            warn_where = (field < (lower + step))
+            bad_where = (field < (lower + 1/8 * step))
+        else:
+            warn_where = (
+                (field < (lower + step))
+            |   (field > (upper - step))
+            )
+            bad_where = (
+                (field < (lower + 1/8 * step))
+            |   (field > (upper - 1/8 * step))
+            )
+        
+
         (
             ASPCAP
             .update(result_flags=warn_flag.set())
             .where(
                 (ASPCAP.v_astra == __version__)
-            &   (
-                    (field < (lower + step))
-                |   (field > (upper - step))
-                )
+            &   (field.is_null(False))
+            &   warn_where
             )
             .execute()
         )
@@ -127,13 +159,11 @@ def flag_boundaries_and_abundances():
             .update(result_flags=bad_flag.set())
             .where(
                 (ASPCAP.v_astra == __version__)
-            &   (
-                    (field < (lower + 1/8 * step))
-                |   (field > (upper - 1/8 * step))
-                )
+            &   (field.is_null(False))
+            &   bad_where
             )
             .execute()
-        )        
+        )
     
     # Now let's do the abundances. 
     abundance_bounds = [
@@ -163,8 +193,16 @@ def flag_boundaries_and_abundances():
     for field_name, lhs, lower, upper, step in abundance_bounds:
         print("Doing", field_name)
 
-        flag_bad = getattr(ASPCAP, f"flag_{field_name}_bad_grid_edge")
+        # Clear the flags first.
+        (
+            ASPCAP
+            .update(**{f"{field_name}_flags": 0 })
+            .where(ASPCAP.v_astra == __version__)
+            .execute()
+        )
 
+        # Set bad edge flags.   
+        flag_bad = getattr(ASPCAP, f"flag_{field_name}_bad_grid_edge")        
         (
             ASPCAP
             .update(**{f"{field_name}_flags": flag_bad.set()})
@@ -178,6 +216,7 @@ def flag_boundaries_and_abundances():
             .execute()
         )
 
+        # Set warn edge flags.
         flag_warn = getattr(ASPCAP, f"flag_{field_name}_warn_grid_edge")
         (
             ASPCAP
@@ -192,6 +231,7 @@ def flag_boundaries_and_abundances():
             .execute()
         )
 
+        # Set censored flags.
         flag_censored = getattr(ASPCAP, f"flag_{field_name}_censored_unphysical")
         (
             ASPCAP
@@ -207,25 +247,140 @@ def flag_boundaries_and_abundances():
             .execute()
         )
 
+    # Let's NaN-ify giant abundances if they are in particularly bad parts of (teff, v_micro) space.
+    # Note: not censoring Mg
+    (
+        ASPCAP
+        .update(
+            c_m_atm=np.nan, 
+            e_c_m_atm=np.nan,
+            n_m_atm=np.nan, 
+            e_n_m_atm=np.nan,
+            c_h=np.nan,     
+            e_c_h=np.nan,
+            c_h_flags=ASPCAP.flag_c_h_censored_low_teff_vmicro.set(),
+            n_h=np.nan,     
+            e_n_h=np.nan,
+            n_h_flags=ASPCAP.flag_n_h_censored_low_teff_vmicro.set(),
+            al_h=np.nan,    
+            e_al_h=np.nan,
+            al_h_flags=ASPCAP.flag_al_h_censored_low_teff_vmicro.set(),
+            ca_h=np.nan,    
+            e_ca_h=np.nan,
+            ca_h_flags=ASPCAP.flag_ca_h_censored_low_teff_vmicro.set(),
+            ce_h=np.nan,    
+            e_ce_h=np.nan,
+            ce_h_flags=ASPCAP.flag_ce_h_censored_low_teff_vmicro.set(),
+            co_h=np.nan,    
+            e_co_h=np.nan,
+            co_h_flags=ASPCAP.flag_co_h_censored_low_teff_vmicro.set(),
+            cr_h=np.nan,    
+            e_cr_h=np.nan,
+            cr_h_flags=ASPCAP.flag_cr_h_censored_low_teff_vmicro.set(),
+            cu_h=np.nan,    
+            e_cu_h=np.nan,
+            cu_h_flags=ASPCAP.flag_cu_h_censored_low_teff_vmicro.set(),
+            k_h=np.nan,     
+            e_k_h=np.nan,
+            k_h_flags=ASPCAP.flag_k_h_censored_low_teff_vmicro.set(),
+            mn_h=np.nan,    
+            e_mn_h=np.nan,
+            mn_h_flags=ASPCAP.flag_mn_h_censored_low_teff_vmicro.set(),
+            na_h=np.nan,    
+            e_na_h=np.nan,
+            na_h_flags=ASPCAP.flag_na_h_censored_low_teff_vmicro.set(),
+            nd_h=np.nan,    
+            e_nd_h=np.nan,
+            nd_h_flags=ASPCAP.flag_nd_h_censored_low_teff_vmicro.set(),
+            ni_h=np.nan,    
+            e_ni_h=np.nan,
+            ni_h_flags=ASPCAP.flag_ni_h_censored_low_teff_vmicro.set(),
+            o_h=np.nan,     
+            e_o_h=np.nan,
+            o_h_flags=ASPCAP.flag_o_h_censored_low_teff_vmicro.set(),
+            p_h=np.nan,     
+            e_p_h=np.nan,
+            p_h_flags=ASPCAP.flag_p_h_censored_low_teff_vmicro.set(),
+            si_h=np.nan,    
+            e_si_h=np.nan,
+            si_h_flags=ASPCAP.flag_si_h_censored_low_teff_vmicro.set(),
+            s_h=np.nan,     
+            e_s_h=np.nan,
+            s_h_flags=ASPCAP.flag_s_h_censored_low_teff_vmicro.set(),
+            ti_h=np.nan,    
+            e_ti_h=np.nan,
+            ti_h_flags=ASPCAP.flag_ti_h_censored_low_teff_vmicro.set(),
+            v_h=np.nan,     
+            e_v_h=np.nan,
+            v_h_flags=ASPCAP.flag_v_h_censored_low_teff_vmicro.set(),
+        )
+        .where(
+            (ASPCAP.v_astra == __version__)
+        &   (ASPCAP.raw_logg <= 3.8)
+        &   (
+                (ASPCAP.teff <= 3250)               # any v_micro
+                |   (                               # lower square
+                        (ASPCAP.teff <= 4300)
+                    &   (ASPCAP.v_micro <= 1.25)
+                )
+                |   (                               # triangle
+                        ASPCAP.teff.between(3250, 4300)
+                    &   (ASPCAP.v_micro <= (4.32142857 - 7.14285714e-04 * ASPCAP.teff))
+                )
+            )
+        )
+        .execute()
+    )
+
+    # Let's nan-ify dwarf abundances
+    # n_m_atm < 4250
+    # n_h < 4250
+    # al_h < 3240
+    # ca_h < 3500
+    # ce_h < 4250
+    # co_h < 4250
+    # cr_h < 4250
+    # cu_h < 4250
+    # k_h < 3500
+    # mn_h < 4000
+    # na_h < 4250
+    # nd_h < 4250
+    # ni -> no cut
+    # na_h < 4250
+    # nd_h < 4250
+    # p_h < 4250
+    # s_h < 4250
+    # ti_h < 4250
+    # v_h < 4250
+    
+
+
+
 
 def flag_upper_limits_by_hayes_2022():
     from astropy.table import Table
     coeff = Table.read(expand_path("$MWM_ASTRA/pipelines/aspcap/hayes_2022_upper_limit_coefficients.txt"), format="ascii")
 
     solar = {
-        # Grevesse
-        "c": 8.66,
-        "n": 4.56,
+        # Grevesse et al. 2007
+        "c": 8.39,
+        "n": 7.78,
         "p": 5.36,
+        "ce": 1.7,
+        "cu": 4.21,
+        "na": 6.17, 
+        "nd": 1.45, 
+        "o": 8.66, 
+        "s": 7.14,
+        "v": 4.0
     }
 
     elements = set(coeff["Element"])
     N_elements = len(elements)
-    elements = ("P", )
+    elements = ("P", "C", "Ce", "Cu", "N", "Na", "Nd", "O", "S", "V")
     T = 5
     with tqdm(total=T * N_elements) as pb:
-
-        for element in tqdm(elements):
+        for element in elements:
             print("Doing", element)
 
             solar_value = solar[element.lower()]
@@ -237,16 +392,23 @@ def flag_upper_limits_by_hayes_2022():
                 row = coeff[mask][0]
                 rhs = (float(row[f"A_{t}"]) * (ASPCAP.raw_teff / 10000) + float(row[f"B_{t}"]))
                 where = (
-                    (solar_value + field) > rhs
+                    (solar_value + field) < rhs
                 )
                 if sum(mask) > 1:
                     for row in coeff[mask][1:]:
                         rhs = (float(row[f"A_{t}"]) * (ASPCAP.raw_teff / 10000) + float(row[f"B_{t}"]))
-                        where &= (
-                            (solar_value + field) > rhs
+                        where |= (
+                            (solar_value + field) < rhs
                         )
                 
                 flag = getattr(ASPCAP, f"flag_{element.lower()}_h_upper_limit_t{t}")
+                # Clear flags first.
+                (
+                    ASPCAP
+                    .update(**{f"{element.lower()}_h_flags": flag.clear() })
+                    .where((ASPCAP.v_astra == __version__))
+                    .execute()
+                )
                 (
                     ASPCAP
                     .update(**{f"{element.lower()}_h_flags": flag.set() })
@@ -257,12 +419,9 @@ def flag_upper_limits_by_hayes_2022():
                     .execute()
                 )
                 pb.update()
-                
-            raise a
-                
 
-    # need to translate m_h abundances to A_X
-    # for each star we need to check if A
+
+
 
 def apply_flags():
     # TODO: Move all this to the construction of aspcap rows
@@ -272,12 +431,16 @@ def apply_flags():
         .update(
             result_flags=ASPCAP.flag_high_v_sini.set()
         )
-        .where(
-            (ASPCAP.raw_teff < 5250)
-        &   (ASPCAP.raw_v_sini > 3)
-        &   (ASPCAP.raw_v_sini.is_null(False))
+        .where(        
+            (ASPCAP.raw_v_sini.is_null(False))
         &   (ASPCAP.raw_v_sini != 'NaN')
         &   (ASPCAP.v_astra == __version__)
+        &   (
+            (
+                ((ASPCAP.raw_teff < 5250) & (ASPCAP.raw_v_sini > 3))
+            |   (ASPCAP.raw_v_sini > 20)
+            )
+        )
         )
         .execute()
     )
@@ -308,7 +471,7 @@ def apply_flags():
     (
         ASPCAP
         .update(
-            result_flags=ASPCAP.flag_low_snr.set()
+            result_flags=ASPCAP.flag_low_snr.set() 
         )
         .where(
             (ASPCAP.ferre_log_snr_sq < 20)
@@ -652,7 +815,11 @@ def apply_dr19_logg_corrections(batch_size: int = 500, limit: int = None):
     # Clear all (logg) calibrations
     (
         ASPCAP
-        .update(calibrated_flags=0)
+        .update(
+            logg=ASPCAP.raw_logg,
+            e_logg=ASPCAP.e_raw_logg,
+            calibrated_flags=0
+        )
         .where(
             (ASPCAP.v_astra == __version__)
         )
@@ -670,6 +837,7 @@ def apply_dr19_logg_corrections(batch_size: int = 500, limit: int = None):
             (ASPCAP.v_astra == __version__)
         &   (ASPCAP.raw_logg >= 3.8)
         &   (ASPCAP.raw_teff >= 4250)
+        &   (ASPCAP.raw_teff <= 7000)
         )
         .execute()
     )
@@ -689,6 +857,23 @@ def apply_dr19_logg_corrections(batch_size: int = 500, limit: int = None):
         )
         .execute()
     )
+
+    # NaN-ify logg for metal-poor M-dwarfs 
+    (
+        ASPCAP
+        .update(
+            logg=np.nan,
+            e_logg=np.nan,            
+            calibrated_flags=ASPCAP.flag_censored_logg_for_metal_poor_m_dwarf.set()
+        )
+        .where(
+            (ASPCAP.v_astra == __version__)
+        &   (ASPCAP.flag_as_m_dwarf_for_calibration)
+        &   (ASPCAP.raw_m_h_atm < -0.6)
+        )
+        .execute()
+    )
+
     '''
     flag_as_m_dwarf_for_calibration
     (
@@ -709,6 +894,7 @@ def apply_dr19_logg_corrections(batch_size: int = 500, limit: int = None):
         .where(
             (ASPCAP.v_astra == __version__)
         &   (ASPCAP.raw_logg < 3.8)
+        &   (ASPCAP.raw_teff <= 7000)
         )
     )
 
@@ -983,7 +1169,7 @@ def apply_solar_neighbourhood_abundance_corrections():
         "raw_nd_h",
         "raw_ni_h",
         #"raw_n_h",
-        #"raw_o_h",
+        "raw_o_h",
         "raw_p_h",
         "raw_si_h",
         "raw_s_h",

@@ -15,6 +15,7 @@ from astra.models.fields import BitField
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
+from playhouse.hybrid import hybrid_property
 
 from astra.glossary import Glossary
 
@@ -55,6 +56,31 @@ class AstroNNdist(BaseModel, PipelineOutputMixin):
     flag_missing_photometry = result_flags.flag(2**1, help_text="Missing Ks-band apparent magnitude")
     flag_missing_extinction = result_flags.flag(2**2, help_text="Missing extinction")
     flag_no_result = result_flags.flag(2**11, help_text="Exception raised when loading spectra")
+
+
+    @hybrid_property
+    def flag_bad(self):
+        return (
+            self.flag_fakemag_unreliable
+        |   self.flag_missing_photometry
+        |   self.flag_no_result
+    )
+    
+    @flag_bad.expression
+    def flag_bad(self):
+        return (
+            self.flag_fakemag_unreliable
+        |   self.flag_missing_photometry
+        |   self.flag_no_result
+    )
+
+    @hybrid_property
+    def flag_warn(self):
+        return self.flag_missing_extinction
+    
+    @flag_warn.expression
+    def flag_warn(self):
+        return self.flag_missing_extinction
 
     class Meta:
         table_name = "astro_nn_dist"

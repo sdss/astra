@@ -311,6 +311,48 @@ def fix_version_id_edge_cases(version_ids=(13, 24, )):
         
     return (updated, failed)
 
+def migrate_sdss4_extra_targ_flag():
+    from astra.migrations.sdss5db.catalogdb import (
+        Catalog,
+        SDSS_DR17_APOGEE_Allvisits as Visit,
+        CatalogToGaia_DR3,
+        CatalogToGaia_DR2,
+        CatalogdbModel
+    )
+    
+    class Star(CatalogdbModel):
+        class Meta:
+            table_name = "allstar_dr17_synspec_rev1"
+    class CatalogToStar(CatalogdbModel):
+        
+        class Meta:
+            table_name = "catalog_to_allstar_dr17_synspec_rev1"
+
+    class SDSS_ID_Flat(CatalogdbModel):
+        class Meta:
+            table_name = "sdss_id_flat"
+            
+    class SDSS_ID_Stacked(CatalogdbModel):
+        class Meta:
+            table_name = "sdss_id_stacked"
+
+    q = (
+        Star
+        .select(
+            SDSS_ID_Flat.sdss_id,
+            Star.extratarg
+        )
+        .join(CatalogToStar, on=(CatalogToStar.target_id == Star.apstar_id))
+        .join(SDSS_ID_Flat, on=(SDSS_ID_Flat.catalogid == CatalogToStar.catalogid))
+        .dicts()
+    )    
+
+    for r in tqdm(q):
+        Source.update(sdss4_apogee_extra_target_flags=r["extratarg"]).where(Source.sdss_id == r["sdss_id"]).execute()
+
+
+
+
 
 def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[int] = 100, limit: Optional[int] = None, max_workers: Optional[int] = 8):
     """
@@ -376,6 +418,7 @@ def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[
             Star.apogee2_target2.alias("sdss4_apogee2_target2_flags"),
             Star.apogee2_target3.alias("sdss4_apogee2_target3_flags"),
             Star.apogee_id.alias("sdss4_apogee_id"),            
+            Star.extratarg.alias("sdss4_extra_target_flags")
         )
         .join(CatalogToStar, JOIN.LEFT_OUTER, on=(CatalogToStar.target_id == Star.apstar_id))        
         .join(Catalog, JOIN.LEFT_OUTER, on=(CatalogToStar.catalogid == Catalog.catalogid))        

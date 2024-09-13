@@ -16,6 +16,8 @@ from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
 from astra.glossary import Glossary
+from playhouse.hybrid import hybrid_property
+
 
 
 class PaynePixelArrayAccessor(BasePixelArrayAccessor):
@@ -139,7 +141,28 @@ class ThePayne(BaseModel, PipelineOutputMixin):
     reduced_chi2 = FloatField(null=True)
     result_flags = BitField(default=0)
     flag_fitting_failure = result_flags.flag(2**0, "Fitting failure")
-    
+    flag_warn_teff = result_flags.flag(2**1, "Teff < 3100 K or Teff > 7900 K")
+    flag_warn_logg = result_flags.flag(2**2, "logg < 0.1 or logg > 5.2")
+    flag_warn_fe_h = result_flags.flag(2**3, "[Fe/H] > 0.4 or [Fe/H] < -1.4")
+    flag_low_snr = result_flags.flag(2**4, "S/N < 70")
+
+    @hybrid_property
+    def flag_warn(self):
+        return (self.result_flags > 0)
+
+    @flag_warn.expression
+    def flag_warn(self):
+        return (self.result_flags > 0)
+
+    @hybrid_property
+    def flag_bad(self):
+        return self.flag_fitting_failure
+
+    @flag_bad.expression
+    def flag_bad(self):
+        return self.flag_fitting_failure    
+
+
     #> Formal uncertainties
     raw_e_teff = FloatField(null=True)
     raw_e_logg = FloatField(null=True)
@@ -540,4 +563,43 @@ def apply_noise_model():
         .execute()
     )
     
-        
+
+
+def apply_flags():
+    (
+        ThePayne
+        .update(result_flags=ThePayne.flag_warn_teff.set())
+        .where(
+            (ThePayne.teff < 3100)
+        |   (ThePayne.teff > 7900)
+        )
+        .execute()
+    )
+    (
+        ThePayne
+        .update(result_flags=ThePayne.flag_warn_logg.set())
+        .where(
+            (ThePayne.logg < 0.1)
+        |   (ThePayne.logg > 5.2)
+        )
+        .execute()
+    )
+    (
+        ThePayne
+        .update(result_flags=ThePayne.flag_warn_fe_h.set())
+        .where(
+            (ThePayne.fe_h > 0.4)
+        |   (ThePayne.fe_h < -1.4)
+        )
+        .execute()
+    )
+    """
+    (
+        ThePayne
+        .update(result_flags=ThePayne.flag_low_snr.set())
+        .where(
+            (ThePayne.snr < 70)
+        )
+        .execute()
+    )
+    """
