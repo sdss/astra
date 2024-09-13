@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+import click
+
+@click.command()
+@click.argument("pwd")
+def ferre_timing(pwd):
+
+    import os
+    import re
+    import numpy as np
+    from glob import glob
+    from collections import OrderedDict
+
+    timing = OrderedDict()
+
+    for stdout_path in glob(f"{pwd}/stdout*"):
+        print(stdout_path)
+        with open(stdout_path, "r") as fp:
+            stdout = fp.read()
+        
+        headers = list(re.finditer("-{65}\s+f e r r e", stdout))
+        print(headers)
+        from tqdm import tqdm
+
+        for h, header in enumerate(tqdm(headers)):
+
+            si = header.span()[0]
+            try:
+                ei = headers[h + 1].span()[0]
+            except:
+                process_stdout = stdout[si:]
+            else:
+                process_stdout = stdout[si:ei]    
+            
+            relative_input_nml_path = re.findall("-{65}\n\s+(?P<rel_path>[\w|\_|/|\.]+).nml\s+", process_stdout)[0] + ".nml"
+
+            matched_input_names = re.findall("\s+(?P<one_index>[0-9]+)\s(?P<input_name>[\w|\d|\_]+)", process_stdout)
+            if matched_input_names[-1][0] == "1" and matched_input_names[-1][1].endswith("input"):
+                matched_input_names.pop(-1)
+            
+            input_names = {}
+            for k, v in sorted(matched_input_names, key=lambda x: int(x[0])):
+                if "/" in v or not v[0].isdecimal(): continue
+                input_names[int(k)] = v
+
+            n_threads = int(re.findall("nthreads\s?= \s+[0-9]+", process_stdout)[0].split()[-1])
+            n_obj = int(re.findall("nobj\s?= \s+[0-9]+", process_stdout)[0].split()[-1])
+
+            n_per_thread = n_obj // n_threads
+            n_mod = n_obj - n_per_thread * n_threads
+
+            n_items = min(n_threads, n_obj)
+
+            si = 0
+            expected_indices = -1 * np.ones((n_items, n_per_thread + 1), dtype=int)
+            for i in range(n_items):
+                ei = n_per_thread + (1 if n_mod > i else 0)
+                expected_indices[i, :ei] = range(si, si + ei)
+                si += ei        
+
+            # Find the obvious examples first.
+            elapsed_time_pattern = "ellapsed time:\s+(?P<time>[{0-9}|.]+)\s*s?\s*"
+            next_object_pattern = "next object #\s+(?P<index_plus_one>[0-9]+)"
+
+            t_elapsed_per_thread = np.nan * np.ones(expected_indices.shape)
+
+            matcher = re.finditer(elapsed_time_pattern, process_stdout)
+            t_load_grid, = next(matcher).groups()
+            t_load_grid = float(t_load_grid)
+
+            unassigned = []
+            for match in tqdm(matcher):
+                elapsed_time, = match.groups()
+                si, ei = match.span()
+                try:
+                    oi = process_stdout[ei:].index("\n")
+                except ValueError:
+                    continue
+                next_object_match = re.match(next_object_pattern, process_stdout[ei:ei+oi])
+                if next_object_match:
+                    next_object, = next_object_match.groups()
+                    i, j = np.where(expected_indices == (int(next_object) - 1 - 1)) # -1 for zero indexing, -1 to reference the object that was analysed
+                    t_elapsed_per_thread[i, j] = float(elapsed_time)
+                else:
+                    # This usually happens when it is the last of an assigned set
+                    unassigned.append((si, ei, elapsed_time))            
+
+            col = np.searchsorted(~np.isfinite(t_elapsed_per_thread[-1]), True)
+            row = np.searchsorted(~np.isfinite(t_elapsed_per_thread[:, col]), True)
+
+            for si, ei, elapsed_time in unassigned:
+                t_elapsed_per_thread[row, col] = elapsed_time
+                row += 1
+                if row >= n_items:
+                    row, col = (0, col + 1)
+
+            # We want to compute the time taken per spectrum, not the time elapsed.
+            t_elapsed_per_spectrum = np.nan * np.ones(n_obj)
+            for i in tqdm(range(n_obj), desc="joining"):
+                (j, ), (k, ) = np.where(expected_indices == i)
+
+                # Subtract the load time from the first time per thread, or the time since last spectrum 
+                offset = t_elapsed_per_thread[j, k - 1] if k > 0 else t_load_grid
+                t_elapsed_per_spectrum[i] = max(0, t_elapsed_per_thread[j, k] - offset)
+
+            for i in range(n_obj):
+                try:
+                    key = (relative_input_nml_path, input_names[1 + i])
+                except:
+                    # Couldn't assign it
+                    continue
+
+                timing.setdefault(key, [0, 0])
+                timing[key][0] += t_elapsed_per_spectrum[i]
+                timing[key][1] += t_load_grid
+    
+    print("#name,input_nml_path,t_load,t_elapsed")
+    for (input_nml_path, name), (t_elapsed, t_load) in timing.items():
+        print(f"{name},{input_nml_path},{t_load:.2f},{t_elapsed:.2f}")
+    
+
+
+if __name__ == "__main__":
+    ferre_timing()    
