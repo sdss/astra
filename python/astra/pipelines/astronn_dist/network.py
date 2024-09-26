@@ -90,6 +90,7 @@ class Network:
 
             outputs_holder = np.zeros((data_length, 1))
             outputs_std_holder = np.zeros((data_length, 1))
+            outputs_model_std_holder = np.zeros((data_length, 1))
             with tqdm(unit=" stars", total=data_length, disable=num_full_batch<3) as pbar:
                 pbar.set_description_str("Spectra Processed: ")
                 with torch.inference_mode():
@@ -102,8 +103,10 @@ class Network:
                             outputs = torch.mean(torch.stack([i[0] for i in temp_outputs]), dim=0)
                             outputs_log_var = torch.mean(torch.stack([i[1] for i in temp_outputs]), dim=0)
                             outputs_std = torch.sqrt(torch.exp(outputs_log_var) + mc_dropout_var)
+                            outputs_model_std = torch.sqrt(mc_dropout_var)
                             outputs_holder[i * batchsize : (i + 1) * batchsize] = outputs.cpu().numpy()
                             outputs_std_holder[i * batchsize : (i + 1) * batchsize] = outputs_std.cpu().numpy()
+                            outputs_model_std_holder[i * batchsize : (i + 1) * batchsize] = outputs_model_std.cpu().numpy()
                             pbar.update(batchsize)
                     if num_data_remaining > 0:
                         batch_inputs = torch.tensor(inputs[-num_data_remaining:] - input_mean, **self.factory_kwargs)[:, :, None]
@@ -113,11 +116,13 @@ class Network:
                         outputs = torch.mean(torch.stack([i[0] for i in temp_outputs]), dim=0)
                         outputs_log_var = torch.mean(torch.stack([i[1] for i in temp_outputs]), dim=0)
                         outputs_std = torch.sqrt(torch.exp(outputs_log_var) + mc_dropout_var)
+                        outputs_model_std = torch.sqrt(mc_dropout_var)
                         outputs_holder[-num_data_remaining:] = outputs.cpu().numpy()
                         outputs_std_holder[-num_data_remaining:] = outputs_std.cpu().numpy()
+                        outputs_model_std_holder[-num_data_remaining:] = outputs_model_std.cpu().numpy()
                         pbar.update(num_data_remaining)
 
-            return np.squeeze(outputs_holder * labels_std), np.squeeze(outputs_std_holder * labels_std)
+            return np.squeeze(outputs_holder * labels_std), np.squeeze(outputs_std_holder * labels_std), np.squeeze(outputs_model_std_holder * labels_std)
 
     def __init__(self, model_path, device):
         """TODO: Docstring this"""
