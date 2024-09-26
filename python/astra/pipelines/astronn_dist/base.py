@@ -146,7 +146,7 @@ def _inference(model, batch):
                 | np.isnan(nn_dist)
                 | np.isinf(nn_dist)
             )
-            print("+"*6, "(_inference) bad_idx:", bad_idx)
+            #print("+"*6, "(_inference) bad_idx:", bad_idx)
             nn_dist[bad_idx] = np.nan
             nn_dist_err[bad_idx] = np.nan
             nn_dist_model_err[bad_idx] = np.nan
@@ -397,26 +397,31 @@ def get_gaiadata(spectrum):
 
     if ZPT:
         try:
-            phot_g_mean_mag = spectrum.source.phot_g_mean_mag
-            nu_eff_used_in_astrometry = spectrum.source.nu_eff_used_in_astrometry
-            pseudocolour = spectrum.source.pseudocolour
-            ecl_lat = spectrum.source.ecl_lat
-            astrometric_params_solved = spectrum.source.astrometric_params_solved
+            q_gaia = query_gaia_dr3_from_sdssdb(spectrum.source.gaia_dr3_source_id)
+            #print("+"*6, "q_gaia:", q_gaia)
+            phot_g_mean_mag = np.atleast_1d(q_gaia[0].phot_g_mean_mag)
+            nu_eff_used_in_astrometry = np.atleast_1d(q_gaia[0].nu_eff_used_in_astrometry)
+            pseudocolour = np.atleast_1d(q_gaia[0].pseudocolour)
+            ecl_lat = np.atleast_1d(q_gaia[0].ecl_lat)
+            astrometric_params_solved = np.atleast_1d(q_gaia[0].astrometric_params_solved)
+
+            # calculate zero-point offset using https://pypi.org/project/gaiadr3-zeropoint/
+            good_idx = np.where(
+                ((astrometric_params_solved == 31) | (astrometric_params_solved == 95))
+                & (phot_g_mean_mag < 21)
+                & (6 < phot_g_mean_mag)
+            )[0]
+            zp = zpt.get_zpt(
+                phot_g_mean_mag[good_idx],
+                nu_eff_used_in_astrometry[good_idx],
+                pseudocolour[good_idx],
+                ecl_lat[good_idx],
+                astrometric_params_solved[good_idx],
+            )
+
+            zp = zp[0]
         except:
             zp = zp_median
-        else:
-            # calculate zero-point offset using https://pypi.org/project/gaiadr3-zeropoint/
-            if (astrometric_params_solved == 31 or astrometric_params_solved == 95) and \
-                (phot_g_mean_mag < 21) and (6 < phot_g_mean_mag):
-                zp = zpt.get_zpt(
-                    phot_g_mean_mag,
-                    nu_eff_used_in_astrometry,
-                    pseudocolour,
-                    ecl_lat,
-                    astrometric_params_solved,
-                )
-            else:
-                zp = zp_median
     else:
         zp = zp_median
 
@@ -428,3 +433,25 @@ def get_gaiadata(spectrum):
         parallax, parallax_err, zp = np.nan, np.nan, np.nan
 
     return parallax, parallax_err, zp
+
+def query_gaia_dr3_from_sdssdb(gaia_dr3_source_id):
+    """
+    Query Gaia DR3 columns from SDSS DB.
+    """
+    
+    from astra.migrations.sdss5db.catalogdb import Gaia_DR3 # as _Gaia_DR3
+    #from sdssdb.peewee.sdss5db import SDSS5dbDatabaseConnection
+
+    #class Gaia_DR3(_Gaia_DR3):
+
+    #    class Meta:
+    #        table_name = "gaia_dr3_source"
+    #        database = SDSS5dbDatabaseConnection(profile="operations")
+
+    q_gaia = (
+        Gaia_DR3
+        .select()
+        .where(Gaia_DR3.source_id == gaia_dr3_source_id)
+    )
+
+    return q_gaia
