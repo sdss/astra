@@ -145,6 +145,8 @@ def _inference(model, batch):
                 | (nn_dist == -9999.0)
                 | np.isnan(nn_dist)
                 | np.isinf(nn_dist)
+                | (nn_dist > 10**10)
+                | (nn_dist_err > 10**10)
             )
             #print("+"*6, "(_inference) bad_idx:", bad_idx)
             nn_dist[bad_idx] = np.nan
@@ -192,6 +194,10 @@ def _inference(model, batch):
             # if both of them is -9999 or NaN, then np.nan
             weighted_dist[(parallax == np.nan) & (nn_parallax == np.nan)] = np.nan
             weighted_dist_err[(parallax == np.nan) & (nn_parallax == np.nan)] = np.nan
+
+            # if weighted_dist and weighted_dist_err is too large, then np.nan
+            weighted_dist[(weighted_dist > 10**10) | (weighted_dist_err > 10**10)] = np.nan
+            weighted_dist_err[(weighted_dist > 10**10) | (weighted_dist_err > 10**10)] = np.nan
     
         #### record results
         mean_t_elapsed = (time() - t_init) / len(spectrum_pks)
