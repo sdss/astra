@@ -168,22 +168,22 @@ def _inference(model, batch):
             weighted_parallax_err = 1 / deno
 
             # if one of them is -9999 or NaN, use the value from the other one
-            idx = (parallax == np.nan) & (nn_parallax != np.nan)
+            idx = np.isnan(parallax) & ~np.isnan(nn_parallax)
             weighted_parallax[idx] = nn_parallax[idx]
             weighted_parallax_err[idx] = nn_parallax_model_err[idx] ** 2  # still variance
             # the other case
-            idx = (nn_parallax == np.nan) & (parallax != np.nan)
+            idx = np.isnan(nn_parallax) & ~np.isnan(parallax)
             weighted_parallax[idx] = parallax[idx]
             weighted_parallax_err[idx] = parallax_err[idx] ** 2  # still variance
 
             # if both of them is -9999 or NaN, then np.nan
-            weighted_parallax[(parallax == np.nan) & (nn_parallax == np.nan)] = np.nan
-            weighted_parallax_err[(parallax == np.nan) & (nn_parallax == np.nan)] = np.nan
+            weighted_parallax[np.isnan(parallax) & np.isnan(nn_parallax)] = np.nan
+            weighted_parallax_err[np.isnan(parallax) & np.isnan(nn_parallax)] = np.nan
 
             # need to take sqrt
             weighted_parallax_err = np.ma.sqrt(
                 np.ma.array(
-                    weighted_parallax_err, mask=(weighted_parallax_err == np.nan), fill_value=np.nan
+                    weighted_parallax_err, mask=np.isnan(weighted_parallax_err), fill_value=np.nan
                 )
             )
 
@@ -192,8 +192,8 @@ def _inference(model, batch):
             weighted_dist_err = weighted_dist * (weighted_parallax_err / weighted_parallax)
 
             # if both of them is -9999 or NaN, then np.nan
-            weighted_dist[(parallax == np.nan) & (nn_parallax == np.nan)] = np.nan
-            weighted_dist_err[(parallax == np.nan) & (nn_parallax == np.nan)] = np.nan
+            weighted_dist[np.isnan(parallax) & np.isnan(nn_parallax)] = np.nan
+            weighted_dist_err[np.isnan(parallax) & np.isnan(nn_parallax)] = np.nan
 
             # if weighted_dist and weighted_dist_err is too large, then np.nan
             weighted_dist[(weighted_dist > 10**10) | (weighted_dist_err > 10**10)] = np.nan
