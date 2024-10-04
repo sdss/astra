@@ -5,7 +5,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 
-
+torch.manual_seed(0)
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class Network:
