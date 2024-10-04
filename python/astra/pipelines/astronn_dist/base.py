@@ -7,6 +7,14 @@ from tqdm import tqdm
 from astra.utils import log
 from astra.models.astronn_dist import AstroNNdist
 
+from astra.migrations.sdss5db.catalogdb import Gaia_DR3 #as _Gaia_DR3
+#from sdssdb.peewee.sdss5db import SDSS5dbDatabaseConnection
+#class Gaia_DR3(_Gaia_DR3):
+
+#    class Meta:
+#        table_name = "gaia_dr3_source"
+#        database = SDSS5dbDatabaseConnection(profile="operations")
+
 import tensorflow_probability as tfp
 from astroNN.apogee import apogee_continuum 
 from astroNN.gaia import extinction_correction, fakemag_to_pc, fakemag_to_parallax
@@ -16,8 +24,10 @@ try:
 
     zpt.load_tables()
     ZPT = True
+    print("+"*6, "ZPT is True")
 except ImportError:
     ZPT = False
+    print("+"*6, "ZPT is False")
 
 
 def _prepare_data(spectrum):
@@ -444,15 +454,6 @@ def query_gaia_dr3_from_sdssdb(gaia_dr3_source_id):
     """
     Query Gaia DR3 columns from SDSS DB.
     """
-    
-    from astra.migrations.sdss5db.catalogdb import Gaia_DR3 # as _Gaia_DR3
-    #from sdssdb.peewee.sdss5db import SDSS5dbDatabaseConnection
-
-    #class Gaia_DR3(_Gaia_DR3):
-
-    #    class Meta:
-    #        table_name = "gaia_dr3_source"
-    #        database = SDSS5dbDatabaseConnection(profile="operations")
 
     q_gaia = (
         Gaia_DR3
