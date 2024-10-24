@@ -1,6 +1,8 @@
 import os
 from sdsstools.logger import get_logger as _get_logger, StreamFormatter
 import warnings
+import inspect
+
 from importlib import import_module
 from time import time
 
@@ -17,6 +19,16 @@ def get_logger(kwargs=None):
     return logger
 
 log = get_logger()
+
+
+def expects_spectrum_types(fun):
+    try:
+        signature = inspect.signature(fun)
+        annotation = signature.parameters["spectra"].annotation
+        spectrum_types = annotation.__args__[0].__args__
+    except:
+        raise RuntimeError(f"Could not parse expected spectrum types from the function signature of {fun}")
+
 
 def executable(name):
     module_name, class_name = name.rsplit(".", 1)
