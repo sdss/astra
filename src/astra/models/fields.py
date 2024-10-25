@@ -1,14 +1,75 @@
 import numpy as np
 import pickle
 from peewee import (
+    AutoField as _AutoField,
+    IntegerField as _IntegerField,
+    FloatField as _FloatField,
     BitField as _BitField,
+    BigIntegerField as _BigIntegerField,
+    SmallIntegerField as _SmallIntegerField,
+    DateTimeField as _DateTimeField,
+    BooleanField as _BooleanField,
     VirtualField,
-    ColumnBase
+    ColumnBase,
 )
 import h5py
-
 from astropy.io import fits
 from astra.utils import expand_path
+from astra.glossary import Glossary
+
+
+class AutoField(_AutoField):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.help_text is None:
+            self.help_text = Glossary.get(self.name, None)
+        return None
+
+class IntegerField(_IntegerField):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.help_text is None:
+            self.help_text = Glossary.get(self.name, None)
+        return None
+
+class FloatField(_FloatField):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.help_text is None:
+            self.help_text = Glossary.get(self.name, None)
+        return None
+
+
+class BigIntegerField(_BigIntegerField):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.help_text is None:
+            self.help_text = Glossary.get(self.name, None)
+        return None
+
+
+class SmallIntegerField(_SmallIntegerField):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.help_text is None:
+            self.help_text = Glossary.get(self.name, None)
+        return None
+    
+class DateTimeField(_DateTimeField):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.help_text is None:
+            self.help_text = Glossary.get(self.name, None)
+        return None
+
+class BooleanField(_BooleanField):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.help_text is None:
+            self.help_text = Glossary.get(self.name, None)
+        return None
+
+
 
 class BitField(_BitField):
 

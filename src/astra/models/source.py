@@ -1,28 +1,22 @@
+import numpy as np
+from functools import cache
+from peewee import fn, PostgresqlDatabase
+from playhouse.hybrid import hybrid_method
 
-from peewee import (
+from astra.models.base import database, BaseModel
+from astra.models.fields import (
     AutoField,
+    BitField,
     IntegerField,
-    FloatField,
     TextField,
-    ForeignKeyField,
     BigBitField,
     BigIntegerField,
-    PostgresqlDatabase,
     SmallIntegerField,
     DateTimeField,
-    BooleanField,
-    fn,
+    BooleanField
 )
-import numpy as np
-from playhouse.hybrid import hybrid_method
-from astra.models.base import database, BaseModel
-from astra.models.fields import BitField
 from astra.models.spectrum import Spectrum
-
 from astra.glossary import Glossary
-from functools import cache
-
-from astropy.table import Table
 from astra.utils import expand_path
 
 
@@ -667,6 +661,7 @@ class Source(BaseModel):
 
 @cache
 def get_carton_to_bit_mapping():
+    from astropy.table import Table
     t = Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_1_with_groups.csv"))
     t.sort("bit")
     return t

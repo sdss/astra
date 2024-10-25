@@ -7,7 +7,7 @@ from sdsstools.configuration import get_config
 from astra.utils import log, Timer
 
 NAME = "astra"
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 @decorator
 def task(function, *args, **kwargs):
@@ -183,25 +183,3 @@ try:
     
 except FileNotFoundError:
     log.exception(f"No configuration file found for {NAME}:")
-
-
-'''
-class Foobar:
-
-    def __init__(self, i):
-        self.i = i
-
-@task
-def long_task(spectra):
-    log.info("in long_task")
-    from time import sleep
-    sleep(10)
-    yield ... 
-    for i in range(len(spectra)):
-        log.info(f"starting {i}")
-        sleep(i)
-        yield Foobar(i=i)
-    
-    yield ... 
-    sleep(5)
-'''

@@ -1,0 +1,51 @@
+[project]
+name = "astra"
+version = "0.7.0" 
+readme = "README.md"
+license = {text = "LICENSE.md"}
+description = "Analysis framework for SDSS-V / MWM." 
+keywords = ["astronomy software"]
+authors = [
+  {name = "Andy Casey", email = "andrew.casey@monash.edu"},
+]
+maintainers = [
+  {name = "Andy Casey", email = "andrew.casey@monash.edu"},
+]
+dependencies = [
+  "numpy",
+  "scipy",
+  "astropy",
+  "tqdm",
+  "PyYAML",
+  "healpy",
+  "sdssdb",
+  "sdsstools",
+  "specutils",
+  "click",
+  "matplotlib",
+  "scikit-learn",
+  "joblib",
+  "pandas",
+  "apache-airflow"
+]
+
+[classifiers]
+development_status = "4 - Beta"
+intended_audience = "Science/Research"
+natural_language = "English"
+programming_language = "Python :: 3"
+topic = ["Documentation :: Sphinx", "Topic :: Software Development :: Libraries  :: Python Modules"]
+
+[tool.setuptools.packages.find]
+where = ["src/"]
+include = ["astra"]
+
+#[scripts]   
+#scripts = ["bin/astra", "bin/ferre_chaos_monkey", "bin/ferre_interpolate_unnormalized_model_flux"]
+
+[dev-dependencies]
+pytest = ">=3.0.7"
+pytest-cov = ">=2.4.0"
+pytest-sugar = ">=0.8.0"
+pre-commit = "*"
+black = "*"

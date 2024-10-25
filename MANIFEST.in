@@ -1,3 +1,0 @@
-VERSION
-recursive-include python/*/etc *
-recursive-include */contrib/thepayne_new/data/ *
