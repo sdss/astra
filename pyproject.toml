@@ -27,6 +27,7 @@ dependencies = [
   "joblib",
   "pandas",
   "apache-airflow",
+  "setuptools",
 ]
 requires-python = ">= 3.9"
 
