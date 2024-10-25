@@ -32,7 +32,7 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: "Install astra"
-        run uv pip install -e .
+        run: uv pip install -e .
 
       - name: "Run tests"
         env:
