@@ -17,62 +17,37 @@ from astropy.io import fits
 from astra.utils import expand_path
 from astra.glossary import Glossary
 
-print("astra.models.fields is deprecated. Use astra.fields instead.")
+class GlossaryFieldMixin:
 
-class AutoField(_AutoField):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def bind(self, model, name, set_attribute=True):
+        self.model = model
+        self.name = self.safe_name = name
+        self.column_name = self.column_name or name
+        if set_attribute:
+            setattr(model, name, self.accessor_class(model, self, name))
+        
         if self.help_text is None:
-            self.help_text = Glossary.get(self.name, None)
-        return None
+            self.help_text = getattr(Glossary, self.name, None)
 
-class IntegerField(_IntegerField):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if self.help_text is None:
-            self.help_text = Glossary.get(self.name, None)
-        return None
+class AutoField(GlossaryFieldMixin, _AutoField):
+    pass
 
-class FloatField(_FloatField):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if self.help_text is None:
-            self.help_text = Glossary.get(self.name, None)
-        return None
+class FloatField(GlossaryFieldMixin, _FloatField):
+    pass
 
+class IntegerField(GlossaryFieldMixin, _IntegerField):
+    pass
 
-class BigIntegerField(_BigIntegerField):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if self.help_text is None:
-            self.help_text = Glossary.get(self.name, None)
-        return None
+class SmallIntegerField(GlossaryFieldMixin, _SmallIntegerField):
+    pass
 
+class DateTimeField(GlossaryFieldMixin, _DateTimeField):
+    pass
 
-class SmallIntegerField(_SmallIntegerField):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if self.help_text is None:
-            self.help_text = Glossary.get(self.name, None)
-        return None
-    
-class DateTimeField(_DateTimeField):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if self.help_text is None:
-            self.help_text = Glossary.get(self.name, None)
-        return None
+class BooleanField(GlossaryFieldMixin, _BooleanField):
+    pass
 
-class BooleanField(_BooleanField):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if self.help_text is None:
-            self.help_text = Glossary.get(self.name, None)
-        return None
-
-
-
-class BitField(_BitField):
+class BitField(GlossaryFieldMixin, _BitField):
 
     """A binary bitfield field that allows for `help_text` to be specified in each `FlagDescriptor`."""
     
@@ -88,21 +63,25 @@ class BitField(_BitField):
         else:
             self.__current_flag = value << 1
 
-        class FlagDescriptor(ColumnBase):
+        class FlagDescriptor(GlossaryFieldMixin, ColumnBase):
             def __init__(self, field, value, help_text=None):
                 self._field = field
                 self._value = value
-                self.help_text = help_text
+                self.help_text = help_text                
                 super(FlagDescriptor, self).__init__()
+
             def clear(self):
                 return self._field.bin_and(~self._value)
+
             def set(self):
                 return self._field.bin_or(self._value)
+
             def __get__(self, instance, instance_type=None):
                 if instance is None:
                     return self
                 value = getattr(instance, self._field.name) or 0
                 return (value & self._value) != 0
+
             def __set__(self, instance, is_set):
                 if is_set not in (True, False):
                     raise ValueError('Value must be either True or False')
@@ -112,8 +91,10 @@ class BitField(_BitField):
                 else:
                     value &= ~self._value
                 setattr(instance, self._field.name, value)
+
             def __sql__(self, ctx):
                 return ctx.sql(self._field.bin_and(self._value) != 0)
+            
         return FlagDescriptor(self, value, help_text)
 
 
