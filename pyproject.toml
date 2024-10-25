@@ -27,9 +27,9 @@ dependencies = [
   "joblib",
   "pandas",
   "apache-airflow",
-  "setuptools",
+#  "setuptools",
 ]
-requires-python = ">= 3.9"
+#requires-python = ">= 3.9"
 
 [classifiers]
 development_status = "4 - Beta"
