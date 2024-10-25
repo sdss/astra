@@ -28,7 +28,9 @@ dependencies = [
   "pandas",
   "apache-airflow",
 #  "setuptools",
-  "decorator"
+  "decorator",
+  "h5py",
+
 ]
 #requires-python = ">= 3.9"
 
