@@ -31,6 +31,8 @@ jobs:
       - name: "Install the project"
         run: uv sync --all-extras --dev
 
+      - name: "Install astra"
+        run uv pip install -e .
 
       - name: "Run tests"
         env:
