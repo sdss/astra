@@ -31,11 +31,15 @@ jobs:
       - name: "Install the project"
         run: uv sync --all-extras --dev
 
+
       - name: "Run tests"
         env:
           ASTRA_DATABASE_URL: ':memory:'
         run: |
           uv run pytest tests
+
+      - name: "Install Coveralls"
+        run: uv pip install coveralls
 
       - name: Coveralls
         env:
