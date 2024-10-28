@@ -157,6 +157,7 @@ def create_astra_all_star_product(
     gzip=True,
     overwrite=False,
     full_output=False,
+    strict_version=True,
 ):
     """
     Create an `astraAllStar<PIPELINE>` product containing the results from a `<PIPELINE>`
@@ -288,8 +289,10 @@ def create_astra_all_star_product(
             .switch(spectrum_model)
             .join(Source, on=(Source.pk == spectrum_model.source_pk))
             #.where(spectrum_model.telescope.startswith(observatory))
-            .where(pipeline_model.v_astra == __version__)
         )
+        if strict_version:
+            q = q.where(pipeline_model.v_astra == __version__)
+
         if where: # Need to check, otherwise it requires AND with previous where.
             q = q.where(where)
         if instrument_where:
