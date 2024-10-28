@@ -152,14 +152,17 @@ class AstroNN(BaseModel, PipelineOutputMixin):
         
     @hybrid_property
     def flag_bad(self):
-        return (self.flag_uncertain_logg & self.flag_uncertain_fe_h & self.flag_uncertain_teff)
+        return ((self.flag_uncertain_logg & self.flag_uncertain_fe_h) | self.flag_uncertain_teff)
 
     @flag_bad.expression
     def flag_bad(self):
-        return (self.flag_uncertain_logg & self.flag_uncertain_fe_h & self.flag_uncertain_teff)
+        return ((self.flag_uncertain_logg & self.flag_uncertain_fe_h) | self.flag_uncertain_teff)
 
 
 def apply_flags():
+
+
+
     (
         AstroNN
         .update(result_flags=AstroNN.flag_uncertain_logg.set())
@@ -177,11 +180,18 @@ def apply_flags():
         )
         .execute()
     )    
+    # Unset all in order to apply new
+    (
+        AstroNN
+        .update(result_flags=AstroNN.flag_uncertain_fe_h.clear())
+        .execute()
+    )
     (
         AstroNN
         .update(result_flags=AstroNN.flag_uncertain_fe_h.set())
         .where(
-            (fn.abs(AstroNN.raw_e_fe_h / AstroNN.raw_fe_h) > 0.12)
+            (AstroNN.raw_e_fe_h > 0.2)
+        &   (fn.abs(AstroNN.raw_e_fe_h / AstroNN.raw_fe_h) > 0.12)
         )
         .execute()
     )
