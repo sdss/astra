@@ -1,20 +1,19 @@
-from peewee import (
+import datetime
+import pickle
+from astra import __version__
+from astra.utils import expand_path
+from astra.models.base import BaseModel
+from astra.fields import (
+    BitField, PixelArray, BasePixelArrayAccessor, LogLambdaArrayAccessor,
     AutoField,
     FloatField,
     TextField,
     ForeignKeyField,
     BitField,
     DateTimeField
-)
-import datetime
-import pickle
-from astra import __version__
-from astra.utils import expand_path
-from astra.models.base import BaseModel
-from astra.models.fields import BitField, PixelArray, BasePixelArrayAccessor, LogLambdaArrayAccessor
+)    
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
-from astra.glossary import Glossary
 from playhouse.hybrid import hybrid_property
 
 
@@ -69,16 +68,16 @@ class ThePayne(BaseModel):
         Spectrum, 
         index=True, 
         lazy_load=False,
-        help_text=Glossary.spectrum_pk
     )
     
     #> Astra Metadata
-    task_pk = AutoField(help_text=Glossary.task_pk)
-    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
-    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
-    t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
-    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
-    tag = TextField(default="", index=True, help_text=Glossary.tag)
+    task_pk = AutoField()
+    v_astra = TextField(default=__version__)
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
+    t_elapsed = FloatField(null=True)
+    t_overhead = FloatField(null=True)
+    tag = TextField(default="", index=True)
     
     
     #> Stellar Labels
@@ -189,8 +188,6 @@ class ThePayne(BaseModel):
     raw_e_c12_c13 = FloatField(null=True)
     raw_e_v_macro = FloatField(null=True)
         
-
-
     #> Correlation Coefficients
     rho_teff_logg = FloatField(null=True)
     rho_teff_v_turb = FloatField(null=True)
@@ -501,10 +498,9 @@ class ThePayne(BaseModel):
             cdelt=6e-6,
             naxis=8575,
         ),
-        help_text=Glossary.wavelength
     )
-    model_flux = PaynePixelArray(help_text=Glossary.model_flux)
-    continuum = PaynePixelArray(help_text=Glossary.continuum)
+    model_flux = PaynePixelArray()
+    continuum = PaynePixelArray()
     
     #@property    
     #def intermediate_output_path(self):
