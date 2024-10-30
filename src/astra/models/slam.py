@@ -1,7 +1,12 @@
 import datetime
 import pickle
-from peewee import (
-    chunked,
+from peewee import chunked
+from playhouse.hybrid import hybrid_property
+
+from astra import __version__
+from astra.utils import expand_path
+from astra.fields import (
+    BitField, PixelArray, BasePixelArrayAccessor, LogLambdaArrayAccessor,
     AutoField,
     FloatField,
     TextField,
@@ -10,20 +15,10 @@ from peewee import (
     IntegerField,
     DateTimeField
 )
-from playhouse.hybrid import hybrid_property
-
-from astra import __version__
-from astra.utils import expand_path
-from astra.models.fields import BitField, PixelArray, BasePixelArrayAccessor, LogLambdaArrayAccessor
 from astra.models.base import BaseModel
 from astra.models.fields import BitField
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
-
-from astra.glossary import Glossary
-
-
-
 
 class SlamPixelArrayAccessor(BasePixelArrayAccessor):
     
@@ -70,64 +65,61 @@ class Slam(BaseModel, PipelineOutputMixin):
     """A result from the 'Stellar Labels Machine'."""
 
     source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
-    spectrum_pk = ForeignKeyField(
-        Spectrum, 
-        index=True, 
-        lazy_load=False,
-        help_text=Glossary.spectrum_pk
-    )
-    
+    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
+        
     #> Astra Metadata
-    task_pk = AutoField(help_text=Glossary.task_pk)
-    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
-    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
-    t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
-    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
-    tag = TextField(default="", index=True, help_text=Glossary.tag)    
+    task_pk = AutoField()
+    v_astra = TextField(default=__version__)
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
+
+    t_elapsed = FloatField(null=True)
+    t_overhead = FloatField(null=True)
+    tag = TextField(default="", index=True)
     
     #> Stellar Labels
-    teff = FloatField(null=True, help_text=Glossary.teff)
-    e_teff = FloatField(null=True, help_text=Glossary.e_teff)
-    logg = FloatField(null=True, help_text=Glossary.logg)
-    e_logg = FloatField(null=True, help_text=Glossary.e_logg)
-    fe_h = FloatField(null=True, help_text=Glossary.fe_h)
-    e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
-    fe_h_niu = FloatField(null=True, help_text="[Fe/H] calibrated from Niu et al. (2023)")
-    e_fe_h_niu = FloatField(null=True, help_text="Error on [Fe/H] calibrated from Niu et al. (2023)")
-    alpha_fe = FloatField(null=True, help_text=Glossary.alpha_fe)
-    e_alpha_fe = FloatField(null=True, help_text=Glossary.e_alpha_fe)
+    teff = FloatField(null=True)
+    e_teff = FloatField(null=True)
+    logg = FloatField(null=True)
+    e_logg = FloatField(null=True)
+    fe_h = FloatField(null=True)
+    e_fe_h = FloatField(null=True)
+    fe_h_niu = FloatField(null=True)
+    e_fe_h_niu = FloatField(null=True)
+    alpha_fe = FloatField(null=True)
+    e_alpha_fe = FloatField(null=True)
     
     #> Correlation Coefficients
-    rho_teff_logg = FloatField(null=True, help_text=Glossary.rho_teff_logg)
-    rho_teff_fe_h = FloatField(null=True, help_text=Glossary.rho_teff_fe_h)
+    rho_teff_logg = FloatField(null=True)
+    rho_teff_fe_h = FloatField(null=True)
     rho_teff_fe_h_niu = FloatField(null=True) # 
     rho_teff_alpha_fe = FloatField(null=True) #
     rho_logg_fe_h_niu = FloatField(null=True)
     rho_logg_alpha_fe = FloatField(null=True)
-    rho_logg_fe_h = FloatField(null=True, help_text=Glossary.rho_logg_fe_h)
+    rho_logg_fe_h = FloatField(null=True)
     rho_fe_h_fe_h_niu = FloatField(null=True)
     rho_fe_h_alpha_fe = FloatField(null=True)
 
     #> Initial Labels
-    initial_teff = FloatField(null=True, help_text=Glossary.initial_teff)
-    initial_logg = FloatField(null=True, help_text=Glossary.initial_logg)
-    initial_fe_h = FloatField(null=True, help_text=Glossary.initial_fe_h)
-    initial_alpha_fe = FloatField(null=True, help_text=Glossary.initial_alpha_fe)
-    initial_fe_h_niu = FloatField(null=True, help_text=Glossary.initial_fe_h_niu)
+    initial_teff = FloatField(null=True)
+    initial_logg = FloatField(null=True)
+    initial_fe_h = FloatField(null=True)
+    initial_alpha_fe = FloatField(null=True)
+    initial_fe_h_niu = FloatField(null=True)
 
     #> Metadata
-    success = BooleanField(help_text="Optimizer returned successful value")
-    status = IntegerField(help_text="Optimization status")
-    optimality = BooleanField(help_text="Optimality condition")
-    result_flags = BitField(default=0, help_text=Glossary.result_flags)            
-    flag_bad_optimizer_status = result_flags.flag(2**0, help_text="Optimizer status value indicate results may not be reliable")
-    flag_teff_outside_bounds = result_flags.flag(2**1, help_text="Teff is outside reliable bounds: (2800, 4500)")
-    flag_fe_h_outside_bounds = result_flags.flag(2**2, help_text="[Fe/H] is outside reliable bounds: (-1, 0.5)")   
-    flag_outside_photometry_range = result_flags.flag(2**3, help_text="Outside 1.5 < BP - RP < 3.5 and 6 < M_G < 12, which approximates the range SLAM was trained on")
+    success = BooleanField()
+    status = IntegerField()
+    optimality = BooleanField()
+    result_flags = BitField(default=0)
+    flag_bad_optimizer_status = result_flags.flag(2**0)
+    flag_teff_outside_bounds = result_flags.flag(2**1)
+    flag_fe_h_outside_bounds = result_flags.flag(2**2)
+    flag_outside_photometry_range = result_flags.flag(2**3)
     
     #> Summary Statistics
-    chi2 = FloatField(help_text=Glossary.chi2)
-    rchi2 = FloatField(help_text=Glossary.rchi2)
+    chi2 = FloatField()
+    rchi2 = FloatField()
     
     #> Spectral Data
     wavelength = PixelArray(
@@ -137,10 +129,9 @@ class Slam(BaseModel, PipelineOutputMixin):
             cdelt=1e-4,
             naxis=4648,
         ),
-        help_text=Glossary.wavelength
     )
-    model_flux = SlamPixelArray(help_text=Glossary.model_flux)
-    continuum = SlamPixelArray(help_text=Glossary.continuum)
+    model_flux = SlamPixelArray()
+    continuum = SlamPixelArray()
     
     @property    
     def intermediate_output_path(self):
