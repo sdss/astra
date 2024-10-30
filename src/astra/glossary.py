@@ -912,6 +912,22 @@ class Glossary(BaseGlossary):
     std_v_rad = "Standard deviation of visit V_RAD [km/s]"
     median_e_v_rad = "Median error in radial velocity [km/s]"
 
+    tag = "Experiment tag for this result"
+    t_elapsed = "Core-time elapsed on this analysis [s]"
+    t_overhead = "Estimated core-time spent in overhads [s]"
+
+    # ApogeeNet
+    created = "Datetime when task record was created"
+    teff = "Stellar effective temperature [K]"
+    e_teff = "Error on stellar effective temperature [K]"
+    logg = "Surface gravity [log10(cm/s^2)]"
+    e_logg = "Error on surface gravity [log10(cm/s^2)]"
+    fe_h = "[Fe/H] [dex]"
+    e_fe_h = "Error on [Fe/H] [dex]"
+    result_flags = "Flags describing the results"
+    raw_e_teff = "Raw error on stellar effective temperature [K]"
+    raw_e_logg = "Raw error on surface gravity [log10(cm/s^2)]"
+    raw_e_fe_h = "Raw error on [Fe/H] [dex]"
 
 
 def lower_first_letter(s):
