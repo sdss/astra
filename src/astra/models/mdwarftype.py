@@ -1,47 +1,41 @@
 import datetime
-from peewee import (
+from playhouse.hybrid import hybrid_property
+from astra import __version__
+from astra.fields import (
     AutoField,
     FloatField,
     TextField,
     ForeignKeyField,
     BitField,
-    DateTimeField
+    DateTimeField,    
 )
-from playhouse.hybrid import hybrid_property
-from astra import __version__
 from astra.models.base import BaseModel
-from astra.models.fields import BitField
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
-from astra.glossary import Glossary
 
 class MDwarfType(BaseModel, PipelineOutputMixin):
 
     """M-dwarf type classifier."""
 
-    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False, help_text=Glossary.source_pk)
-    spectrum_pk = ForeignKeyField(
-        Spectrum, 
-        index=True, 
-        lazy_load=False,
-        help_text=Glossary.spectrum_pk
-    )
+    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
+    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     
     #> Astra Metadata
-    task_pk = AutoField(help_text=Glossary.task_pk)
-    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
-    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
-    t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
-    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
-    tag = TextField(default="", index=True, help_text=Glossary.tag)    
+    task_pk = AutoField()
+    v_astra = TextField(default=__version__)
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
+    t_elapsed = FloatField(null=True)
+    t_overhead = FloatField(null=True)
+    tag = TextField(default="", index=True)
 
     #> M Dwarf Type
-    spectral_type = TextField(help_text=Glossary.spectral_type)
-    sub_type = FloatField(help_text=Glossary.sub_type)
-    rchi2 = FloatField(help_text=Glossary.rchi2)
-    continuum = FloatField(null=True, help_text="Scalar continuum value used")
-    result_flags = BitField(default=0, help_text=Glossary.result_flags)
+    spectral_type = TextField()
+    sub_type = FloatField()
+    rchi2 = FloatField()
+    continuum = FloatField(null=True)
+    result_flags = BitField(default=0)
     
     @hybrid_property
     def flag_bad(self):
