@@ -1,5 +1,11 @@
-from peewee import (
+
+import datetime
+import numpy as np
+from astra import __version__
+from astra.models.base import BaseModel
+from astra.fields import (
     AutoField,
+    BitField,
     FloatField,
     TextField,
     ForeignKeyField,
@@ -8,19 +14,10 @@ from peewee import (
     DateTimeField,
     BooleanField,
 )
-
-import datetime
-import numpy as np
-from functools import cached_property
-
-from astra import __version__
-from astra.models.base import BaseModel
-from astra.models.fields import BitField
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
-from astra.glossary import Glossary
-
+from functools import cached_property
 
 from astra.pipelines.ferre.utils import (get_apogee_pixel_mask, parse_ferre_spectrum_name)
 
@@ -126,6 +123,7 @@ class FerreCoarse(BaseModel, FerreOutputMixin):
     task_pk = AutoField()
     v_astra = TextField(default=__version__)
     created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
     t_elapsed = FloatField(null=True)
     t_overhead = FloatField(null=True)
     tag = TextField(default="", index=True)
@@ -166,14 +164,14 @@ class FerreCoarse(BaseModel, FerreOutputMixin):
     f_format = IntegerField(default=-1)
     n_threads = IntegerField(default=-1)
 
-    flag_teff_frozen = frozen_flags.flag(2**0, "Effective temperature is frozen")
-    flag_logg_frozen = frozen_flags.flag(2**1, "Surface gravity is frozen")
-    flag_m_h_frozen = frozen_flags.flag(2**2, "[M/H] is frozen")
-    flag_log10_v_sini_frozen = frozen_flags.flag(2**3, "Rotational broadening is frozen")
-    flag_log10_v_micro_frozen = frozen_flags.flag(2**4, "Microturbulence is frozen")
-    flag_alpha_m_frozen = frozen_flags.flag(2**5, "[alpha/M] is frozen")
-    flag_c_m_frozen = frozen_flags.flag(2**6, "[C/M] is frozen")
-    flag_n_m_frozen = frozen_flags.flag(2**7, "[N/M] is frozen")
+    flag_teff_frozen = frozen_flags.flag(2**0, help_text="Effective temperature is frozen")
+    flag_logg_frozen = frozen_flags.flag(2**1, help_text="Surface gravity is frozen")
+    flag_m_h_frozen = frozen_flags.flag(2**2, help_text="[M/H] is frozen")
+    flag_log10_v_sini_frozen = frozen_flags.flag(2**3, help_text="Rotational broadening is frozen")
+    flag_log10_v_micro_frozen = frozen_flags.flag(2**4, help_text="Microturbulence is frozen")
+    flag_alpha_m_frozen = frozen_flags.flag(2**5, help_text="[alpha/M] is frozen")
+    flag_c_m_frozen = frozen_flags.flag(2**6, help_text="[C/M] is frozen")
+    flag_n_m_frozen = frozen_flags.flag(2**7, help_text="[N/M] is frozen")
 
     #> Stellar Parameters
     teff = FloatField(null=True)
@@ -208,9 +206,9 @@ class FerreCoarse(BaseModel, FerreOutputMixin):
     ferre_time_elapsed = FloatField(null=True)
     ferre_flags = BitField(default=0)
 
-    flag_ferre_fail = ferre_flags.flag(2**0, "FERRE failed")
-    flag_missing_model_flux = ferre_flags.flag(2**1, "Missing model fluxes from FERRE")
-    flag_potential_ferre_timeout = ferre_flags.flag(2**2, "Potentially impacted by FERRE timeout")
+    flag_ferre_fail = ferre_flags.flag(2**0, help_text="FERRE failed")
+    flag_missing_model_flux = ferre_flags.flag(2**1, help_text="Missing model fluxes from FERRE")
+    flag_potential_ferre_timeout = ferre_flags.flag(2**2, help_text="Potentially impacted by FERRE timeout")
     flag_no_suitable_initial_guess = ferre_flags.flag(2**3, help_text="FERRE not executed because there's no suitable initial guess")
     flag_spectrum_io_error = ferre_flags.flag(2**4, help_text="Error accessing spectrum pixel data")
     flag_teff_grid_edge_warn = ferre_flags.flag(2**5)
@@ -256,6 +254,7 @@ class FerreStellarParameters(BaseModel, FerreOutputMixin):
     task_pk = AutoField()
     v_astra = TextField(default=__version__)
     created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
     t_elapsed = FloatField(null=True)
     t_overhead = FloatField(null=True)
     tag = TextField(default="", index=True)
@@ -294,14 +293,14 @@ class FerreStellarParameters(BaseModel, FerreOutputMixin):
     f_format = IntegerField(default=-1)
     n_threads = IntegerField(default=-1)
 
-    flag_teff_frozen = frozen_flags.flag(2**0, "Effective temperature is frozen")
-    flag_logg_frozen = frozen_flags.flag(2**1, "Surface gravity is frozen")
-    flag_m_h_frozen = frozen_flags.flag(2**2, "[M/H] is frozen")
-    flag_log10_v_sini_frozen = frozen_flags.flag(2**3, "Rotational broadening is frozen")
-    flag_log10_v_micro_frozen = frozen_flags.flag(2**4, "Microturbulence is frozen")
-    flag_alpha_m_frozen = frozen_flags.flag(2**5, "[alpha/M] is frozen")
-    flag_c_m_frozen = frozen_flags.flag(2**6, "[C/M] is frozen")
-    flag_n_m_frozen = frozen_flags.flag(2**7, "[N/M] is frozen")
+    flag_teff_frozen = frozen_flags.flag(2**0, help_text="Effective temperature is frozen")
+    flag_logg_frozen = frozen_flags.flag(2**1, help_text="Surface gravity is frozen")
+    flag_m_h_frozen = frozen_flags.flag(2**2, help_text="[M/H] is frozen")
+    flag_log10_v_sini_frozen = frozen_flags.flag(2**3, help_text="Rotational broadening is frozen")
+    flag_log10_v_micro_frozen = frozen_flags.flag(2**4, help_text="Microturbulence is frozen")
+    flag_alpha_m_frozen = frozen_flags.flag(2**5, help_text="[alpha/M] is frozen")
+    flag_c_m_frozen = frozen_flags.flag(2**6, help_text="[C/M] is frozen")
+    flag_n_m_frozen = frozen_flags.flag(2**7, help_text="[N/M] is frozen")
 
     #> Stellar Parameters
     teff = FloatField(null=True)
@@ -337,9 +336,9 @@ class FerreStellarParameters(BaseModel, FerreOutputMixin):
     ferre_time_elapsed = FloatField(null=True)
     ferre_flags = BitField(default=0)
 
-    flag_ferre_fail = ferre_flags.flag(2**0, "FERRE failed")
-    flag_missing_model_flux = ferre_flags.flag(2**1, "Missing model fluxes from FERRE")
-    flag_potential_ferre_timeout = ferre_flags.flag(2**2, "Potentially impacted by FERRE timeout")
+    flag_ferre_fail = ferre_flags.flag(2**0, help_text="FERRE failed")
+    flag_missing_model_flux = ferre_flags.flag(2**1, help_text="Missing model fluxes from FERRE")
+    flag_potential_ferre_timeout = ferre_flags.flag(2**2, help_text="Potentially impacted by FERRE timeout")
     flag_no_suitable_initial_guess = ferre_flags.flag(2**3, help_text="FERRE not executed because there's no suitable initial guess")
     flag_spectrum_io_error = ferre_flags.flag(2**4, help_text="Error accessing spectrum pixel data")
     flag_teff_grid_edge_warn = ferre_flags.flag(2**5)
@@ -397,6 +396,7 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
     task_pk = AutoField()
     v_astra = TextField(default=__version__)
     created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
     t_elapsed = FloatField(null=True)
     t_overhead = FloatField(null=True)
     tag = TextField(default="", index=True)
@@ -431,14 +431,14 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
     f_format = IntegerField(default=-1)
     n_threads = IntegerField(default=-1)
 
-    flag_teff_frozen = frozen_flags.flag(2**0, "Effective temperature is frozen")
-    flag_logg_frozen = frozen_flags.flag(2**1, "Surface gravity is frozen")
-    flag_m_h_frozen = frozen_flags.flag(2**2, "[M/H] is frozen")
-    flag_log10_v_sini_frozen = frozen_flags.flag(2**3, "Rotational broadening is frozen")
-    flag_log10_v_micro_frozen = frozen_flags.flag(2**4, "Microturbulence is frozen")
-    flag_alpha_m_frozen = frozen_flags.flag(2**5, "[alpha/M] is frozen")
-    flag_c_m_frozen = frozen_flags.flag(2**6, "[C/M] is frozen")
-    flag_n_m_frozen = frozen_flags.flag(2**7, "[N/M] is frozen")
+    flag_teff_frozen = frozen_flags.flag(2**0, help_text="Effective temperature is frozen")
+    flag_logg_frozen = frozen_flags.flag(2**1, help_text="Surface gravity is frozen")
+    flag_m_h_frozen = frozen_flags.flag(2**2, help_text="[M/H] is frozen")
+    flag_log10_v_sini_frozen = frozen_flags.flag(2**3, help_text="Rotational broadening is frozen")
+    flag_log10_v_micro_frozen = frozen_flags.flag(2**4, help_text="Microturbulence is frozen")
+    flag_alpha_m_frozen = frozen_flags.flag(2**5, help_text="[alpha/M] is frozen")
+    flag_c_m_frozen = frozen_flags.flag(2**6, help_text="[C/M] is frozen")
+    flag_n_m_frozen = frozen_flags.flag(2**7, help_text="[N/M] is frozen")
 
     #> Stellar Parameters
     teff = FloatField(null=True)
@@ -475,9 +475,9 @@ class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
     ferre_time_elapsed = FloatField(null=True)
     ferre_flags = BitField(default=0)
     
-    flag_ferre_fail = ferre_flags.flag(2**0, "FERRE failed")
-    flag_missing_model_flux = ferre_flags.flag(2**1, "Missing model fluxes from FERRE")
-    flag_potential_ferre_timeout = ferre_flags.flag(2**2, "Potentially impacted by FERRE timeout")
+    flag_ferre_fail = ferre_flags.flag(2**0, help_text="FERRE failed")
+    flag_missing_model_flux = ferre_flags.flag(2**1, help_text="Missing model fluxes from FERRE")
+    flag_potential_ferre_timeout = ferre_flags.flag(2**2, help_text="Potentially impacted by FERRE timeout")
     flag_no_suitable_initial_guess = ferre_flags.flag(2**3, help_text="FERRE not executed because there's no suitable initial guess")
     flag_spectrum_io_error = ferre_flags.flag(2**4, help_text="Error accessing spectrum pixel data")
     flag_teff_grid_edge_warn = ferre_flags.flag(2**5)
