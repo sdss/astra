@@ -6,6 +6,19 @@ import inspect
 from importlib import import_module
 from time import time
 
+
+def version_integer_to_string(version_integer):
+    parts, v = ([], 0 + version_integer)
+    for scale in (1e6, 1e3, 1):
+        parts.append(v // scale)
+        v %= scale
+    return ".".join(map(str, map(int, parts)))
+
+def version_string_to_integer(version_string):
+    parts = map(int, version_string.split("."))
+    return sum(p * 10**(6 - i * 3) for i, p in enumerate(parts))
+
+
 def get_logger(kwargs=None):
     logger = _get_logger("astra", **(kwargs or {}))
     # https://stackoverflow.com/questions/6729268/log-messages-appearing-twice-with-python-logging
