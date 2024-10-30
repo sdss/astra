@@ -252,7 +252,7 @@ def get_fields(models, name_conflict_strategy=None, ignore_field_name_callable=N
     fields = OrderedDict([])
     for model in models:
         for name, field in model._meta.fields.items():
-            if ignore_field_name_callable is not None and ignore_field_name_callable(name):
+            if ignore_field_name_callable is not None and ignore_field_name_callable(name) or field._hidden:
                 continue
 
             if name in fields:

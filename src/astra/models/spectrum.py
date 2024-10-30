@@ -1,10 +1,9 @@
 import warnings
 import numpy as np
-from astra.fields import AutoField
+from astra.fields import AutoField, BitField
 from astra.utils import log
 from astra.models.base import BaseModel
 from functools import cached_property
-
 
 class SpectrumMixin(object):
     
@@ -118,11 +117,15 @@ class SpectrumMixin(object):
             return fig
 
 
+
+
 class Spectrum(BaseModel, SpectrumMixin):
 
     """ A one dimensional spectrum. """
 
-    pk = AutoField()
+    pk = AutoField(primary_key=True)
+    spectrum_flags = BitField(default=0)
+
 
     def resolve(self):
         for expression, field in self.dependencies():

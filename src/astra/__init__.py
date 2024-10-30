@@ -4,11 +4,10 @@ from peewee import chunked, IntegrityError, SqliteDatabase
 from playhouse.sqlite_ext import SqliteExtDatabase
 from sdsstools.configuration import get_config
 
-from astra.utils import log, Timer, version_string_to_integer
+from astra.utils import log, Timer
 
 NAME = "astra"
 __version__ = "0.7.0"
-__version_integer__ = version_string_to_integer(__version__)
 
 @decorator
 def task(function, *args, **kwargs):
