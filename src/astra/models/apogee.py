@@ -1,24 +1,14 @@
-from peewee import (
-    AutoField,
-    FloatField,
-    BooleanField,
-    DateTimeField,
-    BigIntegerField,
-    IntegerField,
-    TextField,
-    ForeignKeyField,
-    DeferredForeignKey,
-    fn,
-)
-import numpy as np
 import os
+import numpy as np
+from peewee import DeferredForeignKey, fn
 from playhouse.hybrid import hybrid_property
-from astra.models.fields import PixelArray, BitField, LogLambdaArrayAccessor
+from astra.fields import (
+    AutoField, FloatField, BooleanField, DateTimeField, BigIntegerField, IntegerField, TextField,
+    ForeignKeyField, PixelArray, BitField, LogLambdaArrayAccessor
+)
 from astra.models.base import BaseModel
 from astra.models.spectrum import (Spectrum, SpectrumMixin)
 from astra.models.source import Source
-
-from astra.glossary import Glossary
 
 from astropy.constants import c
 from astropy import units as u
@@ -33,7 +23,7 @@ def _transform_err_to_ivar(err, *args, **kwargs):
     return ivar
 
 
-
+# TODO: Move these to a common place in astra.fields
 
 def transform(v, image, instance):
     # Accessor class for the PixelArrays
@@ -75,8 +65,6 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
 
     pk = AutoField()
     
-
-
     # A decision was made here.
 
     # I want the `spectrum_pk` to be unique across tables. I don't want to run
@@ -106,7 +94,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         index=True,
         unique=True,
         lazy_load=False,
-        help_text=Glossary.spectrum_pk,
+#        )
     )
     # Won't appear in a header group because it is first referenced in `Source`.
     source = ForeignKeyField(
@@ -117,26 +105,25 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         null=True, 
         index=True,
         column_name="source_pk",
-        help_text=Glossary.source_pk,
         backref="apogee_visit_spectra",
     )
         
-    catalogid = BigIntegerField(index=True, null=True, help_text="SDSS input catalog identifier")
-    star_pk = BigIntegerField(null=True, unique=False, help_text="APOGEE DRP `star` primary key") # note: unique false
-    visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `visit` primary key")
-    rv_visit_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `rv_visit` primary key")
+    catalogid = BigIntegerField(index=True, null=True)
+    star_pk = BigIntegerField(null=True, unique=False) # Note: unique = False
+    visit_pk = BigIntegerField(null=True, unique=True)
+    rv_visit_pk = BigIntegerField(null=True, unique=True)
 
     #> Data Product Keywords
-    release = TextField(index=True, help_text=Glossary.release)
-    filetype = TextField(default="apVisit", help_text=Glossary.filetype)
-    apred = TextField(index=True, help_text=Glossary.apred)
-    plate = TextField(index=True, help_text=Glossary.plate) # most are integers, but not all!
-    telescope = TextField(index=True, help_text=Glossary.telescope)
-    fiber = IntegerField(index=True, help_text=Glossary.fiber)
-    mjd = IntegerField(index=True, help_text=Glossary.mjd)
-    field = TextField(index=True, help_text=Glossary.field)
-    prefix = TextField(help_text=Glossary.prefix)
-    reduction = TextField(default="", help_text=Glossary.reduction) # only used for DR17 apo1m spectra
+    release = TextField(index=True)
+    filetype = TextField(default="apVisit")
+    apred = TextField(index=True)
+    plate = TextField(index=True)
+    telescope = TextField(index=True)
+    fiber = IntegerField(index=True)
+    mjd = IntegerField(index=True)
+    field = TextField(index=True)
+    prefix = TextField()
+    reduction = TextField(default="")
     # Note that above I use `default=''` instead of `null=True` because SQLite
     # seems to have some weird bug with using `null=True` on a key field. It
     # meant that `reduction` was being set to null even when I gave it values.
@@ -152,94 +139,81 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     # closest attribute, healpix, is a per-source attribute, but this is
     # *correctly* calculated from the CATALOG position (ra, dec) and not the
     # input position to the telescope.
-    obj = TextField(null=True, help_text=Glossary.obj)
+    obj = TextField(null=True)
 
     #> Spectral Data
-    wavelength = PixelArray(
-        ext=4, 
-        transform=lambda x, *_: x[::-1, ::-1],
-    )
-    flux = PixelArray(
-        ext=1,
-        transform=lambda x, *_: x[::-1, ::-1],
-        help_text="Flux [10^-17 ergs/s/cm^2/A]"
-    )
-    ivar = PixelArray(
-        ext=2,
-        transform=lambda x, *_: x[::-1, ::-1]**-2,
-    )
-    pixel_flags = PixelArray(
-        ext=3,
-        transform=lambda x, *_: x[::-1, ::-1],
-    )
+    wavelength = PixelArray(ext=4, transform=lambda x, *_: x[::-1, ::-1])
+    flux = PixelArray(ext=1, transform=lambda x, *_: x[::-1, ::-1])
+    ivar = PixelArray(ext=2, transform=lambda x, *_: x[::-1, ::-1]**-2)
+    pixel_flags = PixelArray(ext=3, transform=lambda x, *_: x[::-1, ::-1])
     
     #> Observing Conditions
-    date_obs = DateTimeField(null=True, help_text=Glossary.date_obs)
-    jd = FloatField(null=True, help_text=Glossary.jd)
-    exptime = FloatField(null=True, help_text=Glossary.exptime)
-    dithered = BooleanField(null=True, help_text=Glossary.dithered)
-    f_night_time = FloatField(null=True, help_text=Glossary.f_night_time)
+    date_obs = DateTimeField(null=True)
+    jd = FloatField(null=True)
+    exptime = FloatField(null=True)
+    dithered = BooleanField(null=True)
+    f_night_time = FloatField(null=True)
     
     #> Telescope Pointing
-    input_ra = FloatField(null=True, help_text=Glossary.input_ra)
-    input_dec = FloatField(null=True, help_text=Glossary.input_dec)
-    n_frames = IntegerField(null=True, help_text=Glossary.n_frames)
-    assigned = IntegerField(null=True, help_text=Glossary.assigned)
-    on_target = IntegerField(null=True, help_text=Glossary.on_target)
-    valid = IntegerField(null=True, help_text=Glossary.valid)
-    fps = BooleanField(null=True, help_text=Glossary.fps)
+    input_ra = FloatField(null=True)
+    input_dec = FloatField(null=True)
+    n_frames = IntegerField(null=True)
+    assigned = IntegerField(null=True)
+    on_target = IntegerField(null=True)
+    valid = IntegerField(null=True)
+    fps = BooleanField(null=True)
     
     #> Statistics and Spectrum Quality 
-    snr = FloatField(null=True, help_text=Glossary.snr)
-    spectrum_flags = BitField(default=0, help_text=Glossary.spectrum_flags)
+    snr = FloatField(null=True)
+    spectrum_flags = BitField(default=0)
     
     # From https://github.com/sdss/apogee_drp/blob/630d3d45ecff840d49cf75ac2e8a31e22b543838/python/apogee_drp/utils/bitmask.py#L110
     # and https://github.com/sdss/apogee/blob/e134409dc14b20f69e68a0d4d34b2c1b5056a901/python/apogee/utils/bitmask.py#L9
-    flag_bad_pixels = spectrum_flags.flag(2**0, help_text="Spectrum has many bad pixels (>20%).")
-    flag_commissioning = spectrum_flags.flag(2**1, help_text="Commissioning data (MJD <55761); non-standard configuration; poor LSF.")
-    flag_bright_neighbor = spectrum_flags.flag(2**2, help_text="Star has neighbor more than 10 times brighter.")
-    flag_very_bright_neighbor = spectrum_flags.flag(2**3, help_text="Star has neighbor more than 100 times brighter.")
-    flag_low_snr = spectrum_flags.flag(2**4, help_text="Spectrum has low S/N (<5).")
+    flag_bad_pixels = spectrum_flags.flag(2**0)
+    flag_commissioning = spectrum_flags.flag(2**1)
+    flag_bright_neighbor = spectrum_flags.flag(2**2)
+    flag_very_bright_neighbor = spectrum_flags.flag(2**3)
+    flag_low_snr = spectrum_flags.flag(2**4)
     # 4-8 inclusive are not defined
-    flag_persist_high = spectrum_flags.flag(2**9, help_text="Spectrum has at least 20% of pixels in high persistence region.")
-    flag_persist_med = spectrum_flags.flag(2**10, help_text="Spectrum has at least 20% of pixels in medium persistence region.")
-    flag_persist_low = spectrum_flags.flag(2**11, help_text="Spectrum has at least 20% of pixels in low persistence region.")
-    flag_persist_jump_pos = spectrum_flags.flag(2**12, help_text="Spectrum has obvious positive jump in blue chip.")
-    flag_persist_jump_neg = spectrum_flags.flag(2**13, help_text="Spectrum has obvious negative jump in blue chip.")
+    flag_persist_high = spectrum_flags.flag(2**9)
+    flag_persist_med = spectrum_flags.flag(2**10)
+    flag_persist_low = spectrum_flags.flag(2**11)
+    flag_persist_jump_pos = spectrum_flags.flag(2**12)
+    flag_persist_jump_neg = spectrum_flags.flag(2**13)
     # 14-15 inclusive are not defined
-    flag_suspect_rv_combination = spectrum_flags.flag(2**16, help_text="RVs from synthetic template differ significantly (~2 km/s) from those from combined template.")
-    flag_suspect_broad_lines = spectrum_flags.flag(2**17, help_text="Cross-correlation peak with template significantly broader than autocorrelation of template.")
-    flag_bad_rv_combination = spectrum_flags.flag(2**18, help_text="RVs from synthetic template differ very significantly (~10 km/s) from those from combined template.")
-    flag_rv_reject = spectrum_flags.flag(2**19, help_text="Rejected visit because cross-correlation RV differs significantly from least squares RV.")
-    flag_rv_suspect = spectrum_flags.flag(2**20, help_text="Suspect visit (but used!) because cross-correlation RV differs slightly from least squares RV.")
-    flag_multiple_suspect = spectrum_flags.flag(2**21, help_text="Suspect multiple components from Gaussian decomposition of cross-correlation.")
-    flag_rv_failure = spectrum_flags.flag(2**22, help_text="RV failure.")
-    flag_suspect_rotation = spectrum_flags.flag(2**23, help_text="Suspect rotation: cross-correlation peak with template significantly broader than autocorretion of template")
-    flag_mtpflux_lt_75 = spectrum_flags.flag(2**24, help_text="Spectrum falls on fiber in MTP block with relative flux < 0.75")
-    flag_mtpflux_lt_50 = spectrum_flags.flag(2**25, help_text="Spectrum falls on fiber in MTP block with relative flux < 0.5")
+    flag_suspect_rv_combination = spectrum_flags.flag(2**16)
+    flag_suspect_broad_lines = spectrum_flags.flag(2**17)
+    flag_bad_rv_combination = spectrum_flags.flag(2**18)
+    flag_rv_reject = spectrum_flags.flag(2**19)
+    flag_rv_suspect = spectrum_flags.flag(2**20)
+    flag_multiple_suspect = spectrum_flags.flag(2**21)
+    flag_rv_failure = spectrum_flags.flag(2**22)
+    flag_suspect_rotation = spectrum_flags.flag(2**23)
+    flag_mtpflux_lt_75 = spectrum_flags.flag(2**24)
+    flag_mtpflux_lt_50 = spectrum_flags.flag(2**25)
     
     #> Radial Velocity (Doppler)
-    v_rad = FloatField(null=True, help_text=Glossary.v_rad)
-    v_rel = FloatField(null=True, help_text=Glossary.v_rel)
-    e_v_rel = FloatField(null=True, help_text=Glossary.e_v_rel)
-    bc = FloatField(null=True, help_text=Glossary.bc)
+    v_rad = FloatField(null=True)
+    v_rel = FloatField(null=True)
+    e_v_rel = FloatField(null=True)
+    bc = FloatField(null=True)
     
-    doppler_teff = FloatField(null=True, help_text=Glossary.teff)
-    doppler_e_teff = FloatField(null=True, help_text=Glossary.e_teff)
-    doppler_logg = FloatField(null=True, help_text=Glossary.logg)
-    doppler_e_logg = FloatField(null=True, help_text=Glossary.e_logg)
-    doppler_fe_h = FloatField(null=True, help_text=Glossary.fe_h)
-    doppler_e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
-    doppler_rchi2 = FloatField(null=True, help_text="Reduced chi-square value of DOPPLER fit")
-    doppler_flags = BitField(default=0, help_text="DOPPLER flags") 
+    doppler_teff = FloatField(null=True)
+    doppler_e_teff = FloatField(null=True)
+    doppler_logg = FloatField(null=True)
+    doppler_e_logg = FloatField(null=True)
+    doppler_fe_h = FloatField(null=True)
+    doppler_e_fe_h = FloatField(null=True)
+    doppler_rchi2 = FloatField(null=True)
+    doppler_flags = BitField(default=0)
     
     #> Radial Velocity (X-Correlation)
-    xcorr_v_rad = FloatField(null=True, help_text=Glossary.v_rad)
-    xcorr_v_rel = FloatField(null=True, help_text=Glossary.v_rel)
-    xcorr_e_v_rel = FloatField(null=True, help_text=Glossary.e_v_rel)
-    ccfwhm = FloatField(null=True, help_text=Glossary.ccfwhm)
-    autofwhm = FloatField(null=True, help_text=Glossary.autofwhm)
-    n_components = IntegerField(null=True, help_text=Glossary.n_components)    
+    xcorr_v_rad = FloatField(null=True)
+    xcorr_v_rel = FloatField(null=True)
+    xcorr_e_v_rel = FloatField(null=True)
+    ccfwhm = FloatField(null=True)
+    autofwhm = FloatField(null=True)
+    n_components = IntegerField(null=True)
 
     @hybrid_property
     def flag_bad(self):
@@ -309,7 +283,6 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         null=True, 
         index=True,
         column_name="source_pk",
-        help_text=Glossary.source_pk,
         backref="apogee_visit_spectra_in_apstar",
     )
 
@@ -319,7 +292,6 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         index=True,
         unique=True,
         lazy_load=False,
-        help_text=Glossary.spectrum_pk
     )
     drp_spectrum_pk = ForeignKeyField(
         ApogeeVisitSpectrum,
@@ -327,7 +299,6 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         unique=True,
         lazy_load=False,
         field=ApogeeVisitSpectrum.spectrum_pk,
-        help_text=Glossary.drp_spectrum_pk
     )    
 
     #> Spectral Data
@@ -338,43 +309,28 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
             cdelt=6e-6,
             naxis=8575,
         ),
-        help_text=Glossary.wavelength
     )
-    flux = PixelArray(
-        ext=1,
-        transform=transform,
-        help_text=Glossary.flux,
-    )
-    ivar = PixelArray(
-        ext=2,
-        transform=lambda *a, **k: _transform_err_to_ivar(transform(*a, **k)),
-        help_text=Glossary.ivar,
-    )
-    pixel_flags = PixelArray(
-        ext=3,
-        transform=transform,
-        help_text=Glossary.pixel_flags,
-    )
+    flux = PixelArray(ext=1, transform=transform)
+    ivar = PixelArray(ext=2, transform=lambda *a, **k: _transform_err_to_ivar(transform(*a, **k)))
+    pixel_flags = PixelArray(ext=3, transform=transform)
 
     #> Data Product Keywords
-    release = TextField(help_text=Glossary.release)
-    filetype = TextField(default="apStar", help_text=Glossary.filetype)
-    apred = TextField(help_text=Glossary.apred)
-    apstar = TextField(default="stars", help_text=Glossary.apstar)
-    obj = TextField(help_text=Glossary.obj)
-    telescope = TextField(help_text=Glossary.telescope)
+    release = TextField()
+    filetype = TextField(default="apStar")
+    apred = TextField()
+    apstar = TextField(default="stars")
+    obj = TextField()
+    telescope = TextField()
     # Healpix is only used in SDSS-V, and may not appear in this data product keywords group (since it appears in Source).
     # Here we repeat it because the APOGEE DRP has a habit of incorrectly computing healpix, so we need to store their version so that we can access paths.
-    healpix = IntegerField(null=True, help_text=Glossary.healpix)
+    healpix = IntegerField(null=True)
     # field is not used in SDSS-V, but we need a non-null default value otherwise postgres allows rows with same values in all other fields of an index
-    field = TextField(default="", null=False, help_text=Glossary.field) 
-    prefix = TextField(default="", null=False, help_text=Glossary.prefix) # not used in SDSS-V
-    plate = TextField(help_text=Glossary.plate)
-    mjd = IntegerField(help_text=Glossary.mjd)
-    fiber = IntegerField(help_text=Glossary.fiber)
-    reduction = TextField(null=True, default="", help_text=Glossary.reduction) # only used for DR17 apo1m spectra
-
-
+    field = TextField(default="", null=False)
+    prefix = TextField(default="", null=False)
+    plate = TextField()
+    mjd = IntegerField()
+    fiber = IntegerField()
+    reduction = TextField(null=True, default="")
 
     @property
     def path(self):
@@ -415,8 +371,6 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
             ),
         )
 
-            
-
 _transform = lambda x, *_: np.atleast_2d(x)[0]
 
 def _transform_coadded_spectrum(v, image, instance):
@@ -446,71 +400,69 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
         null=True, 
         index=True,
         column_name="source_pk",
-        help_text=Glossary.source_pk,
         backref="apogee_coadded_spectra_in_apstar",
     )
 
     #> Identifiers
-    star_pk = BigIntegerField(null=True, unique=True, help_text="APOGEE DRP `star` primary key")
+    star_pk = BigIntegerField(null=True, unique=True)
     spectrum_pk = ForeignKeyField(
         Spectrum,
         null=True,
         index=True,
         unique=True,
         lazy_load=False,
-        help_text=Glossary.spectrum_pk
     )
 
     #> Data Product Keywords
-    release = TextField(help_text=Glossary.release)
-    filetype = TextField(default="apStar", help_text=Glossary.filetype)
-    apred = TextField(help_text=Glossary.apred)
-    apstar = TextField(default="stars", help_text=Glossary.apstar)
-    obj = TextField(help_text=Glossary.obj)
-    telescope = TextField(help_text=Glossary.telescope)
-    healpix = IntegerField(null=True, help_text=Glossary.healpix) 
+    release = TextField()
+    filetype = TextField(default="apStar")
+    apred = TextField()
+    apstar = TextField(default="stars")
+    obj = TextField()
+    telescope = TextField()
+    healpix = IntegerField(null=True)
     # see comment earlier about nullables with field/prefix
-    field = TextField(null=False, default="", help_text=Glossary.field) # not used in SDSS-V
-    prefix = TextField(null=False, default="", help_text=Glossary.prefix) # not used in SDSS-V
+    field = TextField(null=False, default="")
+    prefix = TextField(null=False, default="")
 
     #> Observing Span
-    min_mjd = IntegerField(null=True, help_text="Minimum MJD of visits")
-    max_mjd = IntegerField(null=True, help_text="Maximum MJD of visits")
+    min_mjd = IntegerField(null=True)
+    max_mjd = IntegerField(null=True)
 
     #> Number and Quality of Visits
-    n_entries = IntegerField(null=True, help_text="apStar entries for this SDSS4_APOGEE_ID") # Only present in DR17
-    n_visits = IntegerField(null=True, help_text="Number of APOGEE visits")
-    n_good_visits = IntegerField(null=True, help_text="Number of 'good' APOGEE visits")
-    n_good_rvs = IntegerField(null=True, help_text="Number of 'good' APOGEE radial velocities")
+    n_entries = IntegerField(null=True)
+    n_visits = IntegerField(null=True)
+    n_good_visits = IntegerField(null=True)
+    n_good_rvs = IntegerField(null=True)
 
     #> Summary Statistics
-    snr = FloatField(null=True, help_text=Glossary.snr)
-    mean_fiber = FloatField(null=True, help_text="S/N-weighted mean visit fiber number")
-    std_fiber = FloatField(null=True, help_text="Standard deviation of visit fiber numbers")
-    spectrum_flags = BitField(default=0, help_text=Glossary.spectrum_flags)
+    snr = FloatField(null=True)
+    mean_fiber = FloatField(null=True)
+    std_fiber = FloatField(null=True)
+    spectrum_flags = BitField(default=0)
 
     #> Radial Velocity (Doppler)
-    v_rad = FloatField(null=True, help_text=Glossary.v_rad)
-    e_v_rad = FloatField(null=True, help_text=Glossary.e_v_rad)
-    std_v_rad = FloatField(null=True, help_text="Standard deviation of visit V_RAD [km/s]")
-    median_e_v_rad = FloatField(null=True, help_text=Glossary.median_e_v_rad) # Only in SDSS5
+    v_rad = FloatField(null=True)
+    e_v_rad = FloatField(null=True)
+    std_v_rad = FloatField(null=True)
+    median_e_v_rad = FloatField(null=True)
     
-    doppler_teff = FloatField(null=True, help_text=Glossary.teff)
-    doppler_e_teff = FloatField(null=True, help_text=Glossary.e_teff)
-    doppler_logg = FloatField(null=True, help_text=Glossary.logg)
-    doppler_e_logg = FloatField(null=True, help_text=Glossary.e_logg)
-    doppler_fe_h = FloatField(null=True, help_text=Glossary.fe_h)
-    doppler_e_fe_h = FloatField(null=True, help_text=Glossary.e_fe_h)
-    doppler_rchi2 = FloatField(null=True, help_text="Reduced chi-square value of DOPPLER fit")
-    doppler_flags = BitField(default=0, help_text="DOPPLER flags") # TODO: is this actually STARFLAG from the DRP?
+    doppler_teff = FloatField(null=True)
+    doppler_e_teff = FloatField(null=True)
+    doppler_logg = FloatField(null=True)
+    doppler_e_logg = FloatField(null=True)
+    doppler_fe_h = FloatField(null=True)
+    doppler_e_fe_h = FloatField(null=True)
+    doppler_rchi2 = FloatField(null=True)
+    doppler_flags = BitField(default=0)
 
     #> Radial Velocity (X-Correlation)
-    xcorr_v_rad = FloatField(null=True, help_text=Glossary.v_rad)
-    xcorr_v_rel = FloatField(null=True, help_text=Glossary.v_rel)
-    xcorr_e_v_rel = FloatField(null=True, help_text=Glossary.e_v_rel)
-    ccfwhm = FloatField(null=True, help_text=Glossary.ccfwhm)
-    autofwhm = FloatField(null=True, help_text=Glossary.autofwhm)
-    n_components = IntegerField(null=True, help_text=Glossary.n_components)    
+    xcorr_v_rad = FloatField(null=True)
+    xcorr_v_rel = FloatField(null=True)
+    xcorr_e_v_rel = FloatField(null=True)
+    ccfwhm = FloatField(null=True)
+    autofwhm = FloatField(null=True)
+    n_components = IntegerField(null=True)
 
     #> Spectral Data
     wavelength = PixelArray(
@@ -520,24 +472,10 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
             cdelt=6e-6,
             naxis=8575,
         ),
-        help_text=Glossary.wavelength
     )
-    flux = PixelArray(
-        ext=1,
-        transform=_transform_coadded_spectrum,
-        help_text=Glossary.flux
-    )
-    ivar = PixelArray(
-        ext=2,
-        transform=lambda *a, **k: _transform_err_to_ivar(_transform_coadded_spectrum(*a, **k)),
-        help_text=Glossary.ivar
-    )
-    pixel_flags = PixelArray(
-        ext=3,
-        transform=_transform_coadded_spectrum,
-        help_text=Glossary.pixel_flags
-    )
-
+    flux = PixelArray(ext=1, transform=_transform_coadded_spectrum)
+    ivar = PixelArray(ext=2, transform=lambda *a, **k: _transform_err_to_ivar(_transform_coadded_spectrum(*a, **k)))
+    pixel_flags = PixelArray(ext=3, transform=_transform_coadded_spectrum)
 
     @property
     def path(self):
