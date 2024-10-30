@@ -4,9 +4,8 @@ from astra.fields import (AutoField, DateTimeField, FloatField, TextField, Integ
 from astra.models.base import BaseModel
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
-from astra.models.pipeline import PipelineOutputMixin
 
-class Corv(BaseModel, PipelineOutputMixin):
+class Corv(BaseModel):
 
     """A result from the `corv` pipeline."""
 

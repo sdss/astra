@@ -12,9 +12,8 @@ from astra.fields import (
 from astra.models.base import BaseModel
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
-from astra.models.pipeline import PipelineOutputMixin
 
-class MDwarfType(BaseModel, PipelineOutputMixin):
+class MDwarfType(BaseModel):
 
     """M-dwarf type classifier."""
 

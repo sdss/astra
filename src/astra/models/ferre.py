@@ -16,7 +16,6 @@ from astra.fields import (
 )
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
-from astra.models.pipeline import PipelineOutputMixin
 from functools import cached_property
 
 from astra.pipelines.ferre.utils import (get_apogee_pixel_mask, parse_ferre_spectrum_name)
@@ -24,7 +23,7 @@ from astra.pipelines.ferre.utils import (get_apogee_pixel_mask, parse_ferre_spec
 APOGEE_FERRE_MASK = get_apogee_pixel_mask()
 
 
-class FerreOutputMixin(PipelineOutputMixin):
+class FerreOutputMixin(BaseModel):
         
     @cached_property
     def ferre_flux(self):

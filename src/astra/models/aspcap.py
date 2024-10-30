@@ -18,7 +18,6 @@ from astra.models.fields import BitField, PixelArray, BasePixelArrayAccessor, Lo
 from astra.models.ferre import FerreCoarse, FerreStellarParameters, FerreChemicalAbundances
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
-from astra.models.pipeline import PipelineOutputMixin
 from astra.glossary import Glossary
 from playhouse.hybrid import hybrid_property
 
@@ -85,7 +84,7 @@ class ChemicalAbundanceModelFluxArray(PixelArray):
         )
         
 
-class ASPCAP(BaseModel, PipelineOutputMixin):
+class ASPCAP(BaseModel):
 
     """ APOGEE Stellar Parameter and Chemical Abundances Pipeline (ASPCAP) """
     

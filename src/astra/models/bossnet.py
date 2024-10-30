@@ -7,9 +7,8 @@ from astra.fields import (AutoField, FloatField, TextField, ForeignKeyField, Bit
 from astra.models.base import BaseModel
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
-from astra.models.pipeline import PipelineOutputMixin
 
-class BossNet(BaseModel, PipelineOutputMixin):
+class BossNet(BaseModel):
 
     """A result from the BOSSNet pipeline."""
 

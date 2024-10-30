@@ -23,8 +23,8 @@ from inspect import getsource
 from playhouse.sqlite_ext import SqliteExtDatabase
 from sdsstools.configuration import get_config
 
+from astra.fields import BitField
 from astra.utils import log, get_config_paths, expand_path
-from astra.models.fields import BitField
 
 BLANK_CARD = (" ", " ", None)
 FILLER_CARD = (FILLER_CARD_KEY, *_) = ("TTYPE0", "Water cuggle", None)

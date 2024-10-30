@@ -7,9 +7,8 @@ from astra.fields import (
 )
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
-from astra.models.pipeline import PipelineOutputMixin
 
-class Clam(BaseModel, PipelineOutputMixin):
+class Clam(BaseModel):
 
     """A result from the Clam pipeline."""
 

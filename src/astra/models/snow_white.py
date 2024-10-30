@@ -14,7 +14,6 @@ from astra.models.base import BaseModel
 from astra.models.fields import BitField
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
-from astra.models.pipeline import PipelineOutputMixin
 from astra.models.fields import PixelArray, BitField, LogLambdaArrayAccessor
 from astra.models.fields import BitField, PixelArray, BasePixelArrayAccessor, LogLambdaArrayAccessor
 
@@ -57,7 +56,7 @@ class IntermediatePixelArray(PixelArray):
         )
 
 
-class SnowWhite(BaseModel, PipelineOutputMixin):
+class SnowWhite(BaseModel):
 
     """A result from the white-dwarf pipeline, affectionally known as Snow White."""
 

@@ -17,11 +17,10 @@ from astra.fields import (
 from astra.models.base import BaseModel
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
-from astra.models.pipeline import PipelineOutputMixin
 
 from astra.glossary import Glossary
 
-class ApogeeNet(BaseModel, PipelineOutputMixin):
+class ApogeeNet(BaseModel): 
 
     """A result from the APOGEENet (version 3) pipeline."""
 

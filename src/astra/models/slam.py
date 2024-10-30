@@ -19,7 +19,6 @@ from astra.models.base import BaseModel
 from astra.models.fields import BitField
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
-from astra.models.pipeline import PipelineOutputMixin
 
 from astra.glossary import Glossary
 

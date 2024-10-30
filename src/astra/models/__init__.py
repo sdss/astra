@@ -1,3 +1,4 @@
+"""
 from astra.models.apogeenet import ApogeeNet
 from astra.models.apogee import (
     ApogeeCoaddedSpectrumInApStar,
@@ -35,3 +36,4 @@ from astra.models.mwm import (
 )
 
 from astra.models.astronn_dist import AstroNNdist
+"""

@@ -6,10 +6,9 @@ from astra.fields import (AutoField, BitField, FloatField, TextField, ForeignKey
 from astra.models.base import BaseModel
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
-from astra.models.pipeline import PipelineOutputMixin
 from playhouse.hybrid import hybrid_property
 
-class AstroNN(BaseModel, PipelineOutputMixin):
+class AstroNN(BaseModel):
 
     """A result from the AstroNN pipeline."""
 

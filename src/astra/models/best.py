@@ -1,30 +1,18 @@
-from peewee import (
-    AutoField,
-    FloatField,
-    TextField,
-    ForeignKeyField,
-    IntegerField,
-    BigIntegerField,
-    BitField,
-    DateTimeField,
-    BooleanField,
-)
-
 import datetime
 import numpy as np
-
 from astra import __version__
 from astra.models.base import BaseModel
-from astra.models.fields import BitField, PixelArray, BasePixelArrayAccessor, LogLambdaArrayAccessor
-from astra.models.ferre import FerreCoarse, FerreStellarParameters, FerreChemicalAbundances
+from astra.fields import (
+    AutoField, FloatField, TextField, ForeignKeyField, IntegerField, BigIntegerField,
+    BitField, PixelArray, BasePixelArrayAccessor, LogLambdaArrayAccessor, DateTimeField,
+    BooleanField
+)
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
-from astra.models.pipeline import PipelineOutputMixin
-from astra.glossary import Glossary
 from playhouse.hybrid import hybrid_property
 
 
-class MWMBest(BaseModel, PipelineOutputMixin):
+class MWMBest(BaseModel):
 
     """The best of possibly many bad options."""
     
