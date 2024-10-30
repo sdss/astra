@@ -1,17 +1,16 @@
-from peewee import AutoField
-from astra.utils import log
-from astra.models.base import BaseModel
-from astra.models.fields import BitField
-from functools import cached_property
 import warnings
 import numpy as np
-
+from astra.fields import AutoField
+from astra.utils import log
+from astra.models.base import BaseModel
+from functools import cached_property
 
 
 class SpectrumMixin(object):
     
     @property
     def e_flux(self):
+        raise NotImplementedError("Use the e_flux to ivar")
         return self.ivar**-0.5        
     
 
@@ -118,12 +117,12 @@ class SpectrumMixin(object):
             fig.tight_layout()
             return fig
 
+
 class Spectrum(BaseModel, SpectrumMixin):
 
     """ A one dimensional spectrum. """
 
     pk = AutoField()
-    spectrum_type_flags = BitField(default=0)
 
     def resolve(self):
         for expression, field in self.dependencies():
