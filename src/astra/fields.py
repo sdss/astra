@@ -1,17 +1,22 @@
 import numpy as np
 import pickle
+import inspect
 from peewee import (
     AutoField as _AutoField,
-    IntegerField as _IntegerField,
-    FloatField as _FloatField,
-    BitField as _BitField,
+    BigBitField as _BigBitField,
     BigIntegerField as _BigIntegerField,
-    SmallIntegerField as _SmallIntegerField,
-    DateTimeField as _DateTimeField,
+    BitField as _BitField,
     BooleanField as _BooleanField,
+    DateTimeField as _DateTimeField,
+    FloatField as _FloatField,
+    ForeignKeyField as _ForeignKeyField,
+    IntegerField as _IntegerField,
+    SmallIntegerField as _SmallIntegerField,
+    TextField as _TextField,
     VirtualField,
     ColumnBase,
 )
+from playhouse.postgres_ext import ArrayField as _ArrayField
 import h5py
 from astropy.io import fits
 from astra.utils import expand_path
@@ -29,10 +34,28 @@ class GlossaryFieldMixin:
         if self.help_text is None:
             self.help_text = getattr(Glossary, self.name, None)
 
+class ArrayField(GlossaryFieldMixin, _ArrayField):
+    pass
+
 class AutoField(GlossaryFieldMixin, _AutoField):
     pass
 
+class BigBitField(GlossaryFieldMixin, _BigBitField):
+    pass
+
+class BigIntegerField(GlossaryFieldMixin, _BigIntegerField):
+    pass
+
+class BooleanField(GlossaryFieldMixin, _BooleanField):
+    pass
+
+class DateTimeField(GlossaryFieldMixin, _DateTimeField):
+    pass
+
 class FloatField(GlossaryFieldMixin, _FloatField):
+    pass
+
+class ForeignKeyField(GlossaryFieldMixin, _ForeignKeyField):
     pass
 
 class IntegerField(GlossaryFieldMixin, _IntegerField):
@@ -41,11 +64,9 @@ class IntegerField(GlossaryFieldMixin, _IntegerField):
 class SmallIntegerField(GlossaryFieldMixin, _SmallIntegerField):
     pass
 
-class DateTimeField(GlossaryFieldMixin, _DateTimeField):
+class TextField(GlossaryFieldMixin, _TextField):
     pass
 
-class BooleanField(GlossaryFieldMixin, _BooleanField):
-    pass
 
 class BitField(GlossaryFieldMixin, _BitField):
 
@@ -67,7 +88,17 @@ class BitField(GlossaryFieldMixin, _BitField):
             def __init__(self, field, value, help_text=None):
                 self._field = field
                 self._value = value
-                self.help_text = help_text                
+                if help_text is None:
+                    try:
+                        frame = inspect.currentframe()
+                        outer = inspect.getouterframes(frame)[2]
+                        flag_name, *_ = outer.code_context[0].split("=")
+                        flag_name = flag_name.strip()
+                        help_text = getattr(Glossary, flag_name, None)
+                    except:
+                        None
+                self.help_text = help_text 
+                
                 super(FlagDescriptor, self).__init__()
 
             def clear(self):
@@ -75,7 +106,7 @@ class BitField(GlossaryFieldMixin, _BitField):
 
             def set(self):
                 return self._field.bin_or(self._value)
-
+                
             def __get__(self, instance, instance_type=None):
                 if instance is None:
                     return self
@@ -94,7 +125,7 @@ class BitField(GlossaryFieldMixin, _BitField):
 
             def __sql__(self, ctx):
                 return ctx.sql(self._field.bin_and(self._value) != 0)
-            
+        
         return FlagDescriptor(self, value, help_text)
 
 
