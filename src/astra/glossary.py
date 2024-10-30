@@ -930,6 +930,13 @@ class Glossary(BaseGlossary):
     raw_e_fe_h = "Raw error on [Fe/H] [dex]"
 
 
+    # AstroNNdist:
+    A_k_mag = "Ks-band extinction"
+    L_fakemag = "Predicted (fake) Ks-band absolute luminosity, L_fakemag = 10^(1/5*M_Ks+2)"    
+    e_L_fakemag = "Prediected (fake) Ks-band absolute luminosity error"
+    dist = "Heliocentric distance [pc]"
+    e_dist = "Heliocentric distance error [pc]"
+
 def lower_first_letter(s):
     return f"{s[0].lower()}{s[1:]}"
 

@@ -1,62 +1,46 @@
-import numpy as np
 import datetime
-from peewee import (
-    AutoField,
-    FloatField,
-    TextField,
-    ForeignKeyField,
-    BitField,
-    DateTimeField
-)
-
+import numpy as np
 from astra import __version__
+from astra.fields import (AutoField, BitField, FloatField, TextField, ForeignKeyField, DateTimeField)
 from astra.models.base import BaseModel
-from astra.models.fields import BitField
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from astra.models.pipeline import PipelineOutputMixin
 from playhouse.hybrid import hybrid_property
-
-from astra.glossary import Glossary
 
 class AstroNNdist(BaseModel, PipelineOutputMixin):
 
     """A result from the AstroNN distance pipeline."""
 
     source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
-    spectrum_pk = ForeignKeyField(
-        Spectrum, 
-        index=True, 
-        lazy_load=False,
-        help_text=Glossary.spectrum_pk
-    )
+    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     
     #> Astra Metadata
-    task_pk = AutoField(help_text=Glossary.task_pk)
-    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
-    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
-    t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
-    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
-    tag = TextField(default="", index=True, help_text=Glossary.tag)
+    task_pk = AutoField()
+    v_astra = TextField(default=__version__)
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
+    t_elapsed = FloatField(null=True)
+    t_overhead = FloatField(null=True)
+    tag = TextField(default="", index=True)
 
     #> Stellar Labels
-    k_mag = FloatField(null=True, help_text="2MASS Ks-band apparent magnitude")
-    ebv = FloatField(null=True, help_text="E(B-V) reddening")
-    a_k_mag = FloatField(null=True, help_text="Ks-band extinction")
-    L_fakemag = FloatField(null=True, help_text="Predicted (fake) Ks-band absolute luminosity, L_fakemag = 10^(1/5*M_Ks+2)")
-    L_fakemag_err = FloatField(null=True, help_text="Prediected (fake) Ks-band absolute luminosity error")
-    dist = FloatField(null=True, help_text="Heliocentric distance [pc]")
-    dist_err = FloatField(null=True, help_text="Heliocentric distance error [pc]")
+    k_mag = FloatField(null=True)
+    ebv = FloatField(null=True)
+    A_k_mag = FloatField(null=True)
+    L_fakemag = FloatField(null=True)
+    e_L_fakemag = FloatField(null=True)
+    dist = FloatField(null=True)
+    e_dist = FloatField(null=True)
 
     #> Summary Statistics
-    result_flags = BitField(default=0, help_text=Glossary.result_flags)
+    result_flags = BitField(default=0)
 
     #> Flag definitions
     flag_fakemag_unreliable = result_flags.flag(2**0, help_text="Predicted (fake) Ks-band absolute luminosity is unreliable (fakemag_err / fakemag >= 0.2)")
     flag_missing_photometry = result_flags.flag(2**1, help_text="Missing Ks-band apparent magnitude")
     flag_missing_extinction = result_flags.flag(2**2, help_text="Missing extinction")
     flag_no_result = result_flags.flag(2**11, help_text="Exception raised when loading spectra")
-
 
     @hybrid_property
     def flag_bad(self):
@@ -85,6 +69,8 @@ class AstroNNdist(BaseModel, PipelineOutputMixin):
     class Meta:
         table_name = "astro_nn_dist"
 
+
+
     def apply_flags(self, meta=None, missing_photometry=False, missing_extinction=False):
         """
         Set flags for the pipeline outputs, given the metadata used.
@@ -106,3 +92,5 @@ class AstroNNdist(BaseModel, PipelineOutputMixin):
             self.flag_missing_extinction = True
             
         return None
+
+print("WARNING: TODO: apply_flags needs properly integrating for astronn_dist")
