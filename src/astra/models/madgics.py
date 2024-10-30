@@ -15,7 +15,7 @@ from tqdm import tqdm
 from astra.models.base import BaseModel
 from astra.models.source import Source
 from astra.models.spectrum import (Spectrum, SpectrumMixin)
-from astra.models.fields import PixelArray, PixelArrayAccessorHDF, BasePixelArrayAccessor, LogLambdaArrayAccessor
+from astra.fields import PixelArray, PixelArrayAccessorHDF, BasePixelArrayAccessor, LogLambdaArrayAccessor
 from astra.specutils.resampling import wave_to_pixel, sincint
 
 from astra.glossary import Glossary
