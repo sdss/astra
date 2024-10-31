@@ -8,21 +8,11 @@ from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from playhouse.hybrid import hybrid_property
 
-class AstroNN(BaseModel):
+from astra.models.pipeline import PipelineOutputModel
+
+class AstroNN(PipelineOutputModel):
 
     """A result from the AstroNN pipeline."""
-
-    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
-    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
-    
-    #> Astra Metadata
-    task_pk = AutoField()
-    v_astra = TextField(default=__version__)
-    created = DateTimeField(default=datetime.datetime.now)
-    modified = DateTimeField(default=datetime.datetime.now)
-    t_elapsed = FloatField(null=True)
-    t_overhead = FloatField(null=True)
-    tag = TextField(default="", index=True)
 
     #> Stellar Labels
     teff = FloatField(null=True)

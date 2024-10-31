@@ -5,19 +5,12 @@ from peewee import fn
 from astra.utils import expand_path
 from astra.fields import (
     BitField, PixelArray, BasePixelArrayAccessor, LogLambdaArrayAccessor,
-    AutoField,
     IntegerField,
     FloatField,
     TextField,
-    ForeignKeyField,
-    DateTimeField,
     BooleanField,
 )    
-from astra.models.base import BaseModel
-from astra.models.spectrum import Spectrum
-from astra.models.source import Source
-
-from astra import __version__
+from astra.models.pipeline import PipelineOutputModel
 from astra.utils import log, expand_path
 
 
@@ -66,7 +59,7 @@ class TheCannonPixelArray(PixelArray):
 # These two models are simply to link spectra to records in the database
 
 '''
-class TrainingSet(BaseModel):
+class TrainingSet(PipelineOutputModel):
 
     pk = AutoField()
     name = TextField(unique=True)
@@ -86,7 +79,7 @@ class TrainingSet(BaseModel):
         return expand_path(self.path)
 
 
-class TrainingSetSpectrum(BaseModel):
+class TrainingSetSpectrum(PipelineOutputModel):
 
     training_set_pk = ForeignKeyField(TrainingSet)
     spectrum_pk = ForeignKeyField(Spectrum)
@@ -94,25 +87,9 @@ class TrainingSetSpectrum(BaseModel):
 '''
 
 
-class TheCannon(BaseModel):
+class TheCannon(PipelineOutputModel):
 
     """Stellar labels estimated using The Cannon."""
-
-    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
-    spectrum_pk = ForeignKeyField(
-        Spectrum, 
-        index=True, 
-        lazy_load=False,
-    )
-    
-    #> Astra Metadata
-    task_pk = AutoField()
-    v_astra = TextField(default=__version__)
-    created = DateTimeField(default=datetime.datetime.now)
-    modified = DateTimeField(default=datetime.datetime.now)
-    t_elapsed = FloatField(null=True)
-    t_overhead = FloatField(null=True)
-    tag = TextField(default="", index=True)
     
     #> Stellar Labels
     teff = FloatField(default=np.nan)

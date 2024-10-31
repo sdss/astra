@@ -1,7 +1,6 @@
 import datetime
 import numpy as np
 from astra import __version__
-from astra.models.base import BaseModel
 from astra.fields import (
     AutoField, FloatField, TextField, ForeignKeyField, IntegerField, BigIntegerField,
     BitField, PixelArray, BasePixelArrayAccessor, LogLambdaArrayAccessor, DateTimeField,
@@ -10,23 +9,12 @@ from astra.fields import (
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
 from playhouse.hybrid import hybrid_property
+from astra.models.pipeline import PipelineOutputModel
 
-
-class MWMBest(BaseModel):
+class MWMBest(PipelineOutputModel):
 
     """The best of possibly many bad options."""
     
-    #> Identifiers
-    spectrum_pk = ForeignKeyField(Spectrum, index=True, unique=True, lazy_load=False, help_text=Glossary.spectrum_pk)    
-    source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
-    
-    #> Astra Metadata
-    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
-    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created)
-    modified = DateTimeField(default=datetime.datetime.now, help_text=Glossary.modified)
-    pipeline = TextField(help_text=Glossary.pipeline)
-    task_pk = BigIntegerField(help_text=Glossary.task_pk)
-
     #> Common Spectrum Path Fields
     release = TextField(help_text=Glossary.release)
     filetype = TextField(help_text=Glossary.filetype)

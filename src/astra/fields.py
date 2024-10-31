@@ -9,10 +9,10 @@ from peewee import (
     BooleanField as _BooleanField,
     DateTimeField as _DateTimeField,
     FloatField as _FloatField,
-    ForeignKeyField as _ForeignKeyField,
     IntegerField as _IntegerField,
     SmallIntegerField as _SmallIntegerField,
     TextField as _TextField,
+    ForeignKeyField,
     VirtualField,
     ColumnBase,
 )
@@ -53,9 +53,6 @@ class DateTimeField(GlossaryFieldMixin, _DateTimeField):
     pass
 
 class FloatField(GlossaryFieldMixin, _FloatField):
-    pass
-
-class ForeignKeyField(GlossaryFieldMixin, _ForeignKeyField):
     pass
 
 class IntegerField(GlossaryFieldMixin, _IntegerField):

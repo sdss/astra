@@ -1,22 +1,15 @@
-import datetime
 from astropy.io import fits
-from astra import __version__
 from astra.utils import expand_path
-from astra.models.base import BaseModel
 from astra.fields import (
     BitField,
-    AutoField,
     ArrayField,
     FloatField,
     TextField,
-    ForeignKeyField,
     IntegerField,
-    DateTimeField,
     PixelArray, BitField, LogLambdaArrayAccessor,
     BasePixelArrayAccessor
 )    
-from astra.models.source import Source
-from astra.models.spectrum import Spectrum
+from astra.models.pipeline import PipelineOutputModel
 
 class IntermediatePixelArrayAccessor(BasePixelArrayAccessor):
     
@@ -53,25 +46,9 @@ class IntermediatePixelArray(PixelArray):
         )
 
 
-class SnowWhite(BaseModel):
+class SnowWhite(PipelineOutputModel):
 
     """A result from the white-dwarf pipeline, affectionally known as Snow White."""
-
-    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
-    spectrum_pk = ForeignKeyField(
-        Spectrum, 
-        index=True, 
-        lazy_load=False,
-    )
-    
-    #> Astra Metadata
-    task_pk = AutoField()
-    v_astra = TextField(default=__version__)
-    created = DateTimeField(default=datetime.datetime.now)
-    modified = DateTimeField(default=datetime.datetime.now)
-    t_elapsed = FloatField(null=True)
-    t_overhead = FloatField(null=True)
-    tag = TextField(default="", index=True)
 
     #> Classification Probabilities
     classification = TextField(null=True)

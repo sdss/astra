@@ -2,7 +2,6 @@
 import datetime
 import numpy as np
 from astra import __version__
-from astra.models.base import BaseModel
 from astra.fields import (
     AutoField,
     BitField,
@@ -19,11 +18,12 @@ from astra.models.spectrum import Spectrum
 from functools import cached_property
 
 from astra.pipelines.ferre.utils import (get_apogee_pixel_mask, parse_ferre_spectrum_name)
+from astra.models.pipeline import PipelineOutputModel
 
 APOGEE_FERRE_MASK = get_apogee_pixel_mask()
 
 
-class FerreOutputMixin(BaseModel):
+class FerreOutputMixin:
         
     @cached_property
     def ferre_flux(self):
@@ -113,19 +113,7 @@ class FerreOutputMixin(BaseModel):
         return array
 
 
-class FerreCoarse(BaseModel, FerreOutputMixin):
-
-    source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
-    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
-    
-    #> Astra Metadata
-    task_pk = AutoField()
-    v_astra = TextField(default=__version__)
-    created = DateTimeField(default=datetime.datetime.now)
-    modified = DateTimeField(default=datetime.datetime.now)
-    t_elapsed = FloatField(null=True)
-    t_overhead = FloatField(null=True)
-    tag = TextField(default="", index=True)
+class FerreCoarse(PipelineOutputModel, FerreOutputMixin):
 
     #> Grid and Working Directory
     pwd = TextField(default="")
@@ -243,7 +231,7 @@ class FerreCoarse(BaseModel, FerreOutputMixin):
         )  
     '''          
 
-class FerreStellarParameters(BaseModel, FerreOutputMixin):
+class FerreStellarParameters(PipelineOutputModel, FerreOutputMixin):
 
     source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
     spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
@@ -375,7 +363,7 @@ class FerreStellarParameters(BaseModel, FerreOutputMixin):
     '''
 
 
-class FerreChemicalAbundances(BaseModel, FerreOutputMixin):
+class FerreChemicalAbundances(PipelineOutputModel, FerreOutputMixin):
 
     # We need to ovverride these from the FerreOutputMixin class because the `flux` and `e_flux`
     # arrays are in the parent directory.

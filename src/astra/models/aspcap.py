@@ -1,20 +1,16 @@
-from peewee import (
+import datetime
+import numpy as np
+from astra.fields import (
+    BitField, PixelArray, BasePixelArrayAccessor, LogLambdaArrayAccessor,
     AutoField,
     FloatField,
     TextField,
     ForeignKeyField,
     IntegerField,
-    BitField,
     DateTimeField,
-    BooleanField,
+    BooleanField,    
 )
-
-import datetime
-import numpy as np
-
-from astra import __version__
-from astra.models.base import BaseModel
-from astra.models.fields import BitField, PixelArray, BasePixelArrayAccessor, LogLambdaArrayAccessor
+from astra.models.pipeline import PipelineOutputModel
 from astra.models.ferre import FerreCoarse, FerreStellarParameters, FerreChemicalAbundances
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
@@ -84,21 +80,9 @@ class ChemicalAbundanceModelFluxArray(PixelArray):
         )
         
 
-class ASPCAP(BaseModel):
+class ASPCAP(PipelineOutputModel):
 
     """ APOGEE Stellar Parameter and Chemical Abundances Pipeline (ASPCAP) """
-    
-    #> Identifiers
-    spectrum_pk = ForeignKeyField(Spectrum, index=True, unique=True, lazy_load=False, help_text=Glossary.spectrum_pk)    
-    source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
-    
-    #> Astra Metadata
-    task_pk = AutoField(help_text=Glossary.task_pk)
-    v_astra = TextField(default=__version__, help_text=Glossary.v_astra)
-    created = DateTimeField(default=datetime.datetime.now, help_text=Glossary.created) 
-    t_elapsed = FloatField(null=True, help_text=Glossary.t_elapsed)
-    t_overhead = FloatField(null=True, help_text=Glossary.t_overhead)
-    tag = TextField(default="", index=True, help_text=Glossary.tag)
     
     #> Spectral Data
     wavelength = PixelArray(
@@ -108,7 +92,6 @@ class ASPCAP(BaseModel):
             cdelt=6e-6,
             naxis=8575,
         ),
-        help_text=Glossary.wavelength
     )    
     model_flux = PixelArray(
         accessor_class=StellarParameterPixelAccessor, 

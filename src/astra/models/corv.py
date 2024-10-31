@@ -1,11 +1,11 @@
 import datetime
 from astra import __version__
 from astra.fields import (AutoField, DateTimeField, FloatField, TextField, IntegerField, ForeignKeyField)
-from astra.models.base import BaseModel
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum
+from astra.models.pipeline import PipelineOutputModel
 
-class Corv(BaseModel):
+class Corv(PipelineOutputModel):
 
     """A result from the `corv` pipeline."""
 

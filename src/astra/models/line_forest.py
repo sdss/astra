@@ -1,35 +1,9 @@
-from peewee import (
-    AutoField,
-    FloatField,
-    TextField,
-    ForeignKeyField,
-    DateTimeField
-)
-import datetime
-from playhouse.postgres_ext import ArrayField
+from astra.fields import ArrayField, FloatField
+from astra.models.pipeline import PipelineOutputModel
 
-from astra import __version__
-from astra.glossary import Glossary
-from astra.models.base import BaseModel
-from astra.models.source import Source
-from astra.models.spectrum import Spectrum
-
-
-class LineForest(BaseModel):
+class LineForest(PipelineOutputModel):
 
     """A result from the LineForest pipeline."""
-
-    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False)
-    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
-    
-    #> Astra Metadata
-    task_pk = AutoField()
-    v_astra = TextField(default=__version__)
-    created = DateTimeField(default=datetime.datetime.now)
-    modified = DateTimeField(default=datetime.datetime.now)
-    t_elapsed = FloatField(null=True)
-    t_overhead = FloatField(null=True)
-    tag = TextField(default="", index=True)
     
     #> H-alpha (6562.8 +/- 200A)
     eqw_h_alpha = FloatField(null=True)
