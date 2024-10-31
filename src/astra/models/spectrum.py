@@ -128,18 +128,19 @@ class Spectrum(BaseModel, SpectrumMixin):
 
 
     def resolve(self):
-        for expression, field in self.dependencies():
-            if SpectrumMixin not in field.model.__mro__:
-                continue
-            try:
-                q = field.model.select().where(expression)
-            except:
-                continue
-            else:
-                if q.exists():
-                    return q.first()
-                
-        raise self.model.DoesNotExist(f"Cannot resolve spectrum with identifier {self.pk}")
+        try:
+            for expression, field in self.dependencies():
+                if SpectrumMixin not in field.model.__mro__:
+                    continue
+                try:
+                    q = field.model.select().where(expression)
+                except:
+                    continue
+                else:
+                    if q.exists():
+                        return q.first()
+        except:    
+            raise self.model.DoesNotExist(f"Cannot resolve spectrum with identifier {self.pk}")
 
     @cached_property
     def ref(self):
@@ -150,5 +151,5 @@ class Spectrum(BaseModel, SpectrumMixin):
         return getattr(self.ref, attr)
     
     def __repr__(self):
-        return f"<Spectrum pointer -> ({self.ref.__repr__().strip('<>')})>"
+        return f"<Spectrum pk={self.pk} -> ({self.ref.__repr__().strip('<>')})>"
     

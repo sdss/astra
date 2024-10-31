@@ -27,3 +27,11 @@ class PipelineOutputModel(BaseModel):
         constraints = [
             SQL("UNIQUE (spectrum_pk, v_astra_major_minor)")
         ]
+
+    @classmethod
+    def from_spectrum(cls, spectrum, **kwargs):
+        return cls(
+            spectrum_pk=spectrum.spectrum_pk,
+            source_pk=spectrum.source_pk,
+            **kwargs
+        )
