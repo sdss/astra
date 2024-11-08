@@ -5,7 +5,31 @@ import inspect
 
 from importlib import import_module
 from time import time
+import contextlib
+import sys
+from io import StringIO
 
+@contextlib.contextmanager
+def silenced(no_stdout=True, no_stderr=True):
+    """
+    Suppresses output to stdout and/or stderr.
+    Always resets stdout and stderr, even on an exception.
+    Usage:
+        with silenced(): print("This doesn't print")
+    Modified from post by Alex Martelli in https://stackoverflow.com/questions/2828953/silence-the-stdout-of-a-function-in-python-without-trashing-sys-stdout-and-resto/2829036#2829036
+    which is licensed under CC BY-SA 3.0 https://creativecommons.org/licenses/by-sa/3.0/
+    """
+    if no_stdout:
+        save_stdout = sys.stdout
+        sys.stdout = StringIO()
+    if no_stderr:
+        save_stderr = sys.stderr
+        sys.stderr = StringIO()
+    yield
+    if no_stdout:
+        sys.stdout = save_stdout
+    if no_stderr:
+        sys.stderr = save_stderr
 
 def version_integer_to_string(version_integer):
     parts, v = ([], 0 + version_integer)
@@ -41,7 +65,32 @@ def expects_spectrum_types(fun):
         spectrum_types = annotation.__args__[0].__args__
     except:
         raise RuntimeError(f"Could not parse expected spectrum types from the function signature of {fun}")
+    
+    return spectrum_types
 
+def get_return_type(fun):
+    try:
+        return inspect.getfullargspec(fun).annotations["return"].__args__[0]
+    except:
+        raise ValueError(f"Cannot infer output model for task {fun}, is it missing a type annotation?")
+
+
+
+def resolve_task(task_str):
+    for prefix in ("", "astra.", "astra.pipelines.", f"astra.pipelines.{task_str}."):
+        try:
+            resolved_task = f"{prefix}{task_str}"
+            f = callable(resolved_task)
+        except:
+            None
+        else:
+            #if prefix:
+            #    log.info(f"Resolved '{task}' -> '{resolved_task}'")
+            break
+    else:
+        # Raise exception on the no-prefix case.
+        f = callable(task_str)    
+    return f
 
 def executable(name):
     module_name, class_name = name.rsplit(".", 1)
@@ -208,6 +257,9 @@ def expand_path(path):
         A short-hand path to expand.
     """
     return os.path.expandvars(os.path.expanduser(path))
+
+def dict_to_iterable(DL):
+    return (dict(zip(DL, t)) for t in zip(*DL.values()))
 
 
 def dict_to_list(DL):

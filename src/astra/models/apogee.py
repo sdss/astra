@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import datetime
 from peewee import DeferredForeignKey, fn
 from playhouse.hybrid import hybrid_property
 from astra.fields import (
@@ -94,7 +95,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         index=True,
         unique=True,
         lazy_load=False,
-#        )
+        column_name="spectrum_pk"
     )
     # Won't appear in a header group because it is first referenced in `Source`.
     source = ForeignKeyField(
@@ -107,6 +108,9 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
         column_name="source_pk",
         backref="apogee_visit_spectra",
     )
+
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
         
     catalogid = BigIntegerField(index=True, null=True)
     star_pk = BigIntegerField(null=True, unique=False) # Note: unique = False
@@ -292,6 +296,7 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         index=True,
         unique=True,
         lazy_load=False,
+        column_name="spectrum_pk"
     )
     drp_spectrum_pk = ForeignKeyField(
         ApogeeVisitSpectrum,
@@ -299,7 +304,11 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         unique=True,
         lazy_load=False,
         field=ApogeeVisitSpectrum.spectrum_pk,
+        column_name="drp_spectrum_pk"
     )    
+
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
 
     #> Spectral Data
     wavelength = PixelArray(
@@ -402,6 +411,10 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
         column_name="source_pk",
         backref="apogee_coadded_spectra_in_apstar",
     )
+    
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
+
 
     #> Identifiers
     star_pk = BigIntegerField(null=True, unique=True)
@@ -411,6 +424,7 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
         index=True,
         unique=True,
         lazy_load=False,
+        column_name="spectrum_pk"
     )
 
     #> Data Product Keywords

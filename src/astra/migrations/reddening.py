@@ -1,13 +1,13 @@
 import numpy as np
 import os
-from astra.utils import log, expand_path
+from astra.utils import log, expand_path, silenced
 from astra.models.source import Source
 from peewee import chunked
 from astropy.coordinates import SkyCoord
 from astropy import units as u
 from tqdm import tqdm
 from functools import cache
-
+from astra.migrations.utils import NoQueue
 
 # dust-maps data directory: $MWM_ASTRA/aux/dust-maps/
 from dustmaps.sfd import SFDQuery
@@ -164,27 +164,30 @@ def _update_reddening_on_source(source, sfd, edenhofer2023, bayestar2019, raise_
 
 @cache
 def load_maps():
-    sfd = SFDQuery()
-    edenhofer2023 = Edenhofer2023Query(load_samples=True, integrated=True)
-    bayestar2019 = BayestarQuery()
+    with silenced():
+        sfd = SFDQuery()
+        edenhofer2023 = Edenhofer2023Query(load_samples=True, integrated=True)
+        bayestar2019 = BayestarQuery()
     return (sfd, edenhofer2023, bayestar2019)    
 
-def _reddening_worker(sources):
 
-    maps = load_maps()
-
-    updated = []
-    for source in sources:
-        s = _update_reddening_on_source(source, *maps)
-        if s is not None:
-            updated.append(s)
-    return updated
         
 
-def update_reddening(where=Source.ebv.is_null(), batch_size=1000, max_workers: int = 16):
+def update_reddening(
+    where=(
+        Source.ebv.is_null()
+    &   Source.ra.is_null(False)
+    &   Source.dec.is_null(False)
+    ),
+    batch_size=1000, 
+    max_workers: int = 16, 
+    queue=None
+):
     """
     Update reddening estimates for sources.
     """
+    if queue is None:
+        queue = NoQueue()
     
     maps = load_maps()
     
@@ -192,8 +195,7 @@ def update_reddening(where=Source.ebv.is_null(), batch_size=1000, max_workers: i
     # Fix any problem children first:
     # TODO: mag4_5 uses 99.999 as a BAD value. set to NaNs.
     _fix_rjce_glimpse(*maps)
-    
-    
+        
     q = (
         Source
         .select()
@@ -218,10 +220,10 @@ def update_reddening(where=Source.ebv.is_null(), batch_size=1000, max_workers: i
         Source.e_ebv,
         Source.ebv_flags,
     ]
-    
 
-    with tqdm(total=len(q)) as pb:
-            
+    queue.put(dict(total=q.count()))
+    
+    with silenced(): # Lots of healpix CC errors for invalid theta values
         for chunk in chunked(q, batch_size):
             updated = []
             for source in chunk:
@@ -232,10 +234,9 @@ def update_reddening(where=Source.ebv.is_null(), batch_size=1000, max_workers: i
             if len(updated) > 0:
                 Source.bulk_update(updated, fields)
             
-            pb.update(batch_size)
-            
+            queue.put(dict(advance=len(updated)))
     
-
+    queue.put(Ellipsis)
     """
     executor = concurrent.futures.ProcessPoolExecutor(max_workers)
     
@@ -292,19 +293,15 @@ def setup_dustmaps(data_dir="$MWM_ASTRA/aux/dust-maps"):
     from dustmaps.config import config
     from dustmaps import sfd, bayestar, edenhofer2023
 
-    config.reset()
+    with silenced():
+        config.reset()
 
-    config["data_dir"] = expand_path(data_dir)
+        config["data_dir"] = expand_path(data_dir)
 
-    os.makedirs(expand_path(data_dir), exist_ok=True)
+        os.makedirs(expand_path(data_dir), exist_ok=True)
 
-    log.info(f"Set dust map directory to {config['data_dir']}")
+        sfd.fetch()
 
-    log.info(f"Downloading SFD")
-    sfd.fetch()
+        bayestar.fetch()
 
-    log.info(f"Downloading Bayestar")
-    bayestar.fetch()
-
-    log.info(f"Downloading Edenhofer et al. (2023)")
-    edenhofer2023.fetch(fetch_samples=True)
+        edenhofer2023.fetch(fetch_samples=True)

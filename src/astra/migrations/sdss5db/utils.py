@@ -5,7 +5,7 @@ def get_profile():
         profile = config["migrations"]["sdss5db"]["profile"]
     except:
         profile = "pipelines"
-        log.warn(f"No `profile` found in Astra's config `migrations.sdss5db.profile`. Using '{profile}' profile.")
+        #log.warn(f"No `profile` found in Astra's config `migrations.sdss5db.profile`. Using '{profile}' profile.")
     return profile
 
 

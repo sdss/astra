@@ -1,4 +1,5 @@
 from typing import Optional
+from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
 from tqdm import tqdm
@@ -6,7 +7,7 @@ import numpy as np
 import subprocess
 import concurrent.futures
 
-from astra.utils import log, expand_path
+from astra.utils import log, expand_path, dict_to_iterable
 from astra.models.base import database
 from astra.models.boss import BossVisitSpectrum
 from astra.models.source import Source
@@ -19,6 +20,289 @@ from peewee import (
     FloatField,
     IntegerField
 )
+
+
+
+
+def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000):
+    """
+    Migrate all new BOSS visit information (`specFull` files) stored in the spAll file, which is generated
+    by the SDSS-V BOSS data reduction pipeline.
+    """
+
+    #path = expand_path(f"$BOSS_SPECTRO_REDUX/{run2d}/spAll-{run2d}.fits")
+    #if gzip:
+    #    path += ".gz"
+    #print("USING CUSTOM PATH")
+    path = "spAll-v6_1_3.fits"
+
+
+
+    #spAll = Table.read(expand_path(path))
+    #spAll.sort(["CATALOGID"])
+
+    #if limit is not None:
+    #    spAll = spAll[:limit]
+
+
+    from astra.migrations.sdss5db.catalogdb import (
+        Catalog,
+        CatalogToGaia_DR2,
+        CatalogToGaia_DR3,
+        CatalogdbModel
+    )
+
+    class SDSS_ID_Flat(CatalogdbModel):
+        class Meta:
+            table_name = "sdss_id_flat"
+            
+    class SDSS_ID_Stacked(CatalogdbModel):
+        class Meta:
+            table_name = "sdss_id_stacked"
+
+
+    translations = {
+        "NEXP": "n_exp",
+        "XCSAO_RV": "xcsao_v_rad",
+        "XCSAO_ERV": "xcsao_e_v_rad",
+        "XCSAO_RXC": "xcsao_rxc",
+        "XCSAO_TEFF": "xcsao_teff",
+        "XCSAO_ETEFF": "xcsao_e_teff",
+        "XCSAO_LOGG": "xcsao_logg",
+        "XCSAO_ELOGG": "xcsao_e_logg",
+        "XCSAO_FEH": "xcsao_fe_h",
+        "XCSAO_EFEH": "xcsao_e_fe_h",
+        "ZWARNING": "zwarning_flags",
+        "GRI_GAIA_TRANSFORM": "gri_gaia_transform_flags",
+        "EXPTIME": "exptime",
+
+        "AIRMASS": "airmass",
+        "SEEING50": "seeing",
+    
+        "OBS": "telescope",
+        "MOON_DIST": "moon_dist_mean",
+        "MOON_PHASE": "moon_phase_mean",
+
+        "FIELD": "fieldid",
+        "MJD": "mjd",
+        "CATALOGID": "catalogid",
+        "HEALPIX": "healpix",
+        "DELTA_RA_LIST": "delta_ra",
+        "DELTA_DEC_LIST": "delta_dec",
+        "SN_MEDIAN_ALL": "snr",
+
+        # Some additional identifiers that we don't necessarily need, but will take for now
+        "CATALOGID_V0": "catalogid_v0",
+        "CATALOGID_V0P5": "catalogid_v0p5",
+        "SDSS_ID": "sdss_id",
+        "GAIA_ID": "gaia_dr2_source_id",
+        "FIRSTCARTON": "carton_0"
+    }
+    source_keys_only = ("catalogid_v0", "catalogid_v0p5", "sdss_id", "gaia_dr2_source_id", "carton_0") 
+    transformations = {
+        "telescope": lambda x: f"{x.lower()}25m",
+        "moon_dist_mean": lambda x: np.mean(tuple(map(float, x.split()))),
+        "moon_phase_mean": lambda x: np.mean(tuple(map(float, x.split()))),
+        "delta_ra": lambda x: np.array(x.split(), dtype=float),
+        "delta_dec": lambda x: np.array(x.split(), dtype=float),        
+    }
+
+    #with fits.open(path) as hdul:
+    #queue.put(dict(de))
+    hdul = fits.open(path)
+    spAll = hdul[1].data
+    if limit is not None:
+        spAll = spAll[:limit]
+
+    total = len(spAll)
+    queue.put(dict(total=len(translations), description=f"Parsing BOSS {run2d} metadata"))
+
+    spectrum_data_dicts = dict(
+        release=["sdss5"] * total,
+        run2d=[run2d] * total,
+        filetype=["specFull"] * total,
+    )
+    for from_key, to_key in translations.items(): 
+        queue.put(dict(advance=1, description=f"Parsing BOSS {run2d} {to_key}"))
+        spectrum_data_dicts[to_key] = spAll[from_key]
+    
+    queue.put(dict(description=f"Transforming BOSS {run2d} metadata", total=len(transformations), completed=0))
+    for key, fun in transformations.items():
+        queue.put(dict(advance=1, description=f"Transforming BOSS {run2d} {key}")) 
+        spectrum_data_dicts[key] = list(map(fun, spectrum_data_dicts[key]))
+    
+    spectrum_data_dicts["fiber_offset"] = [np.any((np.abs(ra) + np.abs(dec)) > 0) for ra, dec in zip(spectrum_data_dicts["delta_ra"], spectrum_data_dicts["delta_dec"])]
+
+    queue.put(dict(description=f"Converting BOSS {run2d} data types", total=None, completed=0))
+
+    spectrum_data = dict_to_iterable(spectrum_data_dicts)
+
+    """
+    spectrum_data = []
+    for i, row in enumerate(spAll):
+
+        row_data = dict(zip(row.keys(), row.values()))
+        
+        sanitised_row_data = {
+            "release": "sdss5",
+            "run2d": run2d,
+            "filetype": "specFull",
+        }
+        for from_key, to in translations.items():
+            if isinstance(to, str):
+                sanitised_row_data[to] = row_data[from_key]
+            else:
+                to_key, to_callable = to
+                sanitised_row_data[to_key] = to_callable(row_data[from_key])
+        
+        offset = np.abs(sanitised_row_data["delta_ra"]) + np.abs(sanitised_row_data["delta_dec"])
+        sanitised_row_data["fiber_offset"] = np.any(offset > 0)
+        spectrum_data.append(sanitised_row_data)
+        queue.put({"advance": 1})
+    """
+
+    # We need to get sdss_id and catalog information for each source.
+    source_data = {}
+    queue.put(dict(description=f"Linking BOSS {run2d} spectra to catalog", total=total, completed=0))
+    for chunk in chunked(spectrum_data, batch_size):
+        chunk_catalogids = []
+        gaia_dr2_source_id_given_catalogid = {}
+        for row in chunk:
+            for key in ("catalogid", "catalogid_v0", "catalogid_v0p5"):
+                try:
+                    if np.all(row[key].mask):
+                        continue
+                except:
+                    chunk_catalogids.append(row[key])
+                    gaia_dr2_source_id_given_catalogid[row[key]] = row["gaia_dr2_source_id"]
+
+        q = (
+            Catalog
+            .select(
+                Catalog.ra,
+                Catalog.dec,
+                Catalog.catalogid,
+                Catalog.version_id.alias("version_id"),
+                Catalog.lead,
+                CatalogToGaia_DR3.target.alias("gaia_dr3_source_id"),
+                SDSS_ID_Flat.sdss_id,
+                SDSS_ID_Flat.n_associated,
+                SDSS_ID_Stacked.catalogid21,
+                SDSS_ID_Stacked.catalogid25,
+                SDSS_ID_Stacked.catalogid31,
+            )
+            .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(Catalog.catalogid == SDSS_ID_Flat.catalogid))
+            .join(SDSS_ID_Stacked, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
+            .join(CatalogToGaia_DR3, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.catalogid31 == CatalogToGaia_DR3.catalog))
+            .where(Catalog.catalogid.in_(chunk_catalogids))
+            .dicts()
+        )
+                
+        reference_key = "catalogid"
+        for row in q:
+            if row[reference_key] in source_data:
+                for key, value in row.items():
+                    if source_data[row[reference_key]][key] is None and value is not None:
+                        if key == "sdss_id":
+                            source_data[row[reference_key]][key] = min(source_data[row[reference_key]][key], value)
+                        else:
+                            source_data[row[reference_key]][key] = value
+                continue
+
+            source_data[row[reference_key]] = row
+            gaia_dr2_source_id = gaia_dr2_source_id_given_catalogid[row[reference_key]]
+            if gaia_dr2_source_id < 0:
+                gaia_dr2_source_id = None
+            source_data[row[reference_key]]["gaia_dr2_source_id"] = gaia_dr2_source_id
+        
+        queue.put({"advance": batch_size})
+
+    # Upsert the sources
+    with database.atomic():
+        queue.put(dict(description=f"Upserting BOSS {run2d} sources", total=len(source_data), completed=0))
+        for chunk in chunked(source_data.values(), batch_size):
+            (
+                Source
+                .insert_many(chunk)
+                .on_conflict_ignore()
+                .execute()
+            )
+            queue.put(dict(advance=min(batch_size, len(chunk))))
+
+    q = (
+        Source
+        .select(
+            Source.pk,
+            Source.catalogid,
+            Source.catalogid21,
+            Source.catalogid25,
+            Source.catalogid31
+        )
+        .tuples()
+    )
+    queue.put(dict(description=f"Querying source primary keys for BOSS {run2d} spectra", total=q.count(), completed=0))
+    source_pk_by_catalogid = {}
+    for pk, *catalogids in q.iterator():
+        for catalogid in catalogids:
+            source_pk_by_catalogid[catalogid] = pk
+        queue.put(dict(advance=1))
+    
+    n_warnings = 0
+    for each in spectrum_data:
+        try:
+            each["source_pk"] = source_pk_by_catalogid[each["catalogid"]]
+        except:
+            # log warning?
+            n_warnings += 1
+        finally:
+            for source_key_only in source_keys_only:
+                each.pop(source_key_only, None)
+
+            try:
+                # Missing catalogid!
+                if np.all(each["catalogid"].mask):
+                    each["catalogid"] = -1 # cannot be null
+            except:
+                None
+
+
+    if n_warnings > 0:
+        log.warning(f"There were {n_warnings} spectra with no source_pk, probably because of missing or fake catalogids")
+    
+    pks = upsert_many(
+        BossVisitSpectrum,
+        BossVisitSpectrum.pk,
+        spectrum_data,
+        batch_size,
+        queue,
+        f"Upserting BOSS {run2d} spectra"
+    )
+
+    # Assign spectrum_pk values to any spectra missing it.
+    N = len(pks)
+    if pks:
+        queue.update(dict(description=f"Assigning primary keys to BOSS {run2d} spectra", total=N, completed=0))
+        N_assigned = 0
+        for batch in chunked(pks, batch_size):
+            B = (
+                BossVisitSpectrum
+                .update(
+                    spectrum_pk=Case(None, (
+                        (BossVisitSpectrum.pk == pk, spectrum_pk) for spectrum_pk, pk in enumerate_new_spectrum_pks(batch)
+                    ))
+                )
+                .where(BossVisitSpectrum.pk.in_(batch))
+                .execute()
+            )
+            queue.update(dict(advance=B))
+            N_assigned += B
+        log.info(f"There were {N} spectra inserted and we assigned {N_assigned} spectra with new spectrum_pk values")
+    else:
+        log.info(f"No new spectra inserted")
+    
+    queue.put(Ellipsis)
+    return None
+
 
 def migrate_spectra_from_spall_file(
     run2d: Optional[str] = "v6_1_1",
@@ -235,7 +519,8 @@ def migrate_spectra_from_spall_file(
         BossVisitSpectrum.pk,
         spectrum_data,
         batch_size,
-        desc="Upserting spectra"
+        queue,
+        "Upserting spectra"
     )
 
     # Assign spectrum_pk values to any spectra missing it.
