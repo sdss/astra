@@ -179,6 +179,8 @@ def generate_queries_for_task(task, input_model=None, limit=None, page=None):
     input_models = expects_spectrum_types(fun) if input_model is None else (resolve_model(input_model), )
     output_model = get_return_type(fun)
     group_by_string = get_task_group_by_string(fun)
+    
+    print(input_models)
     for input_model in input_models:
         where = (
             output_model.spectrum_pk.is_null()
@@ -197,6 +199,16 @@ def generate_queries_for_task(task, input_model=None, limit=None, page=None):
             .join(output_model, JOIN.LEFT_OUTER, on=on)
             .where(where)
         )
+        if group_by_string is not None:
+            group_by_resolved = []
+            for item in eval(group_by_string):
+                if isinstance(item, str):
+                    group_by_resolved.append(getattr(input_model, item))
+                else:
+                    group_by_resolved.append(item)
+            
+            q = q.group_by(*group_by_resolved)
+
         if limit is not None:
             if page is not None:
                 q = q.paginate(page, limit)
