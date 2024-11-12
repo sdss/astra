@@ -22,6 +22,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
         index=True,
         unique=True,
         lazy_load=False,
+        column_name="spectrum_pk"
     )
     source = ForeignKeyField(
         Source,
@@ -30,6 +31,9 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
         column_name="source_pk",
         backref="boss_visit_spectra"
     )    
+
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
 
     #> Spectral data
     wavelength = PixelArray(

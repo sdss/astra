@@ -10,6 +10,7 @@ from peewee import (
     DeferredForeignKey,
     fn,
 )
+import datetime
 import numpy as np
 from astra import __version__
 from astra.utils import log
@@ -385,6 +386,7 @@ class ApogeeCombinedSpectrum(MWMStarMixin, SpectrumMixin):
         index=True,
         unique=True,
         lazy_load=False,
+        column_name="spectrum_pk",
         help_text=Glossary.spectrum_pk,
     )
     # Won't appear in a header group because it is first referenced in `Source`.
@@ -407,6 +409,9 @@ class ApogeeCombinedSpectrum(MWMStarMixin, SpectrumMixin):
     healpix = IntegerField(help_text=Glossary.healpix) # This should be the same as the Source-level field.
     sdss_id = BigIntegerField(index=True, unique=False, null=True, help_text="SDSS-5 unique identifier")
     
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
+
     #> Related Data Product Keywords        
     apred = TextField(help_text=Glossary.apred)
     obj = TextField(help_text=Glossary.obj)
@@ -451,8 +456,8 @@ class ApogeeCombinedSpectrum(MWMStarMixin, SpectrumMixin):
     autofwhm = FloatField(null=True, help_text=Glossary.autofwhm)
     n_components = IntegerField(null=True, help_text=Glossary.n_components)    
 
-    #> Provenance
-    input_spectrum_pks = ArrayField(IntegerField, null=True, help_text="DRP visit PKs")
+    ##> Provenance
+    #input_spectrum_pks = ArrayField(IntegerField, null=True, help_text="DRP visit PKs")
 
     #> Spectral Data
     wavelength = PixelArray(

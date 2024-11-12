@@ -80,14 +80,15 @@ def migrate_targeting_cartons(where=(Source.sdss5_target_flags == b""), batch_si
                 chunk_dict[sdss_id].sdss5_target_flags.set_bit(bit)
                 update_dict[sdss_id] = chunk_dict[sdss_id]
 
-        with database.atomic():
-            (
-                Source
-                .bulk_update(
-                    update_dict.values(),
-                    fields=[Source.sdss5_target_flags]
+        if update_dict:
+            with database.atomic():
+                (
+                    Source
+                    .bulk_update(
+                        update_dict.values(),
+                        fields=[Source.sdss5_target_flags]
+                    )
                 )
-            )
         queue.put(dict(advance=batch_size))
     
     queue.put(Ellipsis)

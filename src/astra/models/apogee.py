@@ -267,10 +267,20 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
                 ),
                 True,
             ),
+            # The following index is just to make updating visit counts faster.
+            (
+                (
+                    "source_pk",
+                    "telescope",
+                    "mjd",
+                    "fiber",
+                    "plate",
+                    "field"
+                ),
+                False
+            )
         )
 
-
-    
 
 class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
 

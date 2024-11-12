@@ -1,9 +1,9 @@
 from inspect import isgeneratorfunction
 from decorator import decorator
-from peewee import IntegrityError
+from peewee import IntegrityError, JOIN
 from sdsstools.configuration import get_config
 
-from astra.utils import log, Timer
+from astra.utils import log, Timer, resolve_task, resolve_model, get_return_type, expects_spectrum_types, version_string_to_integer, get_task_group_by_string
 
 NAME = "astra"
 __version__ = "0.7.0"
@@ -12,6 +12,7 @@ __version__ = "0.7.0"
 def task(
     function, 
     *args, 
+    group_by=None,
     batch_size: int = 1000,
     write_frequency: int = 300,
     write_to_database: bool = True,
@@ -24,7 +25,7 @@ def task(
     :param function:
         The callable to decorate.
 
-    :param \*args:
+    :param *args:
         The arguments to the task.
 
     :param batch_size: [optional]
@@ -39,7 +40,7 @@ def task(
     :param re_raise_exceptions: [optional]
         If `True` (default), exceptions raised in the task will be raised. Otherwise, they will be logged and ignored.
 
-    :param \**kwargs: 
+    :param **kwargs: 
         Keyword arguments for the task and the task decorator. See below.
     """
 
@@ -114,7 +115,7 @@ def bulk_insert_or_replace_pipeline_results(results):
     :param results:
         A list of records to create (e.g., sub-classes of `astra.models.BaseModel`).    
     """
-    log.info(f"Bulk inserting {len(results)} into the database")
+    #log.info(f"Bulk inserting {len(results)} into the database")
 
     first = results[0]
     database, model = (first._meta.database, first.__class__)
@@ -150,7 +151,60 @@ def bulk_insert_or_replace_pipeline_results(results):
 
     if len(results_dict) > 0:
         raise IntegrityError("Failed to insert all results into the database.")
+
+
+
+
+def generate_queries_for_task(task, input_model=None, limit=None, page=None):
+    """
+    Generate queries for input data that need to be processed by the given task.
+
+    :param task:
+        The task name, or callable.
     
+    :param input_model: [optional]
+        The input spectrum model. If `None` is given then a query will be generated for each
+        spectrum model expected by the task, based on the task function signature.
+    
+    :param limit: [optional]
+        Limit the number of rows for each spectrum model query.
+    """
+    from astra.models.source import Source
+    from astra.models.spectrum import Spectrum
+
+    current_version = version_string_to_integer(__version__) // 1000
+
+    fun = resolve_task(task)
+
+    input_models = expects_spectrum_types(fun) if input_model is None else (resolve_model(input_model), )
+    output_model = get_return_type(fun)
+    group_by_string = get_task_group_by_string(fun)
+    for input_model in input_models:
+        where = (
+            output_model.spectrum_pk.is_null()
+        |   (input_model.modified > output_model.modified)
+        )
+        on = (
+            (output_model.v_astra_major_minor == current_version)
+        &   (input_model.spectrum_pk == output_model.spectrum_pk)
+        )
+        q = (
+            input_model
+            .select(input_model, Source)
+            .join(Source, attr="source")
+            .switch(input_model)
+            .join(Spectrum)
+            .join(output_model, JOIN.LEFT_OUTER, on=on)
+            .where(where)
+        )
+        if limit is not None:
+            if page is not None:
+                q = q.paginate(page, limit)
+            else:
+                q = q.limit(limit)
+        yield (input_model, q)
+
+
 try:
     config = get_config(NAME)
     

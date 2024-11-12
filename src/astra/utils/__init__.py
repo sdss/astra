@@ -1,4 +1,5 @@
 import os
+import re
 from sdsstools.logger import get_logger as _get_logger, StreamFormatter
 import warnings
 import inspect
@@ -43,6 +44,17 @@ def version_string_to_integer(version_string):
     return sum(p * 10**(6 - i * 3) for i, p in enumerate(parts))
 
 
+def get_task_group_by_string(fun, safe=True):
+    try:
+        return re.search(r"group_by=(.*)", inspect.getsource(fun)).group(1).strip("()")
+    except:
+        if safe:
+            return None
+        else:
+            raise 
+
+    
+
 def get_logger(kwargs=None):
     logger = _get_logger("astra", **(kwargs or {}))
     # https://stackoverflow.com/questions/6729268/log-messages-appearing-twice-with-python-logging
@@ -75,9 +87,16 @@ def get_return_type(fun):
         raise ValueError(f"Cannot infer output model for task {fun}, is it missing a type annotation?")
 
 
+def resolve_model(model_str):
+    *pkg, name = model_str.split(".")
+    parent = import_module(f"astra.models.{pkg[0]}" if pkg else "astra.models")
+    return getattr(parent, name)
+
+
+
 
 def resolve_task(task_str):
-    for prefix in ("", "astra.", "astra.pipelines.", f"astra.pipelines.{task_str}."):
+    for prefix in ( f"astra.pipelines.{task_str}.", "", "astra.", "astra.pipelines.",):
         try:
             resolved_task = f"{prefix}{task_str}"
             f = callable(resolved_task)

@@ -349,8 +349,8 @@ def make_prediction(spectra, error, wavlen,num_uncertainty_draws,model,device):
 from astra import task, __version__
 from astra.utils import log, expand_path
 
-from astra.models import BossVisitSpectrum
-from astra.models import BossNet
+from astra.models.boss import BossVisitSpectrum
+from astra.models.bossnet import BossNet
 from peewee import JOIN
 from typing import Optional, Iterable
 
@@ -360,22 +360,7 @@ interpolate_flux = partial(interpolate_flux, linear_grid=linear_grid)
 interpolate_flux_err = partial(interpolate_flux_err, linear_grid=linear_grid)   
 
 @task
-def bossnet(
-    spectra: Optional[Iterable[BossVisitSpectrum]] = (
-        BossVisitSpectrum
-        .select()
-        .join(
-            BossNet, 
-            JOIN.LEFT_OUTER, 
-            on=(
-                (BossVisitSpectrum.spectrum_pk == BossNet.spectrum_pk)
-            &   (BossNet.v_astra == __version__)
-            )
-        )
-        .where(BossNet.spectrum_pk.is_null())
-    ),
-    num_uncertainty_draws: Optional[int] = 20
-) -> Iterable[BossNet]:
+def bossnet(spectra: Iterable[BossVisitSpectrum], num_uncertainty_draws: Optional[int] = 20) -> Iterable[BossNet]:
     
     model = BossNetModel()
     model_path = expand_path("$MWM_ASTRA/pipelines/BossNet/deconstructed_model")
@@ -392,7 +377,7 @@ def bossnet(
         # Note: if you don't use the `.iterator()` you may get out-of-memory issues from the GPU nodes 
         spectra = spectra.iterator()         
     
-    for spectrum in tqdm(spectra, total=0):
+    for spectrum in spectra:
         
         try:
             flux = np.nan_to_num(spectrum.flux, nan=0.0).astype(np.float32)
@@ -421,8 +406,8 @@ def bossnet(
                 e_logg=log_G_std,
                 teff=10**log_Teff,
                 e_teff=10**log_Teff * log_Teff_std * np.log(10),                
-                v_rad=rv,
-                e_v_rad=rv_std
+                bn_v_r=rv,
+                e_bn_v_r=rv_std
             )
             
 

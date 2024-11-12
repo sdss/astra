@@ -267,35 +267,17 @@ def reverse_inverse_error(inverse_error: np.array, default_error: int) -> np.arr
 from astra import task, __version__
 from astra.utils import log, expand_path
 
-from astra.models import ApogeeCoaddedSpectrumInApStar, ApogeeVisitSpectrumInApStar
+from astra.models.apogee import ApogeeCoaddedSpectrumInApStar, ApogeeVisitSpectrumInApStar
 from astra.models.apogeenet import ApogeeNet
-from peewee import JOIN, ModelSelect
 from typing import Optional, Iterable, Union
 
 
 
 @task
-def apogeenet(
-    spectra: Optional[Iterable[Union[ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar]]] = (
-        ApogeeCoaddedSpectrumInApStar
-        .select()
-        .join(
-            ApogeeNet, 
-            JOIN.LEFT_OUTER, 
-            on=(
-                (ApogeeCoaddedSpectrumInApStar.spectrum_pk == ApogeeNet.spectrum_pk)
-            &   (ApogeeNet.v_astra == __version__)
-            )
-        )
-        .where(ApogeeNet.spectrum_pk.is_null())
-    ),
-    num_uncertainty_draws: Optional[int] = 20,
-    limit=None,
-    **kwargs
-) -> Iterable[ApogeeNet]:
+def apogeenet(spectra: Iterable[Union[ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar]], num_uncertainty_draws: Optional[int] = 20, **kwargs) -> Iterable[ApogeeNet]:
     """
     Run the ANet (APOGEENet III) pipeline.
-    
+   
     """
     
     
@@ -311,13 +293,7 @@ def apogeenet(
     if torch.cuda.is_available():
         model.cuda()
     
-    if isinstance(spectra, ModelSelect):
-        if limit is not None:
-            spectra = spectra.limit(limit)
-        # Note: if you don't use the `.iterator()` you may get out-of-memory issues from the GPU nodes 
-        spectra = spectra.iterator() 
-    
-    for spectrum in tqdm(spectra, total=0):
+    for spectrum in spectra:
         
         try:        
             flux = np.nan_to_num(spectrum.flux, nan=0.0).astype(np.float32)
@@ -329,15 +305,10 @@ def apogeenet(
             log_G,log_Teff,FeH,log_G_std,log_Teff_std,Feh_std = make_prediction(flux, e_flux, None, num_uncertainty_draws,model,device)
         except:
             log.exception(f"Exception when running ApogeeNet on {spectrum}")    
-            yield ApogeeNet(
-                spectrum_pk=spectrum.spectrum_pk,
-                source_pk=spectrum.source_pk,
-                flag_runtime_exception=True
-            )
+            yield ApogeeNet.from_spectrum(spectrum, flag_runtime_exception=True)
         else:
-            yield ApogeeNet(
-                spectrum_pk=spectrum.spectrum_pk,
-                source_pk=spectrum.source_pk,
+            yield ApogeeNet.from_spectrum(
+                spectrum,
                 fe_h=FeH,
                 e_fe_h=Feh_std,
                 logg=log_G,
