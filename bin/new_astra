@@ -34,6 +34,7 @@ def srun(
     from astra.utils import silenced, expand_path
     from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn 
 
+    # TODO: no hard coding of paths
     ASTRA = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/mwm/spectro/astra/astra/astra_dev/bin/new_astra"
 
     _, q = next(generate_queries_for_task(task, model, limit))
@@ -56,9 +57,10 @@ def srun(
         with TemporaryDirectory(dir=expand_path("$PBS")) as td:
                 
             for n in range(nodes):
+                # TODO: Let's not hard code this here.
                 commands = ["export CLUSTER=1"]
                 for page in range(n * procs, (n + 1) * procs):
-                    commands.append(f"{ASTRA} run {task} {model} --limit {limit} --page {page} &")
+                    commands.append(f"astra run {task} {model} --limit {limit} --page {page} &")
                 commands.append("wait")
 
                 script_path = f"{td}/node_{n}.sh"
