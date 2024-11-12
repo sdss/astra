@@ -391,23 +391,23 @@ def bossnet(spectra: Iterable[BossVisitSpectrum], num_uncertainty_draws: Optiona
             log_G,log_Teff,FeH,rv,log_G_std,log_Teff_std,Feh_std,rv_std = make_prediction(flux, e_flux, wavelen, num_uncertainty_draws,model,device)
         except:
             log.exception(f"Exception when running ANet on {spectrum}")    
-            yield BossNet(
-                spectrum_pk=spectrum.spectrum_pk,
-                source_pk=spectrum.source_pk,
+            yield BossNet.from_spectrum(
+                spectrum,
                 flag_runtime_exception=True
             )            
         else:
-            yield BossNet(
-                spectrum_pk=spectrum.spectrum_pk,
-                source_pk=spectrum.source_pk,
+            teff = 10**log_Teff
+            e_teff = 10**log_Teff * log_Teff_std * np.log(10)
+            yield BossNet.from_spectrum(
+                spectrum,
                 fe_h=FeH,
                 e_fe_h=Feh_std,
                 logg=log_G,
                 e_logg=log_G_std,
-                teff=10**log_Teff,
-                e_teff=10**log_Teff * log_Teff_std * np.log(10),                
+                teff=teff,
+                e_teff=e_teff,
                 bn_v_r=rv,
-                e_bn_v_r=rv_std
+                e_bn_v_r=rv_std,
             )
             
 

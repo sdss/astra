@@ -5,6 +5,7 @@ os.environ["ASTRA_DATABASE_PATH"] = ":memory:"
 
 def test_task_query_builder_with_group_by():
     from astra import task, generate_queries_for_task
+    from astra.models.base import database
     from astra.models.source import Source
     from astra.models.spectrum import Spectrum
     from astra.models.apogee import ApogeeVisitSpectrum
@@ -13,18 +14,14 @@ def test_task_query_builder_with_group_by():
     from datetime import datetime
     from typing import Iterable
 
-
-
     class ApogeeVisitState(PipelineOutputModel):
         used = BooleanField()
 
-    for model in (ApogeeVisitState, Source, Spectrum, ApogeeVisitSpectrum):
-        model.create_table()
+    models = (Source, Spectrum, ApogeeVisitSpectrum, ApogeeVisitState)
+    database.create_tables(models)
 
-    for n in range(3):
-        Source.create()
-    for n in range(4):
-        Spectrum.create()
+    source_pks = [Source.create().pk for n in range(3)]
+    spectrum_pks = [Spectrum.create().pk for n in range(4)]
 
 
     @task(group_by=("source_pk", "telescope"))
@@ -42,10 +39,11 @@ def test_task_query_builder_with_group_by():
                 yield ApogeeVisitState.from_spectrum(s, used=True)
 
 
-
-    s1 = ApogeeVisitSpectrum.create(spectrum_pk=1, source_pk=1, release="test", apred="apred", plate="plate", telescope="apo", fiber=0, mjd=0, field="field", prefix="ap")
-    s2 = ApogeeVisitSpectrum.create(spectrum_pk=2, source_pk=1, release="test", apred="apred", plate="plate", telescope="apo", fiber=1, mjd=0, field="field", prefix="ap")
-    s3 = ApogeeVisitSpectrum.create(spectrum_pk=3, source_pk=2, release="test", apred="apred", plate="plate", telescope="lco", fiber=1, mjd=0, field="field", prefix="ap")
+    ApogeeVisitSpectrum.delete().execute()
+    
+    s1 = ApogeeVisitSpectrum.create(spectrum_pk=spectrum_pks[1-1], source_pk=source_pks[1-1], release="test", apred="apred", plate="plate", telescope="apo", fiber=0, mjd=0, field="field", prefix="ap")
+    s2 = ApogeeVisitSpectrum.create(spectrum_pk=spectrum_pks[2-1], source_pk=source_pks[1-1], release="test", apred="apred", plate="plate", telescope="apo", fiber=1, mjd=0, field="field", prefix="ap")
+    s3 = ApogeeVisitSpectrum.create(spectrum_pk=spectrum_pks[3-1], source_pk=source_pks[2-1], release="test", apred="apred", plate="plate", telescope="lco", fiber=1, mjd=0, field="field", prefix="ap")
 
 
     _, q = next(generate_queries_for_task(make_stack))
@@ -69,7 +67,7 @@ def test_task_query_builder_with_group_by():
     s1.modified = datetime.now()
     s1.save()
 
-    s4 = ApogeeVisitSpectrum.create(spectrum_pk=4, source_pk=3, release="test", apred="apred", plate="plate", telescope="apo", fiber=12, mjd=1, field="field", prefix="ap")
+    s4 = ApogeeVisitSpectrum.create(spectrum_pk=spectrum_pks[4-1], source_pk=source_pks[3-1], release="test", apred="apred", plate="plate", telescope="apo", fiber=12, mjd=1, field="field", prefix="ap")
     _, q = next(generate_queries_for_task(make_stack))
     assert q.count() == 2
     q = list(q)

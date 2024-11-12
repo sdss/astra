@@ -58,13 +58,16 @@ def test_pipeline_replace_on_conflict():
 
     for model in (Source, Spectrum, ThisDummy, ApogeeVisitSpectrum):        
         model.create_table()
+    
+    #for model in (ApogeeVisitSpectrum, Spectrum, Source):
+    #    model.delete().execute()
+    
+    source_pk = Source.create().pk
+    spectrum_pk1 = Spectrum.create().pk
+    spectrum_pk2 = Spectrum.create().pk
 
-    Source.create()
-    Spectrum.create()
-    Spectrum.create()
-
-    s = ApogeeVisitSpectrum.create(spectrum_pk=1, source_pk=1, release="test", apred="apred", plate="plate", telescope="telescope", fiber=0, mjd=0, field="field", prefix="ap")
-    s2 = ApogeeVisitSpectrum.create(spectrum_pk=2, source_pk=1, release="test", apred="apred", plate="plate", telescope="telescope", fiber=1, mjd=0, field="field", prefix="ap")
+    s = ApogeeVisitSpectrum.create(spectrum_pk=spectrum_pk1, source_pk=source_pk, release="test", apred="apred", plate="plate", telescope="telescope", fiber=0, mjd=0, field="field", prefix="ap")
+    s2 = ApogeeVisitSpectrum.create(spectrum_pk=spectrum_pk2, source_pk=source_pk, release="test", apred="apred", plate="plate", telescope="telescope", fiber=1, mjd=0, field="field", prefix="ap")
 
     r1 = list(dummy_task([s]))[0].__data__
     sleep(1)

@@ -62,50 +62,33 @@ class BossNet(PipelineOutputModel):
         |   self.flag_runtime_exception
     )
     
+    @classmethod
+    def from_spectrum(cls, spectrum, **kwargs):
 
-# TODO: Move this to happen at runtime
-def apply_result_flags():
-    
-    (
-        BossNet
-        .update(result_flags=BossNet.flag_runtime_exception.set())
-        .where(BossNet.teff.is_null())
-        .execute()
-    )
-    
-    (
-        BossNet
-        .update(result_flags=BossNet.flag_unreliable_teff.set())
-        .where(
-            (BossNet.teff < 1700) | (BossNet.teff > 100_000)
-        )
-        .execute()
-    )    
-    (
-        BossNet
-        .update(result_flags=BossNet.flag_unreliable_logg.set())
-        .where(
-            (BossNet.logg < -1) | (BossNet.logg > 10)
-        )
-        .execute()
-    )    
-    (
-        BossNet
-        .update(result_flags=BossNet.flag_unreliable_fe_h.set())
-        .where(
-            (BossNet.teff < 3200)
-        |   (BossNet.logg > 5)
-        |   (BossNet.fe_h < -4)
-        |   (BossNet.fe_h > 2)
-        )
-        .execute()
-    )
-    (
-        BossNet
-        .update(result_flags=BossNet.flag_suspicious_fe_h.set())
-        .where(
-            (BossNet.teff < 3900)
-        &   ((6 > BossNet.logg) & (BossNet.logg > 3))
-        )
-        .execute()
-    )
+        kwds = kwargs.copy()
+        teff = kwargs.get("teff", None)
+        if teff is not None:
+            kwds["flag_unreliable_teff"] = ((teff < 1700) | (teff > 100_000))
+        else:
+            kwds["flag_runtime_exception"] = True
+        
+        logg = kwargs.get("logg", None)
+        if logg is not None:
+            kwds["flag_unreliable_logg"] = ((logg < -1) | (logg > 10))
+        
+        fe_h = kwargs.get("fe_h", None)
+        if fe_h is not None and logg is not None and teff is not None:
+            kwds["flag_unreliable_fe_h"] = (
+                    (teff < 3200)
+                |   (logg > 5)
+                |   (fe_h < -4)
+                |   (fe_h > 2)
+            )
+
+        if teff is not None and logg is not None:
+            kwds["flag_suspicious_fe_h"] = (
+                (teff < 3900)
+            &   (6 > logg > 3)
+            )
+
+        return super().from_spectrum(spectrum, **kwds)
