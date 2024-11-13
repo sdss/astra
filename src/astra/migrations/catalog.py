@@ -2,20 +2,13 @@
 from typing import Optional
 from tqdm import tqdm
 from peewee import chunked, IntegerField,  fn, JOIN, IntegrityError
-from astra.models.base import database
-from astra.models.source import Source
-from astra.migrations.sdss5db.utils import get_approximate_rows
+#from astra.migrations.sdss5db.utils import get_approximate_rows
 from astra.migrations.utils import NoQueue
 from astra.utils import log, flatten
 import numpy as np
 
 
 def migrate_healpix(
-    where=(
-            Source.healpix.is_null()
-        &   Source.ra.is_null(False)
-        &   Source.dec.is_null(False)
-    ),
     batch_size: Optional[int] = 500,
     limit: Optional[int] = None,
     nside: Optional[int] = 128,
@@ -37,6 +30,9 @@ def migrate_healpix(
     :param lonlat: [optional]
         The HEALPix map is oriented in longitude and latitude coordinates.
     """
+    from astra.models.base import database
+    from astra.models.source import Source
+
     from healpy import ang2pix
     if queue is None:
         queue = NoQueue()
@@ -48,7 +44,11 @@ def migrate_healpix(
             Source.ra,
             Source.dec,
         )
-        .where(where)
+        .where(
+            Source.healpix.is_null()
+        &   Source.ra.is_null(False)
+        &   Source.dec.is_null(False)
+        )
         .limit(limit)
     )    
     
@@ -71,11 +71,13 @@ def migrate_healpix(
 
 
 def migrate_bailer_jones_distances(
-    where=(Source.r_med_geo.is_null() & Source.gaia_dr3_source_id.is_null(False) & (Source.gaia_dr3_source_id > 0)), 
     batch_size=500, 
     limit=None,
     queue=None
 ):
+    from astra.models.base import database
+    from astra.models.source import Source
+
     if queue is None:
         queue = NoQueue()
 
@@ -84,9 +86,10 @@ def migrate_bailer_jones_distances(
     q = (
         Source
         .select()
+        .where(
+            (Source.r_med_geo.is_null() & Source.gaia_dr3_source_id.is_null(False) & (Source.gaia_dr3_source_id > 0))
+        )
     )
-    if where:
-        q = q.where(where)
         
     q = (
         q
@@ -149,11 +152,13 @@ def migrate_bailer_jones_distances(
 
 
 def migrate_gaia_synthetic_photometry(
-    where=(Source.gaia_dr3_source_id.is_null(False) & Source.g_sdss_mag.is_null()), 
     batch_size=500, 
     limit=None,
     queue=None
 ):
+    from astra.models.base import database
+    from astra.models.source import Source
+
     from astra.migrations.sdss5db.catalogdb import Gaia_dr3_synthetic_photometry_gspc
     if queue is None:
         queue = NoQueue()
@@ -161,9 +166,8 @@ def migrate_gaia_synthetic_photometry(
     q = (
         Source
         .select()
+        .where((Source.gaia_dr3_source_id.is_null(False) & Source.g_sdss_mag.is_null()))
     )
-    if where:
-        q = q.where(where)
         
     q = (
         q
@@ -269,6 +273,8 @@ def migrate_zhang_stellar_parameters(where=None, batch_size: Optional[int] = 500
     """
     Migrate stellar parameters derived using Gaia XP spectra from Zhang, Green & Rix (2023) using the cross-match with `catalogid31` (v1).
     """
+    from astra.models.base import database
+    from astra.models.source import Source
 
     from astra.migrations.sdss5db.catalogdb import CatalogdbModel, Gaia_DR3, BigIntegerField, ForeignKeyField
 
@@ -391,6 +397,8 @@ def migrate_zhang_stellar_parameters(where=None, batch_size: Optional[int] = 500
 def migrate_tic_v8_identifier(catalogid_field_name="catalogid21", batch_size: Optional[int] = 500, limit: Optional[int] = None, queue=None):
     if queue is None:
         queue = NoQueue()
+    from astra.models.base import database
+    from astra.models.source import Source
 
     from astra.migrations.sdss5db.catalogdb import CatalogToTIC_v8
 
@@ -453,14 +461,6 @@ def migrate_tic_v8_identifier(catalogid_field_name="catalogid21", batch_size: Op
 
 
 def migrate_twomass_photometry(
-    where=(
-        (
-            Source.j_mag.is_null()
-        |   Source.h_mag.is_null()
-        |   Source.k_mag.is_null()
-        )
-        &   Source.catalogid31.is_null(False)
-    ),
     limit: Optional[int] = None,
     batch_size: Optional[int] = 500, 
     queue = None
@@ -469,9 +469,21 @@ def migrate_twomass_photometry(
     Migrate 2MASS photometry from the database, using the cross-match with `catalogid31` (v1).
     """
 
+    from astra.models.base import database
+    from astra.models.source import Source
+
     if queue is None:
         queue = NoQueue()
     from astra.migrations.sdss5db.catalogdb import TwoMassPSC, CatalogToTwoMassPSC
+
+    where = (
+        (
+            Source.j_mag.is_null()
+        |   Source.h_mag.is_null()
+        |   Source.k_mag.is_null()
+        )
+        &   Source.catalogid31.is_null(False)                
+    )
 
     q = (
         Source
@@ -573,17 +585,10 @@ def migrate_twomass_photometry(
 
 
 def migrate_unwise_photometry(
-    where=(
-        (
-            Source.w1_flux.is_null()
-        |   Source.w2_flux.is_null()
-        )
-        &   Source.catalogid21.is_null(False)
-    ),
     catalogid_field_name="catalogid21", 
     batch_size: Optional[int] = 500, 
     limit: Optional[int] = None,
-    queue = None
+    queue = None,
 ):
     """
     Migrate 2MASS photometry from the database, using the cross-match with `catalogid21` (v0).
@@ -591,8 +596,13 @@ def migrate_unwise_photometry(
     As of 2023-09-14, the cross-match does not yield anything with `catalog31`.
     """
 
+    from astra.models.base import database
+    from astra.models.source import Source
+
     if queue is None:
         queue = NoQueue()
+
+
 
     from astra.migrations.sdss5db.catalogdb import unWISE, CatalogTounWISE
 
@@ -602,13 +612,20 @@ def migrate_unwise_photometry(
         Source
         .select(
             Source.pk,
+            Source.sdss_id,
             catalogid_field
         )
-        .where(where)
+        .where(
+            (
+                Source.w1_flux.is_null()
+            |   Source.w2_flux.is_null()
+            )
+            &   Source.catalogid21.is_null(False)            
+        )
         .order_by(catalogid_field.asc())
         .limit(limit)
     )    
-
+    
     updated = 0
     queue.put(dict(total=limit or q.count()))
     if q:
@@ -676,6 +693,9 @@ def migrate_glimpse_photometry(catalogid_field_name="catalogid31", batch_size: O
     """
     Migrate Glimpse photometry from the database, using the cross-match with `catalogid31` (v1).
     """
+
+    from astra.models.base import database
+    from astra.models.source import Source
 
     if queue is None:
         queue = NoQueue()
@@ -753,20 +773,16 @@ def migrate_glimpse_photometry(catalogid_field_name="catalogid31", batch_size: O
 
 
 def migrate_gaia_source_ids(
-    where=(
-        (Source.gaia_dr3_source_id.is_null())
-    |   (Source.gaia_dr3_source_id == 0)
-    |   (Source.gaia_dr2_source_id.is_null())
-    |   (Source.gaia_dr2_source_id == 0)
-    ),
     limit: Optional[int] = None,
-    batch_size: Optional[int] = 500,
+    batch_size: Optional[int] = 1000,
     queue=None
 ):
     """
     Migrate Gaia source IDs for anything that we might have missed.
     """
-    
+    from astra.models.base import database
+    from astra.models.source import Source
+
     if queue is None:
         queue = NoQueue()
     
@@ -775,11 +791,17 @@ def migrate_gaia_source_ids(
     q = (
         Source
         .select()
-        .where(where)
+        .where(
+            (Source.gaia_dr3_source_id.is_null())
+        |   (Source.gaia_dr3_source_id == 0)
+        |   (Source.gaia_dr2_source_id.is_null())
+        |   (Source.gaia_dr2_source_id == 0)            
+        )
         .limit(limit)
     )
 
     updated = []
+    fields = set()
     queue.put(dict(total=limit or q.count(), description="Querying Gaia source IDs"))
 
     for chunk in chunked(q, batch_size):
@@ -802,6 +824,8 @@ def migrate_gaia_source_ids(
         for catalogid, gaia_dr3_source_id in q:
             source = source_by_catalogid[catalogid]
             source.gaia_dr3_source_id = gaia_dr3_source_id
+            if gaia_dr3_source_id is not None:
+                fields.add(Source.gaia_dr3_source_id)
             updated.append(source)
 
         q = (
@@ -816,10 +840,13 @@ def migrate_gaia_source_ids(
         for catalogid, gaia_dr2_source_id in q:
             source = source_by_catalogid[catalogid]
             source.gaia_dr2_source_id = gaia_dr2_source_id
+            if gaia_dr2_source_id is not None:
+                fields.add(Source.gaia_dr2_source_id)
             updated.append(source)            
 
         queue.put(dict(advance=batch_size))
     
+    fields = list(fields)
     n_updated, updated = (0, list(set(updated)))
     queue.put(dict(total=len(updated), completed=0, description="Ingesting Gaia DR3 source IDs"))
     integrity_errors = []
@@ -829,18 +856,15 @@ def migrate_gaia_source_ids(
                 Source
                 .bulk_update(
                     chunk,
-                    fields=[
-                        Source.gaia_dr2_source_id,
-                        Source.gaia_dr3_source_id
-                    ]
+                    fields=fields
                 )
             )
         except IntegrityError:
             integrity_errors.append(chunk)
-        
+                
         queue.put(dict(advance=batch_size))
-    if integrity_errors:
-        log.warning(f"Integrity errors encountered for {len(integrity_errors)} chunks")
+    #if integrity_errors:
+    #    log.warning(f"Integrity errors encountered for {len(integrity_errors)} chunks")
     queue.put(Ellipsis)
     return n_updated
         
@@ -848,17 +872,6 @@ def migrate_gaia_source_ids(
 
 
 def migrate_gaia_dr3_astrometry_and_photometry(
-    where = (
-        (
-            Source.g_mag.is_null()
-        |   Source.bp_mag.is_null()
-        |   Source.rp_mag.is_null()
-        )
-        &   (
-            Source.gaia_dr3_source_id.is_null(False)
-        &   (Source.gaia_dr3_source_id > 0)
-        )
-    ), 
     limit: Optional[int] = None, 
     batch_size: Optional[int] = 500,
     queue=None
@@ -874,6 +887,9 @@ def migrate_gaia_dr3_astrometry_and_photometry(
     :param limit: [optional]
         Limit the update to `limit` records. Useful for testing.
     """
+    from astra.models.base import database
+    from astra.models.source import Source
+
     if queue is None:
         queue = NoQueue()
 
@@ -897,7 +913,17 @@ def migrate_gaia_dr3_astrometry_and_photometry(
         Source
         .select(Source.gaia_dr3_source_id)
         .distinct()
-        .where(where)
+        .where(
+            (
+                Source.g_mag.is_null()
+            |   Source.bp_mag.is_null()
+            |   Source.rp_mag.is_null()
+            )
+            &   (
+                Source.gaia_dr3_source_id.is_null(False)
+            &   (Source.gaia_dr3_source_id > 0)
+            )            
+        )
         .order_by(
             Source.gaia_dr3_source_id.asc()
         )
@@ -959,8 +985,6 @@ def migrate_gaia_dr3_astrometry_and_photometry(
             )
         )        
     )
-    if where:
-        q = q.where(where)
 
     updated_sources = []
     for source in q:
@@ -999,201 +1023,5 @@ def migrate_gaia_dr3_astrometry_and_photometry(
     #log.info(f"Updated {updated} records ({len(gaia_data)} gaia sources)")
     queue.put(Ellipsis)
     return updated
-
-
-def migrate_sources_from_sdss5_catalogdb(batch_size: Optional[int] = 500, limit: Optional[int] = None):
-    """
-    Migrate all catalog sources stored in the SDSS-V database.
-
-    This creates a unique identifier per astronomical source (akin to a `sdss_id`) and links all possible
-    catalog identifiers (`catalogdb.catalog.catalogid`) to those unique sources.
-            
-    :param batch_size: [optional]
-        The batch size to use when upserting data.    
-    
-    :param limit: [optional]
-        Limit the initial catalog queries for testing purposes.
-    
-    :returns:
-        A tuple of new `sdss_id` identifiers created.
-    """
-    raise ProgrammingError
-    
-    from astra.migrations.sdss5db.catalogdb import CatalogdbModel
-    
-    class Catalog_ver25_to_ver31_full_unique(CatalogdbModel):
-
-        id = IntegerField(primary_key=True)
-
-        class Meta:
-            table_name = 'catalog_ver25_to_ver31_full_unique'
-
-    log.info(f"Querying catalogdb.catalog_ver25_to_ver31_unique")
-
-    q = (
-        Catalog_ver25_to_ver31_full_unique
-        .select(
-            Catalog_ver25_to_ver31_full_unique.id,
-            Catalog_ver25_to_ver31_full_unique.lowest_catalogid,
-            Catalog_ver25_to_ver31_full_unique.highest_catalogid,
-        )
-        .limit(limit)
-        .tuples()
-        .iterator()
-    )
-
-    # Sometimes the highest_catalogid appears twice. There's a good reason for this.
-    # I just don't know what it is. But we need unique-ness, and we need to link to
-    # the lower catalog identifiers.
-    next_sdss_id = 1
-    source_data, lookup_sdss_id_from_catalog_id, lookup_catalog_id_from_sdss_id = ({}, {}, {})
-    for sdss_id, lowest, highest in tqdm(q, total=limit or get_approximate_rows(Catalog_ver25_to_ver31_full_unique)):
-
-        # Do we already have an sdss_id assigned to this highest catalog identifier?
-        sdss_id_1 = lookup_sdss_id_from_catalog_id.get(highest, None)
-        sdss_id_2 = lookup_sdss_id_from_catalog_id.get(lowest, None)
-
-        if sdss_id_1 is not None and sdss_id_2 is not None and sdss_id_1 != sdss_id_2:
-            # We need to amalgamate these two.
-            affected = []
-            affected.extend(lookup_catalog_id_from_sdss_id[sdss_id_1])
-            affected.extend(lookup_catalog_id_from_sdss_id[sdss_id_2])
-            
-            # merge both into sdss_id_1
-            source_data[sdss_id_1] = dict(
-                sdss_id=sdss_id_1,
-                sdss5_catalogid_v1=max(affected)
-            )
-            for catalogid in affected:
-                lookup_sdss_id_from_catalog_id[catalogid] = sdss_id_1
-
-            lookup_catalog_id_from_sdss_id[sdss_id_1] = affected
-            
-            del source_data[sdss_id_2]
-            del lookup_catalog_id_from_sdss_id[sdss_id_2]
-        
-        else:
-            sdss_id = sdss_id_1 or sdss_id_2
-            if sdss_id is None:
-                sdss_id = 0 + next_sdss_id
-                next_sdss_id += 1
-        
-            lookup_catalog_id_from_sdss_id.setdefault(sdss_id, [])
-            lookup_catalog_id_from_sdss_id[sdss_id].extend((lowest, highest))
-
-            lookup_sdss_id_from_catalog_id[lowest] = sdss_id
-            lookup_sdss_id_from_catalog_id[highest] = sdss_id
-            source_data[sdss_id] = dict(
-                sdss_id=sdss_id,
-                sdss5_catalogid_v1=highest
-            )
-
-    log.info(f"There are {len(source_data)} unique `sdss_id` entries so far")
-
-    class Catalog_ver25_to_ver31_full_all(CatalogdbModel):
-
-        id = IntegerField(primary_key=True)
-
-        class Meta:
-            table_name = 'catalog_ver25_to_ver31_full_all'
-    
-    log.info(f"Querying catalogdb.catalog_ver25_to_ver31_full_all")
-
-    q = (
-        Catalog_ver25_to_ver31_full_all
-        .select(
-            Catalog_ver25_to_ver31_full_all.lowest_catalogid,
-            Catalog_ver25_to_ver31_full_all.highest_catalogid
-        )
-        .limit(limit)
-        .tuples()
-        .iterator()
-    )
-    
-    for lowest, highest in tqdm(q, total=limit or get_approximate_rows(Catalog_ver25_to_ver31_full_all)):
-
-        sdss_id_1 = lookup_sdss_id_from_catalog_id.get(highest, None)
-        sdss_id_2 = lookup_sdss_id_from_catalog_id.get(lowest, None)
-
-        if sdss_id_1 is not None and sdss_id_2 is not None and sdss_id_1 != sdss_id_2:
-            # We need to amalgamate these two.
-            affected = []
-            affected.extend(lookup_catalog_id_from_sdss_id[sdss_id_1])
-            affected.extend(lookup_catalog_id_from_sdss_id[sdss_id_2])
-            
-            # merge both into sdss_id_1
-            source_data[sdss_id_1] = dict(
-                sdss_id=sdss_id_1,
-                sdss5_catalogid_v1=max(affected)
-            )
-            for catalogid in affected:
-                lookup_sdss_id_from_catalog_id[catalogid] = sdss_id_1
-
-            lookup_catalog_id_from_sdss_id[sdss_id_1] = affected
-            
-            del source_data[sdss_id_2]
-            del lookup_catalog_id_from_sdss_id[sdss_id_2]
-        
-        else:
-            sdss_id = sdss_id_1 or sdss_id_2
-            if sdss_id is None:
-                sdss_id = 0 + next_sdss_id
-                next_sdss_id += 1
-        
-            lookup_catalog_id_from_sdss_id.setdefault(sdss_id, [])
-            lookup_catalog_id_from_sdss_id[sdss_id].extend((lowest, highest))
-
-            lookup_sdss_id_from_catalog_id[lowest] = sdss_id
-            lookup_sdss_id_from_catalog_id[highest] = sdss_id
-            source_data[sdss_id] = dict(
-                sdss_id=sdss_id,
-                sdss5_catalogid_v1=highest
-            )
-            
-    log.info(f"There are now {len(source_data)} unique `sdss_id` entries so far")
-
-    # Create the Source
-    new_source_ids = []
-    with database.atomic():
-        # Need to chunk this to avoid SQLite limits.
-        with tqdm(desc="Upserting", unit="sources", total=len(source_data)) as pb:
-            for chunk in chunked(source_data.values(), batch_size):
-                new_source_ids.extend(
-                    Source
-                    .insert_many(chunk)
-                    .on_conflict_ignore()
-                    .returning(Source.sdss_id)
-                    .tuples()
-                    .execute()
-                )
-                pb.update(min(batch_size, len(chunk)))
-                pb.refresh()
-
-    log.info(f"Inserted {len(new_source_ids)} new sources")
-
-    log.info("Linking catalog identifiers to SDSS identifiers")
-    
-    data_generator = (
-        dict(catalogid=catalogid, sdss_id=sdss_id) 
-        for catalogid, sdss_id in lookup_sdss_id_from_catalog_id.items()
-    )
-    
-    with database.atomic():
-        with tqdm(desc="Linking catalog identifiers to unique sources", total=len(lookup_sdss_id_from_catalog_id)) as pb:
-            for chunk in chunked(data_generator, batch_size):
-                (
-                    SDSSCatalog
-                    .insert_many(chunk)
-                    .on_conflict_ignore()
-                    .returning(SDSSCatalog.catalogid)
-                    .tuples()
-                    .execute()
-                )
-                pb.update(min(batch_size, len(chunk)))
-                pb.refresh()
-    
-    return tuple(new_source_ids)
-
-
 
 

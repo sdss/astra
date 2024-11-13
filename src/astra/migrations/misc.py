@@ -3,15 +3,12 @@ from astropy.time import Time
 import astropy.coordinates as coord
 import astropy.units as u
 from scipy.signal import argrelmin
-from peewee import chunked, fn, JOIN
+from peewee import chunked, fn, JOIN, EXCLUDED
 import concurrent.futures
 
 import pickle
 from astra.utils import flatten, expand_path
-from astra.models.base import database
-from astra.models.source import Source
-from astra.models.apogee import ApogeeVisitSpectrum
-from astra.models.boss import BossVisitSpectrum
+
 from astra.migrations.utils import NoQueue
 from astropy.coordinates import SkyCoord
 from astropy import units as u
@@ -23,14 +20,14 @@ from astra import __version__
 von = lambda v: v or np.nan
 
 def compute_w1mag_and_w2mag(
-    where=(
-        (Source.w1_flux.is_null(False) & Source.w1_mag.is_null(True))
-    |   (Source.w2_flux.is_null(False) & Source.w2_mag.is_null(True))
-    ),
     limit=None, 
     batch_size=1000,
     queue=None
 ):
+    from astra.models.base import database
+    from astra.models.source import Source
+    from astra.models.apogee import ApogeeVisitSpectrum
+    from astra.models.boss import BossVisitSpectrum
     if queue is None:
         queue = NoQueue()
 
@@ -43,7 +40,10 @@ def compute_w1mag_and_w2mag(
             Source.w2_flux,
             Source.w2_dflux,
         )
-        .where(where)
+        .where(
+            (Source.w1_flux.is_null(False) & Source.w1_mag.is_null(True))
+        |   (Source.w2_flux.is_null(False) & Source.w2_mag.is_null(True))
+        )
         .limit(limit)
     )
     n_updated = 0
@@ -76,12 +76,15 @@ def compute_w1mag_and_w2mag(
 
 
 def update_galactic_coordinates(
-    where=(Source.ra.is_null(False) & Source.l.is_null(True)),
     limit=None,
     frame="icrs", 
     batch_size=1000,
     queue=None
 ):
+    from astra.models.base import database
+    from astra.models.source import Source
+    from astra.models.apogee import ApogeeVisitSpectrum
+    from astra.models.boss import BossVisitSpectrum
     if queue is None:
         queue = NoQueue()
     
@@ -92,7 +95,7 @@ def update_galactic_coordinates(
             Source.ra,
             Source.dec
         )
-        .where(where)
+        .where((Source.ra.is_null(False) & Source.l.is_null(True)))
         .limit(limit)
     )
     
@@ -124,6 +127,12 @@ def update_galactic_coordinates(
 
 
 def fix_unsigned_apogee_flags(queue):
+
+    from astra.models.base import database
+    from astra.models.source import Source
+    from astra.models.apogee import ApogeeVisitSpectrum
+    from astra.models.boss import BossVisitSpectrum
+
     if queue is None:
         queue = NoQueue()
 
@@ -158,10 +167,6 @@ def compute_gonzalez_hernandez_irfm_effective_temperatures_from_vmk(
     model,
     logg_field,
     fe_h_field,
-    where=(
-        Source.v_jkc_mag.is_null(False)
-    &   Source.k_mag.is_null(False)
-    ),
     dwarf_giant_logg_split=3.8,
     batch_size=10_000
 ):
@@ -176,7 +181,11 @@ def compute_gonzalez_hernandez_irfm_effective_temperatures_from_vmk(
     giant_colour_range = [0.7, 3.8]
     giant_fe_h_range = [-4.0, 0.1]
     '''
-    
+    from astra.models.base import database
+    from astra.models.source import Source
+    from astra.models.apogee import ApogeeVisitSpectrum
+    from astra.models.boss import BossVisitSpectrum
+
     B_dwarf = np.array([0.5201, 0.2511, -0.0118, -0.0186, 0.0408, 0.0033])
     B_giant = np.array([0.5293, 0.2489, -0.0119, -0.0042, 0.0135, 0.0010])
     
@@ -198,12 +207,11 @@ def compute_gonzalez_hernandez_irfm_effective_temperatures_from_vmk(
             (model.v_astra == __version__)
         &   logg_field.is_null(False)
         &   fe_h_field.is_null(False)
+        &   Source.v_jkc_mag.is_null(False)
+        &   Source.k_mag.is_null(False)        
         )
     )
     
-    if where:
-        q = q.where(where)
-
     n_updated, batch = (0, [])
     for row in tqdm(q.iterator()):
         X = (row._source.v_jkc_mag or np.nan) - (row._source.k_mag or np.nan)
@@ -265,15 +273,15 @@ def compute_gonzalez_hernandez_irfm_effective_temperatures_from_vmk(
 def compute_casagrande_irfm_effective_temperatures(
     model, 
     fe_h_field,
-    where=(
-        Source.v_jkc_mag.is_null(False)
-    &   Source.k_mag.is_null(False)
-    ),
     batch_size=10_000
 ):
     """
     Compute IRFM effective temperatures using the V-Ks colour and the Casagrande et al. (2010) scale.
     """
+    from astra.models.base import database
+    from astra.models.source import Source
+    from astra.models.apogee import ApogeeVisitSpectrum
+    from astra.models.boss import BossVisitSpectrum
     
     valid_v_k = [0.78, 3.15]
     
@@ -294,11 +302,12 @@ def compute_casagrande_irfm_effective_temperatures(
             Source,
         )
         .join(Source, on=(model.source_pk == Source.pk), attr="_source")
+        .where(
+            Source.v_jkc_mag.is_null(False)
+        &   Source.k_mag.is_null(False)
+        )
     )
     
-    if where:
-        q = q.where(where)
-
     n_updated, batch = (0, [])
     for row in tqdm(q.iterator()):
         
@@ -353,8 +362,14 @@ def update_visit_spectra_counts(
     apogee_where=None,
     boss_where=None,
     batch_size=10_000,   
-    queue=None 
+    queue=None,
+    k=1000
 ):
+    from astra.models.base import database
+    from astra.models.source import Source
+    from astra.models.apogee import ApogeeVisitSpectrum
+    from astra.models.boss import BossVisitSpectrum
+
     if queue is None:
         queue = NoQueue()
 
@@ -384,7 +399,7 @@ def update_visit_spectra_counts(
     q_apogee_counts = (
         ApogeeVisitSpectrum
         .select(
-            ApogeeVisitSpectrum.source_pk,
+            ApogeeVisitSpectrum.source.alias("pk"),
             fn.count(ApogeeVisitSpectrum.pk).alias("n_apogee_visits"),
             fn.min(ApogeeVisitSpectrum.mjd).alias("apogee_min_mjd"),
             fn.max(ApogeeVisitSpectrum.mjd).alias("apogee_max_mjd"),
@@ -418,7 +433,7 @@ def update_visit_spectra_counts(
     q_boss_counts = (
         BossVisitSpectrum
         .select(
-            BossVisitSpectrum.source_pk,
+            BossVisitSpectrum.source.alias("pk"),
             fn.count(BossVisitSpectrum.pk).alias("n_boss_visits"),
             fn.min(BossVisitSpectrum.mjd).alias("boss_min_mjd"),
             fn.max(BossVisitSpectrum.mjd).alias("boss_max_mjd"),
@@ -429,75 +444,67 @@ def update_visit_spectra_counts(
     )
 
     # merge counts
-    defaults = dict(
-        n_boss_visits=0,
-        n_apogee_visits=0,
-        apogee_min_mjd=None,
-        apogee_max_mjd=None,
-        boss_min_mjd=None,
-        boss_max_mjd=None
-    )
-    all_counts = {}
-    queue.put(dict(total=q_apogee_counts.count(), description="Querying APOGEE visit counts"))
-    for each in q_apogee_counts.iterator():
-        source_pk = each.pop("source")
-        all_counts[source_pk] = defaults
-        all_counts[source_pk].update(each)
-        queue.put(dict(advance=1))
-    
-    queue.put(dict(total=q_boss_counts.count(), description="Querying BOSS visit counts", completed=0))
-    for each in q_boss_counts.iterator():
-        source_pk = each.pop("source")
-        all_counts.setdefault(source_pk, defaults)
-        all_counts[source_pk].update(each)
-        queue.put(dict(advance=1))
-    
-    update = []
-    queue.put(dict(total=Source.select().count(), description="Collecting source visit counts", completed=0))
-    for s in Source.select().iterator():
-        for k, v in all_counts.get(s.pk, {}).items():
-            setattr(s, k, v)
-        update.append(s)
+    update = {}
+    queue.put(dict(total=q_apogee_counts.count(), completed=0, description="Querying APOGEE visit counts"))
+    for i, each in enumerate(q_apogee_counts.iterator()):
+        pk = each["pk"]
+        if pk is not None and each["apogee_min_mjd"] is not None:
+            update.setdefault(pk, {})
+            update[pk].update(each)
+        if i > 0 and i % k == 0:
+            queue.put(dict(advance=k))
 
+    queue.put(dict(total=q_boss_counts.count(), description="Querying BOSS visit counts", completed=0))
+    for i, each in enumerate(q_boss_counts.iterator()):
+        pk = each["pk"]
+        if pk is not None and each["boss_min_mjd"] is not None:
+            update.setdefault(pk, {})
+            update[pk].update(each)
+        if i > 0 and i % k == 0:
+            queue.put(dict(advance=k))
+    
     queue.put(dict(total=len(update), description="Updating source visit counts", completed=0))
-    for batch in chunked(update, batch_size):
-        # Ugh some issue where if we are only setting Nones for all then if we supply the field it dies
-        fields = {"n_apogee_visits", "n_boss_visits"}
-        for b in batch:
-            if b.apogee_min_mjd is not None:
-                fields.add("apogee_min_mjd")
-            if b.apogee_max_mjd is not None:
-                fields.add("apogee_max_mjd")
-            if b.boss_min_mjd is not None:
-                fields.add("boss_min_mjd")
-            if b.boss_max_mjd is not None:
-                fields.add("boss_max_mjd")
-        fields = [getattr(Source, f) for f in fields]
+    for chunk in chunked(update.values(), batch_size):
         with database.atomic():
-            Source.bulk_update(
-                batch,
-                fields=fields
+            (
+                Source
+                .insert_many(chunk)
+                .on_conflict(
+                    conflict_target=[Source.pk],
+                    preserve=[
+                        Source.n_apogee_visits,
+                        Source.n_boss_visits,
+                        Source.apogee_min_mjd,
+                        Source.apogee_max_mjd,
+                        Source.boss_min_mjd,
+                        Source.boss_max_mjd
+                    ],
+                    where=(
+                        (EXCLUDED.n_apogee_visits > Source.n_apogee_visits)
+                    |   (EXCLUDED.n_boss_visits > Source.n_boss_visits)
+                    |   ((EXCLUDED.n_apogee_visits > 0) & (Source.n_apogee_visits.is_null()))
+                    |   ((EXCLUDED.n_boss_visits > 0) & (Source.n_boss_visits.is_null()))
+                    )
+                )
+                .execute()
             )
-        queue.put(dict(advance=batch_size))
+            queue.put(dict(advance=batch_size))
 
     queue.put(Ellipsis)
-    return len(update)
+    return None
 
 
 def compute_n_neighborhood(
-    where=(
-        (
-            Source.n_neighborhood.is_null() 
-        |   (Source.n_neighborhood < 0)
-        )
-        &   Source.gaia_dr3_source_id.is_null(False)    
-    ),
     radius=3, # arcseconds
     brightness=5, # magnitudes
     batch_size=1000,
     limit=None,
     queue=None
 ):
+    from astra.models.base import database
+    from astra.models.source import Source
+    from astra.models.apogee import ApogeeVisitSpectrum
+    from astra.models.boss import BossVisitSpectrum
     #"Sources within 3\" and G_MAG < G_MAG_source + 5"
     if queue is None:
         queue = NoQueue()
@@ -514,7 +521,13 @@ def compute_n_neighborhood(
     q = (
         Source
         .select()
-        .where(where)
+        .where(
+            (
+                Source.n_neighborhood.is_null() 
+            |   (Source.n_neighborhood < 0)
+            )
+        &   Source.gaia_dr3_source_id.is_null(False)    
+        )
         .limit(limit)
     )
 
@@ -554,7 +567,8 @@ def compute_n_neighborhood(
             
         n_updated += len(batch_update)
         if len(batch_update) > 0:
-            Source.bulk_update(batch_update, fields=[Source.n_neighborhood])                
+            with database.atomic():
+                Source.bulk_update(batch_update, fields=[Source.n_neighborhood])                
         queue.put(dict(advance=batch_size))
 
     queue.put(Ellipsis)    
@@ -562,6 +576,7 @@ def compute_n_neighborhood(
 
 
 def set_missing_gaia_source_ids_to_null():
+    from astra.models.source import Source
     (
         Source
         .update(gaia_dr3_source_id=None)
@@ -575,13 +590,7 @@ def set_missing_gaia_source_ids_to_null():
         .execute()
     )
 
-def compute_f_night_time_for_boss_visits(
-        where=(
-            BossVisitSpectrum.f_night_time.is_null()
-        &   BossVisitSpectrum.tai_end.is_null(False)
-        &   BossVisitSpectrum.tai_beg.is_null(False) # sometimes we don't have tai_beg or tai_end
-        ),
-        limit=None, batch_size=1000, n_time=256, max_workers=64, queue=None):
+def compute_f_night_time_for_boss_visits(limit=None, batch_size=1000, n_time=256, max_workers=64, queue=None):
     """
     Compute `f_night_time`, which is the observation mid-point expressed as a fraction of time between local sunset and sunrise.
     
@@ -600,11 +609,18 @@ def compute_f_night_time_for_boss_visits(
     :param max_workers:
         The maximum number of workers to use when computing `f_night_time`.
     """
-        
+    from astra.models.base import database
+    from astra.models.source import Source
+    from astra.models.apogee import ApogeeVisitSpectrum
+    from astra.models.boss import BossVisitSpectrum
     q = (
         BossVisitSpectrum
         .select()
-        .where(where)
+        .where(
+            BossVisitSpectrum.f_night_time.is_null()
+        &   BossVisitSpectrum.tai_end.is_null(False)
+        &   BossVisitSpectrum.tai_beg.is_null(False) # sometimes we don't have tai_beg or tai_end
+        )
         .limit(limit)
     )
 
@@ -613,7 +629,7 @@ def compute_f_night_time_for_boss_visits(
     return _compute_f_night_time_for_visits(q, BossVisitSpectrum, get_obs_time, batch_size, n_time, max_workers, queue)
 
     
-def compute_f_night_time_for_apogee_visits(where=ApogeeVisitSpectrum.f_night_time.is_null(), limit=None, batch_size=1000, n_time=256, max_workers=64, queue=None):
+def compute_f_night_time_for_apogee_visits(limit=None, batch_size=1000, n_time=256, max_workers=64, queue=None):
     """
     Compute `f_night_time`, which is the observation mid-point expressed as a fraction of time between local sunset and sunrise.
     
@@ -632,10 +648,14 @@ def compute_f_night_time_for_apogee_visits(where=ApogeeVisitSpectrum.f_night_tim
     :param max_workers:
         The maximum number of workers to use when computing `f_night_time`.        
     """
+    from astra.models.base import database
+    from astra.models.source import Source
+    from astra.models.apogee import ApogeeVisitSpectrum
+    from astra.models.boss import BossVisitSpectrum    
     q = (
         ApogeeVisitSpectrum
         .select()
-        .where(where)
+        .where(ApogeeVisitSpectrum.f_night_time.is_null())
         .limit(limit)
     )
     return _compute_f_night_time_for_visits(q, ApogeeVisitSpectrum, lambda v: v.date_obs, batch_size, n_time, max_workers, queue)
@@ -663,6 +683,8 @@ def _compute_f_night_time(pk, observatory, time, n_time):
 
 def _compute_f_night_time_for_visits(q, model, get_obs_time, batch_size, n_time, max_workers, queue):
 
+    from astra.models.base import database
+
     if queue is None:
         queue = NoQueue()
     executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
@@ -679,26 +701,17 @@ def _compute_f_night_time_for_visits(q, model, get_obs_time, batch_size, n_time,
         
         futures.append(executor.submit(_compute_f_night_time, visit.pk, observatory, time, n_time))
         visit_by_pk[visit.pk] = visit
+        queue.put(dict(advance=1))
 
     updated = []
     n_updated = 0
+    queue.put(dict(total=len(futures), description="Updating f_night", completed=0))
     for future in concurrent.futures.as_completed(futures):
         pk, f_night_time = future.result()
         visit = visit_by_pk[pk]
         visit.f_night_time = f_night_time
         updated.append(visit)
         queue.put(dict(advance=1))
-
-        if len(updated) >= batch_size:
-            with database.atomic():                    
-                n_updated += (
-                    model
-                    .bulk_update(
-                        updated,
-                        fields=[model.f_night_time],
-                    )
-                )
-            updated = []
 
     if len(updated) > 0:
         with database.atomic():
@@ -707,7 +720,9 @@ def _compute_f_night_time_for_visits(q, model, get_obs_time, batch_size, n_time,
                 .bulk_update(
                     updated,
                     fields=[model.f_night_time],
+                    batch_size=batch_size
                 )
             )    
+
     queue.put(Ellipsis)        
     return n_updated    

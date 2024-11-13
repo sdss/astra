@@ -61,11 +61,12 @@ def migrate_dithered_metadata(
     update = []
     queue.put(dict(description="Scraping APOGEE visit spectra headers", total=q.count(), completed=0))
     with concurrent.futures.ProcessPoolExecutor(max_workers) as executor:
-        futures, spectra = ({}, {})
-        for total, s in enumerate(q.iterator(), start=1):
+        futures, spectra, total = ({}, {}, 0)
+        for s in q.iterator():
             futures[s.pk] = executor.submit(_migrate_dithered_metadata, s.pk, s.absolute_path)
             spectra[s.pk] = s
             queue.put(dict(advance=1))
+            total += 1
 
         queue.put(dict(description="Parsing APOGEE visit spectra headers", total=total, completed=0))
         for future in concurrent.futures.as_completed(futures.values()):

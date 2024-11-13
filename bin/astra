@@ -1,861 +1,416 @@
 #!/usr/bin/env python3
-import click
+import typer
+from typing import Optional
+from typing_extensions import Annotated
 
-# Common options.
-@click.group()
-@click.option("-v", "verbose", default=False, is_flag=True, help="verbose mode")
-@click.pass_context
-def cli(context, verbose):
-    context.ensure_object(dict)
-    context.obj["verbose"] = verbose
-    # Overwrite settings in ~/.astra/astra.yml
-    # from astra import log
-    # log.set_level(10 if verbose else 20)
+app = typer.Typer()
+
+@app.command()
+def srun(
+    task: Annotated[str, typer.Argument(help="The task name to run (e.g., `aspcap`, or `astra.pipelines.aspcap.aspcap`).")],
+    model: Annotated[str, typer.Argument(
+        help=(
+            "The input model to use (e.g., `ApogeeCombinedSpectrum`, `BossCombinedSpectrum`). "
+        )
+        )] = None,
+    nodes: Annotated[int, typer.Option(help="The number of nodes to use.", min=1)] = 1,
+    procs: Annotated[int, typer.Option(help="The number of processes to use per node.", min=1)] = 1,
+    limit: Annotated[int, typer.Option(help="Limit the number of inputs.", min=1)] = None,
+    account: Annotated[str, typer.Option(help="Slurm account")] = "sdss-np",
+    partition: Annotated[str, typer.Option(help="Slurm partition")] = None,
+    gres: Annotated[str, typer.Option(help="Slurm generic resources")] = None,
+    mem: Annotated[str, typer.Option(help="Memory per node")] = None,
+    time: Annotated[str, typer.Option(help="Wall-time")] = "24:00:00",
+):
+    """Distribute an Astra task over many nodes using Slurm."""
+
+    partition = partition or account
+
+    import os
+    import sys
+    import numpy as np
+    import concurrent.futures
+    import subprocess
+    from datetime import datetime
+    from tempfile import TemporaryDirectory
+    from peewee import JOIN
+    from importlib import import_module
+    from astra import models, __version__, generate_queries_for_task
+    from astra.utils import silenced, expand_path
+    from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn 
+
+    # TODO: no hard coding of paths
+    ASTRA = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/mwm/spectro/astra/astra/astra_dev/bin/new_astra"
+
+    _, q = next(generate_queries_for_task(task, model, limit))
+
+    total = q.count()
+    workers = nodes * procs
+    limit = int(np.ceil(total / workers))
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        transient=True
+    ) as p:
+
+        executor = concurrent.futures.ProcessPoolExecutor(nodes)
+
+        # Load a whole bunch of sruns in processes
+        futures = {}
+        with TemporaryDirectory(dir=expand_path("$PBS"), prefix=f"{task}-{today}-", delete=False) as td:
+            p.print(f"Working directory: {td}")
+            for n in range(nodes):
+                job_name = f"{task}" + (f"-{n}" if nodes > 1 else "")
+                # TODO: Let's not hard code this here.
+                commands = ["export CLUSTER=1", "echo hello"]
+                for page in range(n * procs, (n + 1) * procs):
+                    commands.append(f"{ASTRA} run {task} {model} --limit {limit} --page {page + 1} &")
+                commands.append("wait")
+
+                script_path = f"{td}/node_{n}.sh"
+                with open(script_path, "w") as fp:
+                    fp.write("\n".join(commands))
+
+                os.system(f"chmod +x {script_path}")
+                executable = [
+                    "srun",
+                    "--nodes=1",
+                    f"--partition={partition}",
+                    f"--account={account}",
+                    f"--job-name={job_name}",
+                    f"--time={time}",
+                    f"--output={td}/{n}.out",
+                    f"--error={td}/{n}.err",
+                ]
+                if mem is not None:
+                    executable.append(f"--mem={mem}")
+                if gres is not None:
+                    executable.append(f"--gres={gres}")
+                
+                executable.extend(["bash", "-c", f"{script_path}"])
+
+                t = p.add_task(description=f"Running {job_name}", total=None)
+                job = executor.submit(
+                    subprocess.run,
+                    executable,
+                    capture_output=True
+                )
+                futures[job] = (n, t)
+                        
+            max_returncode = 0
+            for future in concurrent.futures.as_completed(futures.keys()):                
+                n, t = futures[future]
+                result = future.result()
+                if result.returncode == 0:
+                    p.update(t, description=f"Completed")
+                    p.remove_task(t)
+                else:
+                    p.update(t, description=f"Error code {result.returncode} returned from {task}-{n}")
+                    p.print(result.stderr.decode("utf-8"))
+                
+                max_returncode = max(max_returncode, result.returncode)
+            
+    sys.exit(max_returncode)
 
 
-@cli.command()
-@click.option("--drop-tables", is_flag=True)
-@click.option("--delay", default=10)
-# default to grant permissions
-@click.option("--no-grant-permissions", is_flag=True, default=False)
-def initdb(drop_tables, delay, no_grant_permissions):
-    """Initialize the database."""
-    from time import sleep
-    from astra.utils import log
-    from astra.models import (
-        base,
-        apogee,
-        apogeenet,
-        aspcap,
-        #boss,
-        #classifier,
-        ferre,
-        #lineforest,
-        #madgics,
-        #mdwarftype,
-        #slam,
-        #snow_white,
-        source,
-        spectrum,
-        #the_payne
-    )
+@app.command()
+def run(
+    task: Annotated[str, typer.Argument(help="The task name to run (e.g., `aspcap`, or `astra.pipelines.aspcap.aspcap`).")],
+    spectrum_model: Annotated[str, typer.Argument(
+        help=(
+            "The spectrum model to use (e.g., `ApogeeCombinedSpectrum`, `BossCombinedSpectrum`). "
+            "If `None` is given then all spectrum models accepted by the task will be analyzed."
+        )
+        )] = None,
+    limit: Annotated[int, typer.Option(help="Limit the number of spectra.", min=1)] = None,
+    page: Annotated[int, typer.Option(help="Page to start results from (`limit` spectra per `page`).", min=1)] = None,
+):
+    """Run an Astra task on spectra."""
+    from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn 
     
-    models = base.BaseModel.__subclasses__()
-    with base.database.atomic():
-        if drop_tables:
-            log.warning(f"Dropping database tables in {delay} seconds..")
-            sleep(delay)
-            base.database.drop_tables(models, cascade=True)
+    from astra import models, __version__, generate_queries_for_task
+    from astra.utils import resolve_task
+
+    fun = resolve_task(task)
+
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}")) as p:
+        t = p.add_task(description="Resolving task", total=None)
+        fun = resolve_task(task)
+        p.remove_task(t)
+
+    messages = []
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeRemainingColumn(),
+        transient=False
+    ) as p:
         
-        base.database.create_tables(models)
-    log.info(f"Created {len(models)} database tables: {models}")
-    
-    if not no_grant_permissions:
-        schema = base.BaseModel._meta.schema
-        log.info(f"Granting permissions on schema {schema} to role 'sdss'")
-        base.database.execute_sql(f"GRANT ALL PRIVILEGES ON SCHEMA {schema} TO GROUP sdss;")
-        base.database.execute_sql(f"GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA {schema} to sdss;")
+        for model, q in generate_queries_for_task(fun, spectrum_model, limit, page=page):
+            t = p.add_task(description=f"Running {fun.__name__} on {model.__name__}", total=limit)
+            total = q.count()
+            p.update(t, total=total)
+            if total > 0:
+                for n, r in enumerate(fun(q), start=1):
+                    p.update(t, advance=1, refresh=True)
+                messages.append(f"Processed {n} {model.__name__} spectra with {fun.__name__}")
+            p.update(t, completed=True)
 
-    return None
+    list(map(typer.echo, messages))
 
 
-@cli.command(context_settings=dict(ignore_unknown_options=True))
-@click.option("--apred", default=None)
-@click.option("--run2d", default=None)
-@click.option("--limit", default=None)
-@click.option("--include-dr17", is_flag=True, default=False)
-def migrate(apred, run2d, limit, include_dr17):
-    """Migrate data from the SDSS5 database."""
+@app.command()
+def migrate(
+    apred: Optional[str] = typer.Option(None, help="APOGEE data reduction pipeline version."),
+    run2d: Optional[str] = typer.Option(None, help="BOSS data reduction pipeline version."),
+):
+    """Migrate spectra and auxillary information to the Astra database."""
 
-    from astra.utils import log
-    from astra.models.source import Source
+    import os
+    import multiprocessing as mp
+    from signal import SIGKILL
+    from rich.progress import Text, Progress, SpinnerColumn, Text, TextColumn, TaskProgressColumn, TimeRemainingColumn, TimeElapsedColumn, BarColumn, MofNCompleteColumn as _MofNCompleteColumn
 
-    from astra.migrations.apogee import (
-        migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb, 
-        migrate_apvisit_metadata_from_image_headers,
-        fix_version_id_edge_cases
-    )
+    class MofNCompleteColumn(_MofNCompleteColumn):
+        def render(self, task):
+            completed = int(task.completed)
+            total = f"{int(task.total):,}" if task.total is not None else "?"
+            total_width = len(str(total))
+            return Text(
+                f"{completed:{total_width},d}{self.separator}{total}",
+                style="progress.download",
+            )
+
     from astra.migrations.boss import (
-        migrate_spectra_from_spall_file,
+        migrate_from_spall_file,
         migrate_specfull_metadata_from_image_headers
     )
+    #from astra.migrations.apogee import (
+    #    migrate_apvisit_metadata_from_image_headers,
+    #)
+    from astra.migrations.new_apogee import (
+        migrate_apogee_spectra_from_sdss5_apogee_drpdb,
+        migrate_dithered_metadata
+    )
     from astra.migrations.catalog import (
-        migrate_gaia_source_ids,
         migrate_healpix,
-        migrate_tic_v8_identifier,
         migrate_twomass_photometry,
         migrate_unwise_photometry,
         migrate_glimpse_photometry,
+        migrate_tic_v8_identifier,
+        migrate_gaia_source_ids,
         migrate_gaia_dr3_astrometry_and_photometry,
         migrate_zhang_stellar_parameters,
-        migrate_bailer_jones_distances
+        migrate_bailer_jones_distances,
+        migrate_gaia_synthetic_photometry
     )
     from astra.migrations.misc import (
-        compute_f_night_time_for_boss_visits, 
+        compute_f_night_time_for_boss_visits,
         compute_f_night_time_for_apogee_visits,
-        set_missing_gaia_source_ids_to_null,
+        update_visit_spectra_counts,       
         compute_n_neighborhood,
-        update_visit_spectra_counts
+        update_galactic_coordinates,
+        compute_w1mag_and_w2mag,
+        fix_unsigned_apogee_flags
     )
     from astra.migrations.reddening import update_reddening
-    from astra.migrations.targeting import migrate_carton_assignments_to_bigbitfield
-
-    log.info("Starting ingestion. This will take a long time.")
-
-    if include_dr17:
-        log.info(f"Ingesting DR17 APOGEE spectra")
-        migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(limit=limit)
-
-    if run2d is not None:
-        log.info(f"Ingesting SDSS5 BOSS spectra with run2d={run2d}")
-        migrate_spectra_from_spall_file(run2d, limit=limit)
-
-        log.info(f"Migrating BOSS metadata from headers")
-        migrate_specfull_metadata_from_image_headers()
-            
-    if apred is not None:
-        from astra.migrations.apogee import (        
-            migrate_1p3_apvisit_from_sdss5_apogee_drpdb as migrate_apvisit_from_sdss5_apogee_drpdb,
-            migrate_apstar_from_sdss5_database,
-        )
-
-        log.info(f"Ingesting SDSS5 APOGEE spectra with apred={apred}")
-        migrate_apvisit_from_sdss5_apogee_drpdb(apred, limit=limit)
-        
-        fix_version_id_edge_cases()
-        migrate_apstar_from_sdss5_database(apred, limit=limit)
-        
-    log.info(f"Migrating carton assignments")
-    migrate_carton_assignments_to_bigbitfield()
-
-    log.info(f"Migrating HEALPix")
-    migrate_healpix()
-
-    log.info(f"Migrating Gaia source identifiers")
-    migrate_gaia_source_ids()
-
-    log.info(f"Migrating Gaia astrometry and photometry")
-    migrate_gaia_dr3_astrometry_and_photometry()
-    
-    log.info(f"Migrating Zhang et al stellar parameters")
-    migrate_zhang_stellar_parameters()
-
-    log.info(f"Migrating 2MASS photometry")
-    migrate_twomass_photometry()
-
-    log.info(f"Migrating unWISE photometry")
-    migrate_unwise_photometry()
-
-    log.info(f"Migrating GLIMPSE photometry")
-    migrate_glimpse_photometry()
-
-    log.info(f"Migrating TIC v8 identifiers")
-    migrate_tic_v8_identifier()
-
-    log.info(f"Migrating Bailer-Jones distances")
-    migrate_bailer_jones_distances()
-    
-    log.info(f"Migration from SDSS5 catalogdb complete")
-    set_missing_gaia_source_ids_to_null()
-    
-    log.info(f"Computing f_night_fraction for BOSS visits")
-    compute_f_night_time_for_boss_visits()
-
-    log.info(f"Computing f_night_fraction for APOGEE visits")
-    compute_f_night_time_for_apogee_visits()
-    
-    log.info(f"Computing neighbourhood size")
-    compute_n_neighborhood()
-    
-    log.info("Computing visit spectra counts")
-    update_visit_spectra_counts()
-    
-    log.info(f"Computing extinction")
-    update_reddening()
-    
-    log.info(f"Migrating apVisit metadata from image headers")
-    migrate_apvisit_metadata_from_image_headers()
-    log.info("Done")
-        
-
-@cli.command(context_settings=dict(ignore_unknown_options=True))
-@click.option("--slurm-profile", default=None, help="Use Slurm profile specified in Astra config file. If None is given, it will default to the profile for the task name, or `default`.")
-@click.option("--slurm-dir", default=None)
-@click.option("--limit", default=None, type=int)
-@click.option("--nodes", default=1, type=int)
-def create_mwm_products(slurm_profile, slurm_dir, limit, nodes):
-
-    import os
-    from astra import config, log
-    from astra.utils import expand_path
-    resolved_task = "astra.products.mwm.create_all_mwm_products"
-
-    slurm_profile_config = config.get("slurm", dict(profiles={})).get("profiles", {})
-    if slurm_profile is not None:
-        if slurm_profile not in slurm_profile_config:
-            raise click.BadArgumentUsage(f"Cannot find Slurm profile '{slurm_profile}' in Astra config.")            
-    else:     
-        try_slurm_profile_names = (resolved_task, resolved_task.split(".")[-1], "default")
-        for slurm_profile in try_slurm_profile_names:
-            if slurm_profile in slurm_profile_config:
-                log.info(f"Using Slurm profile '{slurm_profile}'")
-                break
-        else:
-            raise click.BadOptionUsage(f"Cannot find any Slurm profile in Astra config. Use `--slurm-profile PROFILE` to specify. Tried: {', '.join(slurm_profile_config)}")
-
-    if slurm_dir is None:
-        from datetime import datetime
-        from tempfile import mkdtemp
-        prefix = f"{datetime.now().strftime('%Y-%m-%d')}-{resolved_task.split('.')[-1][:30]}-"
-        slurm_dir = mkdtemp(prefix=prefix, dir=expand_path(f"$PBS/"))
-        os.chmod(slurm_dir, 0o755)
-        log.info(f"Using Slurm directory: {slurm_dir}")    
-        job_name = f"{os.path.basename(slurm_dir)}"
-    else:
-        os.makedirs(slurm_dir, exist_ok=True)
-        job_name = f"{resolved_task.split('.')[-1]}"
-
-    if limit is None:
-        from astra.models import Source
-        from astra.products.mwm_summary import DEFAULT_MWM_WHERE
-        from astra.models.apogee import ApogeeVisitSpectrum
-        from astra.models.boss import BossVisitSpectrum
-        from peewee import JOIN
-
-        apreds = ("1.3", "dr17")
-        run2ds = ("v6_1_3", )
-
-        q_apogee = (
-            ApogeeVisitSpectrum
-            .select(ApogeeVisitSpectrum.source_pk)
-            .distinct(ApogeeVisitSpectrum.source_pk)
-            .where(ApogeeVisitSpectrum.apred.in_(apreds))
-            .alias("q_apogee")
-        )
-        q_boss = (
-            BossVisitSpectrum
-            .select(BossVisitSpectrum.source_pk)
-            .distinct(BossVisitSpectrum.source_pk)
-            .where(BossVisitSpectrum.run2d.in_(run2ds))
-            .alias("q_boss")
-        )
-
-        q = (
-            Source
-            .select()
-            .distinct(Source.pk)
-            .where(
-                Source.sdss_id.is_null(False)
-            &   DEFAULT_MWM_WHERE
-            )
-            .join(q_apogee, JOIN.LEFT_OUTER, on=(q_apogee.c.source_pk == Source.pk))
-            .switch(Source)
-            .join(q_boss, JOIN.LEFT_OUTER, on=(q_boss.c.source_pk == Source.pk))
-            .where(
-                (~q_apogee.c.source_pk.is_null())
-            |   (~q_boss.c.source_pk.is_null())
-            )
-        )     
-
-        limit = q.count()
-
-    import sys
-    if slurm_dir is None:
-        from datetime import datetime
-        from tempfile import mkdtemp
-        prefix = f"{datetime.now().strftime('%Y-%m-%d')}-{resolved_task.split('.')[-1][:30]}-"
-        if page:
-            prefix += f"{page}-"
-        slurm_dir = mkdtemp(prefix=prefix, dir=expand_path(f"$PBS/"))
-        os.chmod(slurm_dir, 0o755)
-        log.info(f"Using Slurm directory: {slurm_dir}")    
-        job_name = f"{os.path.basename(slurm_dir)}"
-    else:
-        os.makedirs(slurm_dir, exist_ok=True)
-        job_name = f"{resolved_task.split('.')[-1]}"
-
-    slurm_kwds = slurm_profile_config[slurm_profile]
-
-    from astra.utils.slurm import SlurmTask, SlurmJob
-
-    python_threads = slurm_kwds.pop("python_threads", 8)
-    if slurm_kwds is None:
-        pre_execute_commands = []
-    else:
-        pre_execute_commands = [
-            f"export OMP_NUM_THREADS={python_threads}",
-            f"export OPENBLAS_NUM_THREADS={python_threads}",
-            f"export MKL_NUM_THREADS={python_threads}",
-            f"export VECLIB_MAXIMUM_THREADS={python_threads}",
-            f"export NUMEXPR_NUM_THREADS={python_threads}"            
-        ]
-
-    n_proc = 32    
-    limit_per_proc = limit // (n_proc * nodes) + 1
-    page_count = 0
-    for node in range(nodes):
-        commands = []
-        for page in range(1, n_proc + 1):
-            commands.append(f"astra execute astra.products.mwm.create_all_mwm_products --page {page + page_count} --limit {limit_per_proc} &")
-        page_count += page
-        commands.append("wait")
-
-        this_slurm_dir = os.path.join(slurm_dir, f"{node}")
-        os.makedirs(this_slurm_dir, exist_ok=True)
-        os.chmod(this_slurm_dir, 0o755)
-
-        slurm_job = SlurmJob(
-            [
-                SlurmTask(pre_execute_commands + commands)
-            ],
-            f"{job_name}_{node}",
-            dir=this_slurm_dir,
-            **slurm_kwds,
-        )
-        slurm_job_pk = slurm_job.submit()
-
-        click.echo(f"{slurm_job_pk}")
-    sys.exit(0)    
-
-
-@cli.command(context_settings=dict(ignore_unknown_options=True))
-@click.option("--slurm-profile", default=None, help="Use Slurm profile specified in Astra config file. If None is given, it will default to the profile for the task name, or `default`.")
-@click.option("--nodes", default=1)
-@click.option("--procs-per-node", default=1)
-@click.option("--limit", default=None)
-@click.option("--page", default=None)
-@click.argument("task", nargs=1)
-@click.argument("spectrum_type", nargs=1)
-@click.argument("kwargs_str", nargs=-1)
-def new_execute(slurm_profile, nodes, procs_per_node, limit, page, task, spectrum_type, kwargs_str):
-
-    import os
-    import numpy as np
-    import sys
-    from astra import config, __version__
-    from astra.utils import expand_path, log, callable
-
-    import pickle
-    from inspect import getfullargspec
-    from tqdm import tqdm
-    from peewee import chunked, JOIN
-
-    from astra import models
-    from astra.models.source import Source
-    from astra.models.spectrum import Spectrum, SpectrumMixin    
-
-
-    # Do some cleverness about the task name.
-    for prefix in ("", "astra.", "astra.pipelines.", f"astra.pipelines.{task}."):
-        try:
-            resolved_task = f"{prefix}{task}"
-            f = callable(resolved_task)
-        except:
-            None
-        else:
-            if prefix:
-                log.info(f"Resolved '{task}' -> '{resolved_task}'")
-            break
-    else:
-        # Raise exception on the no-prefix case.
-        f = callable(task)
-
-    kwargs = {}
-    for each in kwargs_str:
-        k, v = each.split("=")
-        kwargs[k.lstrip("-")] = v
-    
-
-    spectrum_model = getattr(models, spectrum_type)
-    try:
-        output_model = getfullargspec(f).annotations["return"].__args__[0]
-    except:
-        raise ValueError(f"Cannot infer output model for task {f}, is it missing a type annotation?")
-
-    # Query for spectra that does not have a result in this output model
-    iterable = (
-        spectrum_model
-        .select(
-            spectrum_model,
-            Source
-        )
-        .join(
-            output_model,
-            JOIN.LEFT_OUTER,
-            on=(
-                (spectrum_model.spectrum_pk == output_model.spectrum_pk)
-            &   (output_model.v_astra == __version__)
-            )
-        )
-        .switch(spectrum_model)
-        .join(Source, attr="source") # convenience to pre-fetch .source attribute on everything
-        .where(output_model.spectrum_pk.is_null())
+    from astra.migrations.targeting import (
+        migrate_carton_assignments_to_bigbitfield,
+        migrate_targeting_cartons
     )
-    for k, v in kwargs.items():
-        iterable = iterable.where(getattr(spectrum_model, k) == v)
-        print(f"requiring {k}={v}")
+    from astra.utils import silenced
 
-    if os.environ.get("CLUSTER", False):
-        q = (
-            iterable
-            .paginate(int(page), int(limit))
-        )
-        # In Slurm environment, so just execute 
-        for item in tqdm(f(q), total=int(limit)):
-            None
-
-    else:
-        # Submit to Slurm
-        total = limit or iterable.count()
-
-        print(f"Found {total}")
-        from astra.utils.slurm import SlurmTask, SlurmJob
-
-        # Resolve slurm profile.
-        slurm_profile_config = config.get("slurm", dict(profiles={})).get("profiles", {})
-        if slurm_profile is not None:
-            if slurm_profile not in slurm_profile_config:
-                raise click.BadArgumentUsage(f"Cannot find Slurm profile '{slurm_profile}' in Astra config.")            
-        else:     
-            try_slurm_profile_names = (resolved_task, resolved_task.split(".")[-1], "default")
-            for slurm_profile in try_slurm_profile_names:
-                if slurm_profile in slurm_profile_config:
-                    log.info(f"Using Slurm profile '{slurm_profile}'")
-                    break
-            else:
-                raise click.BadOptionUsage(f"Cannot find any Slurm profile in Astra config. Use `--slurm-profile PROFILE` to specify. Tried: {', '.join(slurm_profile_config)}")
-            
-        slurm_kwds = slurm_profile_config[slurm_profile]
-
-        n_procs = procs_per_node * nodes
-        batch_size = int(np.ceil(total / (n_procs)))
-        
-        from datetime import datetime
-        from tempfile import mkdtemp
-
-        python_threads = slurm_kwds.pop("python_threads", 8)
-        if slurm_kwds is None:
-            pre_execute_commands = []
-        else:
-            pre_execute_commands = [
-                f"export OMP_NUM_THREADS={python_threads}",
-                f"export OPENBLAS_NUM_THREADS={python_threads}",
-                f"export MKL_NUM_THREADS={python_threads}",
-                f"export VECLIB_MAXIMUM_THREADS={python_threads}",
-                f"export NUMEXPR_NUM_THREADS={python_threads}"            
-            ]
-
-        start_page = 1
-
-        for node in range(nodes):
-
-            commands = []
-            for proc in range(procs_per_node):
-                
-                page = start_page + node * procs_per_node + proc
-                
-                command = f"astra new-execute --page {page} --limit {batch_size} {resolved_task} {spectrum_type} {' '.join(kwargs_str)}"
-                commands.append(command)
-            
-            prefix = f"{datetime.now().strftime('%Y-%m-%d')}-{resolved_task.split('.')[-1][:30]}-"
-            if page:
-                prefix += f"{node}-"
-            slurm_dir = mkdtemp(prefix=prefix, dir=expand_path(f"$PBS/"))
-            os.chmod(slurm_dir, 0o755)
-            log.info(f"Using Slurm directory: {slurm_dir}")    
-            job_name = f"{os.path.basename(slurm_dir)}"
-
-            slurm_job = SlurmJob(
-                [
-                    SlurmTask(pre_execute_commands + [c]) for c in commands
-                ],
-                job_name,
-                dir=slurm_dir,
-                **slurm_kwds,
-            )
-            slurm_job_pk = slurm_job.submit()
-            print(slurm_job_pk)
-
-    
-
-
-@cli.command(context_settings=dict(ignore_unknown_options=True))
-@click.option("--slurm", is_flag=True, default=False, help="Execute through Slurm (see --slurm-profile)")
-@click.option("--slurm-profile", default=None, help="Use Slurm profile specified in Astra config file. If None is given, it will default to the profile for the task name, or `default`.")
-@click.option("--slurm-dir", default=None)
-@click.option("--page", default=None, type=int)
-@click.option("--limit", default=None, type=int)
-@click.option("--kwargs-path")
-@click.argument("task")
-@click.argument("spectra", nargs=-1)
-def execute(slurm, slurm_profile, slurm_dir, page, limit, kwargs_path, task, spectra):
-    """
-    Execute a task on one or many spectra.
-    """
-    # Resolve spectrum ids.
-    #if len(spectra) == 0:
-    #    raise click.UsageError("No spectral model or spectrum identifiers given.")
-
-    import os
-    import sys
-    from astra import config, __version__
-    from astra.utils import expand_path, log, callable
-
-    import pickle
-    from inspect import getfullargspec
-    from tqdm import tqdm
-    from peewee import chunked, JOIN
-
-    from astra import models
-    from astra.models.source import Source
-    from astra.models.spectrum import Spectrum, SpectrumMixin
-
-    kwargs = {}
-    if kwargs_path is not None:
-        with open(kwargs_path, "rb") as fp:
-            kwargs = pickle.load(fp)
-
-    # Parse any additional keyword arguments which unfortunately get lumped into `spectra`.
-    # TODO: THere must be a nicer way to parse this using click.
-    _spectra = []
-    for arg in spectra:
-        if arg.startswith("--"):
-            k, *v = arg[2:].split("=")
-            k = k.replace("-", "_")
-            kwargs[k] = "=".join(v).strip('"')
-        else:
-            _spectra.append(arg)
-
-    # Do some cleverness about the task name.
-    for prefix in ("", "astra.", "astra.pipelines.", f"astra.pipelines.{task}."):
-        try:
-            resolved_task = f"{prefix}{task}"
-            f = callable(resolved_task)
-        except:
-            None
-        else:
-            if prefix:
-                log.info(f"Resolved '{task}' -> '{resolved_task}'")
-            break
-    else:
-        # Raise exception on the no-prefix case.
-        f = callable(task)
-
-    # TODO: This is all a bit of spaghetti code. Refactor
-
-    if slurm:
-        # Check that there is any work to do before submitting a job.
-
-        try:
-            spectrum_pks = list(map(int, _spectra))
-        except ValueError:
-            if len(_spectra) > 1:
-                raise NotImplementedError("Only one spectrum model allowed for now. This can be changed.")
-            
-            # If the first item has a default, then don't do anything special.
-            model_name, = _spectra
-            spectrum_model = getattr(models, model_name)
-            try:
-                output_model = getfullargspec(f).annotations["return"].__args__[0]
-            except:
-                raise a
-                raise ValueError(f"Cannot infer output model for task {f}, is it missing a type annotation?")
-
-            # Query for spectra that does not have a result in this output model
-            iterable = (
-                spectrum_model
-                .select(
-                    spectrum_model,
-                    Source
-                )
-                .join(
-                    output_model,
-                    JOIN.LEFT_OUTER,
-                    on=(spectrum_model.spectrum_pk == output_model.spectrum_pk)
-                )
-                .switch(spectrum_model)
-                .join(Source, attr="source") # convenience to pre-fetch .source attribute on everything
-                .where(output_model.spectrum_pk.is_null())
-                .limit(limit)
-            )
-            total = limit or iterable.count()
-            log.info(f"Found at least {total} {model_name} spectra that do not have results in {output_model}")
-
-        else:
-            total = len(spectrum_pks)
-
-        argspec = getfullargspec(f)
-
-        if len(argspec.defaults) != len(argspec.args) and total == 0:
-            # Nothing to do.
-            log.info(f"No spectra to process.")
-            sys.exit(0)
-    
-
-        from astra.utils.slurm import SlurmTask, SlurmJob
-
-        # Resolve slurm profile.
-        slurm_profile_config = config.get("slurm", dict(profiles={})).get("profiles", {})
-        if slurm_profile is not None:
-            if slurm_profile not in slurm_profile_config:
-                raise click.BadArgumentUsage(f"Cannot find Slurm profile '{slurm_profile}' in Astra config.")            
-        else:     
-            try_slurm_profile_names = (resolved_task, resolved_task.split(".")[-1], "default")
-            for slurm_profile in try_slurm_profile_names:
-                if slurm_profile in slurm_profile_config:
-                    log.info(f"Using Slurm profile '{slurm_profile}'")
-                    break
-            else:
-                raise click.BadOptionUsage(f"Cannot find any Slurm profile in Astra config. Use `--slurm-profile PROFILE` to specify. Tried: {', '.join(slurm_profile_config)}")
-            
-        slurm_kwds = slurm_profile_config[slurm_profile]
-
-        # Submit this job. #TODO: Is there a way for Click to reconstruct the command for us?
-        command = "astra execute "
-        if page:
-            command += f"--page {page} "
-        if limit:
-            command += f"--limit {limit} "
-        if kwargs_path:
-            command += f"--kwargs-path {kwargs_path} "
-        command += f"{resolved_task} "
-        command += " ".join(spectra)
-
-        if slurm_dir is None:
-            from datetime import datetime
-            from tempfile import mkdtemp
-            prefix = f"{datetime.now().strftime('%Y-%m-%d')}-{resolved_task.split('.')[-1][:30]}-"
-            if page:
-                prefix += f"{page}-"
-            slurm_dir = mkdtemp(prefix=prefix, dir=expand_path(f"$PBS/"))
-            os.chmod(slurm_dir, 0o755)
-            log.info(f"Using Slurm directory: {slurm_dir}")    
-            job_name = f"{os.path.basename(slurm_dir)}"
-        else:
-            os.makedirs(slurm_dir, exist_ok=True)
-            job_name = f"{resolved_task.split('.')[-1]}"
-
-        python_threads = slurm_kwds.pop("python_threads", 8)
-        if slurm_kwds is None:
-            pre_execute_commands = []
-        else:
-            pre_execute_commands = [
-                f"export OMP_NUM_THREADS={python_threads}",
-                f"export OPENBLAS_NUM_THREADS={python_threads}",
-                f"export MKL_NUM_THREADS={python_threads}",
-                f"export VECLIB_MAXIMUM_THREADS={python_threads}",
-                f"export NUMEXPR_NUM_THREADS={python_threads}"            
-            ]
-        slurm_job = SlurmJob(
-            [
-                SlurmTask(pre_execute_commands + [command])
-            ],
-            job_name,
-            dir=slurm_dir,
-            **slurm_kwds,
-        )
-        slurm_job_pk = slurm_job.submit()
-
-        click.echo(f"{slurm_job_pk}")
-        sys.exit(0)
-
+    ptq = []
     try:
-        spectrum_pks = list(map(int, _spectra))
-    except ValueError:
-        if len(_spectra) > 1:
-            raise NotImplementedError("Only one spectrum model allowed for now. This can be changed.")
-        
-        model_name, = _spectra
-        spectrum_model = getattr(models, model_name)
-        argspec = getfullargspec(f)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            transient=True
+        ) as progress:
 
-        try:
-            output_model = argspec.annotations["return"].__args__[0]
-        except:
-            raise ValueError(f"Cannot infer output model for task {f}, is it missing a type annotation?")
+            def process_task(target, *args, description=None, **kwargs):
+                queue = mp.Queue()
 
-        # Query for spectra that does not have a result in this output model, for this astra version
-        where = output_model.spectrum_pk.is_null() 
-        if hasattr(spectrum_model, "v_astra"):
-            print(f"Restricting {spectrum_model} to have v_astra={__version__}")
-            where = where & (spectrum_model.v_astra == __version__)
+                kwds = dict(queue=queue)
+                kwds.update(kwargs)
+                process = mp.Process(target=target, args=args, kwargs=kwds)
+                process.start()
 
-        iterable = (
-            spectrum_model
-            .select(
-                spectrum_model,
-                Source
-            )
-            .join(
-                output_model,
-                JOIN.LEFT_OUTER,
-                on=(
-                    (spectrum_model.spectrum_pk == output_model.spectrum_pk)
-                &   (output_model.v_astra == __version__)
-                )
-            )
-            .switch(spectrum_model)
-            .join(Source, attr="source") # convenience to pre-fetch .source attribute on everything
-            .where(where)
-        )
-        print(f"kwargs are {kwargs}")
-        if kwargs:
-            for_deletion = []
-            for k, v in kwargs.items():
-                if hasattr(spectrum_model, k):
-                    print(f"requiring {k} = {v}")
-                    iterable = iterable.where(getattr(spectrum_model, k) == v)
-                    for_deletion.append(k)
-            if for_deletion:
-                for k in for_deletion:
-                    kwargs.pop(k)                    
-                
-        if page:
-            iterable = (
-                iterable
-                .paginate(page, limit)
-            )
-        else:
-            iterable = iterable.limit(limit)
-        total = limit or iterable.count()
-    
-    else:            
-        if not spectrum_pks:
-            spectrum_pks.extend(kwargs.pop("spectra", []))
-        else:
-            if "spectra" in kwargs:
-                raise ValueError("`spectra` given in `kwargs_path` and in command line")
-    
-        argspec = getfullargspec(f)
+                task = progress.add_task(description=(description or ""), total=None)
+                return (process, task, queue)
 
-        if len(argspec.defaults) == len(argspec.args):
-            # It has a default for everything, and no spectrum model given, so give nothing
-            iterable = None
-        elif spectrum_pks:                
-            example = Spectrum.get(spectrum_pks[0])
-            spectrum_model = None
-            for expr, field in example.dependencies():
-                if SpectrumMixin not in field.model.__mro__:
-                    continue
-                try:
-                    q = list(field.model.select().where(expr))
-                except:
-                    continue
-                else:
-                    if q:
-                        spectrum_model = field.model
-                        log.info(f"Identified input spectra as type `{spectrum_model}`")
-                        break
             
-            log.warning(f"All given spectrum identifiers should come from the same model type")
+            if apred is not None or run2d is not None:
+                if apred is not None:
+                    if apred == "dr17":
+                        from astra.migrations.apogee import migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb 
+                        ptq.append(process_task(migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb, description="Ingesting APOGEE dr17 spectra"))
+                    else:
+                        ptq.append(process_task(migrate_apogee_spectra_from_sdss5_apogee_drpdb, apred, description=f"Ingesting APOGEE {apred} spectra"))
+                if run2d is not None:
+                    ptq.append(process_task(migrate_from_spall_file, run2d, description=f"Ingesting BOSS {run2d} spectra"))
+                                
+                awaiting = set(t for p, t, q in ptq)
+                while awaiting:
+                    for p, t, q in ptq:
+                        try:
+                            r = q.get(False)
+                            if r is Ellipsis:
+                                progress.update(t, completed=True)
+                                awaiting.remove(t)
+                                p.join()
+                                progress.update(t, visible=False)
+                            else:
+                                progress.update(t, **r)
+                                if "completed" in r and r.get("completed", None) == 0:
+                                    # reset the task
+                                    progress.reset(t)
+                        except mp.queues.Empty:
+                            pass
 
-            # SQLite has a limit on how many SQL variables can be used in a transaction.
-            def yield_spectrum_chunks():
-                for chunk in chunked(spectrum_pks, 10_000):
-                    yield from (
-                        spectrum_model
-                        .select(
-                            spectrum_model,
-                            Source
-                        )
-                        .join(Source, attr="source")
-                        .where(spectrum_model.spectrum_pk.in_(chunk))
-                    )
-
-            iterable = yield_spectrum_chunks()
-            total = len(spectrum_pks)
-        else:
-            raise click.UsageError("Could not resolve spectrum identifiers.")
-
-    if page is not None:
-        kwargs["page"] = page
-    if limit is not None:
-        kwargs["limit"] = limit
-        
-    if iterable is None:
-        for result in tqdm(f(**kwargs), total=0, unit=" spectra"):
-            None
-    
-    else:
-        for result in tqdm(f(iterable, **kwargs), total=total, unit=" spectra"):
-            None
-    
-    return None
+            # Now that we have sources and spectra, we can do other things.
+            ptq = [
+                process_task(migrate_gaia_source_ids, description="Ingesting Gaia DR3 source IDs"),
+                process_task(migrate_twomass_photometry, description="Ingesting 2MASS photometry"),
+                process_task(migrate_unwise_photometry, description="Ingesting unWISE photometry"),
+                process_task(migrate_glimpse_photometry, description="Ingesting GLIMPSE photometry"),
+                #process_task(migrate_specfull_metadata_from_image_headers, description="Ingesting specFull metadata"),
 
 
+                process_task(migrate_dithered_metadata, description="Ingesting APOGEE dithered metadata"),
+                #process_task(migrate_apvisit_metadata_from_image_headers, description="Ingesting apVisit metadata"),                
+                process_task(migrate_healpix, description="Ingesting HEALPix values"),
+                process_task(migrate_tic_v8_identifier, description="Ingesting TIC v8 identifiers"),
+                process_task(update_galactic_coordinates, description="Computing Galactic coordinates"),
+                process_task(fix_unsigned_apogee_flags, description="Fix unsigned APOGEE flags"),
+                process_task(migrate_targeting_cartons, description="Ingesting targeting cartons"),
+                process_task(compute_f_night_time_for_apogee_visits, description="Computing f_night for APOGEE visits"),                        
+                process_task(update_visit_spectra_counts, description="Updating visit spectra counts"),               
+            ]
+            # reddening needs unwise, 2mass, glimpse, 
+            task_gaia, task_twomass, task_unwise, task_glimpse, task_specfull, *_ = [t for p, t, q in ptq]
+            reddening_requires = {task_twomass, task_unwise, task_glimpse, task_gaia}
+            started_reddening = False
+            awaiting = set(t for p, t, q in ptq)
+            while awaiting:
+                additional_tasks = []
+                for p, t, q in ptq:
+                    try:
+                        r = q.get(False)
+                        if r is Ellipsis:
+                            progress.update(t, completed=True)
+                            awaiting.remove(t)
+                            p.join()
+                            progress.update(t, visible=False)
+                            if t == task_gaia:
+                                # Add a bunch more tasks!
+                                new_tasks = [
+                                    process_task(migrate_gaia_dr3_astrometry_and_photometry, description="Ingesting Gaia DR3 astrometry and photometry"),
+                                    process_task(migrate_zhang_stellar_parameters, description="Ingesting Zhang stellar parameters"),
+                                    process_task(migrate_bailer_jones_distances, description="Ingesting Bailer-Jones distances"),                 
+                                    # commented out only because we are getting deadlock errors caused by some other process.               
+                                    #process_task(migrate_gaia_synthetic_photometry, description="Ingesting Gaia synthetic photometry"),
+                                    process_task(compute_n_neighborhood, description="Computing n_neighborhood"),
+                                ]
+                                reddening_requires.update({t for p, t, q in new_tasks[:3]}) # reddening needs Gaia astrometry, Zhang parameters, and Bailer-Jones distances
+                                additional_tasks.extend(new_tasks)
+                            if t == task_specfull:
+                                additional_tasks.append(
+                                    process_task(compute_f_night_time_for_boss_visits, description="Computing f_night for BOSS visits")
+                                )
+                            if t == task_unwise:
+                                additional_tasks.append(
+                                    process_task(compute_w1mag_and_w2mag, description="Computing W1, W2 mags")
+                                )
+                            if not started_reddening and not (awaiting & reddening_requires):
+                                started_reddening = True
+                                #additional_tasks.append(
+                                #    process_task(update_reddening, description="Computing extinction")
+                                #)
+                        else:
+                            progress.update(t, **r)
+                            if "completed" in r and r.get("completed", None) == 0:
+                                # reset the task
+                                progress.reset(t)
 
-@cli.command()
-@click.argument("paths", nargs=-1)
-def run(paths, **kwargs):
-    """Execute one or many tasks."""
-    import os
-    import json
+                    except mp.queues.Empty:
+                        pass
+
+                ptq.extend(additional_tasks)
+                awaiting |= set(t for p, t, q in additional_tasks)
+
+    except KeyboardInterrupt:  
+        """
+        with silenced():
+            import psutil
+            parent = psutil.Process(os.getpid())
+            for child in parent.children(recursive=True):
+                child.kill()
+        """
+        raise KeyboardInterrupt
+
+
+
+@app.command()
+def init(
+    drop_tables: Optional[bool] = typer.Option(False, help="Drop tables if they exist."), 
+    delay: Optional[int] = typer.Option(10, help="Delay in seconds to wait.")
+):
+    """Initialize the Astra database."""
+
+    from time import sleep
+    from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn
     from importlib import import_module
-    from astra.utils import log, expand_path
-    from astra.database.astradb import DataProduct
-    from tqdm import tqdm
+    from astra.models.base import (database, BaseModel)
+    from astra.models.pipeline import PipelineOutputModel
 
-    for path in paths:
-        log.info(f"Running {path}")
-        with open(path, "r") as fp:
-            content = json.load(fp)
-         
-        instructions = [content] if isinstance(content, dict) else content
-        N = len(instructions)
-        for i, instruction in enumerate(instructions, start=1):
-            log.info(f"Starting on instruction {i}/{N} in {path}")
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        TimeRemainingColumn(),
+        transient=True
+    ) as progress:
 
-            task_kwargs = instruction.get("task_kwargs", {})
+        init_model_packages = (
+            "apogee",
+            "boss",
+            "bossnet",
+            "apogeenet",
+            "astronn_dist",
+            "astronn",
+            "source",
+            "spectrum",
+        )
+        for package in init_model_packages:
+            import_module(f"astra.models.{package}")
+        
+        models = set(BaseModel.__subclasses__()) - {PipelineOutputModel}
+        
+        if drop_tables:
+            tables_to_drop = [m for m in models if m.table_exists()]
+            if delay > 0:
+                t = progress.add_task(description=f"About to drop {len(tables_to_drop)} tables..", total=delay)
+                for i in range(delay):
+                    progress.advance(t)
+                    sleep(1)
+        
+            with database.atomic():
+                database.drop_tables(tables_to_drop, cascade=True)
+            progress.remove_task(t)
 
-            # A couple of unfortunate hacks to fix instructions that were incomplete.
-            if (instruction["task_callable"] == "astra.contrib.aspcap.abundances.aspcap_abundances"):
-                if "pwd" not in task_kwargs:
-                    # This one will fail.
-                    log.warning(f"Skipping {i}-th (1-indexed) instruction because it's ASPCAP abundances without a pwd")
-                    continue
-                
-                # Check if outputs already exist.
-                pwd = task_kwargs["pwd"]
-                if os.path.exists(os.path.join(expand_path(pwd), "stdout")):
-                    log.warning(F"Skipping {i}-th (1-indexed) instruction because it's ASPCAP abundances and the outputs already exist")
-                    continue            
-
-            # Get the task executable.
-            module_name, function_name = instruction["task_callable"].rsplit(".", 1)
-            module = import_module(module_name)
-            task_callable = getattr(module, function_name)
-
-            has_data_products = "data_product" in task_kwargs # TODO: this special key should be defined elsewhere
-            if has_data_products:
-                # Resolve the data products
-                input_data_products = task_kwargs.pop("data_product", [])
-                if isinstance(input_data_products, str):
-                    input_data_products = json.loads(input_data_products)
-                # The same data product can appear in this list multiple times, and we want to preserve order.
-                q = DataProduct.select().where(DataProduct.id << input_data_products)
-                unique_data_products = { dp.id: dp for dp in q }
-                task_kwargs["data_product"] = [unique_data_products[dp_pk] for dp_pk in input_data_products]
-                
-            log.info(f"Executing..")
-            try:
-                results = task_callable(**task_kwargs)
-                for result in results:
-                    None
-            except:
-                log.exception(f"Exception in {task_callable} with {task_kwargs}")
-                raise
-                continue
-
-
-    log.info(f"Done")
-    
-    # Remove the path now that we're done.
-    #try:
-    #    os.unlink(path)
-    #except:
-    #    None
-
-
+        t = progress.add_task(description="Creating tables", total=len(models))
+        with database.atomic():
+            database.create_tables(models)
+        
 
 if __name__ == "__main__":
-    cli(obj=dict())
+    app()

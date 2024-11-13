@@ -165,6 +165,8 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     class Meta:
         indexes = (
             (("release", "run2d", "fieldid", "mjd", "catalogid"), True),
+            # The folloing index makes it easier to count the number of unique spectra per source (over different reduction versions)
+            (("source_pk", "telescope", "mjd", "fieldid", "plateid"), False),
         )
 
     @property
