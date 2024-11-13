@@ -13,20 +13,25 @@ def srun(
             "The input model to use (e.g., `ApogeeCombinedSpectrum`, `BossCombinedSpectrum`). "
         )
         )] = None,
-    nodes: Annotated[int, typer.Option(help="The number of nodes to use.")] = 1,
-    procs: Annotated[int, typer.Option(help="The number of processes to use per node.")] = 1,
-    limit: Annotated[int, typer.Option(help="Limit the number of inputs.")] = None,
+    nodes: Annotated[int, typer.Option(help="The number of nodes to use.", min=1)] = 1,
+    procs: Annotated[int, typer.Option(help="The number of processes to use per node.", min=1)] = 1,
+    limit: Annotated[int, typer.Option(help="Limit the number of inputs.", min=1)] = None,
     account: Annotated[str, typer.Option(help="Slurm account")] = "sdss-np",
-    partition: Annotated[str, typer.Option(help="Slurm partition")] = "sdss-np",
+    partition: Annotated[str, typer.Option(help="Slurm partition")] = None,
+    gres: Annotated[str, typer.Option(help="Slurm generic resources")] = None,
+    mem: Annotated[str, typer.Option(help="Memory per node")] = None,
     time: Annotated[str, typer.Option(help="Wall-time")] = "24:00:00",
 ):
     """Distribute an Astra task over many nodes using Slurm."""
+
+    partition = partition or account
 
     import os
     import sys
     import numpy as np
     import concurrent.futures
     import subprocess
+    from datetime import datetime
     from tempfile import TemporaryDirectory
     from peewee import JOIN
     from importlib import import_module
@@ -42,6 +47,7 @@ def srun(
     total = q.count()
     workers = nodes * procs
     limit = int(np.ceil(total / workers))
+    today = datetime.now().strftime("%Y-%m-%d")
 
     with Progress(
         SpinnerColumn(),
@@ -54,13 +60,14 @@ def srun(
 
         # Load a whole bunch of sruns in processes
         futures = {}
-        with TemporaryDirectory(dir=expand_path("$PBS")) as td:
-                
+        with TemporaryDirectory(dir=expand_path("$PBS"), prefix=f"{task}-{today}-", delete=False) as td:
+            p.print(f"Working directory: {td}")
             for n in range(nodes):
+                job_name = f"{task}" + (f"-{n}" if nodes > 1 else "")
                 # TODO: Let's not hard code this here.
-                commands = ["export CLUSTER=1"]
+                commands = ["export CLUSTER=1", "echo hello"]
                 for page in range(n * procs, (n + 1) * procs):
-                    commands.append(f"astra run {task} {model} --limit {limit} --page {page} &")
+                    commands.append(f"{ASTRA} run {task} {model} --limit {limit} --page {page + 1} &")
                 commands.append("wait")
 
                 script_path = f"{td}/node_{n}.sh"
@@ -68,22 +75,24 @@ def srun(
                     fp.write("\n".join(commands))
 
                 os.system(f"chmod +x {script_path}")
-
                 executable = [
                     "srun",
                     "--nodes=1",
                     f"--partition={partition}",
                     f"--account={account}",
-                    f"--job-name={task}-{n}",
+                    f"--job-name={job_name}",
                     f"--time={time}",
                     f"--output={td}/{n}.out",
                     f"--error={td}/{n}.err",
-                    f"bash",
-                    "-c",
-                    f"sh {script_path}"
                 ]
+                if mem is not None:
+                    executable.append(f"--mem={mem}")
+                if gres is not None:
+                    executable.append(f"--gres={gres}")
+                
+                executable.extend(["bash", "-c", f"{script_path}"])
 
-                t = p.add_task(description=f"Running {task}-{n}", total=None)
+                t = p.add_task(description=f"Running {job_name}", total=None)
                 job = executor.submit(
                     subprocess.run,
                     executable,
@@ -100,9 +109,12 @@ def srun(
                     p.remove_task(t)
                 else:
                     p.update(t, description=f"Error code {result.returncode} returned from {task}-{n}")
+                    p.print(result.stderr.decode("utf-8"))
+                
                 max_returncode = max(max_returncode, result.returncode)
             
     sys.exit(max_returncode)
+
 
 @app.command()
 def run(
@@ -113,8 +125,8 @@ def run(
             "If `None` is given then all spectrum models accepted by the task will be analyzed."
         )
         )] = None,
-    limit: Annotated[int, typer.Option(help="Limit the number of spectra.")] = None,
-    page: Annotated[int, typer.Option(help="Page to start results from (`limit` spectra per `page`).")] = None,
+    limit: Annotated[int, typer.Option(help="Limit the number of spectra.", min=1)] = None,
+    page: Annotated[int, typer.Option(help="Page to start results from (`limit` spectra per `page`).", min=1)] = None,
 ):
     """Run an Astra task on spectra."""
     from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn 

@@ -438,23 +438,28 @@ def update_visit_spectra_counts(
         boss_max_mjd=None
     )
     all_counts = {}
+    queue.put(dict(total=q_apogee_counts.count(), description="Querying APOGEE visit counts"))
     for each in q_apogee_counts.iterator():
         source_pk = each.pop("source")
         all_counts[source_pk] = defaults
         all_counts[source_pk].update(each)
+        queue.put(dict(advance=1))
     
+    queue.put(dict(total=q_boss_counts.count(), description="Querying BOSS visit counts", completed=0))
     for each in q_boss_counts.iterator():
         source_pk = each.pop("source")
         all_counts.setdefault(source_pk, defaults)
         all_counts[source_pk].update(each)
+        queue.put(dict(advance=1))
     
     update = []
+    queue.put(dict(total=Source.select().count(), description="Collecting source visit counts", completed=0))
     for s in Source.select().iterator():
         for k, v in all_counts.get(s.pk, {}).items():
             setattr(s, k, v)
         update.append(s)
 
-    queue.put(dict(total=len(update)))
+    queue.put(dict(total=len(update), description="Updating source visit counts", completed=0))
     for batch in chunked(update, batch_size):
         # Ugh some issue where if we are only setting Nones for all then if we supply the field it dies
         fields = {"n_apogee_visits", "n_boss_visits"}

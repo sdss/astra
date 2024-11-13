@@ -180,7 +180,6 @@ def generate_queries_for_task(task, input_model=None, limit=None, page=None):
     output_model = get_return_type(fun)
     group_by_string = get_task_group_by_string(fun)
     
-    print(input_models)
     for input_model in input_models:
         where = (
             output_model.spectrum_pk.is_null()
