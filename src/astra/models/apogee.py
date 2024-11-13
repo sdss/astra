@@ -196,6 +196,8 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
     flag_mtpflux_lt_75 = spectrum_flags.flag(2**24)
     flag_mtpflux_lt_50 = spectrum_flags.flag(2**25)
     
+    flag_missing_or_corrupted_file = spectrum_flags.flag(2**26)
+
     #> Radial Velocity (Doppler)
     v_rad = FloatField(null=True)
     v_rel = FloatField(null=True)
@@ -452,6 +454,7 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     #> Observing Span
     min_mjd = IntegerField(null=True)
     max_mjd = IntegerField(null=True)
+    starver = IntegerField(null=True)
 
     #> Number and Quality of Visits
     n_entries = IntegerField(null=True)

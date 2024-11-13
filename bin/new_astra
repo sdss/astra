@@ -178,8 +178,12 @@ def migrate(
         migrate_from_spall_file,
         migrate_specfull_metadata_from_image_headers
     )
-    from astra.migrations.apogee import (
-        migrate_apvisit_metadata_from_image_headers,
+    #from astra.migrations.apogee import (
+    #    migrate_apvisit_metadata_from_image_headers,
+    #)
+    from astra.migrations.new_apogee import (
+        migrate_apogee_spectra_from_sdss5_apogee_drpdb,
+        migrate_dithered_metadata
     )
     from astra.migrations.catalog import (
         migrate_healpix,
@@ -239,7 +243,7 @@ def migrate(
                         from astra.migrations.apogee import migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb 
                         ptq.append(process_task(migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb, description="Ingesting APOGEE dr17 spectra"))
                     else:
-                        raise a
+                        ptq.append(process_task(migrate_apogee_spectra_from_sdss5_apogee_drpdb, apred, description=f"Ingesting APOGEE {apred} spectra"))
                 if run2d is not None:
                     ptq.append(process_task(migrate_from_spall_file, run2d, description=f"Ingesting BOSS {run2d} spectra"))
                                 
@@ -270,7 +274,8 @@ def migrate(
                 process_task(migrate_specfull_metadata_from_image_headers, description="Ingesting specFull metadata"),
 
 
-                process_task(migrate_apvisit_metadata_from_image_headers, description="Ingesting apVisit metadata"),                
+                process_task(migrate_dithered_metadata, description="Ingesting APOGEE dithered metadata"),
+                #process_task(migrate_apvisit_metadata_from_image_headers, description="Ingesting apVisit metadata"),                
                 process_task(migrate_healpix, description="Ingesting HEALPix values"),
                 process_task(migrate_tic_v8_identifier, description="Ingesting TIC v8 identifiers"),
                 process_task(update_galactic_coordinates, description="Computing Galactic coordinates"),

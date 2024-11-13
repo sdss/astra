@@ -9,7 +9,7 @@ try:
 
     database = PeeweeDatabaseConnection(
         "sdss5db",
-        autorollback=True
+        #autorollback=True
     )
     database.set_profile(profile)
 

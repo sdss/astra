@@ -1,12 +1,6 @@
-import numpy as np
-import datetime
 from playhouse.hybrid import hybrid_property
-from astra import __version__
-from astra.fields import (AutoField, FloatField, TextField, ForeignKeyField, BitField, DateTimeField)
-from astra.models.source import Source
-from astra.models.spectrum import Spectrum
+from astra.fields import (FloatField, BitField)
 from astra.models.pipeline import PipelineOutputModel
-
 
 class BossNet(PipelineOutputModel):
 
@@ -64,7 +58,12 @@ class BossNet(PipelineOutputModel):
     
     @classmethod
     def from_spectrum(cls, spectrum, **kwargs):
+        """
+        Create a new instance of this model from a Spectrum instance.
 
+        :param spectrum:
+            The spectrum instance.
+        """
         kwds = kwargs.copy()
         teff = kwargs.get("teff", None)
         if teff is not None:

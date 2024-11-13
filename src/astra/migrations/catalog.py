@@ -142,7 +142,7 @@ def migrate_bailer_jones_distances(
                 )
             )
 
-        queue.put(dict(advance=1))
+        queue.put(dict(advance=batch_size))
 
     queue.put(Ellipsis)
     return n_updated
@@ -414,38 +414,39 @@ def migrate_tic_v8_identifier(catalogid_field_name="catalogid21", batch_size: Op
 
     updated = 0
     queue.put(dict(total=q.count()))
-    for batch in chunked(q.iterator(), batch_size):
-        q_tic_v8 = (
-            CatalogToTIC_v8
-            .select(
-                CatalogToTIC_v8.catalogid.alias("catalogid"),
-                CatalogToTIC_v8.target.alias("tic_v8_id"),
-            )
-            .where(
-                CatalogToTIC_v8.catalogid.in_([getattr(r, catalogid_field_name) for r in batch])
-            )
-            .order_by(CatalogToTIC_v8.catalogid.asc())
-            .tuples()
-            .iterator()
-        )
-        
-        sources = { getattr(s, catalogid_field_name): s for s in batch}
-        update = []
-        for catalogid, tic_v8_id in q_tic_v8:
-            source = sources[catalogid]
-            source.tic_v8_id = tic_v8_id
-            update.append(source)
-
-        if update:             
-            updated += (
-                Source
-                .bulk_update(
-                    update,
-                    fields=[Source.tic_v8_id]
+    if q:            
+        for batch in chunked(q, batch_size):
+            q_tic_v8 = (
+                CatalogToTIC_v8
+                .select(
+                    CatalogToTIC_v8.catalogid.alias("catalogid"),
+                    CatalogToTIC_v8.target.alias("tic_v8_id"),
                 )
+                .where(
+                    CatalogToTIC_v8.catalogid.in_([getattr(r, catalogid_field_name) for r in batch])
+                )
+                .order_by(CatalogToTIC_v8.catalogid.asc())
+                .tuples()
+                .iterator()
             )
+            
+            sources = { getattr(s, catalogid_field_name): s for s in batch}
+            update = []
+            for catalogid, tic_v8_id in q_tic_v8:
+                source = sources[catalogid]
+                source.tic_v8_id = tic_v8_id
+                update.append(source)
 
-        queue.put(dict(advance=batch_size))
+            if update:             
+                updated += (
+                    Source
+                    .bulk_update(
+                        update,
+                        fields=[Source.tic_v8_id]
+                    )
+                )
+
+            queue.put(dict(advance=batch_size))
 
     queue.put(Ellipsis)
     return updated    
@@ -487,31 +488,32 @@ def migrate_twomass_photometry(
     queue.put(dict(total=limit or q.count()))
 
     twomass_data = {}
-    for batch in chunked(q, batch_size):
-        q_twomass = (
-            TwoMassPSC
-            .select(
-                CatalogToTwoMassPSC.catalogid.alias("catalogid"),
-                TwoMassPSC.j_m.alias("j_mag"),
-                TwoMassPSC.j_cmsig.alias("e_j_mag"),
-                TwoMassPSC.h_m.alias("h_mag"),
-                TwoMassPSC.h_cmsig.alias("e_h_mag"),
-                TwoMassPSC.k_m.alias("k_mag"),
-                TwoMassPSC.k_cmsig.alias("e_k_mag"),
-                TwoMassPSC.ph_qual,
-                TwoMassPSC.bl_flg,
-                TwoMassPSC.cc_flg,
+    if q:
+        for batch in chunked(q, batch_size):
+            q_twomass = (
+                TwoMassPSC
+                .select(
+                    CatalogToTwoMassPSC.catalogid.alias("catalogid"),
+                    TwoMassPSC.j_m.alias("j_mag"),
+                    TwoMassPSC.j_cmsig.alias("e_j_mag"),
+                    TwoMassPSC.h_m.alias("h_mag"),
+                    TwoMassPSC.h_cmsig.alias("e_h_mag"),
+                    TwoMassPSC.k_m.alias("k_mag"),
+                    TwoMassPSC.k_cmsig.alias("e_k_mag"),
+                    TwoMassPSC.ph_qual,
+                    TwoMassPSC.bl_flg,
+                    TwoMassPSC.cc_flg,
+                )
+                .join(CatalogToTwoMassPSC)
+                .where(
+                    CatalogToTwoMassPSC.catalogid.in_(flatten(batch))
+                )
+                .order_by(CatalogToTwoMassPSC.catalogid.asc())
+                .dicts()
             )
-            .join(CatalogToTwoMassPSC)
-            .where(
-                CatalogToTwoMassPSC.catalogid.in_(flatten(batch))
-            )
-            .order_by(CatalogToTwoMassPSC.catalogid.asc())
-            .dicts()
-        )
-        for r in q_twomass:
-            twomass_data[r.pop("catalogid")] = r
-        queue.put(dict(advance=min(batch_size, len(batch))))
+            for r in q_twomass:
+                twomass_data[r.pop("catalogid")] = r
+            queue.put(dict(advance=min(batch_size, len(batch))))
 
     q = (
         Source
@@ -609,60 +611,61 @@ def migrate_unwise_photometry(
 
     updated = 0
     queue.put(dict(total=limit or q.count()))
-    for batch in chunked(q, batch_size):
-        q_phot = (
-            unWISE
-            .select(
-                CatalogTounWISE.catalogid.alias("catalogid"),
-                unWISE.flux_w1.alias("w1_flux"),
-                unWISE.dflux_w1.alias("w1_dflux"),
-                unWISE.flux_w2.alias("w2_flux"),
-                unWISE.dflux_w2.alias("w2_dflux"),
-                unWISE.fracflux_w1.alias("w1_frac"),
-                unWISE.fracflux_w2.alias("w2_frac"),
-                unWISE.flags_unwise_w1.alias("w1uflags"),
-                unWISE.flags_unwise_w2.alias("w2uflags"),
-                unWISE.flags_info_w1.alias("w1aflags"),
-                unWISE.flags_info_w2.alias("w2aflags")
-            )
-            .join(CatalogTounWISE)
-            .where(
-                CatalogTounWISE.catalogid.in_([getattr(r, catalogid_field_name) for r in batch])
-            )
-            .order_by(CatalogTounWISE.catalogid.asc())
-            .dicts()
-            .iterator()
-        )
-
-        update = []
-        sources = { getattr(s, catalogid_field_name): s for s in batch }
-        for r in q_phot:
-            source = sources[r["catalogid"]]
-            for key, value in r.items():
-                setattr(source, key, value)
-            update.append(source)
-        
-        if update:                    
-            updated += (
-                Source
-                .bulk_update(
-                    update,
-                    fields=[
-                        Source.w1_flux,
-                        Source.w1_dflux,
-                        Source.w2_flux,
-                        Source.w2_dflux,
-                        Source.w1_frac,
-                        Source.w2_frac,
-                        Source.w1uflags,
-                        Source.w2uflags,
-                        Source.w1aflags,
-                        Source.w2aflags
-                    ]
+    if q:
+        for batch in chunked(q, batch_size):
+            q_phot = (
+                unWISE
+                .select(
+                    CatalogTounWISE.catalogid.alias("catalogid"),
+                    unWISE.flux_w1.alias("w1_flux"),
+                    unWISE.dflux_w1.alias("w1_dflux"),
+                    unWISE.flux_w2.alias("w2_flux"),
+                    unWISE.dflux_w2.alias("w2_dflux"),
+                    unWISE.fracflux_w1.alias("w1_frac"),
+                    unWISE.fracflux_w2.alias("w2_frac"),
+                    unWISE.flags_unwise_w1.alias("w1uflags"),
+                    unWISE.flags_unwise_w2.alias("w2uflags"),
+                    unWISE.flags_info_w1.alias("w1aflags"),
+                    unWISE.flags_info_w2.alias("w2aflags")
                 )
+                .join(CatalogTounWISE)
+                .where(
+                    CatalogTounWISE.catalogid.in_([getattr(r, catalogid_field_name) for r in batch])
+                )
+                .order_by(CatalogTounWISE.catalogid.asc())
+                .dicts()
+                .iterator()
             )
 
-        queue.put(dict(advance=batch_size))
+            update = []
+            sources = { getattr(s, catalogid_field_name): s for s in batch }
+            for r in q_phot:
+                source = sources[r["catalogid"]]
+                for key, value in r.items():
+                    setattr(source, key, value)
+                update.append(source)
+            
+            if update:                    
+                updated += (
+                    Source
+                    .bulk_update(
+                        update,
+                        fields=[
+                            Source.w1_flux,
+                            Source.w1_dflux,
+                            Source.w2_flux,
+                            Source.w2_dflux,
+                            Source.w1_frac,
+                            Source.w2_frac,
+                            Source.w1uflags,
+                            Source.w2uflags,
+                            Source.w1aflags,
+                            Source.w2aflags
+                        ]
+                    )
+                )
+
+            queue.put(dict(advance=batch_size))
     queue.put(Ellipsis)
     return updated
 
@@ -694,55 +697,56 @@ def migrate_glimpse_photometry(catalogid_field_name="catalogid31", batch_size: O
             &   catalogid_field.is_null(False)
         )
         .limit(limit)
-    )    
+    )
     queue.put(dict(total=limit or q.count()))
 
     updated = 0
-    for batch in chunked(q, batch_size):
-        catalogids = [getattr(r, catalogid_field_name) for r in batch]
-        q_phot = list(
-            GLIMPSE
-            .select(
-                CatalogToGLIMPSE.catalogid.alias("catalogid"),
-                GLIMPSE.mag4_5,
-                GLIMPSE.d4_5m,
-                GLIMPSE.rms_f4_5,
-                GLIMPSE.sqf_4_5,
-                GLIMPSE.mf4_5,
-                GLIMPSE.csf,
-            )
-            .join(CatalogToGLIMPSE, on=(CatalogToGLIMPSE.target_id == GLIMPSE.pk))
-            .where(
-                CatalogToGLIMPSE.catalogid.in_(catalogids)
-            )
-            .dicts()
-        )
-
-        update = []
-        sources = { getattr(s, catalogid_field_name): s for s in batch }
-        for r in q_phot:
-            source = sources[r["catalogid"]]
-            for key, value in r.items():
-                setattr(source, key, value)
-            update.append(source)
-        
-        if update:                    
-            updated += (
-                Source
-                .bulk_update(
-                    update,
-                    fields=[
-                        Source.mag4_5,
-                        Source.d4_5m,
-                        Source.rms_f4_5,
-                        Source.sqf_4_5,
-                        Source.mf4_5,
-                        Source.csf,
-                    ]
+    if q:
+        for batch in chunked(q, batch_size):
+            catalogids = [getattr(r, catalogid_field_name) for r in batch]
+            q_phot = list(
+                GLIMPSE
+                .select(
+                    CatalogToGLIMPSE.catalogid.alias("catalogid"),
+                    GLIMPSE.mag4_5,
+                    GLIMPSE.d4_5m,
+                    GLIMPSE.rms_f4_5,
+                    GLIMPSE.sqf_4_5,
+                    GLIMPSE.mf4_5,
+                    GLIMPSE.csf,
                 )
+                .join(CatalogToGLIMPSE, on=(CatalogToGLIMPSE.target_id == GLIMPSE.pk))
+                .where(
+                    CatalogToGLIMPSE.catalogid.in_(catalogids)
+                )
+                .dicts()
             )
 
-        queue.put(dict(advance=batch_size))
+            update = []
+            sources = { getattr(s, catalogid_field_name): s for s in batch }
+            for r in q_phot:
+                source = sources[r["catalogid"]]
+                for key, value in r.items():
+                    setattr(source, key, value)
+                update.append(source)
+            
+            if update:                    
+                updated += (
+                    Source
+                    .bulk_update(
+                        update,
+                        fields=[
+                            Source.mag4_5,
+                            Source.d4_5m,
+                            Source.rms_f4_5,
+                            Source.sqf_4_5,
+                            Source.mf4_5,
+                            Source.csf,
+                        ]
+                    )
+                )
+
+            queue.put(dict(advance=batch_size))
 
     queue.put(Ellipsis)
     return updated
@@ -776,7 +780,7 @@ def migrate_gaia_source_ids(
     )
 
     updated = []
-    queue.put(dict(total=limit or q.count()))
+    queue.put(dict(total=limit or q.count(), description="Querying Gaia source IDs"))
 
     for chunk in chunked(q, batch_size):
 
@@ -817,7 +821,7 @@ def migrate_gaia_source_ids(
         queue.put(dict(advance=batch_size))
     
     n_updated, updated = (0, list(set(updated)))
-    queue.put(dict(total=len(updated), completed=0))
+    queue.put(dict(total=len(updated), completed=0, description="Ingesting Gaia DR3 source IDs"))
     integrity_errors = []
     for chunk in chunked(updated, batch_size):
         try:

@@ -7,10 +7,6 @@ import subprocess
 import concurrent.futures
 
 from astra.utils import log, expand_path, dict_to_iterable
-from astra.models.base import database
-from astra.models.boss import BossVisitSpectrum
-from astra.models.source import Source
-from astra.migrations.utils import enumerate_new_spectrum_pks, upsert_many, NoQueue
 
 from peewee import (
     chunked,
@@ -26,6 +22,11 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=1_000_000, batch_size
     Migrate all new BOSS visit information (`specFull` files) stored in the spAll file, which is generated
     by the SDSS-V BOSS data reduction pipeline.
     """
+
+    from astra.models.base import database
+    from astra.models.boss import BossVisitSpectrum
+    from astra.models.source import Source
+    from astra.migrations.utils import enumerate_new_spectrum_pks, upsert_many, NoQueue
 
     #path = expand_path(f"$BOSS_SPECTRO_REDUX/{run2d}/spAll-{run2d}.fits")
     #if gzip:
@@ -358,6 +359,11 @@ def migrate_specfull_metadata_from_image_headers(
     batch_size: Optional[int] = 100,
     queue = None
 ):
+    from astra.models.base import database
+    from astra.models.boss import BossVisitSpectrum
+    from astra.models.source import Source
+    from astra.migrations.utils import enumerate_new_spectrum_pks, upsert_many, NoQueue
+
     if queue is None:
         queue = NoQueue()
 

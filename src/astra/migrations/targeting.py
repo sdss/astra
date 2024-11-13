@@ -30,7 +30,7 @@ def merge_carton_to_bit_mapping_and_meta():
     
     bit_mapping.write(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_1_with_groups.csv"))
 
-def migrate_targeting_cartons(where=(Source.sdss5_target_flags == b""), batch_size=1000, queue=None):
+def migrate_targeting_cartons(where=(Source.sdss5_target_flags == b""), batch_size=500, queue=None):
 
     from astra.migrations.sdss5db.targetdb import Target, CartonToTarget
     from astra.migrations.sdss5db.catalogdb import CatalogdbModel
