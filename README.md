@@ -20,6 +20,6 @@ products from SDSS V and to streamline data releases.
 .. |Coverage Status| image:: https://coveralls.io/repos/github/sdss/astra/badge.svg?branch=master
    :target: https://coveralls.io/github/sdss/astra?branch=master
 
-[Migrations](https://github.com/sdss/astra/blob/dev/docs/astra-migrate-2024-11-14.gif?raw=true)
+[Migrations](./docs/astra-migrate-2024-11-14.gif)
 
 
