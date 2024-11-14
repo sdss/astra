@@ -17,6 +17,7 @@ from astra.fields import (
     BigIntegerField,
     ForeignKeyField,
     DateTimeField,
+    BitField,
     BigBitField,
 )
 from astra.models.fields import BasePixelArrayAccessor
@@ -627,7 +628,8 @@ def _get_extname(instrument, observatory):
     return f"{instrument_str}/{observatory.upper().strip()}"
 
 
-def check_path(path, overwrite):
+def check_path(path, overwrite, gzip=False):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    if os.path.exists(path) and not overwrite:
-        raise OSError(f"File {path} already exists. If you mean to replace it then use the argument \"overwrite=True\".")
+    complete_path = path + (".gz" if gzip else "")
+    if os.path.exists(complete_path) and not overwrite:
+        raise OSError(f"File {complete_path} already exists. If you mean to replace it then use the argument \"overwrite=True\".")

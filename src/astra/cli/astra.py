@@ -1,9 +1,46 @@
 #!/usr/bin/env python3
 import typer
-from typing import Optional
+from typing import List, Optional
 from typing_extensions import Annotated
+from enum import Enum
 
 app = typer.Typer()
+
+class Product(str, Enum):
+    mwmTargets = "mwmTargets"
+    mwmAllStar = "mwmAllStar"
+    mwmAllVisit = "mwmAllVisit"
+
+@app.command()
+def version():
+    """Print the version of Astra."""
+    from astra import __version__
+    typer.echo(f"Astra version: {__version__}")
+
+@app.command()
+def create(
+    products: Annotated[List[Product], typer.Argument(help="The product name(s) to create.")],
+    overwrite: Annotated[bool, typer.Option(help="Overwrite the product if it already exists.")] = False,
+    limit: Annotated[int, typer.Option(help="Limit the number of rows per product.", min=1)] = None,
+):    
+    from astra.products.mwm_summary import (
+        create_mwm_targets_product,
+        create_mwm_all_star_product,
+        create_mwm_all_visit_product
+    )
+    mapping = (
+        {
+            Product.mwmTargets: (create_mwm_targets_product, {}),
+            Product.mwmAllVisit: (create_mwm_all_visit_product, {}),
+            Product.mwmAllStar: (create_mwm_all_star_product, {}),
+        }
+    )    
+
+    for product in products:
+        fun, kwargs = mapping[product]
+        path = fun(overwrite=overwrite, limit=limit, **kwargs)
+        typer.echo(f"Created {product}: {path}")
+
 
 @app.command()
 def srun(

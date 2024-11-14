@@ -92,13 +92,14 @@ DEFAULT_MWM_WHERE = (
 def ignore_field_name_callable(field_name):
     return field_name in ("pk", "input_spectrum_pks", )
 
+
 def create_mwm_targets_product(
     where=(
         DEFAULT_MWM_WHERE
     &   ((Source.n_apogee_visits > 0) | (Source.n_boss_visits > 0))
     ),
     limit=None,
-    output_template="mwmTargets-{version}.fits",
+    output_template="mwmTargets-{version_major_minor}.fits",
     ignore_field_name_callable=ignore_field_name_callable,
     upper=False,
     fill_values=None,
@@ -152,8 +153,11 @@ def create_mwm_targets_product(
         If `True`, return a two-length tuple containing the path and the HDU list,
         otherwise just return the path.      
     """
-    path = get_path(output_template.format(version=__version__))
-    check_path(path, overwrite)
+    path = get_path(output_template.format(
+        version=__version__,
+        version_major_minor=".".join(__version__.split(".")[:2])
+    ))
+    check_path(path, overwrite, gzip)
 
     fields = get_fields(
         (Source, ),
@@ -204,7 +208,7 @@ def create_mwm_all_star_product(
     apogee_where=None,
     boss_spectrum_model=BossCombinedSpectrum,
     apogee_spectrum_model=ApogeeCoaddedSpectrumInApStar,
-    output_template="mwmAllStar-{version}.fits",
+    output_template="mwmAllStar-{version_major_minor}.fits",
     ignore_field_name_callable=ignore_field_name_callable,
     name_conflict_strategy=None,
     upper=False,
@@ -267,7 +271,11 @@ def create_mwm_all_star_product(
         If `True`, return a two-length tuple containing the path and the HDU list,
         otherwise just return the path.        
     """
-    path = get_path(output_template.format(version=__version__))
+    path = get_path(output_template.format(
+        version=__version__,
+        version_major_minor=".".join(__version__.split(".")[:2])
+    ))
+
     return _create_summary_product(
         path,
         where=where,
@@ -296,7 +304,7 @@ def create_mwm_all_visit_product(
     apogee_where=None,
     boss_spectrum_model=BossVisitSpectrum,
     apogee_spectrum_model=ApogeeVisitSpectrum,
-    output_template="mwmAllVisit-{version}.fits",
+    output_template="mwmAllVisit-{version_major_minor}.fits",
     ignore_field_name_callable=ignore_field_name_callable,
     name_conflict_strategy=None,
     upper=False,
@@ -359,7 +367,10 @@ def create_mwm_all_visit_product(
         If `True`, return a two-length tuple containing the path and the HDU list,
         otherwise just return the path.        
     """
-    path = get_path(output_template.format(version=__version__))
+    path = get_path(output_template.format(
+        version=__version__,
+        version_major_minor=".".join(__version__.split(".")[:2])
+    ))
     return _create_summary_product(
         path,
         where=where,
@@ -393,7 +404,7 @@ def _create_summary_product(
     overwrite=False,
     full_output=False,        
 ):    
-    check_path(path, overwrite)
+    check_path(path, overwrite, gzip)
 
     kwds = dict(upper=upper, fill_values=fill_values, limit=limit)
 
