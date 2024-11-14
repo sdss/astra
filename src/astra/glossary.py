@@ -1440,7 +1440,7 @@ def resolve_special_contexts(obj, name):
                 else:
                     return value
                     
-    warnings.warn(f"There are some missing glossary definitions. See `astra.glossary.MISSING_GLOSSARY_TERMS`.")
+    #warnings.warn(f"There are some missing glossary definitions. See `astra.glossary.MISSING_GLOSSARY_TERMS`.")
     MISSING_GLOSSARY_TERMS.add(name)
     return None
 
