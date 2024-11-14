@@ -785,6 +785,9 @@ def migrate_gaia_source_ids(
 
     if queue is None:
         queue = NoQueue()
+
+    queue.put(Ellipsis)
+    return None
     
     from astra.migrations.sdss5db.catalogdb import CatalogToGaia_DR3, CatalogToGaia_DR2
 
@@ -801,7 +804,6 @@ def migrate_gaia_source_ids(
     )
 
     updated = []
-    fields = set()
     queue.put(dict(total=limit or q.count(), description="Querying Gaia source IDs"))
 
     for chunk in chunked(q, batch_size):
@@ -823,9 +825,7 @@ def migrate_gaia_source_ids(
         )
         for catalogid, gaia_dr3_source_id in q:
             source = source_by_catalogid[catalogid]
-            source.gaia_dr3_source_id = gaia_dr3_source_id
-            if gaia_dr3_source_id is not None:
-                fields.add(Source.gaia_dr3_source_id)
+            source.gaia_dr3_source_id = gaia_dr3_source_id or -1
             updated.append(source)
 
         q = (
@@ -839,9 +839,7 @@ def migrate_gaia_source_ids(
         )
         for catalogid, gaia_dr2_source_id in q:
             source = source_by_catalogid[catalogid]
-            source.gaia_dr2_source_id = gaia_dr2_source_id
-            if gaia_dr2_source_id is not None:
-                fields.add(Source.gaia_dr2_source_id)
+            source.gaia_dr2_source_id = gaia_dr2_source_id or -1
             updated.append(source)            
 
         queue.put(dict(advance=batch_size))
@@ -856,11 +854,15 @@ def migrate_gaia_source_ids(
                 Source
                 .bulk_update(
                     chunk,
-                    fields=fields
+                    fields=[
+                        Source.gaia_dr3_source_id,
+                        Source.gaia_dr2_source_id
+                    ]
                 )
             )
         except IntegrityError:
             integrity_errors.append(chunk)
+            raise a
                 
         queue.put(dict(advance=batch_size))
     #if integrity_errors:

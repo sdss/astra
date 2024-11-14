@@ -317,7 +317,6 @@ def migrate(
                                     process_task(migrate_gaia_dr3_astrometry_and_photometry, description="Ingesting Gaia DR3 astrometry and photometry"),
                                     process_task(migrate_zhang_stellar_parameters, description="Ingesting Zhang stellar parameters"),
                                     process_task(migrate_bailer_jones_distances, description="Ingesting Bailer-Jones distances"),                 
-                                    # commented out only because we are getting deadlock errors caused by some other process.               
                                     #process_task(migrate_gaia_synthetic_photometry, description="Ingesting Gaia synthetic photometry"),
                                     process_task(compute_n_neighborhood, description="Computing n_neighborhood"),
                                 ]

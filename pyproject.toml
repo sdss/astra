@@ -43,8 +43,9 @@ topic = ["Documentation :: Sphinx", "Topic :: Software Development :: Libraries 
 where = ["src/"]
 include = ["astra"]
 
-#[scripts]   
-#scripts = ["bin/astra", "bin/ferre_chaos_monkey", "bin/ferre_interpolate_unnormalized_model_flux"]
+
+[console_scripts]
+astra = "astra.cli.astra:app"
 
 [project.optional-dependencies]
 dev = [

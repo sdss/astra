@@ -681,7 +681,7 @@ def _compute_f_night_time(pk, observatory, time, n_time):
 
 
 
-def _compute_f_night_time_for_visits(q, model, get_obs_time, batch_size, n_time, max_workers, queue):
+def _compute_f_night_time_for_visits(q, model, get_obs_time, batch_size, n_time, max_workers, queue, k=100):
 
     from astra.models.base import database
 
@@ -706,12 +706,13 @@ def _compute_f_night_time_for_visits(q, model, get_obs_time, batch_size, n_time,
     updated = []
     n_updated = 0
     queue.put(dict(total=len(futures), description="Updating f_night", completed=0))
-    for future in concurrent.futures.as_completed(futures):
+    for i, future in enumerate(concurrent.futures.as_completed(futures)):
         pk, f_night_time = future.result()
         visit = visit_by_pk[pk]
         visit.f_night_time = f_night_time
         updated.append(visit)
-        queue.put(dict(advance=1))
+        if i > 0 and i % k == 0:
+            queue.put(dict(advance=k))
 
     if len(updated) > 0:
         with database.atomic():
