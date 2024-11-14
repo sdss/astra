@@ -43,6 +43,8 @@ topic = ["Documentation :: Sphinx", "Topic :: Software Development :: Libraries 
 where = ["src/"]
 include = ["astra"]
 
+[project.scripts]
+astra = "astra.cli.astra:app"
 
 [console_scripts]
 astra = "astra.cli.astra:app"
