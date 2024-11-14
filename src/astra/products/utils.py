@@ -5,6 +5,10 @@ from peewee import (
     Field,
     Model,
     PostgresqlDatabase,
+    FieldAccessor,
+    JOIN,
+)
+from astra.fields import (
     TextField,
     FloatField,
     BooleanField,
@@ -13,10 +17,9 @@ from peewee import (
     BigIntegerField,
     ForeignKeyField,
     DateTimeField,
-    FieldAccessor,
     BigBitField,
-    JOIN
 )
+from astra.models.fields import BasePixelArrayAccessor
 try:
     from playhouse.postgres_ext import ArrayField
 except:
@@ -29,7 +32,6 @@ from tqdm import tqdm
 from astra import __version__
 from astra.utils import log, flatten, expand_path
 from astra import models as astra_models
-from astra.models.fields import BitField, BasePixelArrayAccessor
 from typing import Union
 from astra.glossary import Glossary
 

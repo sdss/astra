@@ -5,7 +5,10 @@ from peewee import JOIN
 from astropy.io import fits
 from astra import __version__
 from astra.utils import expand_path
-from astra.models import Source, ApogeeVisitSpectrum, ApogeeCoaddedSpectrumInApStar, BossVisitSpectrum, BossCombinedSpectrum, ApogeeCombinedSpectrum
+from astra.models.source import Source
+from astra.models.apogee import ApogeeVisitSpectrum, ApogeeCoaddedSpectrumInApStar
+from astra.models.boss import BossVisitSpectrum
+from astra.models.mwm import BossCombinedSpectrum, ApogeeCombinedSpectrum
 from astra.products.utils import (get_fields, get_basic_header, get_binary_table_hdu, check_path)
 
 get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")

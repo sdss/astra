@@ -82,4 +82,4 @@ class AstroNNdist(PipelineOutputModel):
             
         return None
 
-print("WARNING: TODO: apply_flags needs properly integrating for astronn_dist")
+#print("WARNING: TODO: apply_flags needs properly integrating for astronn_dist")
