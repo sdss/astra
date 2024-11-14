@@ -23,11 +23,17 @@ database:
 
 If you're using a specific schema, you'll need to create that schema first, then run:
 
-```astra init``` 
+```
+astra init
+``` 
 
 Astra does not need to be run in the same computing environment where the data are stored. For this reason, it needs to _migrate_ information about what spectra are available, and the auxillary data (photometry, astrometry) for those sources. You can do this using the `astra migrate` tool.
 
-```astra migrate```
+```
+astra migrate
+```
+
+Here's what it looks like:
 
 ![Migrations](./docs/astra-migrate-2024-11-14.gif)
 
