@@ -7,6 +7,17 @@ Astra is the analysis framework for the Sloan Digital Sky Survey (SDSS-V) Milky
 Way Mapper. The purpose of Astra is to manage the analysis of reduced data
 products from SDSS and to streamline data releases.
 
+Installation
+------------
+
+I recommend you use `uv` to create an environment for Astra. Download the repository and install from source:
+```
+git clone git@github.com:sdss/astra.git
+cd astra
+uv venv
+source .venv/bin/activate
+uv pip install -e .
+```
 
 Setup
 -----
