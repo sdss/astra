@@ -17,7 +17,7 @@ from peewee import (
 )
 
 
-def migrate_from_spall_file(run2d, queue, gzip=True, limit=1_000_000, batch_size=1000):
+def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000):
     """
     Migrate all new BOSS visit information (`specFull` files) stored in the spAll file, which is generated
     by the SDSS-V BOSS data reduction pipeline.
@@ -28,21 +28,10 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=1_000_000, batch_size
     from astra.models.source import Source
     from astra.migrations.utils import enumerate_new_spectrum_pks, upsert_many, NoQueue
 
-    #path = expand_path(f"$BOSS_SPECTRO_REDUX/{run2d}/spAll-{run2d}.fits")
-    #if gzip:
-    #    path += ".gz"
-    #print("USING CUSTOM PATH")
-    path = "spAll-v6_1_3.fits"
-
-
-
-    #spAll = Table.read(expand_path(path))
-    #spAll.sort(["CATALOGID"])
-
-    #if limit is not None:
-    #    spAll = spAll[:limit]
-
-
+    path = expand_path(f"$BOSS_SPECTRO_REDUX/{run2d}/summary/daily/spAll-{run2d}.fits")
+    if gzip:
+        path += ".gz"
+    
     from astra.migrations.sdss5db.catalogdb import (
         Catalog,
         CatalogToGaia_DR2,

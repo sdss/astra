@@ -171,12 +171,24 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
 
     @property
     def path(self):
-        return (
-            f"$SAS_BASE_DIR/"
-            f"sdsswork/bhm/boss/spectro/redux/"
-            f"{self.run2d}/spectra/full/{self.pad_fieldid}{self.isplate}/{self.mjd}/"
-            f"spec-{self.pad_fieldid}-{self.mjd}-{self.catalogid}.fits"
-        )
+        if self.run2d.startswith("v6_2"):
+            return (
+                f"$SAS_BASE_DIR/"
+                f"sdsswork/bhm/boss/spectro/redux/"
+                f"{self.run2d}/spectra/daily/full/{self.field_group}/{self.pad_fieldid}{self.isplate}/{self.mjd}/"
+                f"spec-{self.pad_fieldid}-{self.mjd}-{self.catalogid}.fits"
+            )        
+        else:
+            return (
+                f"$SAS_BASE_DIR/"
+                f"sdsswork/bhm/boss/spectro/redux/"
+                f"{self.run2d}/spectra/full/{self.pad_fieldid}{self.isplate}/{self.mjd}/"
+                f"spec-{self.pad_fieldid}-{self.mjd}-{self.catalogid}.fits"
+            )
+
+    @property
+    def field_group(self):
+        return f"{str(int(self.fieldid) // 1000):0>3d}XXX"
 
     @property
     def pad_fieldid(self):
