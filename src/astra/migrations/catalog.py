@@ -124,24 +124,25 @@ def migrate_bailer_jones_distances(
             source = sources[source_id]
 
             for key, value in record.items():
-                setattr(source, key, value)
+                if value is not None:
+                    setattr(source, key, value)
             
             update.append(source)
         
         if len(update) > 0:
+            fields = []
+            consider_keys = ("r_med_geo", "r_lo_geo", "r_hi_geo", "r_med_photogeo", "r_lo_photogeo", "r_hi_photogeo")
+            for key in consider_keys:
+                for l in update:
+                    if getattr(l, key) is not None:
+                        fields.append(getattr(Source, key))
+                        break
+                
             n_updated += (
                 Source
                 .bulk_update(
                     update,
-                    fields=[
-                        Source.r_med_geo,
-                        Source.r_lo_geo,
-                        Source.r_hi_geo,
-                        Source.r_med_photogeo,
-                        Source.r_lo_photogeo,
-                        Source.r_hi_photogeo,
-                        Source.bailer_jones_flags,
-                    ]
+                    fields=fields + [Source.bailer_jones_flags]
                 )
             )
 

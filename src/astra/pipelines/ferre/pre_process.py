@@ -46,7 +46,7 @@ def pre_process_ferre(
     f_access: int = 0,
     f_format: int = 1,
     ferre_kwds: Optional[dict] = None,
-    n_threads: int = 32,
+    n_threads: int = 128,
     bad_pixel_flux_value: float = 1e-4,
     bad_pixel_error_value: float = 1e10,
     skyline_sigma_multiplier: float = 100,
@@ -129,7 +129,7 @@ def pre_process_ferre(
     has_warned_on_bad_pixels = False
 
     index, skipped, batch_names, batch_initial_parameters, batch_flux, batch_e_flux = (0, [], [], [], [], [])
-    for (spectrum, initial_parameters) in tqdm(zip(spectra, all_initial_parameters), total=1, desc="Preparing spectra"):
+    for (spectrum, initial_parameters) in zip(spectra, all_initial_parameters):
 
         if spectrum in skipped:
             continue
@@ -143,15 +143,15 @@ def pre_process_ferre(
             try:
                 flux = np.copy(spectrum.flux)
                 e_flux = np.copy(spectrum.ivar)**-0.5
-            except (ValueError, FileNotFoundError):
+            except:
                 log.warning(f"Exception accessing pixel arrays for spectrum {spectrum}")
-                skipped.append(spectrum)
+                skipped.append((spectrum, {"flag_spectrum_io_error": True}))
                 continue       
             
 
             try:
                 pixel_flags = np.copy(spectrum.pixel_flags)
-            except AttributeError:
+            except:
                 warnings.warn(f"At least one spectrum has no pixel_flags attribute")
 
             else:
@@ -175,7 +175,7 @@ def pre_process_ferre(
                     if not has_warned_on_bad_pixels:
                         log.warning(f"Spectrum {spectrum} has too many bad pixels ({n_bad_pixels} > {max_num_bad_pixels}). Other spectra like this in the same FERRE job will have their warnings suppressed.")
                         has_warned_on_bad_pixels = True                        
-                    skipped.append(spectrum)
+                    skipped.append((spectrum, {"flag_too_many_bad_pixels": True}))
                     continue
                 
             if pre_computed_continuum is not None:
@@ -201,10 +201,10 @@ def pre_process_ferre(
         return (pwd, 0, skipped)
 
     control_kwds_formatted = utils.format_ferre_control_keywords(control_kwds, n_obj=1 + index)
-    log.info(f"FERRE control keywords:\n{control_kwds_formatted}")
+    #log.info(f"FERRE control keywords:\n{control_kwds_formatted}")
 
     # Convert list of dicts of initial parameters to array.
-    log.info(f"Validating initial and frozen parameters")
+    #log.info(f"Validating initial and frozen parameters")
     batch_initial_parameters_array = utils.validate_initial_and_frozen_parameters(
         headers,
         batch_initial_parameters,
@@ -214,18 +214,18 @@ def pre_process_ferre(
     )
     # Create directory and write the control file        
     os.makedirs(absolute_pwd, exist_ok=True)
-    log.info(f"Writing control file")
+    #log.info(f"Writing control file")
     with open(os.path.join(absolute_pwd, "input.nml"), "w") as fp:
         fp.write(control_kwds_formatted)       
 
     # hack: we do basename here in case we wrote the prefix to PFILE for the abundances run
-    log.info(f"Writing input parameters")
+    #log.info(f"Writing input parameters")
     with open(os.path.join(absolute_pwd, os.path.basename(control_kwds["pfile"])), "w") as fp:
         for name, point in zip(batch_names, batch_initial_parameters_array):
             fp.write(utils.format_ferre_input_parameters(*point, name=name))
 
     if write_input_pixel_arrays:
-        log.info(f"Writing input pixel arrays")
+        #log.info(f"Writing input pixel arrays")
         LARGE = 1e10
 
         batch_flux = np.array(batch_flux)
@@ -241,8 +241,8 @@ def pre_process_ferre(
         non_finite_flux = ~np.isfinite(batch_flux)
         batch_flux[non_finite_flux] = 0.0
         batch_e_flux[non_finite_flux] = LARGE
-        if np.any(non_finite_flux):
-            log.warning(f"Non-finite fluxes found. Setting them to zero and setting flux error to {LARGE:.1e}")
+        #if np.any(non_finite_flux):
+        #    log.warning(f"Non-finite fluxes found. Setting them to zero and setting flux error to {LARGE:.1e}")
 
         finite_e_flux = np.isfinite(batch_e_flux)
         batch_e_flux[~finite_e_flux] = LARGE
@@ -255,6 +255,7 @@ def pre_process_ferre(
         np.savetxt(e_flux_path, batch_e_flux, **savetxt_kwds)
         
     n_obj = len(batch_names)
+    log.info(f"FERRE pre-processing complete for {pwd} ({n_obj} objects)")
     return (pwd, n_obj, skipped)
 
 '''

@@ -92,6 +92,8 @@ def get_return_type(fun):
 
 
 def resolve_model(model_str):
+    if not isinstance(model_str, (str, bytes)):
+        return model_str
     *pkg, name = model_str.split(".")
     parent = import_module(f"astra.models.{pkg[0]}" if pkg else "astra.models")
     return getattr(parent, name)

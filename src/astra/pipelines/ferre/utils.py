@@ -442,7 +442,7 @@ def validate_ferre_control_keywords(
                 try:
                     ferre_label_name = get_ferre_label_name(parameter_name, ferre_label_names)
                 except:
-                    log.warning(f"Ignoring unknown parameters given in frozen parameters: {parameter_name} (available: {ferre_label_names})")
+                    log.debug(f"Ignoring unknown parameters given in frozen parameters: {parameter_name} (available: {ferre_label_names})")
 
                 else:
                     frozen_label_names[ferre_label_name] = state
@@ -850,7 +850,7 @@ def validate_initial_and_frozen_parameters(
             except:
                 message = f"Ignoring initial parameter '{parameter_name}' as it is not in {ferre_label_names}"
                 if message not in warning_messages:
-                    log.warning(message)
+                    log.debug(message)
                     warning_messages.append(message)
                 continue
         
@@ -858,7 +858,7 @@ def validate_initial_and_frozen_parameters(
                 if ferre_label_name not in ferre_label_names:
                     message = f"Ignoring initial parameter '{ferre_label_name}' as it is not in {ferre_label_names}"
                     if message not in warning_messages:
-                        log.warning(message)
+                        log.debug(message)
                         warning_messages.append(message)
                     continue
 
@@ -874,7 +874,7 @@ def validate_initial_and_frozen_parameters(
             except:
                 message = f"Ignoring frozen parameter '{parameter_name}' as it is not in {ferre_label_names}"
                 if message not in warning_messages:
-                    log.warning(message)
+                    log.debug(message)
                     warning_messages.append(message)
                 continue
 
@@ -897,9 +897,9 @@ def validate_initial_and_frozen_parameters(
         log.critical(e, exc_info=True)
 
         if clip_initial_parameters_to_boundary_edges:
-            log.info(
-                f"Clipping initial parameters to boundary edges (use clip_initial_parameters_to_boundary_edges=False to raise exception instead)"
-            )
+            #log.info(
+            #    f"Clipping initial parameters to boundary edges (use clip_initial_parameters_to_boundary_edges=False to raise exception instead)"
+            #)
 
             clip = clip_epsilon_percent * (upper_limit - lower_limit) / 100.0
             initial_parameters_array = np.round(

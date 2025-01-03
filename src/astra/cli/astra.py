@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 import typer
+import os
 from typing import List, Optional
 from typing_extensions import Annotated
 from enum import Enum
 
 app = typer.Typer()
+
+in_airflow_context = os.environ.get("AIRFLOW_CTX_TASK_ID", None) is not None
 
 class Product(str, Enum):
     mwmTargets = "mwmTargets"
@@ -15,7 +18,7 @@ class Product(str, Enum):
 def version():
     """Print the version of Astra."""
     from astra import __version__
-    typer.echo(f"Astra version: {__version__}")
+    typer.echo(f"Astra version: {__version__}")    
 
 @app.command()
 def create(
@@ -23,6 +26,7 @@ def create(
     overwrite: Annotated[bool, typer.Option(help="Overwrite the product if it already exists.")] = False,
     limit: Annotated[int, typer.Option(help="Limit the number of rows per product.", min=1)] = None,
 ):    
+    """Create an Astra summary product."""    
     from astra.products.mwm_summary import (
         create_mwm_targets_product,
         create_mwm_all_star_product,
@@ -51,7 +55,7 @@ def srun(
         )
         )] = None,
     nodes: Annotated[int, typer.Option(help="The number of nodes to use.", min=1)] = 1,
-    procs: Annotated[int, typer.Option(help="The number of processes to use per node.", min=1)] = 1,
+    procs: Annotated[int, typer.Option(help="The number of `astra` processes to use per node.", min=1)] = 1,
     limit: Annotated[int, typer.Option(help="Limit the number of inputs.", min=1)] = None,
     account: Annotated[str, typer.Option(help="Slurm account")] = "sdss-np",
     partition: Annotated[str, typer.Option(help="Slurm partition")] = None,
@@ -76,9 +80,6 @@ def srun(
     from astra.utils import silenced, expand_path
     from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn 
 
-    # TODO: no hard coding of paths
-    ASTRA = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/mwm/spectro/astra/astra/astra_dev/bin/new_astra"
-
     _, q = next(generate_queries_for_task(task, model, limit))
 
     total = q.count()
@@ -90,7 +91,7 @@ def srun(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
-        transient=True
+        transient=not in_airflow_context
     ) as p:
 
         executor = concurrent.futures.ProcessPoolExecutor(nodes)
@@ -102,9 +103,9 @@ def srun(
             for n in range(nodes):
                 job_name = f"{task}" + (f"-{n}" if nodes > 1 else "")
                 # TODO: Let's not hard code this here.
-                commands = ["export CLUSTER=1", "echo hello"]
+                commands = ["export CLUSTER=1"]
                 for page in range(n * procs, (n + 1) * procs):
-                    commands.append(f"{ASTRA} run {task} {model} --limit {limit} --page {page + 1} &")
+                    commands.append(f"astra run {task} {model} --limit {limit} --page {page + 1} &")
                 commands.append("wait")
 
                 script_path = f"{td}/node_{n}.sh"
@@ -149,7 +150,7 @@ def srun(
                     p.print(result.stderr.decode("utf-8"))
                 
                 max_returncode = max(max_returncode, result.returncode)
-            
+    
     sys.exit(max_returncode)
 
 
@@ -185,7 +186,7 @@ def run(
         BarColumn(),
         MofNCompleteColumn(),
         TimeRemainingColumn(),
-        transient=False
+        transient=not in_airflow_context
     ) as p:
         
         for model, q in generate_queries_for_task(fun, spectrum_model, limit, page=page):
@@ -211,6 +212,7 @@ def migrate(
     import os
     import multiprocessing as mp
     from signal import SIGKILL
+    from rich.console import Console
     from rich.progress import Text, Progress, SpinnerColumn, Text, TextColumn, TaskProgressColumn, TimeRemainingColumn, TimeElapsedColumn, BarColumn, MofNCompleteColumn as _MofNCompleteColumn
 
     class MofNCompleteColumn(_MofNCompleteColumn):
@@ -261,6 +263,11 @@ def migrate(
         migrate_targeting_cartons
     )
     from astra.utils import silenced
+    import sys
+    if in_airflow_context:
+        console = Console(file=sys.stdout)
+    else:
+        console = Console()
 
     ptq = []
     try:
@@ -271,7 +278,8 @@ def migrate(
             MofNCompleteColumn(),
             TimeElapsedColumn(),
             TimeRemainingColumn(),
-            transient=True
+            console=Console(),
+            transient=not in_airflow_context
         ) as progress:
 
             def process_task(target, *args, description=None, **kwargs):
@@ -331,7 +339,7 @@ def migrate(
                 process_task(fix_unsigned_apogee_flags, description="Fix unsigned APOGEE flags"),
                 process_task(migrate_targeting_cartons, description="Ingesting targeting cartons"),
                 process_task(compute_f_night_time_for_apogee_visits, description="Computing f_night for APOGEE visits"),                        
-                process_task(update_visit_spectra_counts, description="Updating visit spectra counts"),               
+                #process_task(update_visit_spectra_counts, description="Updating visit spectra counts"),               
             ]
             # reddening needs unwise, 2mass, glimpse, 
             task_gaia, task_twomass, task_unwise, task_glimpse, task_specfull, *_ = [t for p, t, q in ptq]
@@ -413,7 +421,7 @@ def init(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         TimeRemainingColumn(),
-        transient=True
+        transient=not in_airflow_context
     ) as progress:
 
         init_model_packages = (

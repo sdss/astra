@@ -1,24 +1,208 @@
 import os
 import numpy as np
+import concurrent.futures
+import subprocess
+import re
+from multiprocessing import Pipe
 from datetime import datetime
 from tempfile import mkdtemp
 from typing import Optional, Iterable, List, Tuple, Callable, Union
 from peewee import JOIN, fn
 from tqdm import tqdm
+from time import time, sleep
 
 from astra import __version__, task
 from astra.utils import log, expand_path
+from astra.models.apogee import ApogeeCoaddedSpectrumInApStar
 from astra.models.aspcap import ASPCAP, FerreCoarse, FerreStellarParameters, FerreChemicalAbundances, Source
 from astra.models.spectrum import Spectrum, SpectrumMixin
+from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.aspcap.initial import get_initial_guesses
-from astra.pipelines.aspcap.coarse import coarse_stellar_parameters, post_coarse_stellar_parameters
-from astra.pipelines.aspcap.stellar_parameters import stellar_parameters, post_stellar_parameters
-from astra.pipelines.aspcap.abundances import abundances, get_species, post_abundances
-from astra.pipelines.aspcap.utils import ABUNDANCE_RELATIVE_TO_H
+from astra.pipelines.aspcap.coarse import coarse_stellar_parameters, post_coarse_stellar_parameters, plan_coarse_stellar_parameters
+#from astra.pipelines.aspcap.stellar_parameters import stellar_parameters, post_stellar_parameters
+#from astra.pipelines.aspcap.abundances import abundances, get_species, post_abundances
+#from astra.pipelines.aspcap.utils import ABUNDANCE_RELATIVE_TO_H
+
 
 
 @task
 def aspcap(
+    spectra: Iterable[ApogeeCoaddedSpectrumInApStar], 
+    initial_guess_callable: Optional[Callable] = None,
+    header_paths: Optional[Union[List[str], Tuple[str], str]] = "$MWM_ASTRA/pipelines/aspcap/synspec_dr17_marcs_header_paths.list",
+    weight_path: Optional[str] = "$MWM_ASTRA/pipelines/aspcap/masks/global.mask",
+    element_weight_paths: str = "$MWM_ASTRA/pipelines/aspcap/masks/elements.list",
+    parent_dir: Optional[str] = None, 
+    max_threads: Optional[int] = 128,
+    max_workers: Optional[int] = 16,
+    **kwargs
+) -> Iterable[ASPCAP]:
+    """
+    Run the ASPCAP pipeline on some spectra.
+    
+    .. warning:: 
+        This is task for convenience. 
+        
+        If you want efficiency, you should use the `pre_` and `post_` tasks for each stage in the pipeline.
+    
+    :param spectra:
+        The spectra to analyze with ASPCAP.
+    
+    :param parent_dir: [optional]
+        The parent directory where these FERRE executions will be planned. If `None` is given then this will default
+        to a temporary directory in `$MWM_ASTRA/X.Y.Z/pipelines/aspcap/`.
+    
+    :param initial_guess_callable: [optional]
+        A callable that returns an initial guess for the stellar parameters. 
+    
+    :param header_paths: [optional]
+        The path to a file containing the paths to the FERRE header files. This file should contain one path per line.
+    
+    :param weight_path: [optional]
+        The path to the FERRE weight file to use during the coarse and main stellar parameter stage.
+
+    :param element_weight_paths: [optional]
+        A path containing FERRE weight files for different elements, which will be used in the chemical abundances stage.
+    
+    Keyword arguments
+    -----------------
+    All additional keyword arguments will be passed through to `astra.pipelines.ferre.pre_process.pre_process.ferre`. 
+    Some handy keywords include:
+    continuum_order: int = 4,
+    continuum_reject: float = 0.3,
+    continuum_observations_flag: int = 1,
+    """
+
+    t_full = -time()
+
+    if parent_dir is None:
+        _dir = expand_path(f"$MWM_ASTRA/{__version__}/pipelines/aspcap/")
+        os.makedirs(_dir, exist_ok=True)
+        parent_dir = mkdtemp(prefix=f"{datetime.now().strftime('%Y-%m-%d')}-", dir=_dir)
+
+    plans, spectra_with_no_initial_guess = plan_coarse_stellar_parameters(
+        spectra=spectra, 
+        header_paths=header_paths, 
+        initial_guess_callable=initial_guess_callable,
+        weight_path=weight_path
+    )
+
+    for spectrum in spectra_with_no_initial_guess:
+        yield ASPCAP.from_spectrum(spectrum, flag_no_suitable_initial_guess=True)
+
+    # If we load too many processes at once, the disk I/O kills us.
+    enforce_sequential_grid_loading = True
+
+    current_threads, current_workers, currently_loading_grid = (0, 0, False)
+    at_capacity = lambda t, w, c: t >= max_threads or w >= max_workers or (enforce_sequential_grid_loading and c)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as pre_and_post_process_executor:
+        pre_process_futures = [
+            pre_and_post_process_executor.submit(
+                pre_process_ferre,
+                pwd=os.path.join(parent_dir, plan.pop("relative_dir")),
+                **plan
+            )
+            for plan in plans
+        ]
+
+        parent, child = Pipe()
+
+        n_spectra = {}
+        results = []
+        ferre_futures = []        
+        with tqdm(total=len(spectra) - len(spectra_with_no_initial_guess), desc="Running ASPCAP") as pb:
+                
+            with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as ferre_executor:
+
+                for future in concurrent.futures.as_completed(pre_process_futures):
+                    directory, n_obj, skipped = future.result()
+                    n_spectra[directory] = n_obj
+
+                    # Spectra might be skipped because the file could not be found, or if there were too many bad pixels.
+                    for spectrum, kwds in skipped:
+                        pb.update(1)
+                        #yield ASPCAP.from_spectrum(spectrum, **kwds)
+
+                    # We could be at thread or worker capacity.
+                    while at_capacity(current_threads, current_workers, currently_loading_grid):
+                        pb.set_description(f"ASPCAP ({current_threads}/{max_threads}; {current_workers}/{max_workers}; {'loading' if currently_loading_grid else ''})")
+
+                        while parent.poll():
+                            child_directory, n = parent.recv()
+                            if n == 0:
+                                currently_loading_grid = False
+                            current_threads -= n
+                            pb.update(n)
+                    
+                        try:
+                            ferre_future = next(concurrent.futures.as_completed(ferre_futures, timeout=1))
+                        except TimeoutError:
+                            continue
+                        else:
+                            completed_directory, return_code = ferre_future.result()
+                            #pre_and_post_process_executor.submit(post_process_ferre, directory=completed_directory)
+                        
+                            ferre_futures.remove(ferre_future)
+                            current_workers -= 1
+                            #print(f"Finished {completed_directory} with {n_spectra[completed_directory]} ({current_threads} threads, {current_workers} workers)")                        
+                                                            
+                    ferre_futures.append(ferre_executor.submit(ferre, directory, n_obj, child))
+                    currently_loading_grid = True
+                    current_threads += n_obj
+                    current_workers += 1
+                    #print(f"Submitting {directory} with {n_obj} ({current_threads} threads, {current_workers} workers)")
+
+                #print("All jobs submitted")
+                for ferre_future in concurrent.futures.as_completed(ferre_futures):
+                    directory, return_code = ferre_future.result()
+                    current_workers -= 1
+                    #print(f"Finished {directory} with {n_spectra[directory]} ({current_threads} threads, {current_workers} workers)")
+            
+            t_full += time()
+            print(f"Full time: {t_full:.0f} s")
+            raise a
+
+    
+regex_next_object = re.compile(r"next object #\s+(\d+)")
+regex_completed = re.compile(r"\s+(\d+)\s(\d+_[\d\w_]+)") # assumes input ids start with an integer and underscore
+
+
+def ferre(directory, n_obj, child):
+
+    stdout, n_complete = ([], 0)
+    t_start, t_overhead, t_elapsed = (time(), None, {})
+
+    process = subprocess.Popen(["ferre.x"], cwd=directory, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    
+    for line in iter(process.stdout.readline, ""):
+        # if an object is completed, note the completion time and send back some information to the parent.
+        if match := regex_next_object.search(line):
+            t_elapsed[int(match.group(1))] = -time()
+            if t_overhead is None:
+                t_overhead = time() - t_start
+                child.send((directory, 0))
+        
+        if match := regex_completed.search(line):
+            t_elapsed[int(match.group(1))] += time()
+            n_complete += 1
+            child.send((directory, 1))
+        stdout.append(line)
+
+    # In case there were some we did not pick up the timings for                    
+    if n_missed := n_complete - n_obj: 
+        child.send((directory, n_missed))
+        
+    process.stdout.close()
+    return_code = process.wait()
+
+    return (directory, 0)
+
+
+
+
+@task
+def old_aspcap(
     spectra: Iterable[Spectrum], 
     parent_dir: Optional[str] = None, 
     initial_guess_callable: Optional[Callable] = None,
@@ -311,7 +495,7 @@ def _create_aspcap_results_from_parent_dir(parent_dir, **kwargs) -> Iterable[ASP
         yield ASPCAP(**kwds)
     
 
-
+'''
 @task
 def create_aspcap_results(
     stellar_parameter_results: Optional[Iterable[FerreStellarParameters]] = (
@@ -438,7 +622,7 @@ def create_aspcap_results(
     if len(skipped_results) > 0:
         # There shouldn't be too many of these, so let's just save them.
         log.warn(f"There were {len(skipped_results)} chemical abundance results that might updating to existing ASPCAP records. Doing it now..")
-        '''
+        """
         q = (
             ASPCAP
             .select()
@@ -460,7 +644,7 @@ def create_aspcap_results(
             if any_update_made:
                 log.info(f"Saving result {result}")                
                 result.save()
-        '''
+        """
         
     for stellar_parameter_task_pk, kwds in data.items():
         yield ASPCAP(**kwds)
@@ -505,4 +689,4 @@ def _result_to_kwds(result, existing_kwds):
         new_kwds[f"{label}_flags"] = getattr(result, f"{key}_flags")
         
     return new_kwds
-        
+'''

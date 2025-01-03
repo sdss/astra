@@ -19,8 +19,9 @@ from astra.fields import (
     DateTimeField,
     BitField,
     BigBitField,
+    BasePixelArrayAccessor
 )
-from astra.models.fields import BasePixelArrayAccessor
+#from astra.models.fields import BasePixelArrayAccessor
 try:
     from playhouse.postgres_ext import ArrayField
 except:

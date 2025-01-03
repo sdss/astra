@@ -601,7 +601,8 @@ class ASPCAP(PipelineOutputModel):
         
     
     
-    
+    """
+
     #> Task Primary Keys
     stellar_parameters_task_pk = ForeignKeyField(FerreStellarParameters, unique=True, null=True, lazy_load=False, help_text="Task primary key for stellar parameters")
     al_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Al/H]")
@@ -628,6 +629,7 @@ class ASPCAP(PipelineOutputModel):
     ti_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Ti/H]")
     ti_2_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Ti 2/H]")
     v_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [V/H]")
+    """
 
     #> Calibration flags
     calibrated_flags = BitField(null=True, help_text="Calibration flags")

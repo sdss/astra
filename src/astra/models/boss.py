@@ -188,7 +188,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
 
     @property
     def field_group(self):
-        return f"{str(int(self.fieldid) // 1000):0>3d}XXX"
+        return f"{str(int(self.fieldid) // 1000):0>3}XXX"
 
     @property
     def pad_fieldid(self):

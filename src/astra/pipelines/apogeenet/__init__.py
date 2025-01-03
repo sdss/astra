@@ -293,7 +293,7 @@ def apogeenet(spectra: Iterable[Union[ApogeeVisitSpectrumInApStar, ApogeeCoadded
     if torch.cuda.is_available():
         model.cuda()
     
-    for spectrum in spectra:
+    for spectrum in spectra.iterator():
         
         try:        
             flux = np.nan_to_num(spectrum.flux, nan=0.0).astype(np.float32)

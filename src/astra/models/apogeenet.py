@@ -52,51 +52,36 @@ class ApogeeNet(PipelineOutputModel):
         |   self.flag_runtime_exception
     )
 
-# TODO: Move this to happen at runtime
-def apply_result_flags():
-    (
-        ApogeeNet
-        .update(
-            raw_e_teff=ApogeeNet.e_teff,
-            raw_e_logg=ApogeeNet.e_logg,
-            raw_e_fe_h=ApogeeNet.e_fe_h
+    @classmethod
+    def from_spectrum(cls, spectrum, teff=None, logg=None, fe_h=None, **kwargs):
+        """
+        Create a new instance of this model from a Spectrum instance.
+
+        :param spectrum:
+            The spectrum instance.
+        """
+        kwds = kwargs.copy()
+        for key in ("teff", "logg", "fe_h"):
+            
+            kwds.setdefault(f"raw_e_{key}", kwargs.get(f"e_{key}"))
+            
+        kwds.update(
+            teff=teff,
+            logg=logg,
+            fe_h=fe_h,
+            flag_unreliable_teff=(teff is not None and not (1700 < teff < 100_000)),
+            flag_unreliable_logg=(logg is not None and not (-1 < logg < 10)),
+            flag_unreliable_fe_h=(
+                    (fe_h is not None and not (-4 < fe_h < 2))
+                or  (teff is not None and teff < 3200)
+                or  (logg is not None and logg > 5)
+            )
         )
-        .where(
-            ApogeeNet.raw_e_teff.is_null()
-        &   (ApogeeNet.v_astra == __version__)
-        )
-        .execute()
-    )    
-    (
-        ApogeeNet
-        .update(result_flags=ApogeeNet.flag_unreliable_teff.set())
-        .where(
-            (ApogeeNet.teff < 1700) | (ApogeeNet.teff > 100_000)
-        )
-        .where(ApogeeNet.v_astra == __version__)
-        .execute()
-    )    
-    (
-        ApogeeNet
-        .update(result_flags=ApogeeNet.flag_unreliable_logg.set())
-        .where(
-            (ApogeeNet.logg < -1) | (ApogeeNet.logg > 10)
-        )
-        .where(ApogeeNet.v_astra == __version__)
-        .execute()
-    )    
-    (
-        ApogeeNet
-        .update(result_flags=ApogeeNet.flag_unreliable_fe_h.set())
-        .where(
-            (ApogeeNet.teff < 3200)
-        |   (ApogeeNet.logg > 5)
-        |   (ApogeeNet.fe_h < -4)
-        |   (ApogeeNet.fe_h > 2)
-        )
-        .where(ApogeeNet.v_astra == __version__)
-        .execute()
-    )
+        return super().from_spectrum(spectrum, **kwds)
+
+
+
+
     
 
 def apply_noise_model():

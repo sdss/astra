@@ -45,9 +45,11 @@ include = ["astra"]
 
 [project.scripts]
 astra = "astra.cli.astra:app"
+casload = "astra.cli.casload:app"
 
 [console_scripts]
 astra = "astra.cli.astra:app"
+casload = "astra.cli.casload:app"
 
 [project.optional-dependencies]
 dev = [
