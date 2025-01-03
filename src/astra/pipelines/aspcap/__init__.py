@@ -3,6 +3,7 @@ import numpy as np
 import concurrent.futures
 import subprocess
 import re
+import heapq
 from multiprocessing import Pipe
 from datetime import datetime
 from tempfile import mkdtemp
@@ -23,6 +24,34 @@ from astra.pipelines.aspcap.coarse import coarse_stellar_parameters, post_coarse
 #from astra.pipelines.aspcap.abundances import abundances, get_species, post_abundances
 #from astra.pipelines.aspcap.utils import ABUNDANCE_RELATIVE_TO_H
 
+def yield_largest_finished_future(futures_dict):
+    """
+    Yields the finished future with the largest value of the specified attribute.
+
+    """
+    
+    futures = list(futures_dict.keys())
+
+    finished_futures = []
+    while futures:
+        # Check for finished futures
+        for future in futures:
+            if future.done():
+                try:
+                    result = future.result()
+                    # Calculate attribute value
+                    # Add future and attribute value to heap
+                    heapq.heappush(finished_futures, (-futures_dict[future], future)) 
+                except Exception as e:
+                    print(f"Exception in future: {e}") 
+        
+        # Yield the future with the largest attribute value (if any)
+        if finished_futures:
+            _, largest_future = heapq.heappop(finished_futures)
+            yield largest_future
+        
+        # Remove finished futures from the main list
+        futures = [f for f in futures if not f.done()]
 
 
 @task
@@ -33,8 +62,9 @@ def aspcap(
     weight_path: Optional[str] = "$MWM_ASTRA/pipelines/aspcap/masks/global.mask",
     element_weight_paths: str = "$MWM_ASTRA/pipelines/aspcap/masks/elements.list",
     parent_dir: Optional[str] = None, 
-    max_threads: Optional[int] = 128,
     max_workers: Optional[int] = 16,
+    max_threads: Optional[int] = 128,
+    max_concurrent_loading: Optional[int] = 1,
     **kwargs
 ) -> Iterable[ASPCAP]:
     """
@@ -91,7 +121,6 @@ def aspcap(
         yield ASPCAP.from_spectrum(spectrum, flag_no_suitable_initial_guess=True)
 
     # If we load too many processes at once, the disk I/O kills us.
-    max_concurrent_loading = 1
 
     parent, child = Pipe()
     n_executions, n_executions_total = (0, len(plans))
@@ -99,15 +128,17 @@ def aspcap(
 
     at_capacity = lambda t, w, c: t >= max_threads or w >= max_workers or c >= max_concurrent_loading
 
+
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as pre_and_post_process_executor:
-        pre_process_futures = [
+        pre_process_futures = {
             pre_and_post_process_executor.submit(
                 pre_process_ferre,
                 pwd=os.path.join(parent_dir, plan.pop("relative_dir")),
                 **plan
-            )
+            ): len(plan["spectra"])
             for plan in plans
-        ]
+        }
     
         results = []
         ferre_futures = []
@@ -142,7 +173,8 @@ def aspcap(
 
             with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as ferre_executor:
 
-                for future in concurrent.futures.as_completed(pre_process_futures):
+                for future in yield_largest_finished_future(pre_process_futures):
+
                     directory, n_obj, skipped = future.result()
 
                     # Spectra might be skipped because the file could not be found, or if there were too many bad pixels.
@@ -156,8 +188,8 @@ def aspcap(
                     ferre_futures.append(ferre_executor.submit(ferre, directory, n_obj, child))
                     n_executions, currently_loading, current_threads, current_workers = (n_executions + 1, currently_loading + 1, current_threads + n_obj, current_workers + 1)
 
-                while current_workers:
-                    current_threads, current_workers, currently_loading = check_capacity(current_threads, current_workers, currently_loading_grid)
+                    while current_workers:
+                        current_threads, current_workers, currently_loading = check_capacity(current_threads, current_workers, currently_loading)
 
             t_full += time()
             print(f"Full time: {t_full:.0f} s")
