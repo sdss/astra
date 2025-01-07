@@ -99,7 +99,7 @@ def pre_process_ferre(
             control_kwds[key] = prefix + control_kwds[key]
 
     absolute_pwd = expand_path(pwd)
-    log.info(f"FERRE working directory: {absolute_pwd}")
+    #log.info(f"FERRE working directory: {absolute_pwd}")
 
 
     # Construct mask to match FERRE model grid.
@@ -141,8 +141,9 @@ def pre_process_ferre(
 
             # If this part fails, the spectrum doesn't exist and we should just continue
             try:
-                flux = np.copy(spectrum.flux)
-                e_flux = np.copy(spectrum.ivar)**-0.5
+                with np.errstate(divide="ignore"):
+                    flux = np.copy(spectrum.flux)
+                    e_flux = np.copy(spectrum.ivar)**-0.5
             except:
                 log.warning(f"Exception accessing pixel arrays for spectrum {spectrum}")
                 skipped.append((spectrum, {"flag_spectrum_io_error": True}))

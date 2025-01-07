@@ -1,8 +1,9 @@
 import os
 import numpy as np
 from typing import Iterable
-
+from time import time
 from astra.utils import log, expand_path
+from astra.pipelines.ferre.operator import post_execution_interpolation
 from astra.pipelines.ferre.utils import (
     read_ferre_headers,
     read_control_file, 
@@ -25,7 +26,12 @@ def write_pixel_array_with_names(path, names, data):
 
 LARGE = 1e10 # TODO: This is also defined in pre_process, move it common
 
-def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Iterable[dict]:
+def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> list[dict]:
+    post_execution_interpolation(dir)
+    v =  list(_post_process_ferre(dir, pwd=pwd, skip_pixel_arrays=skip_pixel_arrays, **kwargs))
+    return v
+
+def _post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Iterable[dict]:
     """
     Post-process results from a FERRE execution.
 
@@ -49,6 +55,7 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Iter
 
     # When finding paths, if the path is in the input.nml file, we should use `ref_dir`, otherwise `dir`.
     timing = {}
+    """
     try:
         raw_timing = np.atleast_2d(np.loadtxt(os.path.join(ref_dir, "timing.csv"), dtype=str, delimiter=","))
     except:
@@ -66,7 +73,7 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Iter
                 timing = timing["input.nml"]
         except:
             log.exception(f"Exception when trying to load timing for {ref_dir}")
-
+    """
     control_kwds = read_control_file(os.path.join(dir, "input.nml"))
 
     # Load input files.
@@ -106,9 +113,8 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Iter
         is_missing_rectified_model_flux = ~np.all(np.isfinite(rectified_model_flux), axis=1)
     '''
     
-    print("WARNING: Using new verify_and_fix_output_flux_file")
     parameter_input_path = os.path.join(dir, "parameter.input")
-    os.system(f"verify_and_fix_ferre_output_flux_file {parameter_input_path} {offile_path}")
+    os.system(f"vaffoff {parameter_input_path} {offile_path}")
     is_missing_rectified_model_flux = ~np.isfinite(np.atleast_1d(np.loadtxt(offile_path, usecols=(1, ), dtype=float)))
     names_with_missing_rectified_model_flux = input_names[is_missing_rectified_model_flux]
 
@@ -131,7 +137,7 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Iter
             rectified_flux = np.nan * np.ones_like(flux)
         '''
         
-        os.system(f"verify_and_fix_ferre_output_flux_file {parameter_input_path} {sffile_path}")
+        os.system(f"vaffoff {parameter_input_path} {sffile_path}")
         names_with_missing_rectified_flux = input_names[~np.isfinite(np.loadtxt(sffile_path, usecols=(1, ), dtype=float))]
         
         '''
@@ -148,7 +154,14 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Iter
             model_flux = np.nan * np.ones_like(flux)
         '''
         model_flux_output_path = os.path.join(absolute_dir, "model_flux.output") # TODO: Should this be ref_dir?
-        os.system(f"verify_and_fix_ferre_output_flux_file {parameter_input_path} {model_flux_output_path}")
+        # We might have to wait some time for it to be written
+        #t_wait = time()
+        #while not os.path.exists(model_flux_output_path):
+        #    if time() > t_wait + 60:
+        #        log.warn(f"Cannot find model_flux output in {absolute_dir} ({model_flux_output_path})")
+        #        break
+
+        os.system(f"vaffoff {parameter_input_path} {model_flux_output_path}")
         is_missing_model_flux = ~np.isfinite(np.atleast_1d(np.loadtxt(model_flux_output_path, usecols=(1, ), dtype=float)))
                         
         if len(names_with_missing_rectified_model_flux) > 0:
@@ -232,17 +245,7 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Iter
         # Add correlation coefficients.
         #meta["cov"]
         # Add timing information, if we can.
-        try:
-            t_load, t_elapsed = timing[name]    
-            result.update(
-                ferre_time_load_grid=t_load,
-                ferre_time_elapsed=t_elapsed,
-            )
-        except:
-            if len(timing) > 0:
-                # Only warn when there are specific timings missing
-                log.warning(f"No FERRE timing for spectrum_pk={name_meta['spectrum_pk']}")
-
+        
         '''
         if not skip_pixel_arrays:
             snr = np.nanmedian(flux[i]/e_flux[i])
@@ -278,7 +281,5 @@ def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Iter
                 f"flag_{parameter}_grid_edge_warn": flag_grid_edge_warn[i, j],
             })
 
-        # TODO: Load metadata from dir/meta.json (e.g., pre-continuum steps)
-        # TODO: Include correlation coefficients?
         yield result
         

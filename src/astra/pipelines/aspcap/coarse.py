@@ -164,30 +164,30 @@ def penalize_coarse_stellar_parameter_result(result: FerreCoarse, warn_multiplie
     """
 
     # Penalize GK-esque things at cool temperatures.
-    result.penalized_rchi2 = 0 + result.rchi2
+    penalized_rchi2 = 0 + result.rchi2
     if result.teff < 3900 and "GK_200921" in result.header_path:
-        result.penalized_rchi2 *= cool_star_in_gk_grid_multiplier
+        penalized_rchi2 *= cool_star_in_gk_grid_multiplier
         
     if result.flag_logg_grid_edge_warn:
-        result.penalized_rchi2 *= warn_multiplier
+        penalized_rchi2 *= warn_multiplier
 
     if result.flag_teff_grid_edge_warn:
-        result.penalized_rchi2 *= warn_multiplier
+        penalized_rchi2 *= warn_multiplier
 
     if result.flag_logg_grid_edge_bad:
-        result.penalized_rchi2 *= bad_multiplier
+        penalized_rchi2 *= bad_multiplier
 
     if result.flag_teff_grid_edge_bad:
-        result.penalized_rchi2 *= bad_multiplier
+        penalized_rchi2 *= bad_multiplier
 
     # Add penalization terms for if FERRE failed.
     if result.flag_teff_ferre_fail:
-        result.penalized_rchi2 *= fail_multiplier
+        penalized_rchi2 *= fail_multiplier
     
     if result.flag_logg_ferre_fail:
-        result.penalized_rchi2 *= fail_multiplier
+        penalized_rchi2 *= fail_multiplier
     
-    return None
+    return penalized_rchi2
 
         
 def plan_coarse_stellar_parameters(
