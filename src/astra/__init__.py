@@ -117,6 +117,9 @@ def bulk_insert_or_replace_pipeline_results(results):
     """
     #log.info(f"Bulk inserting {len(results)} into the database")
 
+    if len(results) == 0:
+        return 
+        
     first = results[0]
     database, model = (first._meta.database, first.__class__)
     # Here, `preserve` is the set of fields that we want to overwrite if there is a conflict.
