@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Check if the correct number of arguments is provided
+if [ "$#" -ne 2 ]; then
+    echo "Sort and fix a FERRE output flux file"
+    echo "Usage: $0 <input_filename> <output_filename>"
+    exit 1
+fi
+
+# Assign input arguments to variables
+input_file="$1"
+output_file="$2"
+
+# Generate a list of expected entries
+expected_entries=$(awk '{print $1}' "$input_file" | sort -u)
+
+# Extract existing entries from the output file
+existing_entries=$(awk '{print $1}' "$output_file" | sort -u)
+
+# Find missing entries
+missing_entries=$(comm -23 <(echo "$expected_entries") <(echo "$existing_entries"))
+
+missing_row=$(printf ' NaN%.0s' {1..7514})
+
+# Insert missing entries into the output file
+for entry in $missing_entries; do
+    echo "$entry $missing_row" >> "$output_file"
+done
+
+# Sort the output file based on the first column
+sort -t ' ' -k 1,1V "$output_file" -o "$output_file"
