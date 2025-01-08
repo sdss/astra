@@ -29,6 +29,7 @@ dependencies = [
   "apache-airflow",
   "decorator",
   "h5py",
+  "thread"
 ]
 #requires-python = ">= 3.9"
 
@@ -46,10 +47,15 @@ include = ["astra"]
 [project.scripts]
 astra = "astra.cli.astra:app"
 casload = "astra.cli.casload:app"
+ferre_interpolate_unnormalized_model_flux = "astra.cli.post_execution_interpolation:post_execution_interpolation"
 
 [console_scripts]
 astra = "astra.cli.astra:app"
 casload = "astra.cli.casload:app"
+ferre_interpolate_unnormalized_model_flux = "astra.cli.post_execution_interpolation:post_execution_interpolation"
+
+[tool.setuptools]
+script-files = ["scripts/vaffoff"]
 
 [project.optional-dependencies]
 dev = [

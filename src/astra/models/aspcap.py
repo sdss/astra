@@ -520,7 +520,9 @@ class ASPCAP(PipelineOutputModel):
     snr = FloatField(null=True, help_text=Glossary.snr)
     rchi2 = FloatField(null=True, help_text=Glossary.rchi2)
     ferre_log_snr_sq = FloatField(null=True, help_text="FERRE-reported log10(snr**2)")
-    ferre_time_elapsed = FloatField(null=True, help_text="Total core-second use reported by FERRE [s]")
+    ferre_time_coarse = FloatField(null=True, help_text="Total core-second by FERRE for coarse stage [s]")
+    ferre_time_params = FloatField(null=True, help_text="Total core-second by FERRE for params stage [s]")
+    ferre_time_abundances = FloatField(null=True, help_text="Total core-second by FERRE for abundances stage [s]")
     result_flags = BitField(default=0, help_text="Flags indicating FERRE issues")
 
     flag_ferre_fail = result_flags.flag(2**0, "FERRE failed")
@@ -598,11 +600,31 @@ class ASPCAP(PipelineOutputModel):
         |   self.flag_spectrum_io_error
     )
 
-        
-    
+    #> Initial parameters
+    initial_teff = FloatField(null=True, help_text=Glossary.initial_teff)
+    initial_logg = FloatField(null=True, help_text=Glossary.initial_logg)
+    initial_v_micro = FloatField(null=True, help_text=Glossary.initial_v_micro)
+    initial_v_sini = FloatField(null=True, help_text=Glossary.initial_v_sini)
+    initial_m_h_atm = FloatField(null=True, help_text=Glossary.initial_m_h_atm)
+    initial_alpha_m_atm = FloatField(null=True, help_text=Glossary.initial_alpha_m_atm)
+    initial_c_m_atm = FloatField(null=True, help_text=Glossary.initial_c_m_atm)
+    initial_n_m_atm = FloatField(null=True, help_text=Glossary.initial_n_m_atm)
+
+    #> Coarse parameters
+    coarse_teff = FloatField(null=True, help_text=Glossary.coarse_teff)
+    coarse_logg = FloatField(null=True, help_text=Glossary.coarse_logg)
+    coarse_v_micro = FloatField(null=True, help_text=Glossary.coarse_v_micro)
+    coarse_v_sini = FloatField(null=True, help_text=Glossary.coarse_v_sini)
+    coarse_m_h_atm = FloatField(null=True, help_text=Glossary.coarse_m_h_atm)
+    coarse_alpha_m_atm = FloatField(null=True, help_text=Glossary.coarse_alpha_m_atm)
+    coarse_c_m_atm = FloatField(null=True, help_text=Glossary.coarse_c_m_atm)
+    coarse_n_m_atm = FloatField(null=True, help_text=Glossary.coarse_n_m_atm)
+    coarse_ferre_flags = BitField(default=0, help_text="FERRE flags for coarse grid")
+
+    coarse_rchi2 = FloatField(null=True, help_text=Glossary.coarse_rchi2)
+    coarse_penalized_rchi2 = FloatField(null=True, help_text="Penalized reduced chi-squared for coarse grid")
     
     """
-
     #> Task Primary Keys
     stellar_parameters_task_pk = ForeignKeyField(FerreStellarParameters, unique=True, null=True, lazy_load=False, help_text="Task primary key for stellar parameters")
     al_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Al/H]")

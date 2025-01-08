@@ -217,6 +217,7 @@ class FerreCoarse(PipelineOutputModel, FerreOutputMixin):
 
 
 
+
     '''
     class Meta:
         # To prevent post-processing tasks ingesting the same results many times

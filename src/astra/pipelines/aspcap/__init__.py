@@ -23,7 +23,8 @@ from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
 from astra.pipelines.ferre.utils import  parse_header_path
 from astra.pipelines.aspcap.initial import get_initial_guesses
-from astra.pipelines.aspcap.coarse import coarse_stellar_parameters, post_coarse_stellar_parameters, plan_coarse_stellar_parameters, penalize_coarse_stellar_parameter_result
+from astra.pipelines.aspcap.coarse import plan_coarse_stellar_parameters, penalize_coarse_stellar_parameter_result
+from astra.pipelines.aspcap.stellar_parameters import plan_stellar_parameters_stage
 from astra.pipelines.aspcap.continuum import MedianFilter
 
 #from astra.pipelines.aspcap.stellar_parameters import stellar_parameters, post_stellar_parameters
@@ -92,7 +93,7 @@ def aspcap(
         os.makedirs(_dir, exist_ok=True)
         parent_dir = mkdtemp(prefix=f"{datetime.now().strftime('%Y-%m-%d')}-", dir=_dir)
 
-    plans, spectra_with_no_initial_guess = plan_coarse_stellar_parameters(
+    coarse_plans, spectra_with_no_initial_guess = plan_coarse_stellar_parameters(
         spectra=spectra, 
         header_paths=header_paths, 
         initial_guess_callable=initial_guess_callable,
@@ -102,99 +103,44 @@ def aspcap(
     for spectrum in spectra_with_no_initial_guess:
         yield ASPCAP.from_spectrum(spectrum, flag_no_suitable_initial_guess=True)
 
-    coarse_results = _aspcap_stage("coarse", plans, parent_dir, max_processes, max_threads, max_concurrent_loading, soft_thread_ratio)
-
-    STAGE = "params"
-    # Plan stellar parameter stage.
-    coarse_results_by_spectrum = {}
-    for kwds in coarse_results:
-        this = FerreCoarse(**kwds)
-        # TODO: Make the penalized rchi2 a property of the FerreCoarse class.
-        this.penalized_rchi2 = penalize_coarse_stellar_parameter_result(this)
-
-        best = None
-        try:
-            existing = coarse_results_by_spectrum[this.spectrum_pk]
-        except KeyError:
-            best = this
-        else:
-            if this.penalized_rchi2 < existing.penalized_rchi2:
-                best = this
-            elif this.penalized_rchi2 > existing.penalized_rchi2:
-                best = existing
-            elif this.penalized_rchi2 == existing.penalized_rchi2:
-                best = existing
-                best.flag_multiple_equally_good_coarse_results = True            
-        finally:
-            coarse_results_by_spectrum[this.spectrum_pk] = best
-
-    spectra_by_pk = {s.spectrum_pk: s for s in spectra}
-
-    pre_continuum = MedianFilter()
-
-    futures = []
-    with concurrent.futures.ProcessPoolExecutor(128) as executor:
-        for r in tqdm(coarse_results_by_spectrum.values(), desc="Distributing work"):
-            spectrum = spectra_by_pk[r.spectrum_pk]
-            futures.append(executor.submit(_pre_compute_continuum, r, spectrum, pre_continuum))
-
-    pre_computed_continuum = {}
-    with tqdm(total=len(futures), desc="Pre-computing continuum") as pb:
-        for future in concurrent.futures.as_completed(futures):
-            spectrum_pk, continuum = future.result()
-            pre_computed_continuum[spectrum_pk] = continuum
-            pb.update()        
-
-    group_task_kwds = {}
-    for r in tqdm(coarse_results_by_spectrum.values(), desc="Grouping results"):
-        group_task_kwds.setdefault(r.header_path, [])
-        spectrum = spectra_by_pk[r.spectrum_pk]
-
-        group_task_kwds[r.header_path].append(
-            dict(
-                spectra=spectrum,
-                pre_computed_continuum=pre_computed_continuum[r.spectrum_pk],
-                initial_teff=r.teff,
-                initial_logg=r.logg,
-                initial_m_h=r.m_h,
-                initial_log10_v_sini=r.log10_v_sini,
-                initial_log10_v_micro=r.log10_v_micro,
-                initial_alpha_m=r.alpha_m,
-                initial_c_m=r.c_m,
-                initial_n_m=r.n_m,
-                initial_flags=r.initial_flags,                
-                upstream_pk=r.task_pk,
-            )
-        )
-
-    stellar_parameter_plans = []
-    for header_path in group_task_kwds.keys():
-        short_grid_name = parse_header_path(header_path)["short_grid_name"]
-        group_task_kwds[header_path] = list_to_dict(group_task_kwds[header_path])
-        group_task_kwds[header_path].update(
-            header_path=header_path,
-            weight_path=weight_path,
-            relative_dir=f"{STAGE}/{short_grid_name}",
-            **kwargs
-        )
-        stellar_parameter_plans.append(group_task_kwds[header_path])        
+    coarse_results = _aspcap_stage("coarse", coarse_plans, parent_dir, max_processes, max_threads, max_concurrent_loading, soft_thread_ratio)
+    
+    stellar_parameter_plans, best_coarse_results = plan_stellar_parameters_stage(spectra, coarse_results)
 
     stellar_parameter_results = _aspcap_stage("params", stellar_parameter_plans, parent_dir, max_processes, max_threads, max_concurrent_loading, soft_thread_ratio)
     
     # yeet back some ASPCAP results
-    
+    for r in stellar_parameter_results:
+        coarse = best_coarse_results[r["spectrum_pk"]]
+        r.update(
+            coarse_teff=coarse.teff,
+            coarse_logg=coarse.logg,
+            coarse_v_micro=10**(coarse.log10_v_micro or np.nan),
+            coarse_v_sini=10**(coarse.log10_v_sini or np.nan),
+            coarse_m_h_atm=coarse.m_h,
+            coarse_alpha_m_atm=coarse.alpha_m,
+            coarse_c_m_atm=coarse.c_m,
+            coarse_n_m_atm=coarse.n_m,
+            coarse_rchi2=coarse.rchi2,
+            coarse_penalized_rchi2=coarse.penalized_rchi2,
+            coarse_result_flags=coarse.ferre_flags,
+            coarse_short_grid_name=coarse.short_grid_name,
+            initial_teff=coarse.initial_teff,
+            initial_logg=coarse.initial_logg,
+            initial_v_micro=10**(coarse.initial_log10_v_micro or np.nan),
+            initial_v_sini=10**(coarse.initial_log10_v_sini or np.nan),
+            initial_m_h_atm=coarse.initial_m_h,
+            initial_alpha_m_atm=coarse.initial_alpha_m,
+            initial_c_m_atm=coarse.initial_c_m,
+            initial_n_m_atm=coarse.initial_n_m,    
+            ferre_time_coarse=coarse.t_elapsed,
+            ferre_time_params=r["t_elapsed"],        
+        )
+        yield ASPCAP(**r)
 
-    raise a
 
-    """
-    for kwds in post_process_ferre(pwd):
-        result = FerreCoarse(**kwds)
-        penalize_coarse_stellar_parameter_result(result)
-        yield result
-    """
 
-# TODO: remove from coarse.py
-
+# TODO: move elsewhere?
 def _pre_compute_continuum(coarse_result, spectrum, pre_continuum):
     try:
         # Apply continuum normalization.

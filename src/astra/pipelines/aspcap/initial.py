@@ -13,16 +13,14 @@ def get_initial_guesses(spectra):
         An iterable of spectra.
     """
     
-    print("TODO: Switch over from FerreCoarse")
-
-    pks = { s.spectrum_pk: s for s in spectra }
+    spectra_dict = {s.spectrum_pk: s for s in spectra}
 
     functions = (
         get_initial_guesses_from_apogeenet, 
         get_initial_guess_from_gaia_xp_zhang_2023
     )
     for fun in functions:
-        yield from fun(pks)
+        yield from fun(spectra_dict)
 
 
 def get_effective_fiber(spectrum):

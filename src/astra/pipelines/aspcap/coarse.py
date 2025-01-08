@@ -15,144 +15,9 @@ from astra.pipelines.aspcap.initial import get_initial_guesses
 
 #from astra.tools.continuum import Continuum, Scalar
 
-from typing import Iterable, Union, List, Tuple, Optional, Callable
+from typing import Dict, Iterable, Union, List, Tuple, Optional, Callable
 
 STAGE = "coarse"
-
-@task
-def coarse_stellar_parameters(
-    spectra: Iterable[Spectrum],
-    parent_dir: str,
-    initial_guess_callable: Optional[Callable] = None,
-    header_paths: Optional[Union[List[str], Tuple[str], str]] = "$MWM_ASTRA/pipelines/aspcap/synspec_dr17_marcs_header_paths.list",
-    weight_path: Optional[str] = "$MWM_ASTRA/pipelines/aspcap/masks/global.mask",
-    operator_kwds: Optional[dict] = None,
-    **kwargs
-) -> Iterable[FerreCoarse]:
-    """
-    Run the coarse stellar parameter determination step in ASPCAP.
-    
-    This task does the pre-processing and post-processing steps for FERRE, all in one. If you care about performance, you should
-    run these steps separately and execute FERRE with a batch system.
-
-    :param spectra:
-        The spectra to be processed.
-    
-    :param parent_dir:
-        The parent directory where these FERRE executions will be planned.    
-    
-    :param initial_guess_callable:
-        A callable that returns an initial guess for the stellar parameters. 
-    
-    :param header_paths:
-        The path to a file containing the paths to the FERRE header files. This file should contain one path per line.
-    
-    :param weight_path:
-        The path to the FERRE weight file.
-    """
-
-    yield from pre_coarse_stellar_parameters(
-        spectra,
-        parent_dir,
-        initial_guess_callable,
-        header_paths,
-        weight_path,
-        **kwargs
-    )
-    
-    # Execute ferre.
-    job_ids, executions = (
-        FerreOperator(
-            f"{parent_dir}/{STAGE}/", 
-            **(operator_kwds or {})
-        )
-        .execute()
-    )
-    FerreMonitoringOperator(job_ids, executions).execute()
-    
-    yield from post_coarse_stellar_parameters(parent_dir, **kwargs)
-
-
-@task
-def pre_coarse_stellar_parameters(
-    spectra: Iterable[Spectrum],
-    parent_dir: str,
-    initial_guess_callable: Optional[Callable] = None,
-    header_paths: Optional[Union[List[str], Tuple[str], str]] = "$MWM_ASTRA/pipelines/aspcap/synspec_dr17_marcs_header_paths.list",
-    weight_path: Optional[str] = "$MWM_ASTRA/pipelines/aspcap/masks/global.mask",
-    **kwargs
-) -> Iterable[FerreCoarse]:
-    """
-    Prepare to run FERRE multiple times for the coarse stellar parameter determination step.
-
-    This task will only create `FerreCoarse` database entries for spectra that had no suitable initial guess.
-    The `post_coarse_stellar_parameters` task will collect results from FERRE and create database entries.
-
-    :param spectra:
-        The spectra to be processed.
-    
-    :param parent_dir:
-        The parent directory where these FERRE executions will be planned.    
-    
-    :param initial_guess_callable:
-        A callable that returns an initial guess for the stellar parameters. 
-    
-    :param header_paths:
-        The path to a file containing the paths to the FERRE header files. This file should contain one path per line.
-    
-    :param weight_path:
-        The path to the FERRE weight file.
-    """
-    
-    ferre_kwds, spectra_with_no_initial_guess = plan_coarse_stellar_parameters(
-        spectra,
-        parent_dir,
-        header_paths,
-        initial_guess_callable,
-        weight_path,
-        **kwargs,
-    )
-
-    # Create the FERRE files for each execution.
-    skipped_spectra = []
-    for kwd in ferre_kwds:
-        pwd, n_obj, skipped = pre_process_ferre(**kwd)
-        skipped_spectra.extend(skipped)
-    
-    yield ... # tell Astra that all the work up until now has been in overheads
-    for spectrum in skipped_spectra:
-        yield FerreCoarse(
-            source_pk=spectrum.source_pk,
-            spectrum_pk=spectrum.spectrum_pk,
-            flag_spectrum_io_error=True
-        )
-
-    # Create database entries for those with no initial guess.
-    for spectrum in spectra_with_no_initial_guess:
-        yield FerreCoarse(
-            source_pk=spectrum.source_pk,
-            spectrum_pk=spectrum.spectrum_pk,
-            flag_no_suitable_initial_guess=True,
-        )
-
-
-
-@task
-def post_coarse_stellar_parameters(parent_dir, **kwargs) -> Iterable[FerreCoarse]:
-    """
-    Collect the results from FERRE and create database entries for the coarse stellar parameter determination step.
-
-    :param parent_dir:
-        The parent directory where these FERRE executions were planned.
-    """
-
-    for pwd in map(os.path.dirname, get_input_nml_paths(parent_dir, STAGE)):
-        log.info("Post-processing FERRE results in {0}".format(pwd))
-        for kwds in post_process_ferre(pwd):
-            result = FerreCoarse(**kwds)
-            penalize_coarse_stellar_parameter_result(result)
-            yield result
-
 
 def penalize_coarse_stellar_parameter_result(result: FerreCoarse, warn_multiplier=5, bad_multiplier=10, fail_multiplier=20, cool_star_in_gk_grid_multiplier=10):
     """
@@ -262,7 +127,7 @@ def plan_coarse_stellar_parameters(
             # Check if all the nput initial guess values are finite.
             check_keys = ("teff", "logg", "m_h", "log10_v_micro", "c_m", "n_m", "log10_v_sini", "alpha_m")
             if np.all(np.isfinite([input_initial_guess[k] for k in check_keys])):
-                log.warning(f"No suitable initial guess found for {spectrum} (from inputs {input_initial_guess}). Will start from closest grid.")
+                #log.warning(f"No suitable initial guess found for {spectrum} (from inputs {input_initial_guess}). Will start from closest grid.")
 
                 # Find the closest grid center
                 closest_grid_center_index = np.argmin(np.sum((unique_grid_centers - np.array([input_initial_guess["logg"], input_initial_guess["teff"]]))**2, axis=1))
@@ -358,8 +223,9 @@ def plan_coarse_stellar_parameters(
         log.warning(
             f"There were {len(spectra_with_no_initial_guess)} that were not dispatched to *any* FERRE grid. "
             f"This can only happen if the `initial_guess_callable` function sent back a dictionary "
-            f"with no valid `telescope` keyword, or no valid `mean_fiber` keyword. Please check the"
-            f" initial guess function. The unmatched spectra are:"
+            f"with no valid `telescope` keyword, or no valid `mean_fiber` keyword. Please check the "
+            f"initial guess function.\n\n"
+            f"Example spectrum_pk={spectra_with_no_initial_guess[0].spectrum_pk} at {spectra_with_no_initial_guess[0].absolute_path}"
         )
         #for s in spectra_with_no_initial_guess:
         #    log.warning(f"\s{s} ({s.path})")

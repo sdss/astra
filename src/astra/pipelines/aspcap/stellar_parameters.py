@@ -7,6 +7,7 @@ from astra import task
 from astra.utils import log, list_to_dict, expand_path
 from astra.models.spectrum import Spectrum
 from astra.models.aspcap import FerreCoarse, FerreStellarParameters
+from astra.pipelines.aspcap.coarse import penalize_coarse_stellar_parameter_result
 from astra.pipelines.ferre.operator import FerreOperator, FerreMonitoringOperator
 from astra.pipelines.ferre.pre_process import pre_process_ferre
 from astra.pipelines.ferre.post_process import post_process_ferre
@@ -21,99 +22,6 @@ import concurrent.futures
 
 STAGE = "params"
 
-@task
-def stellar_parameters(
-    spectra: Iterable[Spectrum],
-    parent_dir: str,
-    weight_path: Optional[str] = "$MWM_ASTRA/pipelines/aspcap/masks/global.mask",
-    operator_kwds: Optional[dict] = None,
-    **kwargs
-) -> Iterable[FerreStellarParameters]:
-    """
-    Run the coarse stellar parameter determination step in ASPCAP.
-    
-    This task does the pre-processing and post-processing steps for FERRE, all in one. If you care about performance, you should
-    run these steps separately and execute FERRE with a batch system.
-
-    :param spectra:
-        The spectra to be processed.
-    
-    :param parent_dir:
-        The parent directory where these FERRE executions will be planned.    
-        
-    :param weight_path:
-        The path to the FERRE weight file.
-    """
-
-    yield from pre_stellar_parameters(spectra, parent_dir, weight_path, **kwargs)
-
-    # Execute ferre.
-    job_ids, executions = (
-        FerreOperator(
-            f"{parent_dir}/{STAGE}/", 
-            **(operator_kwds or {})
-        )
-        .execute()
-    )
-    FerreMonitoringOperator(job_ids, executions).execute()
-    
-    yield from post_stellar_parameters(parent_dir)
-
-@task
-def pre_stellar_parameters(
-    spectra: Iterable[Spectrum],
-    parent_dir: str,
-    weight_path: Optional[str] = "$MWM_ASTRA/pipelines/aspcap/masks/global.mask",
-    **kwargs
-) -> Iterable[FerreStellarParameters]:
-    """
-    Prepare to run FERRE multiple times for the stellar parameter determination step.
-
-    The `post_stellar_parameters` task will collect results from FERRE and create database entries.
-
-    :param spectra:
-        The spectra to be processed.
-    
-    :param parent_dir:
-        The parent directory where these FERRE executions will be planned.    
-    
-    :param weight_path:
-        The path to the FERRE weight file.
-    """
-    
-    ferre_kwds, upstream_failed = plan_stellar_parameters(spectra, parent_dir, weight_path, **kwargs)
-
-    # Create the FERRE files for each execution.
-    for kwd in ferre_kwds:
-        pre_process_ferre(**kwd)
-
-    # Create database entries for those with upstream failures.
-    for upstream in upstream_failed:
-        yield FerreStellarParameters(
-            source_pk=upstream.source_pk,
-            spectrum_pk=upstream.spectrum_pk,
-            upstream=upstream,
-            ferre_flags=upstream.ferre_flags,
-            initial_flags=upstream.initial_flags,
-        )
-
-
-
-@task
-def post_stellar_parameters(parent_dir, **kwargs) -> Iterable[FerreStellarParameters]:
-    """
-    Collect the results from FERRE and create database entries for the stellar parameter step.
-
-    :param parent_dir:
-        The parent directory where these FERRE executions were planned.
-    """
-    
-    for pwd in map(os.path.dirname, get_input_nml_paths(parent_dir, STAGE)):
-        log.info("Post-processing FERRE results in {0}".format(pwd))
-        for i, kwds in enumerate(post_process_ferre(pwd)):
-            yield FerreStellarParameters(**kwds)
-
-
 
 def _pre_compute_continuum(coarse_result, spectrum, pre_continuum):
     try:
@@ -124,8 +32,94 @@ def _pre_compute_continuum(coarse_result, spectrum, pre_continuum):
         return (spectrum.spectrum_pk, None)
     else:
         return (spectrum.spectrum_pk, pre_computed_continuum)
+
+
+def plan_stellar_parameters_stage(spectra, coarse_results, pre_continuum=MedianFilter,):
+        
+    best_coarse_results = {}
+    for kwds in coarse_results:
+        this = FerreCoarse(**kwds)
+        # TODO: Make the penalized rchi2 a property of the FerreCoarse class.
+        this.penalized_rchi2 = penalize_coarse_stellar_parameter_result(this)
+
+        best = None
+        try:
+            existing = best_coarse_results[this.spectrum_pk]
+        except KeyError:
+            best = this
+        else:            
+            if this.penalized_rchi2 < existing.penalized_rchi2:
+                best = this
+            elif this.penalized_rchi2 > existing.penalized_rchi2:
+                best = existing
+            elif this.penalized_rchi2 == existing.penalized_rchi2:
+                best = existing
+                best.flag_multiple_equally_good_coarse_results = True      
+            best.ferre_time_coarse = this.t_elapsed + existing.t_elapsed
+        finally:            
+            best_coarse_results[this.spectrum_pk] = best
+
+
+    spectra_dict = { s.spectrum_pk: s for s in spectra }
+
+    if pre_continuum is None:
+        pre_computed_continuum = { s.spectrum_pk: 1 for s in spectra }
+    else:            
+        fun = pre_continuum()
+
+        futures = []
+        with concurrent.futures.ProcessPoolExecutor(os.cpu_count()) as executor:
+            for r in tqdm(best_coarse_results.values(), desc="Distributing work"):
+                spectrum = spectra_dict[r.spectrum_pk]
+                futures.append(executor.submit(_pre_compute_continuum, r, spectrum, fun))
+
+        pre_computed_continuum = {}
+        with tqdm(total=len(futures), desc="Pre-computing continuum") as pb:
+            for future in concurrent.futures.as_completed(futures):
+                spectrum_pk, continuum = future.result()
+                pre_computed_continuum[spectrum_pk] = continuum
+                pb.update()
+
+    # Plan the next stage
+    group_task_kwds = {}
+    for r in tqdm(best_coarse_results.values(), desc="Grouping results"):
+        group_task_kwds.setdefault(r.header_path, [])
+        spectrum = spectra_dict[r.spectrum_pk]
+
+        group_task_kwds[r.header_path].append(
+            dict(
+                spectra=spectrum,
+                pre_computed_continuum=pre_computed_continuum[r.spectrum_pk],
+                initial_teff=r.teff,
+                initial_logg=r.logg,
+                initial_m_h=r.m_h,
+                initial_log10_v_sini=r.log10_v_sini,
+                initial_log10_v_micro=r.log10_v_micro,
+                initial_alpha_m=r.alpha_m,
+                initial_c_m=r.c_m,
+                initial_n_m=r.n_m,
+                initial_flags=r.initial_flags,                
+                upstream_pk=r.task_pk,
+            )
+        )
+
+    stellar_parameter_plans = []
+    for header_path in group_task_kwds.keys():
+        short_grid_name = parse_header_path(header_path)["short_grid_name"]
+        group_task_kwds[header_path] = list_to_dict(group_task_kwds[header_path])
+        group_task_kwds[header_path].update(
+            header_path=header_path,
+            weight_path=weight_path,
+            relative_dir=f"{STAGE}/{short_grid_name}",
+            **kwargs
+        )
+        stellar_parameter_plans.append(group_task_kwds[header_path])        
+
+    return (stellar_parameter_plans, best_coarse_results)
+
     
-def plan_stellar_parameters(
+
+def old_plan_stellar_parameters(
     spectra: Iterable[Spectrum],
     parent_dir: str,
     weight_path: Optional[str] = "$MWM_ASTRA/pipelines/aspcap/masks/global.mask",
