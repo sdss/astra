@@ -1,7 +1,6 @@
 import os
 import numpy as np
 from glob import glob
-from tqdm import tqdm
 from astra import task
 from astra.models.spectrum import Spectrum
 from astra.models.aspcap import FerreCoarse
@@ -81,7 +80,7 @@ def plan_coarse_stellar_parameters(
 
     all_kwds = []
     spectrum_primary_keys_with_at_least_one_initial_guess = set()
-    for spectrum, input_initial_guess in tqdm(initial_guess_callable(spectra), total=0, desc="Initial guesses"):
+    for spectrum, input_initial_guess in initial_guess_callable(spectra):
 
         n_initial_guesses = 0
         for strict in (True, False):
@@ -234,7 +233,6 @@ def plan_coarse_stellar_parameters(
 
     # Bundle them together into executables based on common header paths.
     header_paths = list(set([ea["header_path"] for ea in all_kwds]))
-    log.info(f"Found {len(header_paths)} unique header paths")
 
     grouped_task_kwds = { header_path: [] for header_path in header_paths }
     for kwds in all_kwds:

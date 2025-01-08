@@ -103,16 +103,24 @@ def aspcap(
     for spectrum in spectra_with_no_initial_guess:
         yield ASPCAP.from_spectrum(spectrum, flag_no_suitable_initial_guess=True)
 
-    coarse_results = _aspcap_stage("coarse", coarse_plans, parent_dir, max_processes, max_threads, max_concurrent_loading, soft_thread_ratio)
+    all_coarse_results = _aspcap_stage("coarse", coarse_plans, parent_dir, max_processes, max_threads, max_concurrent_loading, soft_thread_ratio)
     
-    stellar_parameter_plans, best_coarse_results = plan_stellar_parameters_stage(spectra, coarse_results)
+    stellar_parameter_plans, coarse_results = plan_stellar_parameters_stage(spectra, all_coarse_results)
+    results = _aspcap_stage("params", stellar_parameter_plans, parent_dir, max_processes, max_threads, max_concurrent_loading, soft_thread_ratio)
+    
+    for r in results:
+        coarse = coarse_results[r["spectrum_pk"]]
 
-    stellar_parameter_results = _aspcap_stage("params", stellar_parameter_plans, parent_dir, max_processes, max_threads, max_concurrent_loading, soft_thread_ratio)
-    
-    # yeet back some ASPCAP results
-    for r in stellar_parameter_results:
-        coarse = best_coarse_results[r["spectrum_pk"]]
+        v_sini = 10**(r.get("log10_v_sini", np.nan))
+        e_v_sini = r.get("e_log10_v_sini", np.nan) * v_sini * np.log(10)
+        v_micro = 10**(r.get("log10_v_micro", np.nan))
+        e_v_micro = r.get("e_log10_v_micro", np.nan) * v_micro * np.log(10)
+
         r.update(
+            v_sini=v_sini,
+            e_v_sini=e_v_sini,
+            v_micro=v_micro,
+            e_v_micro=e_v_micro,
             coarse_teff=coarse.teff,
             coarse_logg=coarse.logg,
             coarse_v_micro=10**(coarse.log10_v_micro or np.nan),
@@ -136,21 +144,11 @@ def aspcap(
             ferre_time_coarse=coarse.t_elapsed,
             ferre_time_params=r["t_elapsed"],        
         )
+    
+    # TODO: Chemical abundances.
+
+    for r in results:
         yield ASPCAP(**r)
-
-
-
-# TODO: move elsewhere?
-def _pre_compute_continuum(coarse_result, spectrum, pre_continuum):
-    try:
-        # Apply continuum normalization.
-        pre_computed_continuum = pre_continuum.fit(spectrum, coarse_result)
-    except:
-        log.exception(f"Exception when computing continuum for spectrum {spectrum} from coarse result {coarse_result}:")
-        return (spectrum.spectrum_pk, None)
-    else:
-        return (spectrum.spectrum_pk, pre_computed_continuum)
-
 
 
 

@@ -99,12 +99,7 @@ def pre_process_ferre(
             control_kwds[key] = prefix + control_kwds[key]
 
     absolute_pwd = expand_path(pwd)
-    #log.info(f"FERRE working directory: {absolute_pwd}")
 
-
-    # Construct mask to match FERRE model grid.
-    #chip_wavelengths = tuple(map(utils.wavelength_array, segment_headers))
-    
     values_or_cycle_none = lambda x: x if (x is not None and len(x) > 0) else cycle([None])
     all_initial_parameters = dict_to_list(dict(
         teff=values_or_cycle_none(initial_teff),
@@ -119,13 +114,8 @@ def pre_process_ferre(
         upstream_pk=values_or_cycle_none(upstream_pk)
     ))
 
-    # Retrict to the pixels within the model wavelength grid.
-    # TODO: Assuming all spectra are the same.
-    #mask = _get_ferre_chip_mask(spectra[0].wavelength, chip_wavelengths)
-
-    # TODO: use mask2
     mask = utils.get_apogee_pixel_mask()
-    #assert np.all(mask == mask2)
+
     has_warned_on_bad_pixels = False
 
     index, skipped, batch_names, batch_initial_parameters, batch_flux, batch_e_flux = (0, [], [], [], [], [])
@@ -145,7 +135,7 @@ def pre_process_ferre(
                     flux = np.copy(spectrum.flux)
                     e_flux = np.copy(spectrum.ivar)**-0.5
             except:
-                log.warning(f"Exception accessing pixel arrays for spectrum {spectrum}")
+                #log.warning(f"Exception accessing pixel arrays for spectrum {spectrum}")
                 skipped.append((spectrum, {"flag_spectrum_io_error": True}))
                 continue       
             
@@ -202,10 +192,8 @@ def pre_process_ferre(
         return (pwd, 0, skipped)
 
     control_kwds_formatted = utils.format_ferre_control_keywords(control_kwds, n_obj=1 + index)
-    #log.info(f"FERRE control keywords:\n{control_kwds_formatted}")
 
     # Convert list of dicts of initial parameters to array.
-    #log.info(f"Validating initial and frozen parameters")
     batch_initial_parameters_array = utils.validate_initial_and_frozen_parameters(
         headers,
         batch_initial_parameters,
@@ -215,18 +203,15 @@ def pre_process_ferre(
     )
     # Create directory and write the control file        
     os.makedirs(absolute_pwd, exist_ok=True)
-    #log.info(f"Writing control file")
     with open(os.path.join(absolute_pwd, "input.nml"), "w") as fp:
         fp.write(control_kwds_formatted)       
 
     # hack: we do basename here in case we wrote the prefix to PFILE for the abundances run
-    #log.info(f"Writing input parameters")
     with open(os.path.join(absolute_pwd, os.path.basename(control_kwds["pfile"])), "w") as fp:
         for name, point in zip(batch_names, batch_initial_parameters_array):
             fp.write(utils.format_ferre_input_parameters(*point, name=name))
 
     if write_input_pixel_arrays:
-        #log.info(f"Writing input pixel arrays")
         LARGE = 1e10
 
         batch_flux = np.array(batch_flux)
@@ -242,21 +227,17 @@ def pre_process_ferre(
         non_finite_flux = ~np.isfinite(batch_flux)
         batch_flux[non_finite_flux] = 0.0
         batch_e_flux[non_finite_flux] = LARGE
-        #if np.any(non_finite_flux):
-        #    log.warning(f"Non-finite fluxes found. Setting them to zero and setting flux error to {LARGE:.1e}")
 
         finite_e_flux = np.isfinite(batch_e_flux)
         batch_e_flux[~finite_e_flux] = LARGE
         if not np.any(finite_e_flux):
             log.warning(f"ALL flux errors are non-finite!")
             
-        # Write data arrays.
         savetxt_kwds = dict(fmt="%.4e")#footer="\n")
         np.savetxt(flux_path, batch_flux, **savetxt_kwds)
         np.savetxt(e_flux_path, batch_e_flux, **savetxt_kwds)
         
     n_obj = len(batch_names)
-    log.info(f"FERRE pre-processing complete for {pwd} ({n_obj} objects)")
     return (pwd, n_obj, skipped)
 
 '''
