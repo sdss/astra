@@ -19,7 +19,8 @@ C_KM_S = c.to(u.km / u.s).value
 
 
 def _transform_err_to_ivar(err, *args, **kwargs):
-    ivar = np.atleast_2d(err)[0]**-2
+    with np.errstate(divide="ignore"):
+        ivar = np.atleast_2d(err)[0]**-2
     ivar[~np.isfinite(ivar)] = 0
     return ivar
 
