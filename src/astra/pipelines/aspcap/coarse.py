@@ -218,6 +218,7 @@ def plan_coarse_stellar_parameters(
         s for s in spectra \
             if s.spectrum_pk not in spectrum_primary_keys_with_at_least_one_initial_guess
     ]
+    """
     if spectra_with_no_initial_guess:
         log.warning(
             f"There were {len(spectra_with_no_initial_guess)} that were not dispatched to *any* FERRE grid. "
@@ -226,10 +227,8 @@ def plan_coarse_stellar_parameters(
             f"initial guess function.\n\n"
             f"Example spectrum_pk={spectra_with_no_initial_guess[0].spectrum_pk} at {spectra_with_no_initial_guess[0].absolute_path}"
         )
-        #for s in spectra_with_no_initial_guess:
-        #    log.warning(f"\s{s} ({s.path})")
-
-    log.info(f"Processing {len(spectrum_primary_keys_with_at_least_one_initial_guess)} unique spectra")
+    """
+    #log.info(f"Processing {len(spectrum_primary_keys_with_at_least_one_initial_guess)} unique spectra")
 
     # Bundle them together into executables based on common header paths.
     header_paths = list(set([ea["header_path"] for ea in all_kwds]))

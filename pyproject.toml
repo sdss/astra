@@ -29,7 +29,8 @@ dependencies = [
   "apache-airflow",
   "decorator",
   "h5py",
-  "thread"
+  "thread",
+  "typer"
 ]
 #requires-python = ">= 3.9"
 

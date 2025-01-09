@@ -891,10 +891,10 @@ def validate_initial_and_frozen_parameters(
             initial_parameters_array, lower_limit, upper_limit, headers['LABEL']
         )
     except ValueError as e:
-        log.exception(
-            f"Exception when checking initial parameters within grid boundaries:"
-        )
-        log.critical(e, exc_info=True)
+        #log.exception(
+        #    f"Exception when checking initial parameters within grid boundaries:"
+        #)
+        #log.critical(e, exc_info=True)
 
         if clip_initial_parameters_to_boundary_edges:
             #log.info(

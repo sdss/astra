@@ -185,8 +185,8 @@ def pre_process_ferre(
         batch_initial_parameters.append(initial_parameters)
         index += 1
 
-    if len(skipped) > 0:
-        log.warning(f"Skipping {len(skipped)} spectra ({100 * len(skipped) / len(spectra):.0f}%; of {len(spectra)})")
+    #if len(skipped) > 0:
+    #    log.warning(f"Skipping {len(skipped)} spectra ({100 * len(skipped) / len(spectra):.0f}%; of {len(spectra)})")
 
     if not batch_initial_parameters:
         return (pwd, 0, skipped)

@@ -69,6 +69,13 @@ def get_logger(kwargs=None):
 
 log = get_logger()
 
+def accepts_live_renderable(fun):
+    try:
+        signature = inspect.signature(fun)
+        return "live_renderable" in signature.parameters
+    except:
+        return False
+
 
 def expects_spectrum_types(fun):
     try:

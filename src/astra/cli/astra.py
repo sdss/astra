@@ -80,7 +80,7 @@ def srun(
     from astra.utils import silenced, expand_path
     from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn 
 
-    _, q = next(generate_queries_for_task(task, model, limit))
+    model, q = next(generate_queries_for_task(task, model, limit))
 
     total = q.count()
     workers = nodes * procs
@@ -105,7 +105,7 @@ def srun(
                 # TODO: Let's not hard code this here.
                 commands = ["export CLUSTER=1"]
                 for page in range(n * procs, (n + 1) * procs):
-                    commands.append(f"astra run {task} {model} --limit {limit} --page {page + 1} &")
+                    commands.append(f"astra run {task} {model.__name__} --limit {limit} --page {page + 1} &")
                 commands.append("wait")
 
                 script_path = f"{td}/node_{n}.sh"
@@ -143,6 +143,7 @@ def srun(
                 n, t = futures[future]
                 result = future.result()
                 if result.returncode == 0:
+                    # TODO: Cat the output file?
                     p.update(t, description=f"Completed")
                     p.remove_task(t)
                 else:
@@ -168,12 +169,38 @@ def run(
 ):
     """Run an Astra task on spectra."""
     from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn 
-    
+    from rich.live import Live
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.console import Console
+
     from astra import models, __version__, generate_queries_for_task
-    from astra.utils import resolve_task
+    from astra.utils import resolve_task, accepts_live_renderable
 
     fun = resolve_task(task)
+    fun_accepts_live_renderable = accepts_live_renderable(fun)
+    live_renderable = Table.grid()
+    if not fun_accepts_live_renderable:
+        overall_progress = Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        )
+        live_renderable.add_row(Panel(overall_progress, title=task))
+        
+    with Live(live_renderable) as live:
+        for model, q in generate_queries_for_task(fun, spectrum_model, limit, page=page):            
+            if total := q.count():
+                if not fun_accepts_live_renderable:
+                    task = overall_progress.add_task(model.__name__, total=total)
+                for r in fun(q, live_renderable=live_renderable):
+                    if not fun_accepts_live_renderable:
+                        overall_progress.update(task, advance=1)
+                if not fun_accepts_live_renderable:
+                    overall_progress.update(task, completed=True)
 
+    """
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}")) as p:
         t = p.add_task(description="Resolving task", total=None)
         fun = resolve_task(task)
@@ -187,19 +214,20 @@ def run(
         MofNCompleteColumn(),
         TimeRemainingColumn(),
         transient=not in_airflow_context
-    ) as p:
+    ) as progress:
         
         for model, q in generate_queries_for_task(fun, spectrum_model, limit, page=page):
-            t = p.add_task(description=f"Running {fun.__name__} on {model.__name__}", total=limit)
+            t = progress.add_task(description=f"Running {fun.__name__} on {model.__name__}", total=limit)
             total = q.count()
-            p.update(t, total=total)
+            progress.update(t, total=total)
             if total > 0:
-                for n, r in enumerate(fun(q), start=1):
-                    p.update(t, advance=1, refresh=True)
+                for n, r in enumerate(fun(q, progress=progress), start=1):
+                    progress.update(t, advance=1, refresh=True)
                 messages.append(f"Processed {n} {model.__name__} spectra with {fun.__name__}")
-            p.update(t, completed=True)
+            progress.update(t, completed=True)
 
     list(map(typer.echo, messages))
+    """
 
 
 @app.command()

@@ -34,7 +34,7 @@ def _pre_compute_continuum(coarse_result, spectrum, pre_continuum):
         return (spectrum.spectrum_pk, pre_computed_continuum)
 
 
-def plan_stellar_parameters_stage(spectra, coarse_results, pre_continuum=MedianFilter,):
+def plan_stellar_parameters_stage(spectra, coarse_results, weight_path, pre_continuum=MedianFilter, **kwargs):
         
     best_coarse_results = {}
     for kwds in coarse_results:
@@ -69,20 +69,19 @@ def plan_stellar_parameters_stage(spectra, coarse_results, pre_continuum=MedianF
 
         futures = []
         with concurrent.futures.ProcessPoolExecutor(os.cpu_count()) as executor:
-            for r in tqdm(best_coarse_results.values(), desc="Distributing work"):
+            for r in best_coarse_results.values():
                 spectrum = spectra_dict[r.spectrum_pk]
                 futures.append(executor.submit(_pre_compute_continuum, r, spectrum, fun))
 
         pre_computed_continuum = {}
-        with tqdm(total=len(futures), desc="Pre-computing continuum") as pb:
-            for future in concurrent.futures.as_completed(futures):
-                spectrum_pk, continuum = future.result()
-                pre_computed_continuum[spectrum_pk] = continuum
-                pb.update()
+        #with tqdm(total=len(futures), desc="Pre-computing continuum") as pb:
+        for future in concurrent.futures.as_completed(futures):
+            spectrum_pk, continuum = future.result()
+            pre_computed_continuum[spectrum_pk] = continuum
 
     # Plan the next stage
     group_task_kwds = {}
-    for r in tqdm(best_coarse_results.values(), desc="Grouping results"):
+    for r in best_coarse_results.values():
         group_task_kwds.setdefault(r.header_path, [])
         spectrum = spectra_dict[r.spectrum_pk]
 

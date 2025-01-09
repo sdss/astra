@@ -262,11 +262,7 @@ def yield_suitable_grids(
         A generator that yields two-length tuples containing header path, and metadata..
     """
 
-    # Figure out which grids are suitable.
-    if mean_fiber is None or not np.isfinite(mean_fiber):
-        log.warning(f"Missing finite mean_fiber value, not yielding any start position")
-        
-    else:            
+    if mean_fiber is not None and np.isfinite(mean_fiber):  
         lsf_grid = get_lsf_grid_name(int(np.round(mean_fiber)))
 
         #point = np.array([m_h, logg, teff])

@@ -1,10 +1,11 @@
-"""
-from astra.models.apogeenet import ApogeeNet
 from astra.models.apogee import (
     ApogeeCoaddedSpectrumInApStar,
     ApogeeVisitSpectrum,
     ApogeeVisitSpectrumInApStar,
 )
+
+"""
+from astra.models.apogeenet import ApogeeNet
 from astra.models.apogeenet_v2 import ApogeeNetV2
 from astra.models.aspcap import ASPCAP
 from astra.models.astronn import AstroNN
