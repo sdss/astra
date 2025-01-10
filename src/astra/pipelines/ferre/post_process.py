@@ -230,10 +230,10 @@ def _post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Ite
             source_pk=name_meta["source_pk"],
             spectrum_pk=name_meta["spectrum_pk"],
             initial_flags=name_meta["initial_flags"] or 0,
-            upstream_pk=name_meta["upstream_pk"],
+            #upstream_pk=name_meta["upstream_pk"],
             ferre_name=name,
-            ferre_input_index=name_meta["index"],
-            ferre_output_index=i,
+            ferre_index=name_meta["index"],
+            #ferre_output_index=i,
             rchi2=10**ferre_log_chi_sq[i], 
             penalized_rchi2=10**ferre_log_chi_sq[i],     
             ferre_log_snr_sq=ferre_log_snr_sq[i],
@@ -241,6 +241,7 @@ def _post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Ite
             flag_potential_ferre_timeout=flag_potential_ferre_timeout[i],
             flag_missing_model_flux=flag_missing_model_flux[i],
         )
+        assert i == name_meta["index"]
 
         # Add correlation coefficients.
         #meta["cov"]

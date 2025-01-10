@@ -61,6 +61,8 @@ def pre_process_ferre(
     if kwargs:
         log.warning(f"astra.pipelines.ferre.pre_process.pre_process ignoring kwargs: {kwargs}")
 
+    n_threads = min(n_threads, len(spectra))
+
     # Validate the control file keywords.
     (
         control_kwds,
@@ -85,7 +87,7 @@ def pre_process_ferre(
         full_covariance=full_covariance,
         pca_project=pca_project,
         pca_chi=pca_chi,
-        n_threads=min(n_threads, len(spectra)), # Limit threads to the number of objects
+        n_threads=n_threads, # Limit threads to the number of objects
         f_access=f_access,
         f_format=f_format,
     )
@@ -238,7 +240,7 @@ def pre_process_ferre(
         np.savetxt(e_flux_path, batch_e_flux, **savetxt_kwds)
         
     n_obj = len(batch_names)
-    return (pwd, n_obj, n_threads, skipped)
+    return (pwd, n_obj, min(n_threads, n_obj), skipped)
 
 '''
     bad_pixel_flux_value: float = 1e-4,

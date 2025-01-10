@@ -54,7 +54,7 @@ def penalize_coarse_stellar_parameter_result(result: FerreCoarse, warn_multiplie
     return penalized_rchi2
 
         
-def plan_coarse_stellar_parameters(
+def plan_coarse_stellar_parameters_stage(
     spectra: Iterable[Spectrum],
     header_paths: Optional[Union[List[str], Tuple[str], str]] = "$MWM_ASTRA/pipelines/aspcap/synspec_dr17_marcs_header_paths.list",
     initial_guess_callable: Optional[Callable] = None,

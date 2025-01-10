@@ -60,18 +60,18 @@ class FerreOutputMixin:
     def _get_input_pixel_array(self, basename):
         return np.loadtxt(
             fname=f"{self.pwd}/{basename}",
-            skiprows=int(self.ferre_input_index), 
+            skiprows=int(self.ferre_index), 
             max_rows=1,
         )
 
 
     def _get_output_pixel_array(self, basename, P=7514):
         
-        #assert self.ferre_input_index >= 0
+        #assert self.ferre_index >= 0
 
         kwds = dict(
             fname=f"{self.pwd}/{basename}",
-            skiprows=int(self.ferre_output_index), 
+            skiprows=int(self.ferre_index), 
             max_rows=1,
         )
         '''
@@ -83,17 +83,17 @@ class FerreOutputMixin:
             if (
                 (int(meta["source_pk"]) != self.source_pk)
             or (int(meta["spectrum_pk"]) != self.spectrum_pk)
-            or (int(meta["index"]) != self.ferre_input_index)
+            or (int(meta["index"]) != self.ferre_index)
             ):
                 raise a
         except:
             del kwds["skiprows"]
             del kwds["max_rows"]
 
-            name = get_ferre_spectrum_name(self.ferre_input_index, self.source_pk, self.spectrum_pk, self.initial_flags, self.upstream_id)
+            name = get_ferre_spectrum_name(self.ferre_index, self.source_pk, self.spectrum_pk, self.initial_flags, self.upstream_id)
 
             index = list(np.loadtxt(usecols=(0, ), dtype=str, **kwds)).index(name)
-            self.ferre_output_index = index
+            self.ferre_index = index
             self.save()
             print("saved!")
             kwds["skiprows"] = index
@@ -108,7 +108,7 @@ class FerreOutputMixin:
         meta = parse_ferre_spectrum_name(name)
         assert int(meta["source_pk"]) == self.source_pk
         assert int(meta["spectrum_pk"]) == self.spectrum_pk
-        assert int(meta["index"]) == self.ferre_input_index
+        assert int(meta["index"]) == self.ferre_index
 
         return array
 
@@ -180,8 +180,7 @@ class FerreCoarse(PipelineOutputModel, FerreOutputMixin):
  
     #> FERRE Access Fields
     ferre_name = TextField(default="")
-    ferre_input_index = IntegerField(default=-1)
-    ferre_output_index = IntegerField(default=-1)
+    ferre_index = IntegerField(default=-1)
     ferre_n_obj = IntegerField(default=-1)
 
     #> Summary Statistics
@@ -311,8 +310,8 @@ class FerreStellarParameters(PipelineOutputModel, FerreOutputMixin):
     # TODO: flag definitions for each dimension (DRY)
     #> FERRE Access Fields
     ferre_name = TextField(default="")
-    ferre_input_index = IntegerField(default=-1)
-    ferre_output_index = IntegerField(default=-1)
+    ferre_index = IntegerField(default=-1)
+    ferre_index = IntegerField(default=-1)
     ferre_n_obj = IntegerField(default=-1)
 
     #> Summary Statistics
@@ -450,8 +449,8 @@ class FerreChemicalAbundances(PipelineOutputModel, FerreOutputMixin):
     # TODO: flag definitions for each dimension (DRY)
     #> FERRE Access Fields
     ferre_name = TextField(default="")
-    ferre_input_index = IntegerField(default=-1)
-    ferre_output_index = IntegerField(default=-1)
+    ferre_index = IntegerField(default=-1)
+    ferre_index = IntegerField(default=-1)
     ferre_n_obj = IntegerField(default=-1)
 
     #> Summary Statistics
