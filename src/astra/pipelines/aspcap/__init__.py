@@ -47,6 +47,7 @@ def aspcap(
     weight_path: Optional[str] = "$MWM_ASTRA/pipelines/aspcap/masks/global.mask",
     element_weight_paths: str = "$MWM_ASTRA/pipelines/aspcap/masks/elements.list",
     parent_dir: Optional[str] = None, 
+    n_threads: Optional[int] = 32,
     max_processes: Optional[int] = 16,
     max_threads: Optional[int] = 128,
     max_concurrent_loading: Optional[int] = 4,
@@ -56,11 +57,6 @@ def aspcap(
 ) -> Iterable[ASPCAP]:
     """
     Run the ASPCAP pipeline on some spectra.
-    
-    .. warning:: 
-        This is task for convenience. 
-        
-        If you want efficiency, you should use the `pre_` and `post_` tasks for each stage in the pipeline.
     
     :param spectra:
         The spectra to analyze with ASPCAP.
@@ -80,6 +76,7 @@ def aspcap(
 
     :param element_weight_paths: [optional]
         A path containing FERRE weight files for different elements, which will be used in the chemical abundances stage.
+    
     
     Keyword arguments
     -----------------
@@ -107,7 +104,8 @@ def aspcap(
         spectra=spectra, 
         header_paths=header_paths, 
         initial_guess_callable=initial_guess_callable,
-        weight_path=weight_path
+        weight_path=weight_path,
+        n_threads=n_threads
     )
     for spectrum in spectra_with_no_initial_guess:
         yield ASPCAP.from_spectrum(spectrum, flag_no_suitable_initial_guess=True)
@@ -119,6 +117,7 @@ def aspcap(
         spectra=spectra, 
         coarse_results=coarse_results,
         weight_path=weight_path,
+        n_threads=n_threads
     )
     param_results, param_failures = _aspcap_stage("params", stellar_parameter_plans, *stage_args, **stage_kwds)
     yield from param_failures
@@ -282,7 +281,7 @@ def _aspcap_stage(
             except IndexError:
                 continue
             else:
-                directory, n_obj, skipped = future.result()
+                directory, n_obj, n_ferre_threads, skipped = future.result()
 
                 # Spectra might be skipped because the file could not be found, or if there were too many bad pixels.
                 for spectrum, kwds in skipped:
@@ -302,7 +301,7 @@ def _aspcap_stage(
                             f"  [yellow]{os.path.basename(directory)}",
                             total=n_obj
                         )
-                    currently_loading, current_threads, current_processes = (currently_loading + 1, current_threads + n_obj, current_processes + 1)
+                    currently_loading, current_threads, current_processes = (currently_loading + 1, current_threads + n_ferre_threads, current_processes + 1)
                 n_executions += 1
 
         # All submitted. Now wait for them to finish.

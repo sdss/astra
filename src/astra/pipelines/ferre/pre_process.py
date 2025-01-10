@@ -189,7 +189,7 @@ def pre_process_ferre(
     #    log.warning(f"Skipping {len(skipped)} spectra ({100 * len(skipped) / len(spectra):.0f}%; of {len(spectra)})")
 
     if not batch_initial_parameters:
-        return (pwd, 0, skipped)
+        return (pwd, 0, 0, skipped)
 
     control_kwds_formatted = utils.format_ferre_control_keywords(control_kwds, n_obj=1 + index)
 
@@ -238,7 +238,7 @@ def pre_process_ferre(
         np.savetxt(e_flux_path, batch_e_flux, **savetxt_kwds)
         
     n_obj = len(batch_names)
-    return (pwd, n_obj, skipped)
+    return (pwd, n_obj, n_threads, skipped)
 
 '''
     bad_pixel_flux_value: float = 1e-4,
