@@ -85,7 +85,7 @@ def pre_process_ferre(
         full_covariance=full_covariance,
         pca_project=pca_project,
         pca_chi=pca_chi,
-        n_threads=n_threads,
+        n_threads=min(n_threads, len(spectra)), # Limit threads to the number of objects
         f_access=f_access,
         f_format=f_format,
     )

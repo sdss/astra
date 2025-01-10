@@ -60,11 +60,7 @@ def aspcap(
     
     :param spectra:
         The spectra to analyze with ASPCAP.
-    
-    :param parent_dir: [optional]
-        The parent directory where these FERRE executions will be planned. If `None` is given then this will default
-        to a temporary directory in `$MWM_ASTRA/X.Y.Z/pipelines/aspcap/`.
-    
+
     :param initial_guess_callable: [optional]
         A callable that returns an initial guess for the stellar parameters. 
     
@@ -77,7 +73,31 @@ def aspcap(
     :param element_weight_paths: [optional]
         A path containing FERRE weight files for different elements, which will be used in the chemical abundances stage.
     
+    :param parent_dir: [optional]
+        The parent directory where these FERRE executions will be planned. If `None` is given then this will default
+        to a temporary directory in `$MWM_ASTRA/X.Y.Z/pipelines/aspcap/`.
+
+    :param n_threads: [optional]
+        The number of threads to use per FERRE process.
     
+    :param max_processes: [optional]
+        The maximum number of FERRE processes to run at once.
+    
+    :param max_threads: [optional]
+        The maximum number of threads to run at once. This is a soft limit that can be temporarily exceeded by `soft_thread_ratio`
+        to allow new FERRE processes to load into memory while existing threads are still running.
+    
+    :param max_concurrent_loading: [optional]
+        The maximum number of FERRE grids to load at once. This is to prevent disk I/O from becoming a bottleneck.
+    
+    :param soft_thread_ratio: [optional]
+        The ratio of threads to processes that can be temporarily exceeded to allow new FERRE processes to load into memory while 
+        existing threads are still running.
+    
+    :param live_renderable: [optional]
+        A live renderable object that can be updated with progress information. This is useful for Jupyter notebooks or other
+        live-rendering environments.
+
     Keyword arguments
     -----------------
     All additional keyword arguments will be passed through to `astra.pipelines.ferre.pre_process.pre_process.ferre`. 
@@ -92,13 +112,18 @@ def aspcap(
         os.makedirs(_dir, exist_ok=True)
         parent_dir = mkdtemp(prefix=f"{datetime.now().strftime('%Y-%m-%d')}-", dir=_dir)
 
-    stage_args = (parent_dir, max_processes, max_threads, max_concurrent_loading, soft_thread_ratio)
-    stage_kwds = {}
+    stage_args = [parent_dir, max_processes, max_threads, max_concurrent_loading, soft_thread_ratio]
     if live_renderable is not None:
-        rows, progress_meta = get_progress_bars_for_live_renderable()
-        for row in rows:
-            live_renderable.add_row(*row)
-        stage_kwds["progress_meta"] = progress_meta
+        from rich.panel import Panel
+        from rich.progress import (Progress, BarColumn, MofNCompleteColumn, TimeElapsedColumn)
+        progress = Progress(
+            "[progress.description]{task.description}",
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn()
+        )
+        live_renderable.add_row(Panel.fit(progress, title="ASPCAP", padding=(2, 2)))
+        stage_args += [progress]
 
     coarse_plans, spectra_with_no_initial_guess = plan_coarse_stellar_parameters(
         spectra=spectra, 
@@ -110,16 +135,16 @@ def aspcap(
     for spectrum in spectra_with_no_initial_guess:
         yield ASPCAP.from_spectrum(spectrum, flag_no_suitable_initial_guess=True)
 
-    coarse_results, coarse_failures = _aspcap_stage("coarse", coarse_plans, *stage_args, **stage_kwds)    
+    coarse_results, coarse_failures = _aspcap_stage("coarse", coarse_plans, *stage_args)    
     yield from coarse_failures
-    
+
     stellar_parameter_plans, best_coarse_results = plan_stellar_parameters_stage(
         spectra=spectra, 
         coarse_results=coarse_results,
         weight_path=weight_path,
         n_threads=n_threads
     )
-    param_results, param_failures = _aspcap_stage("params", stellar_parameter_plans, *stage_args, **stage_kwds)
+    param_results, param_failures = _aspcap_stage("params", stellar_parameter_plans, *stage_args)
     yield from param_failures
 
     for r in param_results:
@@ -161,6 +186,7 @@ def aspcap(
     
     # TODO: Chemical abundances.
 
+    # TODO: Confirm we can access all the spectra from the single `ASPCAP` object.
     for r in param_results:
         yield ASPCAP(**r)
 
@@ -173,15 +199,16 @@ def _aspcap_stage(
     max_threads, 
     max_concurrent_loading, 
     soft_thread_ratio, 
-    progress_meta=None,
+    progress=None,
 ):
-    live_updates = progress_meta is not None
-    progress, stage_task_id, pb = (None, None, None)
-    if live_updates:
-        stage_task_id = progress_meta["tasks"][f"{stage}_stage"]
-        progress = progress_meta["progress"]
-        progress.start_task(stage_task_id)
-        progress.update(stage_task_id, visible=True)
+    pb = None
+    if progress is not None:
+        full_names = {
+            "coarse": "Coarse parameters",
+            "params": "Stellar parameters",
+            "abundances": "Chemical abundances"
+        }
+        stage_task_id = progress.add_task(f"[bold blue]{full_names.get(stage, stage)}[/bold blue]")
 
     # FERRE can be limited by at least three mechanisms:
     # 1. Too many threads requested (CPU limited).
@@ -216,7 +243,7 @@ def _aspcap_stage(
             )
             total += len(plan["spectra"])
         
-        if live_updates:
+        if progress is not None:
             progress.update(stage_task_id, completed=0, total=total)
         else:
             pb = tqdm(total=total, desc=f"ASPCAP {stage}")
@@ -240,7 +267,7 @@ def _aspcap_stage(
                 child_directory, n = parent.recv()
                 if n == 0:
                     currently_loading -= 1
-                    if live_updates:
+                    if progress is not None:
                         progress.update(
                             ferre_tasks[child_directory],
                             description=f"  [white]{os.path.basename(child_directory)}",
@@ -250,7 +277,7 @@ def _aspcap_stage(
                 current_threads -= n
                 if pb is not None:
                     pb.update(n)
-                if live_updates:
+                if progress is not None:
                     progress.update(ferre_tasks[child_directory], advance=n)
                     progress.update(stage_task_id, advance=n)
         
@@ -285,7 +312,7 @@ def _aspcap_stage(
 
                 # Spectra might be skipped because the file could not be found, or if there were too many bad pixels.
                 for spectrum, kwds in skipped:
-                    if live_updates:
+                    if progress is not None:
                         progress.update(stage_task_id, advance=1)
                     if pb is not None:
                         pb.update(1)
@@ -296,7 +323,7 @@ def _aspcap_stage(
 
                 if n_obj > 0:
                     ferre_futures.append(executor.submit(ferre, directory, n_obj, child))
-                    if live_updates:
+                    if progress is not None:
                         ferre_tasks[directory] = progress.add_task(
                             f"  [yellow]{os.path.basename(directory)}",
                             total=n_obj
@@ -328,7 +355,7 @@ def _aspcap_stage(
 
         executor.shutdown(wait=False, cancel_futures=True)
     
-    if live_updates:
+    if progress is not None:
         for task_id in ferre_tasks.values():
             progress.update(task_id, completed=True, visible=False, refresh=True)
     else:
@@ -336,42 +363,8 @@ def _aspcap_stage(
     return (successes, list(failures.values()))
 
 
-def get_progress_bars_for_live_renderable():
-
-    from rich.live import Live
-    from rich.panel import Panel
-    from rich.progress import (
-        Progress, SpinnerColumn, BarColumn, TextColumn, MofNCompleteColumn,
-        TimeElapsedColumn, TimeRemainingColumn
-    )
-    from rich.table import Table
-
-    progress = Progress(
-        "[progress.description]{task.description}",
-        BarColumn(),
-        MofNCompleteColumn(),
-        TimeElapsedColumn()
-    )
-    l, r = ("[bold blue]", "[/bold blue]")
-    coarse_stage = progress.add_task(f"{l}Coarse parameters{r}")
-    params_stage = progress.add_task(f"{l}Stellar parameters{r}", start=False, visible=False)
-    abundances_stage = progress.add_task(f"{l}Chemical abundances{r}", start=False, visible=False)
-    row = (
-        Panel.fit(progress, title="ASPCAP", padding=(2, 2)),
-    )    
-    meta = dict(
-        progress=progress,
-        tasks=dict(
-            coarse_stage=coarse_stage,
-            params_stage=params_stage,
-            abundances_stage=abundances_stage,
-        )
-    )
-    return ((row, ), meta)
-
 regex_next_object = re.compile(r"next object #\s+(\d+)")
 regex_completed = re.compile(r"\s+(\d+)\s(\d+_[\d\w_]+)") # assumes input ids start with an integer and underscore
- 
 
 
 def ferre(directory, n_obj, pipe, timeout_line=10, timeout_grid_load=60):
