@@ -110,7 +110,7 @@ def pre_process_ferre(
     if kwargs:
         log.warning(f"astra.pipelines.ferre.pre_process.pre_process ignoring kwargs: {kwargs}")
 
-    n_threads = min(n_threads, len(spectra))
+    #n_threads = min(n_threads, len(spectra))
 
     # Validate the control file keywords.
     (
