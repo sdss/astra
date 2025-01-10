@@ -12,6 +12,51 @@ import warnings
 
 # FERRE v4.8.8 src trunk : /uufs/chpc.utah.edu/common/home/sdss09/software/apogee/Linux/apogee/trunk/external/ferre/src
 
+def pre_process_ferres(plans):
+    processed = [pre_process_ferre(**plan) for plan in plans]
+    if len(plans) == 1:
+        return processed[0]
+    else:
+        # Abundance mode.
+        abundance_dir = os.path.dirname(os.path.dirname(processed[0][0]))
+
+        input_nml_paths, total, skipped = ([], 0, [])
+        for input_nml_path_, n_obj_, n_threads, skipped_ in processed:
+            input_nml_paths.append(input_nml_path_[len(abundance_dir) + 1:]) # ppaths too long
+            total += n_obj_
+            for spectrum, kwds in skipped_:
+                skipped.append((spectrum, kwds))
+        
+        
+        # Create a FERRE list file.
+        input_nml_path = os.path.join(abundance_dir, "input_list.nml")
+        with open(input_nml_path, "w") as fp:
+            fp.write("\n".join(input_nml_paths) + "\n")
+
+        return (input_nml_path, total, n_threads, skipped)
+    
+    """"
+        def group_abundance_plans_in_list_mode(plans):
+    group = {}
+    for kwd in plans:
+        pre_process_ferre(**kwd)
+
+        pwd = kwd["pwd"].rstrip("/")
+        group_dir = "/".join(pwd.split("/")[:-1])
+        group.setdefault(group_dir, [])
+        group[group_dir].append(pwd[1 + len(group_dir):] + "/input.nml")
+    
+    if ferre_list_mode:
+        # Create a parent input_list.nml file to use with the ferre.x -l flag.
+        for pwd, items in group.items():
+            input_list_path = f"{pwd}/input_list.nml"
+            log.info(f"Created grouped FERRE input file with {len(items)} dirs: {input_list_path}")
+            with open(expand_path(input_list_path), "w") as fp:
+                # Sometimes `wc` would not give the right amount of lines in a file, so we add a \n to the end
+                # https://unix.stackexchange.com/questions/314256/wc-l-not-returning-correct-value
+                fp.write("\n".join(items) + "\n")   
+    """
+
 def pre_process_ferre(
     pwd: str,
     header_path: str,
@@ -55,8 +100,12 @@ def pre_process_ferre(
     reference_pixel_arrays_for_abundance_run=False,
     write_input_pixel_arrays=True,
     max_num_bad_pixels=2000,
+    remove_existing_output_files=True,
     **kwargs
 ):
+
+    if remove_existing_output_files:
+        os.system(f"rm -f {pwd}/*.output {pwd}/stdout {pwd}/stderr")    
     
     if kwargs:
         log.warning(f"astra.pipelines.ferre.pre_process.pre_process ignoring kwargs: {kwargs}")
@@ -240,7 +289,7 @@ def pre_process_ferre(
         np.savetxt(e_flux_path, batch_e_flux, **savetxt_kwds)
         
     n_obj = len(batch_names)
-    return (pwd, n_obj, min(n_threads, n_obj), skipped)
+    return (f"{pwd}/input.nml", n_obj, min(n_threads, n_obj), skipped)
 
 '''
     bad_pixel_flux_value: float = 1e-4,

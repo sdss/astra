@@ -26,9 +26,33 @@ def write_pixel_array_with_names(path, names, data):
 
 LARGE = 1e10 # TODO: This is also defined in pre_process, move it common
 
-def post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> list[dict]:
-    post_execution_interpolation(dir)
-    v =  list(_post_process_ferre(dir, pwd=pwd, skip_pixel_arrays=skip_pixel_arrays, **kwargs))
+def post_process_ferre(input_nml_path, **kwargs) -> list[dict]:
+
+    """
+        if relative_mode:
+            ref_dir = os.path.dirname(dir)
+        else:
+            ref_dir = None
+        log.info(f"Post-processing FERRE results in {dir} {'with FERRE list mode' if relative_mode else 'in standard mode'}")
+        for kwds in post_process_ferre(dir, ref_dir, skip_pixel_arrays=skip_pixel_arrays, **kwargs):
+            yield FerreChemicalAbundances(**kwds)    
+    """
+    is_abundance_mode = input_nml_path.endswith("input_list.nml")
+    if is_abundance_mode:
+        abundance_dir = os.path.dirname(input_nml_path)
+        with open(input_nml_path, "r") as fp:
+            dirs = [os.path.join(abundance_dir, line.split("/")[0]) for line in fp.read().strip().split("\n")]
+        
+        # TODO: this might be slow we can probably use -l mode
+        for d in dirs:
+            post_execution_interpolation(d)
+        
+        ref_dir = os.path.dirname(input_nml_path)
+        v = [list(_post_process_ferre(d, ref_dir, skip_pixel_arrays=True, **kwargs)) for d in dirs]
+    else:
+        directory = os.path.dirname(input_nml_path)
+        post_execution_interpolation(directory)
+        v = list(_post_process_ferre(directory, **kwargs))
     return v
 
 def _post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Iterable[dict]:

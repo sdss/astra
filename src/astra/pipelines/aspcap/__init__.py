@@ -3,41 +3,30 @@ import numpy as np
 import concurrent.futures
 import subprocess
 import re
-import heapq
-import thread
 from multiprocessing import Pipe, Lock
 from datetime import datetime
 from tempfile import mkdtemp
 from typing import Optional, Iterable, List, Tuple, Callable, Union
-from peewee import JOIN, fn
 from tqdm import tqdm
 from time import time, sleep
-from threading import Timer
 
 from astra import __version__, task
-from astra.utils import log, expand_path, list_to_dict
+from astra.utils import log, expand_path
 from astra.models.apogee import ApogeeCoaddedSpectrumInApStar
 from astra.models.aspcap import ASPCAP, FerreCoarse, FerreStellarParameters, FerreChemicalAbundances, Source
-from astra.models.spectrum import Spectrum, SpectrumMixin
-from astra.pipelines.ferre.pre_process import pre_process_ferre
+from astra.models.spectrum import Spectrum
+from astra.pipelines.ferre.pre_process import pre_process_ferres
 from astra.pipelines.ferre.post_process import post_process_ferre
-from astra.pipelines.ferre.utils import  parse_header_path
+from astra.pipelines.ferre.utils import parse_header_path
 from astra.pipelines.aspcap.initial import get_initial_guesses
-from astra.pipelines.aspcap.coarse import plan_coarse_stellar_parameters, penalize_coarse_stellar_parameter_result
+from astra.pipelines.aspcap.coarse import plan_coarse_stellar_parameters_stage
 from astra.pipelines.aspcap.stellar_parameters import plan_stellar_parameters_stage
-from astra.pipelines.aspcap.continuum import MedianFilter
-
+from astra.pipelines.aspcap.abundances import plan_abundances_stage
 #from astra.pipelines.aspcap.stellar_parameters import stellar_parameters, post_stellar_parameters
 #from astra.pipelines.aspcap.abundances import abundances, get_species, post_abundances
 #from astra.pipelines.aspcap.utils import ABUNDANCE_RELATIVE_TO_H
 
-
-import signal
-from threading import Event, Lock, Thread
-from subprocess import Popen, PIPE, STDOUT
-
-
-
+from signal import SIGTERM
 
 @task
 def aspcap(
@@ -112,40 +101,59 @@ def aspcap(
         os.makedirs(_dir, exist_ok=True)
         parent_dir = mkdtemp(prefix=f"{datetime.now().strftime('%Y-%m-%d')}-", dir=_dir)
 
-    stage_args = [parent_dir, max_processes, max_threads, max_concurrent_loading, soft_thread_ratio]
-    if live_renderable is not None:
-        from rich.panel import Panel
-        from rich.progress import (Progress, BarColumn, MofNCompleteColumn, TimeElapsedColumn)
-        progress = Progress(
-            "[progress.description]{task.description}",
-            BarColumn(),
-            MofNCompleteColumn(),
-            TimeElapsedColumn()
+    parent, child = Pipe()
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max(max_threads, max_processes)) as executor:
+        stage_args = [executor, parent, child, parent_dir, max_processes, max_threads, max_concurrent_loading, soft_thread_ratio]
+        if live_renderable is not None:
+            from rich.panel import Panel
+            from rich.progress import (Progress, BarColumn, MofNCompleteColumn, TimeElapsedColumn)
+            progress = Progress(
+                "[progress.description]{task.description}",
+                BarColumn(),
+                MofNCompleteColumn(),
+                TimeElapsedColumn()
+            )
+            live_renderable.add_row(Panel.fit(progress, title="ASPCAP", padding=(2, 2)))
+            stage_args += [progress]
+
+        coarse_plans, spectra_with_no_initial_guess = plan_coarse_stellar_parameters_stage(
+            spectra=spectra, 
+            parent_dir=parent_dir,
+            header_paths=header_paths, 
+            initial_guess_callable=initial_guess_callable,
+            weight_path=weight_path,
+            n_threads=n_threads
         )
-        live_renderable.add_row(Panel.fit(progress, title="ASPCAP", padding=(2, 2)))
-        stage_args += [progress]
+        for spectrum in spectra_with_no_initial_guess:
+            yield ASPCAP.from_spectrum(spectrum, flag_no_suitable_initial_guess=True)
 
-    coarse_plans, spectra_with_no_initial_guess = plan_coarse_stellar_parameters(
-        spectra=spectra, 
-        header_paths=header_paths, 
-        initial_guess_callable=initial_guess_callable,
-        weight_path=weight_path,
-        n_threads=n_threads
-    )
-    for spectrum in spectra_with_no_initial_guess:
-        yield ASPCAP.from_spectrum(spectrum, flag_no_suitable_initial_guess=True)
+        coarse_results, coarse_failures = _aspcap_stage("coarse", coarse_plans, *stage_args)    
+        yield from coarse_failures
 
-    coarse_results, coarse_failures = _aspcap_stage("coarse", coarse_plans, *stage_args)    
-    yield from coarse_failures
+        stellar_parameter_plans, best_coarse_results = plan_stellar_parameters_stage(
+            spectra=spectra, 
+            parent_dir=parent_dir,
+            coarse_results=coarse_results,
+            weight_path=weight_path,
+            n_threads=n_threads
+        )
+        param_results, param_failures = _aspcap_stage("params", stellar_parameter_plans, *stage_args)
+        yield from param_failures
 
-    stellar_parameter_plans, best_coarse_results = plan_stellar_parameters_stage(
-        spectra=spectra, 
-        coarse_results=coarse_results,
-        weight_path=weight_path,
-        n_threads=n_threads
-    )
-    param_results, param_failures = _aspcap_stage("params", stellar_parameter_plans, *stage_args)
-    yield from param_failures
+        abundance_plans = plan_abundances_stage(
+            spectra=spectra,
+            parent_dir=parent_dir,
+            stellar_parameter_results=param_results,
+            element_weight_paths=element_weight_paths,
+            n_threads=n_threads
+        )
+        abundance_results, abundance_failures = _aspcap_stage("abundances", abundance_plans, *stage_args)
+
+        parent.close()
+        child.close()
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    raise a
 
     for r in param_results:
         coarse = best_coarse_results[r["spectrum_pk"]]
@@ -181,11 +189,12 @@ def aspcap(
             initial_c_m_atm=coarse.initial_c_m,
             initial_n_m_atm=coarse.initial_n_m,    
             ferre_time_coarse=coarse.t_elapsed,
-            ferre_time_params=r["t_elapsed"],        
+            ferre_time_params=r["t_elapsed"],
+            pwd=parent_dir,
         )
     
     # TODO: Chemical abundances.
-
+    raise a
     # TODO: Confirm we can access all the spectra from the single `ASPCAP` object.
     for r in param_results:
         yield ASPCAP(**r)
@@ -194,6 +203,9 @@ def aspcap(
 def _aspcap_stage(
     stage, 
     plans, 
+    executor,
+    parent,
+    child,
     parent_dir, 
     max_processes, 
     max_threads, 
@@ -210,14 +222,15 @@ def _aspcap_stage(
         }
         stage_task_id = progress.add_task(f"[bold blue]{full_names.get(stage, stage)}[/bold blue]")
 
+    get_task_name = lambda input_nml_path: os.path.dirname(input_nml_path).split("/")[-1]
+
     # FERRE can be limited by at least three mechanisms:
     # 1. Too many threads requested (CPU limited).
     # 2. Too many processes started (RAM limited).
     # 3. Too many grids load at once (disk I/O limited).
-    parent, child = Pipe()
     current_processes, current_threads, currently_loading = (0, 0, 0)
     pre_processed_futures, ferre_futures, post_processed_futures = ([], [], [])
-    n_executions, n_executions_total, timings, t_full = (0, len(plans), {}, -time())
+    n_executions, n_executions_total, timings = (0, len(plans), {})
 
     # TODO: the soft thread ratio is to account for the fact that it takes time to load the grid, and we can load the grid while
     #       we are still thread limited. By the time the grid is loaded, we won't be thread limited anymore.
@@ -229,131 +242,123 @@ def _aspcap_stage(
     )
     max_workers = max(max_processes, max_threads)
     successes, failures = [], {}
-    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
 
-        total = 0
-        for plan in plans:
-            # Remove any output files files in the expected directory.
-            pwd = os.path.join(parent_dir, plan.pop("relative_dir"))
-            os.system(f"rm -f {pwd}/*.output {pwd}/stdout {pwd}/stderr")
-            (
-                executor
-                .submit(pre_process_ferre, pwd=pwd, **plan)
-                .add_done_callback(lambda future: pre_processed_futures.insert(0, future))
-            )
-            total += len(plan["spectra"])
-        
-        if progress is not None:
-            progress.update(stage_task_id, completed=0, total=total)
-        else:
-            pb = tqdm(total=total, desc=f"ASPCAP {stage}")
-            pb.__enter__()
-
-        ferre_tasks = {}
-
-        def check_capacity(current_processes, current_threads, currently_loading):
-            worker_limit, thread_limit, loading_limit = at_capacity(current_processes, current_threads, currently_loading)
-
-            if pb is not None:
-                pb.set_description(
-                    f"ASPCAP {stage} ("
-                    f"thread {current_threads}/{max_threads}{'*' if thread_limit else ''}; "
-                    f"proc {current_processes}/{max_processes}{'*' if worker_limit else ''}; "
-                    f"load {currently_loading}/{max_concurrent_loading}{'*' if loading_limit else ''}; "
-                    f"job {n_executions}/{n_executions_total})"
-                )
-
-            while parent.poll():
-                child_directory, n = parent.recv()
-                if n == 0:
-                    currently_loading -= 1
-                    if progress is not None:
-                        progress.update(
-                            ferre_tasks[child_directory],
-                            description=f"  [white]{os.path.basename(child_directory)}",
-                            refresh=True
-                        )
-                    
-                current_threads -= n
-                if pb is not None:
-                    pb.update(n)
-                if progress is not None:
-                    progress.update(ferre_tasks[child_directory], advance=n)
-                    progress.update(stage_task_id, advance=n)
-        
-            try:
-                ferre_future = next(concurrent.futures.as_completed(ferre_futures, timeout=0))
-            except TimeoutError:
-                None
-            else:
-                (completed_directory, return_code, t_overhead, t_elapsed) = ferre_future.result()
-                if return_code not in (0, 1):
-                    log.exception(f"FERRE failed on {completed_directory}: {return_code}")
-                timings[completed_directory] = (t_overhead, t_elapsed)
-                post_processed_futures.append(
-                    executor.submit(
-                        post_process_ferre,
-                        completed_directory
-                    )
-                )
-                ferre_futures.remove(ferre_future)
-                current_processes -= 1
-            return (current_processes, current_threads, currently_loading)
-
-        while n_executions_total > n_executions:
-            try:
-                # Let's oscillate between the first (largest) and last (smallest) elements: (-0 and -1)
-                # This means we are distributing the grid loading time while other threads are doing useful things.
-                future = pre_processed_futures.pop(-((n_executions + 1) % 2))
-            except IndexError:
-                continue
-            else:
-                directory, n_obj, n_ferre_threads, skipped = future.result()
-
-                # Spectra might be skipped because the file could not be found, or if there were too many bad pixels.
-                for spectrum, kwds in skipped:
-                    if progress is not None:
-                        progress.update(stage_task_id, advance=1)
-                    if pb is not None:
-                        pb.update(1)
-                    failures[spectrum.spectrum_pk] = ASPCAP.from_spectrum(spectrum, **kwds)
-
-                while any(at_capacity(current_processes, current_threads, currently_loading)):
-                    current_processes, current_threads, currently_loading = check_capacity(current_processes, current_threads, currently_loading)
-
-                if n_obj > 0:
-                    ferre_futures.append(executor.submit(ferre, directory, n_obj, child))
-                    if progress is not None:
-                        ferre_tasks[directory] = progress.add_task(
-                            f"  [yellow]{os.path.basename(directory)}",
-                            total=n_obj
-                        )
-                    currently_loading, current_threads, current_processes = (currently_loading + 1, current_threads + n_ferre_threads, current_processes + 1)
-                n_executions += 1
-
-        # All submitted. Now wait for them to finish.
-        while current_processes:
-            current_processes, current_threads, currently_loading = check_capacity(current_processes, current_threads, currently_loading)
-
-        t_full += time()
-                
-        parent.close()
-        child.close()
+    total = 0
+    for plan in plans:
+        (
+            executor
+            .submit(pre_process_ferres, plan)
+            .add_done_callback(lambda future: pre_processed_futures.insert(0, future))
+        )
+        total += sum(map(len, (p["spectra"] for p in plan)))
     
-        for future in concurrent.futures.as_completed(post_processed_futures):
-            for result in future.result():
-                # Assign timings to the results.
-                try:
-                    t_overhead, t_elapsed_all = timings[result["pwd"]]
-                    t_elapsed = t_elapsed_all[result["ferre_name"]]
-                except:
-                    t_elapsed = t_overhead = np.nan
-                finally:
-                    result["t_overhead"] = t_overhead
-                    result["t_elapsed"] = t_elapsed
-                successes.append(result)
+    if progress is not None:
+        progress.update(stage_task_id, completed=0, total=total)
+    else:
+        pb = tqdm(total=total, desc=f"ASPCAP {stage}")
+        pb.__enter__()
 
-        executor.shutdown(wait=False, cancel_futures=True)
+    ferre_tasks = {}
+
+    def check_capacity(current_processes, current_threads, currently_loading):
+        worker_limit, thread_limit, loading_limit = at_capacity(current_processes, current_threads, currently_loading)
+
+        if pb is not None:
+            pb.set_description(
+                f"ASPCAP {stage} ("
+                f"thread {current_threads}/{max_threads}{'*' if thread_limit else ''}; "
+                f"proc {current_processes}/{max_processes}{'*' if worker_limit else ''}; "
+                f"load {currently_loading}/{max_concurrent_loading}{'*' if loading_limit else ''}; "
+                f"job {n_executions}/{n_executions_total})"
+            )
+
+        while parent.poll():
+            input_nml_path, n = parent.recv()
+            if n == 0:
+                currently_loading -= 1
+                if progress is not None:
+                    progress.update(
+                        ferre_tasks[input_nml_path],
+                        description=f"  [white]{get_task_name(input_nml_path)}",
+                        refresh=True
+                    )
+                
+            if not input_nml_path.endswith("input_list.nml"):
+                current_threads -= n
+            if pb is not None:
+                pb.update(n)
+            if progress is not None:
+                progress.update(ferre_tasks[input_nml_path], advance=n)
+                progress.update(stage_task_id, advance=n)
+    
+        try:
+            ferre_future = next(concurrent.futures.as_completed(ferre_futures, timeout=0))
+        except:
+            None
+        else:
+            (input_nml_path, return_code, t_overhead, t_elapsed) = ferre_future.result()
+            if return_code not in (0, 1):
+                log.exception(f"FERRE failed on {input_nml_path}: {return_code}")
+            timings[os.path.dirname(input_nml_path)] = (t_overhead, t_elapsed)
+            # TODO: Should `timings` and `post_process_ferre` take directories or input_nml_paths?
+            post_processed_futures.append(
+                executor.submit(
+                    post_process_ferre,
+                    input_nml_path
+                )
+            )
+            ferre_futures.remove(ferre_future)
+            current_processes -= 1
+        return (current_processes, current_threads, currently_loading)
+
+    while n_executions_total > n_executions:
+        try:
+            # Let's oscillate between the first (largest) and last (smallest) elements: (-0 and -1)
+            # This means we are distributing the grid loading time while other threads are doing useful things.
+            future = pre_processed_futures.pop(-((n_executions + 1) % 2))
+        except IndexError:
+            continue
+        else:
+            input_nml_path, total, n_ferre_threads, skipped = future.result()
+            
+            # Spectra might be skipped because the file could not be found, or if there were too many bad pixels.
+            for spectrum, kwds in skipped:
+                if progress is not None:
+                    progress.update(stage_task_id, advance=1)
+                if pb is not None:
+                    pb.update(1)
+                failures[spectrum.spectrum_pk] = ASPCAP.from_spectrum(spectrum, **kwds)
+
+            while any(at_capacity(current_processes, current_threads, currently_loading)):
+                current_processes, current_threads, currently_loading = check_capacity(current_processes, current_threads, currently_loading)
+
+            if total > 0:
+                ferre_futures.append(executor.submit(ferre, input_nml_path, total, child))
+                if progress is not None:
+                    ferre_tasks[input_nml_path] = progress.add_task(
+                        f"  [yellow]{get_task_name(input_nml_path)}",
+                        total=total
+                    )
+                currently_loading, current_threads, current_processes = (currently_loading + 1, current_threads + n_ferre_threads, current_processes + 1)
+            n_executions += 1
+
+    # All submitted. Now wait for them to finish.
+    while current_processes:
+        current_processes, current_threads, currently_loading = check_capacity(current_processes, current_threads, currently_loading)
+            
+
+    for future in concurrent.futures.as_completed(post_processed_futures):
+        for result in future.result():
+            # Assign timings to the results.
+            try:
+                t_overhead, t_elapsed_all = timings[result["pwd"]]
+                t_elapsed = t_elapsed_all[result["ferre_name"]]
+            except:
+                t_elapsed = t_overhead = np.nan
+            finally:
+                result["t_overhead"] = t_overhead
+                result["t_elapsed"] = t_elapsed
+            successes.append(result)
     
     if progress is not None:
         for task_id in ferre_tasks.values():
@@ -367,82 +372,48 @@ regex_next_object = re.compile(r"next object #\s+(\d+)")
 regex_completed = re.compile(r"\s+(\d+)\s(\d+_[\d\w_]+)") # assumes input ids start with an integer and underscore
 
 
-def ferre(directory, n_obj, pipe, timeout_line=10, timeout_grid_load=60):
-    rid = os.getpid()
-    #print(f"FERRE starting {rid} {directory}")
+def ferre(input_nml_path, n_obj, pipe):
+
+    # TODO: list mode!
+    is_abundances_mode = input_nml_path.endswith("input_list.nml")
+
     try:
         stdout, n_complete = ([], 0)
-        t_start, t_overhead, t_elapsed = (time(), None, {})
+        t_start, t_overhead, t_awaiting, t_elapsed = (time(), None, {}, {})
 
-        process = subprocess.Popen(["ferre.x"], cwd=directory, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        command = ["ferre.x"]
+        if is_abundances_mode:
+            command += ["-l", os.path.basename(input_nml_path)]
+        cwd = os.path.dirname(input_nml_path)
 
-        def callback(*args):
-            print(f"callback hit: {args}")
-            raise KeyboardInterrupt
-
-        #watchdog = WatchdogTimer(timeout_line, callback=callback, daemon=True)
-        #watchdog.start()
+        process = subprocess.Popen(
+            command, 
+            cwd=cwd, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE, 
+            universal_newlines=True
+        )
 
         for line in iter(process.stdout.readline, ""):
-            #except KeyboardInterrupt:
-            #    # watchdog hit.
-            #    print(f"{rid} {directory} watchdog. time_elapsed: {time() - t_start:.0f} s, n_complete: {n_complete}/{n_obj} (t_overhead: {t_overhead})")
-            #else:
-            #with watchdog.blocked:
-            # if an object is completed, note the completion time and send back some information to the parent.
             if match := regex_next_object.search(line):
-                t_elapsed[int(match.group(1))] = -time()
+                t_awaiting[int(match.group(1))] = -time()
                 if t_overhead is None:
                     t_overhead = time() - t_start
-                    pipe.send((directory, 0))
+                    pipe.send((input_nml_path, 0))
             
             if match := regex_completed.search(line):
-                t_elapsed[match.group(2)] = t_elapsed.pop(int(match.group(1))) + time()
+                key = match.group(2)
+                t_elapsed.setdefault(key, 0)
+                t_elapsed[key] += t_awaiting.pop(int(match.group(1))) + time()
                 n_complete += 1
-                pipe.send((directory, 1))
+                pipe.send((input_nml_path, 1))
             stdout.append(line)
-        #finally:
-        #    watchdog.restart()
-            
-        """
-        for line in iter(process.stdout.readline, ""):
-
-            # if an object is completed, note the completion time and send back some information to the parent.
-            if match := regex_next_object.search(line):
-                t_elapsed[int(match.group(1))] = -time()
-                if t_overhead is None:
-                    t_overhead = time() - t_start
-                    child.send((directory, 0))
-            
-            if match := regex_completed.search(line):
-                t_elapsed[match.group(2)] = t_elapsed.pop(int(match.group(1))) + time()
-                n_complete += 1
-                child.send((directory, 1))
-            stdout.append(line)
-
-            print(f"{rid} still waiting in {directory} after {timeout_line}")
-            # Check which objects we are waiting on, and how long we have been waiting.
-            t_since_start = time() - t_start
-            is_grid_loaded = t_overhead is not None
-            if (t_overhead is None) and (time() - t_start) > timeout_grid_load:
-                print(f"{rid} timeout on grid load: {t_since_start:.0f} s so far")
-            
-            currently_running = {k: (time() + v) for k, v in t_elapsed.items() if v < 0}
-            if len(currently_running) > 0:
-                print(f"{rid} currently running {len(currently_running)} objects:")
-                for k, v in currently_running.items():
-                    print(f"    {rid}  {k}: {v:.0f} s")
-        """
-
-
-        #finally:
-        #    timeout.cancel()
 
         # In case there were some we did not pick up the timings for, or we somehow sent false-positives.                      
         if n_complete != n_obj:
-            child.send((directory, n_obj - n_complete))
+            pipe.send((input_nml_path, n_obj - n_complete))
 
-        with open(os.path.join(directory, "stdout"), "w") as fp:
+        with open(os.path.join(cwd, "stdout"), "w") as fp:
             fp.write("".join(stdout))
 
         process.stdout.close()
@@ -451,19 +422,20 @@ def ferre(directory, n_obj, pipe, timeout_line=10, timeout_grid_load=60):
         process.stderr.close()
         try:
             process.kill()
-            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+            os.killpg(os.getpgid(process.pid), SIGTERM)
         except:
             None
 
+        with open(os.path.join(cwd, "stderr"), "w") as fp:
+            fp.write(stderr)
+
         if return_code not in (0, 1): # FERRE returns return code 1 even if everything is OK.
-            log.error(f"FERRE returned code {return_code} in {directory}:")
+            log.error(f"FERRE returned code {return_code} in {input_nml_path}:")
             log.error(stderr)
-            with open(os.path.join(directory, "stderr"), "w") as fp:
-                fp.write(stderr)
     except:
-        print(f"FAILED ON {directory}")
+        print(f"FAILED ON {input_nml_path}")
         raise
-    return (directory, return_code, t_overhead, t_elapsed)
+    return (input_nml_path, return_code, t_overhead, t_elapsed)
 
 
 

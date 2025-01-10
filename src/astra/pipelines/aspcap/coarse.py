@@ -56,6 +56,7 @@ def penalize_coarse_stellar_parameter_result(result: FerreCoarse, warn_multiplie
         
 def plan_coarse_stellar_parameters_stage(
     spectra: Iterable[Spectrum],
+    parent_dir: str,
     header_paths: Optional[Union[List[str], Tuple[str], str]] = "$MWM_ASTRA/pipelines/aspcap/synspec_dr17_marcs_header_paths.list",
     initial_guess_callable: Optional[Callable] = None,
     weight_path: Optional[str] = "$MWM_ASTRA/pipelines/aspcap/masks/global.mask",
@@ -244,17 +245,17 @@ def plan_coarse_stellar_parameters_stage(
 
         short_grid_name = parse_header_path(header_path)["short_grid_name"]
 
-        relative_dir = f"{STAGE}/{short_grid_name}"
+        pwd = f"{parent_dir}/{STAGE}/{short_grid_name}"
 
         grouped_task_kwds[header_path].update(
             header_path=header_path,
-            relative_dir=relative_dir,
+            pwd=pwd,
             weight_path=weight_path,
             # Frozen parameters are common to the header path, so just set as the first value.
             frozen_parameters=grouped_task_kwds[header_path]["frozen_parameters"][0],
         )
         grouped_task_kwds[header_path].update(kwargs)
-        return_list_of_kwds.append(grouped_task_kwds[header_path])
+        return_list_of_kwds.append([grouped_task_kwds[header_path]])
 
     return (return_list_of_kwds, spectra_with_no_initial_guess)
 

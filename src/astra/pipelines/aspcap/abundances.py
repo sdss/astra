@@ -18,6 +18,9 @@ from astra.pipelines.aspcap.utils import (get_input_nml_paths, get_abundance_key
 
 STAGE = "abundances"
 
+# NOTE to Future Andy:
+# ferre often (but not always; ie nthreads>1) needs the NOBJ keyword to be set for doing abundances in list (-l) mode 
+
 
 @task
 def abundances(
@@ -144,9 +147,11 @@ def post_abundances(parent_dir, relative_mode=True, skip_pixel_arrays=True, **kw
         for kwds in post_process_ferre(dir, ref_dir, skip_pixel_arrays=skip_pixel_arrays, **kwargs):
             yield FerreChemicalAbundances(**kwds)    
 
+ 
 
 def plan_abundances_stage(
     spectra: Iterable[Spectrum],
+    parent_dir: str,
     stellar_parameter_results, 
     element_weight_paths: str,
     continuum_order: Optional[int] = -1,
@@ -195,7 +200,7 @@ def plan_abundances_stage(
         
         spectrum = lookup_spectrum_by_primary_key[result["spectrum_pk"]]
 
-        prefix = f"{result['pwd']}/params/{result['short_grid_name']}"
+        prefix = f"{result['pwd']}"#/params/{result['short_grid_name']}"
 
         try:
             continuum_cache[prefix]
@@ -280,7 +285,7 @@ def plan_abundances_stage(
             weight_path, frozen_parameters, ferre_kwds = details
             kwds = grid_kwds.copy()
             kwds.update(
-                relative_dir=os.path.join(STAGE, short_grid_name, species),
+                pwd=os.path.join(parent_dir, STAGE, short_grid_name, species),
                 header_path=header_path,
                 weight_path=weight_path,
                 frozen_parameters=frozen_parameters,
@@ -297,11 +302,21 @@ def plan_abundances_stage(
                 continue
             plans.append(kwds)
         
+
+    # Group together as necessary
+    grouped = {}
+    for plan in plans:
+        short_grid_name = parse_header_path(plan["header_path"])["short_grid_name"]
+
+        grouped.setdefault(short_grid_name, [])
+        grouped[short_grid_name].append(plan)
+
         #spectra_with_no_stellar_parameters -= set(grid_kwds["spectra"])
-        
+
+    grouped_plans = list(grouped.values())        
     #spectra_with_no_stellar_parameters = tuple(spectra_with_no_stellar_parameters)
     #return (plans, spectra_with_no_stellar_parameters)
-    return plans
+    return grouped_plans
 
 
 

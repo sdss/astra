@@ -34,7 +34,7 @@ def _pre_compute_continuum(coarse_result, spectrum, pre_continuum):
         return (spectrum.spectrum_pk, pre_computed_continuum)
 
 
-def plan_stellar_parameters_stage(spectra, coarse_results, weight_path, pre_continuum=MedianFilter, **kwargs):
+def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_path, pre_continuum=MedianFilter, **kwargs):
         
     best_coarse_results = {}
     for kwds in coarse_results:
@@ -109,10 +109,10 @@ def plan_stellar_parameters_stage(spectra, coarse_results, weight_path, pre_cont
         group_task_kwds[header_path].update(
             header_path=header_path,
             weight_path=weight_path,
-            relative_dir=f"{STAGE}/{short_grid_name}",
+            pwd=f"{parent_dir}/{STAGE}/{short_grid_name}",
             **kwargs
         )
-        stellar_parameter_plans.append(group_task_kwds[header_path])        
+        stellar_parameter_plans.append([group_task_kwds[header_path]])
 
     return (stellar_parameter_plans, best_coarse_results)
 
