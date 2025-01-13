@@ -30,8 +30,18 @@ class PipelineOutputModel(BaseModel):
 
     @classmethod
     def from_spectrum(cls, spectrum, **kwargs):
-        return cls(
-            spectrum_pk=spectrum.spectrum_pk,
-            source_pk=spectrum.source_pk,
-            **kwargs
-        )
+
+        kwds = kwargs.copy()
+        given_source_pk = kwds.pop("source_pk", None)
+        given_spectrum_pk = kwds.pop("spectrum_pk", None)
+
+        if given_source_pk is not None and given_source_pk != spectrum.source_pk:
+            raise ValueError(f"`source_pk` mismatch between `spectrum` and `source_pk` argument ({spectrum.source_pk} != {given_source_pk})")
+        if given_spectrum_pk is not None and given_spectrum_pk != spectrum.spectrum_pk:
+            raise ValueError(f"`spectrum_pk` mismatch between `spectrum` and `spectrum_pk` argument ({spectrum.spectrum_pk} != {given_spectrum_pk})")
+
+        kwds.update({
+            "spectrum_pk": spectrum.spectrum_pk,
+            "source_pk": spectrum.source_pk,
+        })
+        return cls(**kwds)
