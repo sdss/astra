@@ -22,34 +22,6 @@ from astra.pipelines.ferre.utils import (get_apogee_pixel_mask, parse_ferre_spec
 
 APOGEE_FERRE_MASK = get_apogee_pixel_mask()
 
-"""
-    @cached_property
-    def ferre_flux(self):
-        return self._get_pixel_array("params/flux.input")
-        
-    @cached_property
-    def ferre_e_flux(self):
-        return self._get_pixel_array("params/e_flux.input")
-    
-    #@cached_property
-    #def model_flux(self):
-    #    return self._get_pixel_array("params/model_flux.output")
-        
-    @cached_property
-    def rectified_model_flux(self):
-        return self._get_pixel_array("params/rectified_model_flux.output")
-        
-    @cached_property
-    def rectified_flux(self):
-        return self._get_pixel_array("params/rectified_flux.output")
-
-    @cached_property
-    def e_rectified_flux(self):
-        continuum = self.ferre_flux / self.rectified_flux
-        return self.ferre_e_flux / continuum
-
-"""
-
 class ASPCAPPixelArrayAccessor(BasePixelArrayAccessor):
     
     def __get__(self, instance, instance_type=None):
@@ -73,56 +45,22 @@ class ASPCAPPixelArrayAccessor(BasePixelArrayAccessor):
 
                 else:
                     # Chemical abundance pixel array.
-                    x_h = self.name[len("model_flux_"):]
-                    #isntance._get_output_pixel_array("abundances", "")
-                    raise NotImplementedError
+                    label = self.name[len("model_flux_"):]
+                    species = label[:-2] if label.endswith("_h") else label
+                    try:
+                        masked_model_flux = instance._get_output_pixel_array(f"abundances", f"{species.title()}/rectified_model_flux.output")
+                    except FileNotFoundError:
+                        instance.__pixel_data__.setdefault(self.name, np.nan * np.ones(8575))
+                    else:
+                        instance.__pixel_data__.setdefault(self.name, instance._unmask_pixel_array(masked_model_flux))
 
             return instance.__pixel_data__[self.name]
         return self.field
-
-        
-
-class ChemicalAbundancePixelAccessor(BasePixelArrayAccessor):
-
-    def __get__(self, instance, instance_type=None):
-        if instance is not None:
-            try:
-                return instance.__pixel_data__[self.name]
-            except (AttributeError, KeyError):
-                instance.__pixel_data__ = {}
-
-                x_h = self.name[len("model_flux_"):]
-                upstream = FerreChemicalAbundances.get(getattr(instance, f"{x_h}_task_pk"))
-
-                try:
-                    instance.__pixel_data__.setdefault(self.name, upstream.unmask(upstream.rectified_model_flux))
-                except:
-                    instance.__pixel_data__[self.name] = np.nan * np.ones(8575)
-                
-            finally:
-                return instance.__pixel_data__[self.name]
-        
-        return self.field
-
-
-class ChemicalAbundanceModelFluxArray(PixelArray):
     
-    def __init__(self, ext=None, column_name=None, transform=None, accessor_class=ChemicalAbundancePixelAccessor, help_text=None, **kwargs):
-        super(ChemicalAbundanceModelFluxArray, self).__init__(
-            ext=ext,
-            column_name=column_name,
-            transform=transform,
-            accessor_class=accessor_class,
-            help_text=help_text,
-            **kwargs
-        )
-        
-
 class ASPCAP(PipelineOutputModel):
 
     """ APOGEE Stellar Parameter and Chemical Abundances Pipeline (ASPCAP) """
     
-
     #> Spectral Data
     wavelength = PixelArray(
         accessor_class=LogLambdaArrayAccessor,
@@ -132,40 +70,32 @@ class ASPCAP(PipelineOutputModel):
             naxis=8575,
         ),
     )    
-    model_flux = PixelArray(
-        accessor_class=ASPCAPPixelArrayAccessor, 
-        help_text="Model flux at optimized stellar parameters"
-    )
-    continuum = PixelArray(
-        accessor_class=ASPCAPPixelArrayAccessor,
-        help_text="Continuum"
-    )
+    model_flux = PixelArray(help_text="Model flux at optimized stellar parameters", accessor_class=ASPCAPPixelArrayAccessor)
+    continuum = PixelArray(help_text="Continuum", accessor_class=ASPCAPPixelArrayAccessor)
 
     #> Model Fluxes from Chemical Abundance Fits
-    model_flux_al_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Al/H]")
-    model_flux_c_12_13 = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized C12/13")
-    model_flux_ca_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ca/H]")
-    model_flux_ce_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ce/H]")
-    model_flux_c_1_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [C 1/H]")
-    model_flux_c_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [C/H]")
-    model_flux_co_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Co/H]")
-    model_flux_cr_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Cr/H]")
-    model_flux_cu_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Cu/H]")
-    model_flux_fe_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Fe/H]")
-    model_flux_k_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [K/H]")
-    model_flux_mg_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Mg/H]")
-    model_flux_mn_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Mn/H]")
-    model_flux_na_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Na/H]")
-    model_flux_nd_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Nd/H]")
-    model_flux_ni_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ni/H]")
-    model_flux_n_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [N/H]")
-    model_flux_o_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [O/H]")
-    model_flux_p_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [P/H]")
-    model_flux_si_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Si/H]")
-    model_flux_s_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [S/H]")
-    model_flux_ti_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ti/H]")
-    model_flux_ti_2_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [Ti 2/H]")
-    model_flux_v_h = ChemicalAbundanceModelFluxArray(help_text="Model flux at optimized [V/H]")
+    model_flux_al_h = PixelArray(help_text="Model flux at optimized [Al/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_c_12_13 = PixelArray(help_text="Model flux at optimized C12/13", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_ca_h = PixelArray(help_text="Model flux at optimized [Ca/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_ce_h = PixelArray(help_text="Model flux at optimized [Ce/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_c_h = PixelArray(help_text="Model flux at optimized [C/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_co_h = PixelArray(help_text="Model flux at optimized [Co/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_cr_h = PixelArray(help_text="Model flux at optimized [Cr/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_cu_h = PixelArray(help_text="Model flux at optimized [Cu/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_fe_h = PixelArray(help_text="Model flux at optimized [Fe/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_k_h = PixelArray(help_text="Model flux at optimized [K/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_mg_h = PixelArray(help_text="Model flux at optimized [Mg/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_mn_h = PixelArray(help_text="Model flux at optimized [Mn/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_na_h = PixelArray(help_text="Model flux at optimized [Na/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_nd_h = PixelArray(help_text="Model flux at optimized [Nd/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_ni_h = PixelArray(help_text="Model flux at optimized [Ni/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_n_h = PixelArray(help_text="Model flux at optimized [N/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_o_h = PixelArray(help_text="Model flux at optimized [O/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_p_h = PixelArray(help_text="Model flux at optimized [P/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_si_h = PixelArray(help_text="Model flux at optimized [Si/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_s_h = PixelArray(help_text="Model flux at optimized [S/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_ti_h = PixelArray(help_text="Model flux at optimized [Ti/H]", accessor_class=ASPCAPPixelArrayAccessor)
+    model_flux_v_h = PixelArray(help_text="Model flux at optimized [V/H]", accessor_class=ASPCAPPixelArrayAccessor)
 
     #> IRFM Effective Temperatures from V-Ks (Gonzalez Hernandez and Bonifacio 2009)
     irfm_teff = FloatField(null=True, help_text=Glossary.teff)
@@ -221,7 +151,6 @@ class ASPCAP(PipelineOutputModel):
     flag_c_12_13_warn_teff = c_12_13_flags.flag(2**10, "These abundances are known to be unreliable for this Teff")
     flag_c_12_13_warn_m_h = c_12_13_flags.flag(2**11, "These abundances are known to be unreliable for this [M/H]")
 
-
     ca_h = FloatField(null=True, help_text=Glossary.ca_h)
     e_ca_h = FloatField(null=True, help_text=Glossary.e_ca_h)
     ca_h_flags = BitField(default=0, help_text=Glossary.ca_h_flags)
@@ -233,8 +162,6 @@ class ASPCAP(PipelineOutputModel):
     flag_ca_h_warn_grid_edge = ca_h_flags.flag(2**9, "Grid edge warning")
     flag_ca_h_warn_teff = ca_h_flags.flag(2**10, "These abundances are known to be unreliable for this Teff")
     flag_ca_h_warn_m_h = ca_h_flags.flag(2**11, "These abundances are known to be unreliable for this [M/H]")
-
-
 
     ce_h = FloatField(null=True, help_text=Glossary.ce_h)
     e_ce_h = FloatField(null=True, help_text=Glossary.e_ce_h)
@@ -252,23 +179,6 @@ class ASPCAP(PipelineOutputModel):
     flag_ce_h_warn_grid_edge = ce_h_flags.flag(2**9, "Grid edge warning")
     flag_ce_h_warn_teff = ce_h_flags.flag(2**10, "These abundances are known to be unreliable for this Teff")
     flag_ce_h_warn_m_h = ce_h_flags.flag(2**11, "These abundances are known to be unreliable for this [M/H]")
-    
-    c_1_h = FloatField(null=True, help_text=Glossary.c_1_h)
-    e_c_1_h = FloatField(null=True, help_text=Glossary.e_c_1_h)
-    c_1_h_flags = BitField(default=0, help_text=Glossary.c_1_h_flags)
-    c_1_h_rchi2 = FloatField(null=True, help_text=Glossary.c_1_h_rchi2)
-    flag_c_1_h_upper_limit_t1 = c_1_h_flags.flag(2**0, "At least one line is an upper limit by the 1% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_c_1_h_upper_limit_t2 = c_1_h_flags.flag(2**1, "At least one line is an upper limit by the 2% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_c_1_h_upper_limit_t3 = c_1_h_flags.flag(2**2, "At least one line is an upper limit by the 3% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_c_1_h_upper_limit_t4 = c_1_h_flags.flag(2**3, "At least one line is an upper limit by the 4% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_c_1_h_upper_limit_t5 = c_1_h_flags.flag(2**4, "At least one line is an upper limit by the 5% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_c_1_h_censored_high_teff = c_1_h_flags.flag(2**5, "Censored value because abundances known to be wrong for this Teff")
-    flag_c_1_h_censored_low_teff_vmicro = c_1_h_flags.flag(2**6, "Censored value because it has low Teff and v_micro")
-    flag_c_1_h_censored_unphysical = c_1_h_flags.flag(2**7, "Censored value because FERRE returned unphysical value")
-    flag_c_1_h_bad_grid_edge = c_1_h_flags.flag(2**8, "Grid edge bad")
-    flag_c_1_h_warn_grid_edge = c_1_h_flags.flag(2**9, "Grid edge warning")
-    flag_c_1_h_warn_teff = c_1_h_flags.flag(2**10, "These abundances are known to be unreliable for this Teff")
-    flag_c_1_h_warn_m_h = c_1_h_flags.flag(2**11, "These abundances are known to be unreliable for this [M/H]")
     
     c_h = FloatField(null=True, help_text=Glossary.c_h)
     e_c_h = FloatField(null=True, help_text=Glossary.e_c_h)
@@ -514,18 +424,6 @@ class ASPCAP(PipelineOutputModel):
     flag_ti_h_warn_teff = ti_h_flags.flag(2**10, "These abundances are known to be unreliable for this Teff")
     flag_ti_h_warn_m_h = ti_h_flags.flag(2**11, "These abundances are known to be unreliable for this [M/H]")
 
-    ti_2_h = FloatField(null=True, help_text=Glossary.ti_2_h)
-    e_ti_2_h = FloatField(null=True, help_text=Glossary.e_ti_2_h)
-    ti_2_h_flags = BitField(default=0, help_text=Glossary.ti_2_h_flags)
-    ti_2_h_rchi2 = FloatField(null=True, help_text=Glossary.ti_2_h_rchi2)
-    flag_ti_2_h_censored_high_teff = ti_2_h_flags.flag(2**5, "Censored value because abundances known to be wrong for this Teff")
-    flag_ti_2_h_censored_low_teff_vmicro = ti_2_h_flags.flag(2**6, "Censored value because it has low Teff and v_micro")
-    flag_ti_2_h_censored_unphysical = ti_2_h_flags.flag(2**7, "Censored value because FERRE returned unphysical value")
-    flag_ti_2_h_bad_grid_edge = ti_2_h_flags.flag(2**8, "Grid edge bad")
-    flag_ti_2_h_warn_grid_edge = ti_2_h_flags.flag(2**9, "Grid edge warning")
-    flag_ti_2_h_warn_teff = ti_2_h_flags.flag(2**10, "These abundances are known to be unreliable for this Teff")
-    flag_ti_2_h_warn_m_h = ti_2_h_flags.flag(2**11, "These abundances are known to be unreliable for this [M/H]")
-
     v_h = FloatField(null=True, help_text=Glossary.v_h)
     e_v_h = FloatField(null=True, help_text=Glossary.e_v_h)
     v_h_flags = BitField(default=0, help_text=Glossary.v_h_flags)
@@ -556,7 +454,6 @@ class ASPCAP(PipelineOutputModel):
     flag_initial_guess_from_user = initial_flags.flag(2**2, help_text="Initial guess specified by user")
 
     #> Summary Statistics
-    snr = FloatField(null=True, help_text=Glossary.snr)
     rchi2 = FloatField(null=True, help_text=Glossary.rchi2)
     ferre_log_snr_sq = FloatField(null=True, help_text="FERRE-reported log10(snr**2)")
     ferre_time_coarse = FloatField(null=True, help_text="Total core-second by FERRE for coarse stage [s]")
@@ -665,35 +562,6 @@ class ASPCAP(PipelineOutputModel):
     
     pwd = TextField(null=True, help_text="Working directory")
     ferre_index = IntegerField(null=True, help_text="Index of the FERRE run")
-    
-    """
-    #> Task Primary Keys
-    stellar_parameters_task_pk = ForeignKeyField(FerreStellarParameters, unique=True, null=True, lazy_load=False, help_text="Task primary key for stellar parameters")
-    al_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Al/H]")
-    c_12_13_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for C12/C13")
-    ca_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Ca/H]")
-    ce_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Ce/H]")
-    c_1_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [C 1/H]")
-    c_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [C/H]")
-    co_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Co/H]")
-    cr_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Cr/H]")
-    cu_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Cu/H]")
-    fe_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Fe/H]")
-    k_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [K/H]")
-    mg_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Mg/H]")
-    mn_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Mn/H]")
-    na_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Na/H]")
-    nd_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Nd/H]")
-    ni_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Ni/H]")
-    n_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [N/H]")
-    o_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [O/H]")
-    p_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [P/H]")
-    si_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Si/H]")
-    s_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [S/H]")
-    ti_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Ti/H]")
-    ti_2_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [Ti 2/H]")
-    v_h_task_pk = ForeignKeyField(FerreChemicalAbundances, unique=True, null=True, lazy_load=False, help_text="Task primary key for [V/H]")
-    """
 
     #> Calibration flags
     calibrated_flags = BitField(null=True, help_text="Calibration flags")
@@ -730,8 +598,6 @@ class ASPCAP(PipelineOutputModel):
     raw_e_ca_h = FloatField(null=True, help_text=Glossary.raw_e_ca_h)
     raw_ce_h = FloatField(null=True, help_text=Glossary.raw_ce_h)
     raw_e_ce_h = FloatField(null=True, help_text=Glossary.raw_e_ce_h)
-    raw_c_1_h = FloatField(null=True, help_text=Glossary.raw_c_1_h)
-    raw_e_c_1_h = FloatField(null=True, help_text=Glossary.raw_e_c_1_h)
     raw_c_h = FloatField(null=True, help_text=Glossary.raw_c_h)
     raw_e_c_h = FloatField(null=True, help_text=Glossary.raw_e_c_h)
     raw_co_h = FloatField(null=True, help_text=Glossary.raw_co_h)
@@ -766,8 +632,6 @@ class ASPCAP(PipelineOutputModel):
     raw_e_s_h = FloatField(null=True, help_text=Glossary.raw_e_s_h)
     raw_ti_h = FloatField(null=True, help_text=Glossary.raw_ti_h)
     raw_e_ti_h = FloatField(null=True, help_text=Glossary.raw_e_ti_h)
-    raw_ti_2_h = FloatField(null=True, help_text=Glossary.raw_ti_2_h)
-    raw_e_ti_2_h = FloatField(null=True, help_text=Glossary.raw_e_ti_2_h)
     raw_v_h = FloatField(null=True, help_text=Glossary.raw_v_h)
     raw_e_v_h = FloatField(null=True, help_text=Glossary.raw_e_v_h)
     
@@ -798,6 +662,7 @@ class ASPCAP(PipelineOutputModel):
         assert int(meta["spectrum_pk"]) == self.spectrum_pk
         assert int(meta["index"]) == self.ferre_index
         return array
+
 
 
 
