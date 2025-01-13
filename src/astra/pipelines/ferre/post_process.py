@@ -48,7 +48,10 @@ def post_process_ferre(input_nml_path, **kwargs) -> list[dict]:
             post_execution_interpolation(d)
         
         ref_dir = os.path.dirname(input_nml_path)
-        v = [list(_post_process_ferre(d, ref_dir, skip_pixel_arrays=True, **kwargs)) for d in dirs]
+        v = []
+        for d in dirs:
+            v.extend(list(_post_process_ferre(d, ref_dir, skip_pixel_arrays=True, **kwargs)))
+        return v
     else:
         directory = os.path.dirname(input_nml_path)
         post_execution_interpolation(directory)

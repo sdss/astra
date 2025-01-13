@@ -21,10 +21,9 @@ from astra.pipelines.ferre.utils import parse_header_path
 from astra.pipelines.aspcap.initial import get_initial_guesses
 from astra.pipelines.aspcap.coarse import plan_coarse_stellar_parameters_stage
 from astra.pipelines.aspcap.stellar_parameters import plan_stellar_parameters_stage
-from astra.pipelines.aspcap.abundances import plan_abundances_stage
+from astra.pipelines.aspcap.abundances import plan_abundances_stage, get_species
 #from astra.pipelines.aspcap.stellar_parameters import stellar_parameters, post_stellar_parameters
-#from astra.pipelines.aspcap.abundances import abundances, get_species, post_abundances
-#from astra.pipelines.aspcap.utils import ABUNDANCE_RELATIVE_TO_H
+from astra.pipelines.aspcap.utils import ABUNDANCE_RELATIVE_TO_H
 
 from signal import SIGTERM
 
@@ -40,7 +39,7 @@ def aspcap(
     max_processes: Optional[int] = 16,
     max_threads: Optional[int] = 128,
     max_concurrent_loading: Optional[int] = 4,
-    soft_thread_ratio: Optional[float] = 2,
+    soft_thread_ratio: Optional[float] = 1,
     live_renderable: Optional[object] = None,
     **kwargs
 ) -> Iterable[ASPCAP]:
@@ -153,17 +152,39 @@ def aspcap(
         child.close()
         executor.shutdown(wait=False, cancel_futures=True)
 
-    raise a
-
+    # Bring it all together baby.
+    result_kwds = {}
     for r in param_results:
         coarse = best_coarse_results[r["spectrum_pk"]]
-
         v_sini = 10**(r.get("log10_v_sini", np.nan))
         e_v_sini = r.get("e_log10_v_sini", np.nan) * v_sini * np.log(10)
         v_micro = 10**(r.get("log10_v_micro", np.nan))
         e_v_micro = r.get("e_log10_v_micro", np.nan) * v_micro * np.log(10)
-
         r.update(
+            raw_teff=r["teff"],
+            raw_e_teff=r["e_teff"],
+            raw_logg=r["logg"],
+            raw_e_logg=r["e_logg"],
+            raw_v_micro=v_micro,
+            raw_e_v_micro=e_v_micro,
+            raw_v_sini=v_sini,
+            raw_e_v_sini=e_v_sini,
+            raw_m_h_atm=r["m_h"],
+            raw_e_m_h_atm=r["e_m_h"],
+            raw_alpha_m_atm=r.get("alpha_m", np.nan),
+            raw_e_alpha_m_atm=r.get("e_alpha_m", np.nan),
+            raw_c_m_atm=r.get("c_m", np.nan),
+            raw_e_c_m_atm=r.get("e_c_m", np.nan),
+            raw_n_m_atm=r.get("n_m", np.nan),
+            raw_e_n_m_atm=r.get("e_n_m", np.nan),
+            m_h_atm=r["m_h"],
+            e_m_h_atm=r["e_m_h"],
+            alpha_m_atm=r.get("alpha_m", np.nan),
+            e_alpha_m_atm=r.get("e_alpha_m", np.nan),
+            c_m_atm=r.get("c_m", np.nan),
+            e_c_m_atm=r.get("e_c_m", np.nan),
+            n_m_atm=r.get("n_m", np.nan),
+            e_n_m_atm=r.get("e_n_m", np.nan),
             v_sini=v_sini,
             e_v_sini=e_v_sini,
             v_micro=v_micro,
@@ -192,12 +213,40 @@ def aspcap(
             ferre_time_params=r["t_elapsed"],
             pwd=parent_dir,
         )
+        result_kwds[r["spectrum_pk"]] = r
     
-    # TODO: Chemical abundances.
-    raise a
+    for r in abundance_results:
+        species = get_species(r["weight_path"])
+        label = species.lower() if species.lower() == "c_12_13" else f"{species.lower()}_h"
+
+        for key in ("m_h", "alpha_m", "c_m", "n_m"):
+            if not r.get(f"flag_{key}_frozen", False):
+                break
+        else:
+            raise ValueError(f"Can't figure out which label to use")
+
+        value, e_value = (r[key], r[f"e_{key}"])
+
+        if not ABUNDANCE_RELATIVE_TO_H[species] and value is not None:
+            # [X/M] = [X/H] - [M/H]
+            # [X/H] = [X/M] + [M/H]                
+            value += result_kwds[r["spectrum_pk"]]["m_h_atm"]
+            e_value = np.sqrt(e_value**2 + result_kwds[r["spectrum_pk"]]["e_m_h_atm"]**2)
+            
+        kwds = {
+            f"{label}_rchi2": r["rchi2"],
+            f"{label}": value,
+            f"e_{label}": e_value,
+            f"raw_{label}": value,
+            f"raw_e_{label}": e_value,
+            f"{label}_flags": FerreChemicalAbundances(**r).ferre_flags     
+        }            
+        result_kwds[r["spectrum_pk"]].update(kwds)
+    
     # TODO: Confirm we can access all the spectra from the single `ASPCAP` object.
-    for r in param_results:
-        yield ASPCAP(**r)
+    spectra_by_pk = {s.spectrum_pk: s for s in spectra}
+    for spectrum_pk, kwds in result_kwds.items():
+        yield ASPCAP.from_spectrum(spectra_by_pk[spectrum_pk], **kwds)
 
 
 def _aspcap_stage(
@@ -273,8 +322,8 @@ def _aspcap_stage(
             )
 
         while parent.poll():
-            input_nml_path, n = parent.recv()
-            if n == 0:
+            input_nml_path, n_obj_update, n_threads_update = parent.recv()
+            if n_obj_update == 0:
                 currently_loading -= 1
                 if progress is not None:
                     progress.update(
@@ -282,11 +331,10 @@ def _aspcap_stage(
                         description=f"  [white]{get_task_name(input_nml_path)}",
                         refresh=True
                     )
-                
             if not input_nml_path.endswith("input_list.nml"):
-                current_threads -= n
+                current_threads -= n_threads_update
             if pb is not None:
-                pb.update(n)
+                pb.update(n_obj_update)
             if progress is not None:
                 progress.update(ferre_tasks[input_nml_path], advance=n)
                 progress.update(stage_task_id, advance=n)
@@ -333,7 +381,7 @@ def _aspcap_stage(
                 current_processes, current_threads, currently_loading = check_capacity(current_processes, current_threads, currently_loading)
 
             if total > 0:
-                ferre_futures.append(executor.submit(ferre, input_nml_path, total, child))
+                ferre_futures.append(executor.submit(ferre, input_nml_path, total, n_ferre_threads, child))
                 if progress is not None:
                     ferre_tasks[input_nml_path] = progress.add_task(
                         f"  [yellow]{get_task_name(input_nml_path)}",
@@ -351,7 +399,11 @@ def _aspcap_stage(
         for result in future.result():
             # Assign timings to the results.
             try:
-                t_overhead, t_elapsed_all = timings[result["pwd"]]
+                if stage == "abundances":
+                    key = os.path.dirname(result["pwd"])
+                else:
+                    key = result["pwd"]
+                t_overhead, t_elapsed_all = timings[key]
                 t_elapsed = t_elapsed_all[result["ferre_name"]]
             except:
                 t_elapsed = t_overhead = np.nan
@@ -372,7 +424,7 @@ regex_next_object = re.compile(r"next object #\s+(\d+)")
 regex_completed = re.compile(r"\s+(\d+)\s(\d+_[\d\w_]+)") # assumes input ids start with an integer and underscore
 
 
-def ferre(input_nml_path, n_obj, pipe):
+def ferre(input_nml_path, n_obj, n_threads, pipe):
 
     # TODO: list mode!
     is_abundances_mode = input_nml_path.endswith("input_list.nml")
@@ -399,19 +451,21 @@ def ferre(input_nml_path, n_obj, pipe):
                 t_awaiting[int(match.group(1))] = -time()
                 if t_overhead is None:
                     t_overhead = time() - t_start
-                    pipe.send((input_nml_path, 0))
+                    pipe.send((input_nml_path, 0, 0))
             
             if match := regex_completed.search(line):
                 key = match.group(2)
                 t_elapsed.setdefault(key, 0)
                 t_elapsed[key] += t_awaiting.pop(int(match.group(1))) + time()
                 n_complete += 1
-                pipe.send((input_nml_path, 1))
+                n_remaining = n_obj - n_complete
+                n_threads_released = 1 if n_remaining < n_threads else 0
+                pipe.send((input_nml_path, 1, n_threads_released))
             stdout.append(line)
 
         # In case there were some we did not pick up the timings for, or we somehow sent false-positives.                      
         if n_complete != n_obj:
-            pipe.send((input_nml_path, n_obj - n_complete))
+            pipe.send((input_nml_path, n_obj - n_complete, 0))
 
         with open(os.path.join(cwd, "stdout"), "w") as fp:
             fp.write("".join(stdout))
