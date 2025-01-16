@@ -37,26 +37,35 @@ def post_process_ferre(input_nml_path, **kwargs) -> list[dict]:
         for kwds in post_process_ferre(dir, ref_dir, skip_pixel_arrays=skip_pixel_arrays, **kwargs):
             yield FerreChemicalAbundances(**kwds)    
     """
-    is_abundance_mode = input_nml_path.endswith("input_list.nml")
-    if is_abundance_mode:
+    #is_abundance_mode = input_nml_path.endswith("input_list.nml")
+    #if is_abundance_mode:
+    if "input_list.nml" in input_nml_path:
         abundance_dir = os.path.dirname(input_nml_path)
         with open(input_nml_path, "r") as fp:
-            dirs = [os.path.join(abundance_dir, line.split("/")[0]) for line in fp.read().strip().split("\n")]
-        
-        # TODO: this might be slow we can probably use -l mode
-        for d in dirs:
-            post_execution_interpolation(d)
-        
+            dirs = [os.path.join(abundance_dir, line.split("/")[0]) for line in fp.read().strip().split("\n")]        
         ref_dir = os.path.dirname(input_nml_path)
-        v = []
-        for d in dirs:
-            v.extend(list(_post_process_ferre(d, ref_dir, skip_pixel_arrays=True, **kwargs)))
-        return v
+
     else:
-        directory = os.path.dirname(input_nml_path)
-        post_execution_interpolation(directory)
-        v = list(_post_process_ferre(directory, **kwargs))
+        dirs = [os.path.dirname(input_nml_path)]
+        if "/abundances/" in input_nml_path:
+            ref_dir = os.path.dirname(os.path.dirname(input_nml_path))
+        else:
+            ref_dir = os.path.dirname(input_nml_path)
+
+    # TODO: this might be slow we can probably use -l mode
+    for d in dirs:
+        post_execution_interpolation(d)
+    
+    v = []
+    for d in dirs:
+        v.extend(list(_post_process_ferre(d, ref_dir, skip_pixel_arrays=True, **kwargs)))
     return v
+    #else:
+    #    directory = os.path.dirname(input_nml_path)
+    #    post_execution_interpolation(directory)
+    #    v = list(_post_process_ferre(directory, **kwargs))
+    return v
+
 
 def _post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Iterable[dict]:
     """
@@ -139,9 +148,17 @@ def _post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Ite
     else:
         is_missing_rectified_model_flux = ~np.all(np.isfinite(rectified_model_flux), axis=1)
     '''
+
+    #np.atleast_1d(np.loadtxt(f"{prefix}/model_flux.output", usecols=(0, ), dtype=str)),
+    #np.atleast_1d(np.loadtxt(f"{prefix}/rectified_flux.output", usecols=(0, ), dtype=str)),
+    #np.atleast_1d(np.loadtxt(f"{prefix}/rectified_model_flux.output", usecols=(0, ), dtype=str)),
     
+    #print(f"DIR -> {dir}\n{offile_path}")
     parameter_input_path = os.path.join(dir, "parameter.input")
-    os.system(f"vaffoff {parameter_input_path} {offile_path}")
+    for basename in ("model_flux.output", "rectified_flux.output", "rectified_model_flux.output"):
+        if os.path.exists(os.path.join(dir, basename)):
+            os.system(f"vaffoff {parameter_input_path} {os.path.join(dir, basename)}")
+
     is_missing_rectified_model_flux = ~np.isfinite(np.atleast_1d(np.loadtxt(offile_path, usecols=(1, ), dtype=float)))
     names_with_missing_rectified_model_flux = input_names[is_missing_rectified_model_flux]
 
@@ -208,6 +225,8 @@ def _post_process_ferre(dir, pwd=None, skip_pixel_arrays=False, **kwargs) -> Ite
 
     # Create some boolean flags. 
     header_path = control_kwds["SYNTHFILE(1)"]
+    if not os.path.exists(header_path):
+        header_path = os.path.join(ref_dir, header_path)
     headers, *segment_headers = read_ferre_headers(expand_path(header_path))
     bad_lower = headers["LLIMITS"] + headers["STEPS"] / 8
     bad_upper = headers["ULIMITS"] - headers["STEPS"] / 8

@@ -40,8 +40,5 @@ class PipelineOutputModel(BaseModel):
         if given_spectrum_pk is not None and given_spectrum_pk != spectrum.spectrum_pk:
             raise ValueError(f"`spectrum_pk` mismatch between `spectrum` and `spectrum_pk` argument ({spectrum.spectrum_pk} != {given_spectrum_pk})")
 
-        kwds.update({
-            "spectrum_pk": spectrum.spectrum_pk,
-            "source_pk": spectrum.source_pk,
-        })
+        kwds.update(spectrum_pk=spectrum.spectrum_pk, source_pk=spectrum.source_pk)
         return cls(**kwds)

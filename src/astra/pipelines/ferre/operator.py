@@ -154,7 +154,13 @@ def post_execution_interpolation(pwd, n_threads=128, f_access=1, epsilon=0.001):
     control_kwds = parse_control_kwds(input_path)
 
     # parse synthfile headers to get the edges
+    # TODO: so hacky. just give post_execution_interpolation an input nml path and a reference dir.
+    
     synthfile = control_kwds["SYNTHFILE(1)"]
+    for check in (synthfile, f"{pwd}/{synthfile}", f"{pwd}/../{synthfile}"):
+        if os.path.exists(check):
+            synthfile = check
+            break
     headers = read_ferre_headers(synthfile)
 
     output_parameter_path = os.path.join(f"{pwd}/{os.path.basename(control_kwds['OPFILE'])}")

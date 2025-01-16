@@ -154,6 +154,7 @@ def plan_abundances_stage(
     parent_dir: str,
     stellar_parameter_results, 
     element_weight_paths: str,
+    use_ferre_list_mode: Optional[bool] = False,
     continuum_order: Optional[int] = -1,
     continuum_flag: Optional[int] = 0,
     continuum_observations_flag: Optional[int] = 0,
@@ -304,20 +305,24 @@ def plan_abundances_stage(
         
 
     # Group together as necessary
-    grouped = {}
-    for plan in plans:
-        short_grid_name = parse_header_path(plan["header_path"])["short_grid_name"]
+    if use_ferre_list_mode:
+        grouped = {}
+        for plan in plans:
+            short_grid_name = parse_header_path(plan["header_path"])["short_grid_name"]
 
-        grouped.setdefault(short_grid_name, [])
-        grouped[short_grid_name].append(plan)
+            grouped.setdefault(short_grid_name, [])
+            grouped[short_grid_name].append(plan)
 
-        #spectra_with_no_stellar_parameters -= set(grid_kwds["spectra"])
+            #spectra_with_no_stellar_parameters -= set(grid_kwds["spectra"])
 
-    grouped_plans = list(grouped.values())        
-    #spectra_with_no_stellar_parameters = tuple(spectra_with_no_stellar_parameters)
-    #return (plans, spectra_with_no_stellar_parameters)
-    return grouped_plans
-
+        grouped_plans = list(grouped.values())        
+        #spectra_with_no_stellar_parameters = tuple(spectra_with_no_stellar_parameters)
+        #return (plans, spectra_with_no_stellar_parameters)
+        return grouped_plans
+    
+    else:
+        # In each directory, create symbolic links to the flux/e_flux arrays
+        return [[plan] for plan in plans]
 
 
 def get_species(weight_path):

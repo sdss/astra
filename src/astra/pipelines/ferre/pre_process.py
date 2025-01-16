@@ -25,8 +25,7 @@ def pre_process_ferres(plans):
             input_nml_paths.append(input_nml_path_[len(abundance_dir) + 1:]) # ppaths too long
             total += n_obj_
             for spectrum, kwds in skipped_:
-                skipped.append((spectrum, kwds))
-        
+                skipped.append((spectrum, kwds))        
         
         # Create a FERRE list file.
         input_nml_path = os.path.join(abundance_dir, "input_list.nml")
@@ -221,8 +220,13 @@ def pre_process_ferre(
                     continue
                 
             if pre_computed_continuum is not None:
-                flux /= pre_computed_continuum[index]
-                e_flux /= pre_computed_continuum[index]
+                continuum = pre_computed_continuum[index]
+                flux /= continuum
+                e_flux /= continuum
+
+            #bad = ((flux < 0) | (e_flux <= 0))
+            #flux[bad] = 0.01
+            e_flux = np.clip(e_flux, 0.005, np.inf)
             
             batch_flux.append(flux[mask])
             batch_e_flux.append(e_flux[mask])
@@ -236,11 +240,21 @@ def pre_process_ferre(
         batch_initial_parameters.append(initial_parameters)
         index += 1
 
+    assert np.all(np.array(batch_e_flux) > 0)
+    
     #if len(skipped) > 0:
     #    log.warning(f"Skipping {len(skipped)} spectra ({100 * len(skipped) / len(spectra):.0f}%; of {len(spectra)})")
 
     if not batch_initial_parameters:
         return (pwd, 0, 0, skipped)
+
+
+
+    synthfile_full_path = control_kwds["synthfile(1)"]
+    if reference_pixel_arrays_for_abundance_run:
+        control_kwds["synthfile(1)"] = os.path.basename(synthfile_full_path)
+    else:
+        control_kwds["synthfile(1)"] = os.path.basename(synthfile_full_path)
 
     control_kwds_formatted = utils.format_ferre_control_keywords(control_kwds, n_obj=1 + index)
 
@@ -254,6 +268,20 @@ def pre_process_ferre(
     )
     # Create directory and write the control file        
     os.makedirs(absolute_pwd, exist_ok=True)
+    if reference_pixel_arrays_for_abundance_run:
+        if write_input_pixel_arrays:
+            target_path_prefix = f"{absolute_pwd}/../{os.path.basename(synthfile_full_path)}"[:-4]
+            if not os.path.exists(f"{target_path_prefix}.hdf"):
+                os.system(f"ln -s {synthfile_full_path} {target_path_prefix}.hdr")
+            if not os.path.exists(f"{target_path_prefix}.unf"):
+                os.system(f"ln -s {synthfile_full_path[:-4]}.unf {target_path_prefix}.unf")
+    else:
+        target_path_prefix = f"{absolute_pwd}/{os.path.basename(synthfile_full_path)}"[:-4]
+        if not os.path.exists(f"{target_path_prefix}.hdr"):
+            os.system(f"ln -s {synthfile_full_path} {target_path_prefix}.hdr")
+        if not os.path.exists(f"{target_path_prefix}.unf"):
+            os.system(f"ln -s {synthfile_full_path[:-4]}.unf {target_path_prefix}.unf")
+
     with open(os.path.join(absolute_pwd, "input.nml"), "w") as fp:
         fp.write(control_kwds_formatted)       
 
@@ -287,7 +315,10 @@ def pre_process_ferre(
         savetxt_kwds = dict(fmt="%.4e")#footer="\n")
         np.savetxt(flux_path, batch_flux, **savetxt_kwds)
         np.savetxt(e_flux_path, batch_e_flux, **savetxt_kwds)
-        
+    
+    #if reference_pixel_arrays_for_abundance_run:
+    #    for basename in (control_kwds["ffile"], control_kwds["erfile"]):
+    #        os.system(f"ln -s {absolute_pwd}/../{basename} {absolute_pwd}/{basename}")
     n_obj = len(batch_names)
     return (f"{pwd}/input.nml", n_obj, min(n_threads, n_obj), skipped)
 

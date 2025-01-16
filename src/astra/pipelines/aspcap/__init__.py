@@ -6,7 +6,8 @@ import re
 from multiprocessing import Pipe, Lock
 from datetime import datetime
 from tempfile import mkdtemp
-from typing import Optional, Iterable, List, Tuple, Callable, Union
+import threading
+from typing import Optional, Iterable, List, Tuple, Callable, Union, Sequence
 from tqdm import tqdm
 from time import time, sleep
 
@@ -17,6 +18,7 @@ from astra.models.aspcap import ASPCAP, FerreCoarse, FerreStellarParameters, Fer
 from astra.models.spectrum import Spectrum
 from astra.pipelines.ferre.pre_process import pre_process_ferres
 from astra.pipelines.ferre.post_process import post_process_ferre
+from astra.pipelines.ferre.re_process import re_process_partial_ferre
 from astra.pipelines.ferre.utils import parse_header_path
 from astra.pipelines.aspcap.initial import get_initial_guesses
 from astra.pipelines.aspcap.coarse import plan_coarse_stellar_parameters_stage
@@ -27,11 +29,18 @@ from astra.pipelines.aspcap.utils import ABUNDANCE_RELATIVE_TO_H
 
 from signal import SIGTERM
 
+debug = lambda *_: None
+debug = print
+
+def _is_list_mode(path):
+    return "input_list.nml" in path
+
 @task
 def aspcap(
     spectra: Iterable[ApogeeCoaddedSpectrumInApStar], 
     initial_guess_callable: Optional[Callable] = None,
     header_paths: Optional[Union[List[str], Tuple[str], str]] = "$MWM_ASTRA/pipelines/aspcap/synspec_dr17_marcs_header_paths.list",
+    #header_paths: Optional[Union[Sequence[str], str]] = "/uufs/chpc.utah.edu/common/home/u6020307/vast/aspcap-grids/synspec_dr17_marcs_header_paths.list",
     weight_path: Optional[str] = "$MWM_ASTRA/pipelines/aspcap/masks/global.mask",
     element_weight_paths: str = "$MWM_ASTRA/pipelines/aspcap/masks/elements.list",
     parent_dir: Optional[str] = None, 
@@ -40,6 +49,7 @@ def aspcap(
     max_threads: Optional[int] = 128,
     max_concurrent_loading: Optional[int] = 4,
     soft_thread_ratio: Optional[float] = 1,
+    use_ferre_list_mode: Optional[bool] = True,
     live_renderable: Optional[object] = None,
     **kwargs
 ) -> Iterable[ASPCAP]:
@@ -81,6 +91,10 @@ def aspcap(
     :param soft_thread_ratio: [optional]
         The ratio of threads to processes that can be temporarily exceeded to allow new FERRE processes to load into memory while 
         existing threads are still running.
+
+    :param use_ferre_list_mode: [optional]
+        Use the `-l` list mode in FERRE for the abundances stage. In theory this is more efficient. In practice FERRE can hang
+        forever in list mode when it does not hang in normal mode.
     
     :param live_renderable: [optional]
         A live renderable object that can be updated with progress information. This is useful for Jupyter notebooks or other
@@ -115,37 +129,48 @@ def aspcap(
             live_renderable.add_row(Panel.fit(progress, title="ASPCAP", padding=(2, 2)))
             stage_args += [progress]
 
-        coarse_plans, spectra_with_no_initial_guess = plan_coarse_stellar_parameters_stage(
-            spectra=spectra, 
-            parent_dir=parent_dir,
-            header_paths=header_paths, 
-            initial_guess_callable=initial_guess_callable,
-            weight_path=weight_path,
-            n_threads=n_threads
-        )
-        for spectrum in spectra_with_no_initial_guess:
-            yield ASPCAP.from_spectrum(spectrum, flag_no_suitable_initial_guess=True)
+        import pickle
+        temp_path = "temp.pkl"
+        if os.path.exists(temp_path):
+            with open(temp_path, "rb") as fp:
+                parent_dir, abundance_plans = pickle.load(fp)
+                stage_args[3] = parent_dir                        
+        else:
+            coarse_plans, spectra_with_no_initial_guess = plan_coarse_stellar_parameters_stage(
+                spectra=spectra, 
+                parent_dir=parent_dir,
+                header_paths=header_paths, 
+                initial_guess_callable=initial_guess_callable,
+                weight_path=weight_path,
+                n_threads=n_threads
+            )
+            for spectrum in spectra_with_no_initial_guess:
+                yield ASPCAP.from_spectrum(spectrum, flag_no_suitable_initial_guess=True)
 
-        coarse_results, coarse_failures = _aspcap_stage("coarse", coarse_plans, *stage_args)    
-        yield from coarse_failures
+            coarse_results, coarse_failures = _aspcap_stage("coarse", coarse_plans, *stage_args)    
+            yield from coarse_failures
 
-        stellar_parameter_plans, best_coarse_results = plan_stellar_parameters_stage(
-            spectra=spectra, 
-            parent_dir=parent_dir,
-            coarse_results=coarse_results,
-            weight_path=weight_path,
-            n_threads=n_threads
-        )
-        param_results, param_failures = _aspcap_stage("params", stellar_parameter_plans, *stage_args)
-        yield from param_failures
+            stellar_parameter_plans, best_coarse_results = plan_stellar_parameters_stage(
+                spectra=spectra, 
+                parent_dir=parent_dir,
+                coarse_results=coarse_results,
+                weight_path=weight_path,
+                n_threads=n_threads
+            )
+            param_results, param_failures = _aspcap_stage("params", stellar_parameter_plans, *stage_args)
+            yield from param_failures
 
-        abundance_plans = plan_abundances_stage(
-            spectra=spectra,
-            parent_dir=parent_dir,
-            stellar_parameter_results=param_results,
-            element_weight_paths=element_weight_paths,
-            n_threads=n_threads
-        )
+            abundance_plans = plan_abundances_stage(
+                spectra=spectra,
+                parent_dir=parent_dir,
+                stellar_parameter_results=param_results,
+                element_weight_paths=element_weight_paths,
+                n_threads=n_threads,
+                use_ferre_list_mode=use_ferre_list_mode
+            )            
+            with open("temp.pkl", "wb") as fp:
+                pickle.dump((parent_dir, abundance_plans), fp)
+        
         abundance_results, abundance_failures = _aspcap_stage("abundances", abundance_plans, *stage_args)
 
         parent.close()
@@ -243,7 +268,6 @@ def aspcap(
         }            
         result_kwds[r["spectrum_pk"]].update(kwds)
     
-    # TODO: Confirm we can access all the spectra from the single `ASPCAP` object.
     spectra_by_pk = {s.spectrum_pk: s for s in spectra}
     for spectrum_pk, kwds in result_kwds.items():
         yield ASPCAP.from_spectrum(spectra_by_pk[spectrum_pk], **kwds)
@@ -271,7 +295,13 @@ def _aspcap_stage(
         }
         stage_task_id = progress.add_task(f"[bold blue]{full_names.get(stage, stage)}[/bold blue]")
 
-    get_task_name = lambda input_nml_path: os.path.dirname(input_nml_path).split("/")[-1]
+    def get_task_name(path):
+        #if stage == "abundances" and input_nml_path.endswith("input.nml"):
+        #    return "/".join(os.path.dirname(input_nml_path).split("/")[-2:])
+        #else:
+        *__, stage_name, task_name, base_name = path.split("/")
+        return task_name
+        
 
     # FERRE can be limited by at least three mechanisms:
     # 1. Too many threads requested (CPU limited).
@@ -281,9 +311,6 @@ def _aspcap_stage(
     pre_processed_futures, ferre_futures, post_processed_futures = ([], [], [])
     n_executions, n_executions_total, timings = (0, len(plans), {})
 
-    # TODO: the soft thread ratio is to account for the fact that it takes time to load the grid, and we can load the grid while
-    #       we are still thread limited. By the time the grid is loaded, we won't be thread limited anymore.
-    #       It's a massive hack that we should revisit.
     at_capacity = lambda p, t, c: (
         p >= max_processes,
         t >= (soft_thread_ratio * max_threads),
@@ -292,19 +319,19 @@ def _aspcap_stage(
     max_workers = max(max_processes, max_threads)
     successes, failures = [], {}
 
-    total = 0
+    n_spectra_for_analysis = 0
     for plan in plans:
         (
             executor
             .submit(pre_process_ferres, plan)
             .add_done_callback(lambda future: pre_processed_futures.insert(0, future))
         )
-        total += sum(map(len, (p["spectra"] for p in plan)))
+        n_spectra_for_analysis += sum(map(len, (p["spectra"] for p in plan)))
     
     if progress is not None:
-        progress.update(stage_task_id, completed=0, total=total)
+        progress.update(stage_task_id, completed=0, total=n_spectra_for_analysis)
     else:
-        pb = tqdm(total=total, desc=f"ASPCAP {stage}")
+        pb = tqdm(total=n_spectra_for_analysis, desc=f"ASPCAP {stage}")
         pb.__enter__()
 
     ferre_tasks = {}
@@ -322,10 +349,12 @@ def _aspcap_stage(
             )
 
         while parent.poll():
+            #input_nml_path, n_process_update, n_threads_update, n_obj_update = parent.recv()
+
             input_nml_path, n_obj_update, n_threads_update = parent.recv()
             if n_obj_update == 0:
                 currently_loading -= 1
-                if progress is not None:
+                if progress is not None and input_nml_path in ferre_tasks:
                     progress.update(
                         ferre_tasks[input_nml_path],
                         description=f"  [white]{get_task_name(input_nml_path)}",
@@ -336,15 +365,18 @@ def _aspcap_stage(
             if pb is not None:
                 pb.update(n_obj_update)
             if progress is not None:
-                progress.update(ferre_tasks[input_nml_path], advance=n)
-                progress.update(stage_task_id, advance=n)
+                if input_nml_path in ferre_tasks:
+                    progress.update(ferre_tasks[input_nml_path], advance=n_obj_update)
+                progress.update(stage_task_id, advance=n_obj_update)
     
         try:
             ferre_future = next(concurrent.futures.as_completed(ferre_futures, timeout=0))
-        except:
+        except (concurrent.futures.TimeoutError, StopIteration):
             None
         else:
             (input_nml_path, return_code, t_overhead, t_elapsed) = ferre_future.result()
+
+            # TODO: check if input_nml_path has a suffix and we should merge things?
             if return_code not in (0, 1):
                 log.exception(f"FERRE failed on {input_nml_path}: {return_code}")
             timings[os.path.dirname(input_nml_path)] = (t_overhead, t_elapsed)
@@ -380,8 +412,9 @@ def _aspcap_stage(
             while any(at_capacity(current_processes, current_threads, currently_loading)):
                 current_processes, current_threads, currently_loading = check_capacity(current_processes, current_threads, currently_loading)
 
-            if total > 0:
-                ferre_futures.append(executor.submit(ferre, input_nml_path, total, n_ferre_threads, child))
+            if total > 0:                    
+                cwd = os.path.dirname(input_nml_path)
+                ferre_futures.append(executor.submit(ferre, input_nml_path, cwd, total, n_ferre_threads, child))
                 if progress is not None:
                     ferre_tasks[input_nml_path] = progress.add_task(
                         f"  [yellow]{get_task_name(input_nml_path)}",
@@ -394,7 +427,6 @@ def _aspcap_stage(
     while current_processes:
         current_processes, current_threads, currently_loading = check_capacity(current_processes, current_threads, currently_loading)
             
-
     for future in concurrent.futures.as_completed(post_processed_futures):
         for result in future.result():
             # Assign timings to the results.
@@ -409,7 +441,7 @@ def _aspcap_stage(
                 t_elapsed = t_overhead = np.nan
             finally:
                 result["t_overhead"] = t_overhead
-                result["t_elapsed"] = t_elapsed
+                result["t_elapsed"] = np.sum(np.atleast_1d(t_elapsed))
             successes.append(result)
     
     if progress is not None:
@@ -423,21 +455,54 @@ def _aspcap_stage(
 regex_next_object = re.compile(r"next object #\s+(\d+)")
 regex_completed = re.compile(r"\s+(\d+)\s(\d+_[\d\w_]+)") # assumes input ids start with an integer and underscore
 
+def _teardown_process(process):
+    return_code = int(process.wait())
+    process.stdout.close()
+    process.stderr.close()
+    try:
+        process.kill()
+        os.killpg(os.getpgid(process.pid), SIGTERM)
+    except:
+        None  
+    return return_code 
 
-def ferre(input_nml_path, n_obj, n_threads, pipe):
 
-    # TODO: list mode!
-    is_abundances_mode = input_nml_path.endswith("input_list.nml")
+
+
+def ferre(
+    input_nml_path,
+    cwd,
+    n_obj,
+    n_threads,
+    pipe,
+    max_sigma_outlier=10,
+    max_t_elapsed=30,
+    #max_t_grid_load=600, #TODO
+):
+    debug(f"RUNNING {input_nml_path} from {cwd}")
+    #debug(input_nml_path, cwd, n_obj, n_threads)
+
+    is_list_mode = _is_list_mode(input_nml_path)#.endswith("input_list.nml")
+    n_threads_released = 0 + n_threads
+    ferre_hanging = threading.Event()
 
     try:
         stdout, n_complete = ([], 0)
-        t_start, t_overhead, t_awaiting, t_elapsed = (time(), None, {}, {})
+        t_start, t_overhead, t_awaiting, t_elapsed, exclude_indices = (time(), None, {}, {}, [])
+
+        load_grid_timeout = 600
+
+        last_output_time = time()
 
         command = ["ferre.x"]
-        if is_abundances_mode:
+        if is_list_mode:
             command += ["-l", os.path.basename(input_nml_path)]
-        cwd = os.path.dirname(input_nml_path)
-
+        else:
+            if input_nml_path.startswith(cwd):
+                command.append(input_nml_path[len(cwd):].lstrip("/"))
+            else:
+                command.append(input_nml_path)
+        
         process = subprocess.Popen(
             command, 
             cwd=cwd, 
@@ -446,50 +511,191 @@ def ferre(input_nml_path, n_obj, n_threads, pipe):
             universal_newlines=True
         )
 
-        for line in iter(process.stdout.readline, ""):
+        def monitor():
+            while not ferre_hanging.is_set():
+
+
+                if t_overhead is not None and (max_sigma_outlier is not None or max_t_elapsed is not None) and t_awaiting:
+                    n_await = len(t_awaiting)
+                    n_execution = 0 if len(t_elapsed) == 0 else max(list(map(len, t_elapsed.values())))
+                    n_complete = sum([len(v) == n_execution for v in t_elapsed.values()])
+                    
+                    t_elapsed_per_spectrum_execution = []
+                    for k, v in t_elapsed.items():
+                        t_elapsed_per_spectrum_execution.extend(v)
+
+                    if (max_sigma_outlier is not None or max_t_elapsed is not None) and len(t_elapsed_per_spectrum_execution) > len(t_awaiting):
+                        median = np.median(t_elapsed_per_spectrum_execution)
+                        stddev = np.std(t_elapsed_per_spectrum_execution)
+                        max_elapsed_this_execution = np.max(t_elapsed_per_spectrum_execution)
+
+                        t_awaiting_elapsed = { k: (time() + v) for k, v in t_awaiting.items() }                        
+                        waiting_elapsed = max(t_awaiting_elapsed.values())
+                        sigma_outlier = (waiting_elapsed - median)/stddev
+                    
+                        # We want to be sure that we have a reasonable estimate of the wait time for existing things.
+                        # We can use previous executions to estimate this, if it is part of a list mode.
+
+                        is_hanging = [
+                            k for k, v in t_awaiting_elapsed.items()
+                            if (
+                                (max_t_elapsed is None or v > max_t_elapsed)
+                            and (max_sigma_outlier is None or ((v - median)/stddev) > max_sigma_outlier)
+                            )
+                        ]
+                        
+                        # TODO: strace the process and check that it is waiting on FUTEX_PRIVATE_WAIT
+                        
+                        # Need to kill and re-run the process.
+                        if is_hanging: 
+                            exclude_indices.extend(is_hanging)         
+                            ferre_hanging.set()
+                            debug(f"KILLING FERRE {cwd} {input_nml_path} {is_hanging} {t_awaiting} {os.getpgid(process.pid)}")
+                            try:
+                                process.kill()
+                            except:
+                                None
+                            break
+                sleep(1)
+
+        monitor = threading.Thread(target=monitor)
+        monitor.daemon = True
+        monitor.start()
+
+        while True:
+            line = process.stdout.readline()
+
             if match := regex_next_object.search(line):
                 t_awaiting[int(match.group(1))] = -time()
                 if t_overhead is None:
                     t_overhead = time() - t_start
-                    pipe.send((input_nml_path, 0, 0))
+                    if pipe is not None:
+                        pipe.send((input_nml_path, 0, 0))
+                        """
+                        pipe.send({
+                            "input_nml_path": input_nml_path,
+                            "n_loading": -1,
+                        })
+                        """
+                    
             
             if match := regex_completed.search(line):
                 key = match.group(2)
-                t_elapsed.setdefault(key, 0)
-                t_elapsed[key] += t_awaiting.pop(int(match.group(1))) + time()
+                t_elapsed.setdefault(key, [])
+                t_elapsed[key].append(t_awaiting.pop(int(match.group(1))) + time())
                 n_complete += 1
                 n_remaining = n_obj - n_complete
-                n_threads_released = 1 if n_remaining < n_threads else 0
-                pipe.send((input_nml_path, 1, n_threads_released))
+                n_threads_released_ = 1 if (n_remaining < n_threads and n_threads > 0) else 0
+                n_threads_released -= n_threads_released_
+                if pipe is not None:
+                    pipe.send((input_nml_path, 1, n_threads_released_))
+                    """
+                    pipe.send({
+                        "input_nml_path": input_nml_path,
+                        "n_complete": 1,
+                        "n_threads_released": n_threads_released_,
+                    })
+                    """
+                
+            if not line or ferre_hanging.is_set():
+                break
+
             stdout.append(line)
 
         # In case there were some we did not pick up the timings for, or we somehow sent false-positives.                      
-        if n_complete != n_obj:
-            pipe.send((input_nml_path, n_obj - n_complete, 0))
+        #if n_complete != n_obj:
+        #    pipe.send((input_nml_path, n_obj - n_complete, n_threads_released))
 
-        with open(os.path.join(cwd, "stdout"), "w") as fp:
+        #for i in range(10):
+        #    debug(f"WRITIUNG OUT STUFF FOR {cwd}")
+        with open(os.path.join(cwd, f"stdout"), "w") as fp:
             fp.write("".join(stdout))
 
-        process.stdout.close()
-        return_code = int(process.wait())
         stderr = process.stderr.read()
-        process.stderr.close()
-        try:
-            process.kill()
-            os.killpg(os.getpgid(process.pid), SIGTERM)
-        except:
-            None
+        return_code = _teardown_process(process)
 
-        with open(os.path.join(cwd, "stderr"), "w") as fp:
+        with open(os.path.join(cwd, f"stderr"), "w") as fp:
             fp.write(stderr)
 
-        if return_code not in (0, 1): # FERRE returns return code 1 even if everything is OK.
-            log.error(f"FERRE returned code {return_code} in {input_nml_path}:")
-            log.error(stderr)
+        #if return_code not in (0, 1): # FERRE returns return code 1 even if everything is OK.
+        #    log.error(f"FERRE returned code {return_code} in {input_nml_path}:")
+        #    log.error(stderr)
+            
     except:
-        print(f"FAILED ON {input_nml_path}")
+        debug(f"FAILED ON {input_nml_path}")
         raise
-    return (input_nml_path, return_code, t_overhead, t_elapsed)
+
+    try:
+        debug(f"OK CHECK {input_nml_path} {ferre_hanging.is_set()}")
+    except:
+        debug(f"COULD NOT CHECK {input_nml_path}")
+
+    if ferre_hanging.is_set():
+        debug(f"FERRE HANGING FOR {input_nml_path}")
+        if is_list_mode:
+            n_execution = 0 if len(t_elapsed) == 0 else max(list(map(len, t_elapsed.values())))
+            n_spectra_done_in_last_execution = len([v for v in t_elapsed.values() if len(v) == n_execution])
+            #n_execution = max(n_execution - 1, 0)
+
+            with open(input_nml_path, "r") as fp:
+                paths = fp.readlines()
+                n_planned_executions = len(paths)
+                failed_input_nml_paths = list(map(str.strip, paths[n_execution:]))
+
+            if n_spectra_done_in_last_execution > 0:
+                # Correct our progress in the main progress bar.
+                if pipe is not None:
+                    pipe.send((input_nml_path, -n_spectra_done_in_last_execution, 0))
+
+                """
+                # Re-process that one failed thing
+                updated_nml_path, _ = re_process_partial_ferre(failed_input_nml_paths[0], cwd, exclude_indices=exclude_indices)
+                if updated_nml_path is not None:
+                    _, __, this_t_overhead, this_t_elapsed = ferre(updated_nml_path, cwd, n_obj // n_execution - n_spectra_done_in_last_execution, -n_threads, pipe)
+                    t_overhead += this_t_overhead
+                    for k, v in this_t_elapsed.items():
+                        t_elapsed.setdefault(k, [])
+                        t_elapsed[k].extend(v)
+                """
+            """            
+            debug(failed_input_nml_paths, n_spectra_done_in_last_execution, n_obj, n_planned_executions, n_threads)
+
+            for path in failed_input_nml_paths:
+                *_, t_overhead_this, t_elapsed_this = ferre(path, cwd, n_obj // n_planned_executions, -n_threads, pipe)
+
+                t_overhead += t_overhead_this
+                for k, v in t_elapsed_this.items():
+                    t_elapsed.setdefault(k, [])
+                    t_elapsed[k].extend(v)
+                
+                n_complete += n_obj // n_planned_executions
+                if pipe is not None:
+                    pipe.send((input_nml_path, n_obj // n_planned_executions, 0))
+            
+            # release threads
+            if pipe is not None:
+                pipe.send((input_nml_path, 0, n_threads))
+            """
+
+            prefix, suffix = input_nml_path.split(".nml")
+            suffix = suffix.lstrip(".")
+            suffix = (int(suffix) + 1) if suffix != "" else 1
+            new_path = f"{prefix}.nml.{suffix}"
+
+            with open(new_path, "w") as fp:
+                fp.write("\n".join(failed_input_nml_paths[1:]))
+            
+            return ferre(new_path, cwd, n_obj - n_complete + n_spectra_done_in_last_execution, n_threads, pipe)
+
+        else:
+            new_input_nml_path, ignored = re_process_partial_ferre(input_nml_path, cwd, exclude_indices=exclude_indices)                
+            if new_input_nml_path is not None:                    
+                debug(f"doing new thing for {new_input_nml_path}, {exclude_indices}")
+                foo = ferre(new_input_nml_path, cwd, n_obj - n_complete + len(ignored), n_threads, pipe)
+                # Merge results of partials together.
+                return foo
+    else:
+        return (input_nml_path, return_code, t_overhead, t_elapsed)
 
 
 
