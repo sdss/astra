@@ -384,7 +384,7 @@ def _aspcap_stage(
         except IndexError:
             continue
         else:
-            input_nml_path, pwd, total, n_ferre_threads, skipped = future.result()
+            input_nml_path, pwd, n_obj, n_ferre_threads, skipped = future.result()
             
             # Spectra might be skipped because the file could not be found, or if there were too many bad pixels.
             for spectrum, kwds in skipped:
@@ -400,12 +400,12 @@ def _aspcap_stage(
                 if not any(at_capacity(current_processes, current_threads, currently_loading)):
                     break
 
-            if total > 0:                    
-                ferre_futures.append(executor.submit(ferre, input_nml_path, pwd, total, n_ferre_threads, child, communicate_on_start=False))
+            if n_obj > 0:                    
+                ferre_futures.append(executor.submit(ferre, input_nml_path, pwd, n_obj, n_ferre_threads, child, communicate_on_start=False))
                 # Do the communication here ourselves because otherwise we will submit too many jobs before they start.
                 if progress is not None:
                     task_name = get_task_name(input_nml_path)
-                    ferre_tasks[task_name] = progress.add_task(task_name, total=total)
+                    ferre_tasks[task_name] = progress.add_task(task_name, total=n_obj)
 
                 child.send(dict(input_nml_path=input_nml_path, n_processes=1, n_loading=1, n_threads=n_ferre_threads))
 
@@ -540,9 +540,9 @@ def ferre(
                 n_complete += 1
                 n_remaining = n_obj - n_complete
 
-                n_threads_released = 1 if n_remaining < n_threads and n_threads > 0 else 0
+                n_threads_released = 1 if n_remaining < n_threads and n_threads_to_release > 0 else 0
                 n_threads_to_release -= n_threads_released
-                pipe.send(dict(input_nml_path=input_nml_path, n_complete=1, n_threads_released=n_threads_released))                
+                pipe.send(dict(input_nml_path=input_nml_path, n_complete=1, n_threads=n_threads_released))                
 
             if not line or ferre_hanging.is_set():
                 break
