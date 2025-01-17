@@ -113,7 +113,7 @@ def resolve_task(task_str):
         try:
             resolved_task = f"{prefix}{task_str}"
             f = callable(resolved_task)
-        except:
+        except (ModuleNotFoundError, ImportError):
             None
         else:
             #if prefix:

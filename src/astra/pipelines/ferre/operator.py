@@ -145,25 +145,24 @@ def partition_items(items, K, return_indices=False):
 
 
 
-def post_execution_interpolation(pwd, n_threads=128, f_access=1, epsilon=0.001):
+def post_execution_interpolation(input_nml_path, pwd, n_threads=128, f_access=1, epsilon=0.001):
     """
     Run a single FERRE process to perform post-execution interpolation of model grids.
     """
 
-    input_path = expand_path(f"{pwd}/input.nml")
-    control_kwds = parse_control_kwds(input_path)
+    control_kwds = parse_control_kwds(input_nml_path)
 
     # parse synthfile headers to get the edges
     # TODO: so hacky. just give post_execution_interpolation an input nml path and a reference dir.
     
     synthfile = control_kwds["SYNTHFILE(1)"]
-    for check in (synthfile, f"{pwd}/{synthfile}", f"{pwd}/../{synthfile}"):
+    for check in (synthfile, f"{pwd}/{synthfile}"):
         if os.path.exists(check):
             synthfile = check
             break
     headers = read_ferre_headers(synthfile)
 
-    output_parameter_path = os.path.join(f"{pwd}/{os.path.basename(control_kwds['OPFILE'])}")
+    output_parameter_path = os.path.join(f"{pwd}/{control_kwds['OPFILE']}")
     output_names = np.atleast_1d(np.loadtxt(output_parameter_path, usecols=(0, ), dtype=str))
     output_parameters = np.atleast_2d(np.loadtxt(output_parameter_path, usecols=range(1, 1 + int(control_kwds["NDIM"]))))
 
@@ -178,12 +177,14 @@ def post_execution_interpolation(pwd, n_threads=128, f_access=1, epsilon=0.001):
         for name, point in zip(output_names, clipped_parameters):
             fp.write(format_ferre_input_parameters(*point, name=name))
 
+    relative_dir = os.path.relpath(os.path.dirname(input_nml_path), pwd)
+
     contents = f"""
     &LISTA
-    SYNTHFILE(1) = '{synthfile}'
+    SYNTHFILE(1) = '{control_kwds["SYNTHFILE(1)"]}'
     NOV = 0
-    OFFILE = 'model_flux.output'
-    PFILE = '{os.path.basename(clipped_parameter_path)}'
+    OFFILE = '{os.path.join(relative_dir, "model_flux.output")}'
+    PFILE = '{os.path.join(relative_dir, os.path.basename(clipped_parameter_path))}'
     INTER = {control_kwds['INTER']}
     F_FORMAT = 1
     F_ACCESS = {f_access}
@@ -193,11 +194,14 @@ def post_execution_interpolation(pwd, n_threads=128, f_access=1, epsilon=0.001):
     /
     """
     contents = "\n".join(map(str.strip, contents.split("\n"))).lstrip()
-    input_nml_path = f"{pwd}/post_execution_interpolation.nml"
-    with open(input_nml_path, "w") as fp:
+    new_input_nml_path = os.path.join(pwd, relative_dir, "post_execution_interpolation.nml")
+    with open(new_input_nml_path, "w") as fp:
         fp.write(contents)
     
-    execute_ferre(input_nml_path)
+    execute_ferre(new_input_nml_path, pwd)
+
+    os.system(f"vaffoff {os.path.join(pwd, relative_dir, 'parameter.output.clipped')} {os.path.join(pwd, relative_dir, 'model_flux.output')}")
+
     return None
 
 

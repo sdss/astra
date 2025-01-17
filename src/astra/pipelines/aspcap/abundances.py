@@ -1,156 +1,17 @@
 import os
 import numpy as np
 from typing import Iterable, Optional
-from peewee import fn
-from glob import glob
-from tqdm import tqdm
-from time import time
-
-from astra import task
 from astra.utils import expand_path, log, list_to_dict
-from astra.models.spectrum import Spectrum
-from astra.models.aspcap import FerreStellarParameters, FerreChemicalAbundances
-from astra.pipelines.ferre.operator import FerreOperator, FerreMonitoringOperator
-from astra.pipelines.ferre.pre_process import pre_process_ferre
-from astra.pipelines.ferre.post_process import post_process_ferre
-from astra.pipelines.ferre.utils import (get_apogee_pixel_mask, parse_ferre_spectrum_name, read_ferre_headers, parse_header_path, get_input_spectrum_primary_keys)
-from astra.pipelines.aspcap.utils import (get_input_nml_paths, get_abundance_keywords, sanitise_parent_dir)
+from astra.pipelines.ferre.utils import (get_apogee_pixel_mask, parse_ferre_spectrum_name, read_ferre_headers, parse_header_path)
+from astra.pipelines.aspcap.utils import get_abundance_keywords
 
 STAGE = "abundances"
 
 # NOTE to Future Andy:
 # ferre often (but not always; ie nthreads>1) needs the NOBJ keyword to be set for doing abundances in list (-l) mode 
-
-
-@task
-def abundances(
-    spectra: Iterable[Spectrum],
-    parent_dir: str,
-    element_weight_paths: str = "$MWM_ASTRA/pipelines/aspcap/masks/elements.list",
-    operator_kwds: Optional[dict] = None,
-    **kwargs
-) -> Iterable[FerreChemicalAbundances]:
-    """
-    Run the abundance stage in ASPCAP.
-    
-    This task does the pre-processing and post-processing steps for FERRE, all in one. If you care about performance, you should
-    run these steps separately and execute FERRE with a batch system.
-
-    :param spectra:
-        The spectra to be processed.
-    
-    :param parent_dir:
-        The parent directory where these FERRE executions will be planned.    
-    """
-
-    yield from pre_abundances(
-        spectra, 
-        parent_dir, 
-        element_weight_paths,
-        **kwargs
-    )
-
-    job_ids, executions = (
-        FerreOperator(
-            f"{parent_dir}/{STAGE}/", 
-            input_nml_wildmask="*/*/input*.nml",
-            experimental_abundances=True,
-            **(operator_kwds or {})
-        )
-        .execute()
-    )
-    FerreMonitoringOperator(job_ids, executions).execute()
-    
-    yield from post_abundances(
-        parent_dir, 
-        **kwargs
-    )
-
-
-@task
-def pre_abundances(
-    spectra: Iterable[Spectrum], 
-    parent_dir: str, 
-    element_weight_paths: str = "$MWM_ASTRA/pipelines/aspcap/masks/elements.list",
-    ferre_list_mode = False,
-    **kwargs
-) -> Iterable[FerreChemicalAbundances]:
-    """
-    Prepare to run FERRE multiple times for the abundance determination stage.
-
-    The `post_abundances` task will collect results from FERRE and create database entries.
-
-    :param spectra:
-        The spectra to be processed.
-    
-    :param parent_dir:
-        The parent directory where these FERRE executions will be planned.    
-    """
-    
-    ferre_kwds, spectra_with_no_stellar_parameters = plan_abundances_stage(
-        spectra,
-        parent_dir,
-        element_weight_paths,
-        **kwargs
-    )
-    # In other stages we would yield back a database result with a flag indicating that
-    # there was nothing that could be done, but here we won't. That's because the final
-    # ASPCAP table is built by using the `FerreStellarParameters` as a reference table,
-    # not the `FerreChemicalAbundances` table. The chemical abundances are a bonus.
-    if spectra_with_no_stellar_parameters:
-        log.warning(
-            f"There were {len(spectra_with_no_stellar_parameters)} spectra with no suitable stellar parameters."
-        )
-
-    # Create the FERRE files for each execution.
-    group = {}
-    for kwd in ferre_kwds:
-        pre_process_ferre(**kwd)
-
-        pwd = kwd["pwd"].rstrip("/")
-        group_dir = "/".join(pwd.split("/")[:-1])
-        group.setdefault(group_dir, [])
-        group[group_dir].append(pwd[1 + len(group_dir):] + "/input.nml")
-    
-    if ferre_list_mode:
-        # Create a parent input_list.nml file to use with the ferre.x -l flag.
-        for pwd, items in group.items():
-            input_list_path = f"{pwd}/input_list.nml"
-            log.info(f"Created grouped FERRE input file with {len(items)} dirs: {input_list_path}")
-            with open(expand_path(input_list_path), "w") as fp:
-                # Sometimes `wc` would not give the right amount of lines in a file, so we add a \n to the end
-                # https://unix.stackexchange.com/questions/314256/wc-l-not-returning-correct-value
-                fp.write("\n".join(items) + "\n")
-        
-    yield from []
-
-
-@task
-def post_abundances(parent_dir, relative_mode=True, skip_pixel_arrays=True, **kwargs) -> Iterable[FerreChemicalAbundances]:
-    """
-    Collect the results from FERRE and create database entries for the abundance step.
-
-    :param parent_dir:
-        The parent directory where these FERRE executions were planned.
-    """    
-
-    # Note the "/*" after STAGE because of the way folders are structured for abundances
-    # And we use the `ref_dir` because it was executed from the parent folder.
-    for dir in map(os.path.dirname, get_input_nml_paths(parent_dir, f"{STAGE}/*")):
-        
-        # If the abundances were executed from the parent directory with the -l flag, you should use
-        if relative_mode:
-            ref_dir = os.path.dirname(dir)
-        else:
-            ref_dir = None
-        log.info(f"Post-processing FERRE results in {dir} {'with FERRE list mode' if relative_mode else 'in standard mode'}")
-        for kwds in post_process_ferre(dir, ref_dir, skip_pixel_arrays=skip_pixel_arrays, **kwargs):
-            yield FerreChemicalAbundances(**kwds)    
-
  
-
 def plan_abundances_stage(
-    spectra: Iterable[Spectrum],
+    spectra,
     parent_dir: str,
     stellar_parameter_results, 
     element_weight_paths: str,
@@ -176,8 +37,6 @@ def plan_abundances_stage(
     
     mask = get_apogee_pixel_mask()
     continuum_cache, continuum_cache_names = ({}, {})
-
-    t_check = 0
 
     group_task_kwds, pre_computed_continuum = ({}, {})
     for result in stellar_parameter_results:
@@ -218,23 +77,19 @@ def plan_abundances_stage(
 
             # Check names
             # TODO: This is a sanity check. if it is expensive, we can remove it later.
-            t = -time()
             continuum_cache_names[prefix] = [
                 np.atleast_1d(np.loadtxt(f"{prefix}/model_flux.output", usecols=(0, ), dtype=str)),
                 np.atleast_1d(np.loadtxt(f"{prefix}/rectified_flux.output", usecols=(0, ), dtype=str)),
                 np.atleast_1d(np.loadtxt(f"{prefix}/rectified_model_flux.output", usecols=(0, ), dtype=str)),
             ]    
-            t_check += (time() + t)
 
         finally:
-            t = -time()
             pre_computed_continuum[result["spectrum_pk"]] = continuum_cache[prefix][int(result["ferre_index"])]
             for each in continuum_cache_names[prefix]:
                 meta = parse_ferre_spectrum_name(each[int(result["ferre_index"])])
                 assert int(meta["source_pk"]) == int(result["source_pk"])
                 assert int(meta["spectrum_pk"]) == int(result["spectrum_pk"])
                 assert int(meta["index"]) == int(result["ferre_index"])
-            t_check += (time() + t)
         
         group_task_kwds[result["header_path"]].append(
             dict(

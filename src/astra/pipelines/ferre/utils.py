@@ -54,28 +54,22 @@ def parse_control_kwds(input_nml_path):
             control_kwds[key] = value
     return control_kwds
 
-def execute_ferre(path, timeout=None):
+def execute_ferre(input_nml_path, pwd, timeout=None):
         
-    path = expand_path(path)
-    if path.lower().endswith(".nml"):
-        # A direct NML file was given.
-        input_nml_path = os.path.basename(path)
+    if pwd is None:    
         pwd = os.path.dirname(path)
-        stdout_path = os.path.join(pwd, f"{input_nml_path}.stdout")
-        stderr_path = os.path.join(pwd, f"{input_nml_path}.stderr")
 
-    else:
-        pwd = path
-        input_nml_path = "input.nml"
-        stdout_path = os.path.join(pwd, "stdout")
-        stderr_path = os.path.join(pwd, "stderr")
+    stdout_path = f"{input_nml_path}.stdout"
+    stderr_path = f"{input_nml_path}.stderr"
 
     log.debug(f"Running FERRE on {pwd}/{input_nml_path} with timeout of {timeout}")
+
+    path_relative_to_pwd = os.path.relpath(input_nml_path, pwd)
     try:
         with open(stdout_path, "w") as stdout:
             with open(stderr_path, "w") as stderr:
                 process = subprocess.run(
-                    ["ferre.x", input_nml_path],
+                    ["ferre.x", path_relative_to_pwd],
                     cwd=pwd,
                     stdout=stdout,
                     stderr=stderr,
