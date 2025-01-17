@@ -124,55 +124,43 @@ def aspcap(
             live_renderable.add_row(Panel.fit(progress, title="ASPCAP", padding=(2, 2)))
             stage_args += [progress]
 
-        import pickle
-        temp_path = "temp.pkl"
-        if os.path.exists(temp_path):
-            with open(temp_path, "rb") as fp:
-                parent_dir, abundance_plans = pickle.load(fp)
-                stage_args[3] = parent_dir                        
-        else:
-            coarse_plans, spectra_with_no_initial_guess = plan_coarse_stellar_parameters_stage(
-                spectra=spectra, 
-                parent_dir=parent_dir,
-                header_paths=header_paths, 
-                initial_guess_callable=initial_guess_callable,
-                weight_path=weight_path,
-                n_threads=n_threads
-            )
-            for spectrum in spectra_with_no_initial_guess:
-                yield ASPCAP.from_spectrum(spectrum, flag_no_suitable_initial_guess=True)
+        coarse_plans, spectra_with_no_initial_guess = plan_coarse_stellar_parameters_stage(
+            spectra=spectra, 
+            parent_dir=parent_dir,
+            header_paths=header_paths, 
+            initial_guess_callable=initial_guess_callable,
+            weight_path=weight_path,
+            n_threads=n_threads
+        )
+        for spectrum in spectra_with_no_initial_guess:
+            yield ASPCAP.from_spectrum(spectrum, flag_no_suitable_initial_guess=True)
 
-            coarse_results, coarse_failures = _aspcap_stage("coarse", coarse_plans, *stage_args)    
-            yield from coarse_failures
+        coarse_results, coarse_failures = _aspcap_stage("coarse", coarse_plans, *stage_args)    
+        yield from coarse_failures
 
-            stellar_parameter_plans, best_coarse_results = plan_stellar_parameters_stage(
-                spectra=spectra, 
-                parent_dir=parent_dir,
-                coarse_results=coarse_results,
-                weight_path=weight_path,
-                n_threads=n_threads
-            )
-            param_results, param_failures = _aspcap_stage("params", stellar_parameter_plans, *stage_args)
-            yield from param_failures
+        stellar_parameter_plans, best_coarse_results = plan_stellar_parameters_stage(
+            spectra=spectra, 
+            parent_dir=parent_dir,
+            coarse_results=coarse_results,
+            weight_path=weight_path,
+            n_threads=n_threads
+        )
+        param_results, param_failures = _aspcap_stage("params", stellar_parameter_plans, *stage_args)
+        yield from param_failures
 
-            abundance_plans = plan_abundances_stage(
-                spectra=spectra,
-                parent_dir=parent_dir,
-                stellar_parameter_results=param_results,
-                element_weight_paths=element_weight_paths,
-                n_threads=n_threads,
-                use_ferre_list_mode=use_ferre_list_mode
-            )            
-            with open("temp.pkl", "wb") as fp:
-                pickle.dump((parent_dir, abundance_plans), fp)
+        abundance_plans = plan_abundances_stage(
+            spectra=spectra,
+            parent_dir=parent_dir,
+            stellar_parameter_results=param_results,
+            element_weight_paths=element_weight_paths,
+            n_threads=n_threads,
+            use_ferre_list_mode=use_ferre_list_mode
+        )            
         
         abundance_results, abundance_failures = _aspcap_stage("abundances", abundance_plans, *stage_args)
         parent.close()
         child.close()
         executor.shutdown(wait=False, cancel_futures=True)
-        print(len(abundance_results))
-        import sys
-        sys.exit()
 
     # Bring it all together baby.
     result_kwds = {}
@@ -326,14 +314,11 @@ def _aspcap_stage(
         pb = tqdm(total=total, desc=f"ASPCAP {stage}")
         pb.__enter__()
 
-    import json
 
     def check_capacity(current_processes, current_threads, currently_loading):
 
         while parent.poll(): 
             state = parent.recv()
-            with open("state.txt", "a") as fp:
-                fp.write(json.dumps(state) + f" {current_processes} {current_threads} {currently_loading}\n")
 
             delta_n_loading = state.get("n_loading", 0)
             delta_n_complete = state.get("n_complete", 0)
@@ -540,9 +525,9 @@ def ferre(
                 n_complete += 1
                 n_remaining = n_obj - n_complete
 
-                n_threads_released = 1 if n_remaining < n_threads and n_threads_to_release > 0 else 0
-                n_threads_to_release -= n_threads_released
-                pipe.send(dict(input_nml_path=input_nml_path, n_complete=1, n_threads=n_threads_released))                
+                delta_n_threads = -1 if n_remaining < n_threads and n_threads_to_release > 0 else 0
+                n_threads_to_release += delta_n_threads
+                pipe.send(dict(input_nml_path=input_nml_path, n_complete=1, n_threads=delta_n_threads))                
 
             if not line or ferre_hanging.is_set():
                 break

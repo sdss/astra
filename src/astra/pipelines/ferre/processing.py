@@ -17,7 +17,7 @@ def _is_list_mode(path):
 def pre_process_ferre(plans):
     processed = [_pre_process_ferre(**plan) for plan in plans]
     if len(plans) == 1:
-        input_nml_path, total, n_threads, skipped = processed
+        input_nml_path, total, n_threads, skipped = processed[0]
         pwd = os.path.dirname(input_nml_path)
         return (input_nml_path, pwd, total, n_threads, skipped)
     else:
