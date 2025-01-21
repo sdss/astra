@@ -57,9 +57,7 @@ def task(
         while True:
             try:
                 result = next(timer)
-                # `Ellipsis` has a special meaning to Astra tasks.
-                # It is a marker that tells the Astra timer that the interval spent so far is related
-                # to common overheads, not specifically to the calculations of one result.
+
                 if result is Ellipsis:
                     continue
 

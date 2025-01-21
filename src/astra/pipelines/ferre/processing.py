@@ -430,8 +430,8 @@ def _post_process_ferre(input_nml_path, pwd=None, skip_pixel_arrays=False, **kwa
         if os.path.exists(path):
             os.system(f"vaffoff {parameter_input_path} {path}")
 
-    try:
-        parameters, e_parameters, meta, names_with_missing_outputs = utils.read_output_parameter_file(pwd, control_kwds, input_names)
+    parameters, e_parameters, meta, names_with_missing_outputs = utils.read_output_parameter_file(pwd, control_kwds, input_names)
+    """
     except:
         # This only happens if the file does not exist
         D = int(control_kwds["NDIM"])
@@ -442,6 +442,7 @@ def _post_process_ferre(input_nml_path, pwd=None, skip_pixel_arrays=False, **kwa
             "log_chisq_fit": np.nan * np.ones(N),
         }
         names_with_missing_outputs = input_names
+    """
 
     # Create some boolean flags. 
     header_path = control_kwds["SYNTHFILE(1)"]

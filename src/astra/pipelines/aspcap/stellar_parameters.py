@@ -42,7 +42,12 @@ def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_pa
             elif this.penalized_rchi2 == existing.penalized_rchi2:
                 best = existing
                 best.flag_multiple_equally_good_coarse_results = True      
-            best.ferre_time_coarse = this.t_elapsed + existing.t_elapsed
+            
+            if best is None:
+                log.error(f"Error for {kwds} - best is None. {existing} {existing.penalized_rchi2} {this} {this.penalized_rchi2}")
+            else:
+                best.ferre_time_coarse = this.t_elapsed + existing.t_elapsed
+            
         finally:            
             best_coarse_results[this.spectrum_pk] = best
 

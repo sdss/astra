@@ -42,7 +42,7 @@ def get_input_spectrum_primary_keys(stage_dir):
 def parse_control_kwds(input_nml_path):
     with open(expand_path(input_nml_path), "r") as fp:
         contents = fp.read()
-    matches = re.findall("(?P<key>[A-Z\(\)0-9]+)\s*=\s*['\"]?\s*(?P<value>.+)\s*['\"]?\s*$", contents, re.MULTILINE)
+    matches = re.findall(r"(?P<key>[A-Z\(\)0-9]+)\s*=\s*['\"]?\s*(?P<value>.+)\s*['\"]?\s*$", contents, re.MULTILINE)
     control_kwds = {}
     for key, value in matches:
         value = value.rstrip('"\'')
@@ -62,28 +62,17 @@ def execute_ferre(input_nml_path, pwd, timeout=None):
     stdout_path = f"{input_nml_path}.stdout"
     stderr_path = f"{input_nml_path}.stderr"
 
-    log.debug(f"Running FERRE on {pwd}/{input_nml_path} with timeout of {timeout}")
-
     path_relative_to_pwd = os.path.relpath(input_nml_path, pwd)
-    try:
-        with open(stdout_path, "w") as stdout:
-            with open(stderr_path, "w") as stderr:
-                process = subprocess.run(
-                    ["ferre.x", path_relative_to_pwd],
-                    cwd=pwd,
-                    stdout=stdout,
-                    stderr=stderr,
-                    check=False,
-                    timeout=timeout, 
-                )
-    except subprocess.TimeoutExpired:
-        log.exception(f"FERRE has timed out in {pwd}")
-    except:
-        log.exception(f"Exception when calling FERRE in {pwd}:")
-        raise
-
-    else:
-        log.debug(f"Ferre finished")
+    with open(stdout_path, "w") as stdout:
+        with open(stderr_path, "w") as stderr:
+            process = subprocess.run(
+                ["ferre.x", path_relative_to_pwd],
+                cwd=pwd,
+                stdout=stdout,
+                stderr=stderr,
+                check=False,
+                timeout=timeout, 
+            )
 
     return None
 
@@ -260,7 +249,7 @@ def validate_ferre_control_keywords(
     f_sort=False,
     **kwargs,
 ):
-    """
+    r"""
     Validate the FERRE control keywords.
 
     :param header_path:
@@ -669,7 +658,7 @@ def validate_lsf_shape_flag_and_lsf_shape_path(lsf_shape_flag, lsf_shape_path):
 
 def validate_error_algorithm_flag(error_algorithm_flag):
     available = {
-        0: "adopt distance from the solution at which \chi^2 = min(\chi^2) + 1",
+        0: r"adopt distance from the solution at which \chi^2 = min(\chi^2) + 1",
         1: "invert the curvature matrix",
         2: "perform numerical experiments injecting noise into the data",
     }
@@ -769,7 +758,7 @@ def read_ferre_header(fp):
             # Check values.
             if value.lstrip()[0] != "'":
                 # Treat as numerical values.
-                values = re.findall("[+|-|\d|\.|e|-]+", value)
+                values = re.findall(r"[+|-|\d|\.|e|-]+", value)
 
                 dtype = float if "." in value else int
 
@@ -835,6 +824,7 @@ def validate_initial_and_frozen_parameters(
     mid_point = grid_mid_point(headers)
     initial_parameters_array = np.tile(mid_point, N).reshape((N, -1))
     warning_messages = []
+    recognized_parameter_names = ["LGVSINI", "LOG10VDOP", "C", "N", "O Mg Si S Ca Ti", "METALS", "LOGG", "TEFF"]
 
     for i, ip in enumerate(initial_parameters):
         for parameter_name, value in ip.items():
@@ -842,18 +832,20 @@ def validate_initial_and_frozen_parameters(
             try:
                 ferre_label_name = get_ferre_label_name(parameter_name, ferre_label_names, transforms)
             except:
-                message = f"Ignoring initial parameter '{parameter_name}' as it is not in {ferre_label_names}"
-                if message not in warning_messages:
-                    log.debug(message)
-                    warning_messages.append(message)
+                if parameter_name not in recognized_parameter_names:
+                    message = f"Ignoring initial parameter '{parameter_name}' as it is not in {ferre_label_names}"
+                    if message not in warning_messages:
+                        log.debug(message)
+                        warning_messages.append(message)
                 continue
         
             else:
                 if ferre_label_name not in ferre_label_names:
-                    message = f"Ignoring initial parameter '{ferre_label_name}' as it is not in {ferre_label_names}"
-                    if message not in warning_messages:
-                        log.debug(message)
-                        warning_messages.append(message)
+                    if ferre_label_name not in recognized_parameter_names:
+                        message = f"Ignoring initial parameter '{ferre_label_name}' as it is not in {ferre_label_names}"
+                        if message not in warning_messages:
+                            log.debug(message)      
+                            warning_messages.append(message)
                     continue
 
             if np.isfinite(value):
@@ -866,11 +858,12 @@ def validate_initial_and_frozen_parameters(
             try:
                 ferre_label_name = get_ferre_label_name(parameter_name, ferre_label_names, transforms)
             except:
-                message = f"Ignoring frozen parameter '{parameter_name}' as it is not in {ferre_label_names}"
-                if message not in warning_messages:
-                    log.debug(message)
-                    warning_messages.append(message)
-                continue
+                if parameter_name not in recognized_parameter_names:
+                    message = f"Ignoring frozen parameter '{parameter_name}' as it is not in {ferre_label_names}"
+                    if message not in warning_messages:
+                        log.debug(message)
+                        warning_messages.append(message)
+                    continue
 
             j = ferre_label_names.index(ferre_label_name)
             log.info(f"Over-writing initial values for {parameter_name} ({ferre_label_name}) with frozen value of {value}")
@@ -885,16 +878,7 @@ def validate_initial_and_frozen_parameters(
             initial_parameters_array, lower_limit, upper_limit, headers['LABEL']
         )
     except ValueError as e:
-        #log.exception(
-        #    f"Exception when checking initial parameters within grid boundaries:"
-        #)
-        #log.critical(e, exc_info=True)
-
         if clip_initial_parameters_to_boundary_edges:
-            #log.info(
-            #    f"Clipping initial parameters to boundary edges (use clip_initial_parameters_to_boundary_edges=False to raise exception instead)"
-            #)
-
             clip = clip_epsilon_percent * (upper_limit - lower_limit) / 100.0
             initial_parameters_array = np.round(
                 np.clip(
@@ -1284,7 +1268,7 @@ def get_processing_times(stdout_path_prefix, relative_path=None):
         with open(path, "r") as fp:
             stdout = fp.read()
         
-        headers = list(re.finditer("-{65}\s+f e r r e", stdout))
+        headers = list(re.finditer(r"-{65}\s+f e r r e", stdout))
 
         for h, header in enumerate(headers):
 
@@ -1296,7 +1280,7 @@ def get_processing_times(stdout_path_prefix, relative_path=None):
             else:
                 process_stdout = stdout[si:ei]    
             
-            relative_input_nml_path = re.findall("-{65}\n\s+(?P<rel_path>[\w|\_|/|\.]+).nml\s+", process_stdout)[0] + ".nml"
+            relative_input_nml_path = re.findall(r"-{65}\n\s+(?P<rel_path>[\w|\_|/|\.]+).nml\s+", process_stdout)[0] + ".nml"
 
             if relative_path is not None:
                 # Get the relative path of the input file.
@@ -1306,8 +1290,8 @@ def get_processing_times(stdout_path_prefix, relative_path=None):
             #i = process_stdout[::-1].index(header[0][::-1])
             #use_process_stdout = stdout[-(i + len(header)) :]
 
-            n_threads = int(re.findall("nthreads\s?= \s+[0-9]+", process_stdout)[0].split()[-1])
-            n_obj = int(re.findall("nobj\s?= \s+[0-9]+", process_stdout)[0].split()[-1])
+            n_threads = int(re.findall(r"nthreads\s?= \s+[0-9]+", process_stdout)[0].split()[-1])
+            n_obj = int(re.findall(r"nobj\s?= \s+[0-9]+", process_stdout)[0].split()[-1])
 
             n_per_thread = n_obj // n_threads
             n_mod = n_obj - n_per_thread * n_threads
@@ -1322,8 +1306,8 @@ def get_processing_times(stdout_path_prefix, relative_path=None):
                 si += ei        
 
             # Find the obvious examples first.
-            elapsed_time_pattern = "ellapsed time:\s+(?P<time>[{0-9}|.]+)\s*s?\s*"
-            next_object_pattern = "next object #\s+(?P<index_plus_one>[0-9]+)"
+            elapsed_time_pattern = r"ellapsed time:\s+(?P<time>[{0-9}|.]+)\s*s?\s*"
+            next_object_pattern = r"next object #\s+(?P<index_plus_one>[0-9]+)"
 
             t_elapsed_per_thread = np.nan * np.ones(expected_indices.shape)
 

@@ -172,14 +172,20 @@ def run(
     from rich.live import Live
     from rich.panel import Panel
     from rich.table import Table
+    from rich.logging import RichHandler
     from rich.console import Console
+    from logging import FileHandler
 
     from astra import models, __version__, generate_queries_for_task
-    from astra.utils import resolve_task, accepts_live_renderable
+    from astra.utils import log, resolve_task, accepts_live_renderable
 
     fun = resolve_task(task)
     fun_accepts_live_renderable = accepts_live_renderable(fun)
     live_renderable = Table.grid()
+
+    # Re-direct log handler
+    console = Console()
+
     if not fun_accepts_live_renderable:
         overall_progress = Progress(
             TextColumn("[progress.description]{task.description}"),
@@ -188,8 +194,13 @@ def run(
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
         )
         live_renderable.add_row(Panel(overall_progress, title=task))
-        
-    with Live(live_renderable) as live:
+    
+    with Live(live_renderable, console=console, redirect_stdout=False, redirect_stderr=False) as live:
+        log.handlers.clear()
+        log.handlers.extend([
+            RichHandler(console=live.console, markup=True, rich_tracebacks=True),
+        ])
+
         for model, q in generate_queries_for_task(fun, spectrum_model, limit, page=page):            
             if total := q.count():
                 if not fun_accepts_live_renderable:
