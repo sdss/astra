@@ -27,9 +27,8 @@ from astra.pipelines.aspcap.utils import ABUNDANCE_RELATIVE_TO_H
 
 
 def do_logger(*foo):
-    None
-    #with open("astra.log", "a") as fp:
-    #    fp.write(" ".join(map(str, foo)) + "\n")
+    with open("astra.log", "a") as fp:
+        fp.write(" ".join(map(str, foo)) + "\n")
 
 def _is_list_mode(path):
     return "input_list.nml" in path
@@ -479,10 +478,11 @@ def ferre(
     n_obj,
     n_threads,
     pipe,
-    max_sigma_outlier=None,
-    max_t_elapsed=None,
+    max_sigma_outlier=10,
+    max_t_elapsed=600,
     communicate_on_start=True
 ):
+
     try:            
         if communicate_on_start:
             pipe.send(dict(input_nml_path=input_nml_path, n_processes=1, n_loading=1, n_threads=max(0, n_threads)))
@@ -656,6 +656,12 @@ def ferre(
                     return foo
             """
         
+        else:
+            # Just kill the process. Don't bother with the failed things.
+            # TODO: Send back which items we were waiting on at the time, so we can mark them as the problematic ones.
+            do_logger(f"hanging on {input_nml_path} {cwd} {return_code} {t_overhead} {t_elapsed}")
+            do_logger(t_awaiting)
+
         # Set ferre_hanging to kill the daemon thread.
         ferre_hanging.set()
         return (input_nml_path, cwd, return_code, t_overhead, t_elapsed)
