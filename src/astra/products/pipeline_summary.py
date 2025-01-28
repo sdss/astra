@@ -13,7 +13,7 @@ from astra.models.boss import BossVisitSpectrum
 from astra.models.mwm import BossCombinedSpectrum
 from astra.products.utils import (get_fields, get_basic_header, get_binary_table_hdu, check_path, resolve_model)
 
-get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
+get_path = lambda bn, gzip: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}" + (".gz" if gzip else ""))
 
 def ignore_field_name_callable(field_name):
     return (
@@ -76,7 +76,7 @@ def create_astra_best_product(
         
     from astra.models.best import MWMBest as pipeline_model
 
-    path = get_path(output_template.format(version=__version__))
+    path = get_path(output_template.format(version=__version__), gzip)
     check_path(path, overwrite)
     
     kwds = dict(
@@ -145,7 +145,7 @@ def create_astra_best_product(
     return (path, hdu_list) if full_output else path    
 
 
-def create_astra_all_star_product(
+def create_all_star_product(
     pipeline_model,
     where=None,
     limit=None,
@@ -216,7 +216,7 @@ def create_astra_all_star_product(
     pipeline_model = resolve_model(pipeline_model)
     pipeline = pipeline_model.__name__
 
-    path = get_path(output_template.format(pipeline=pipeline, version=__version__))
+    path = get_path(output_template.format(pipeline=pipeline, version=__version__), gzip)
     check_path(path, overwrite)
 
     pipeline_model = resolve_model(pipeline_model)
@@ -313,16 +313,17 @@ def create_astra_all_star_product(
         )
         hdus.append(hdu)
 
+    written_path = get_path(output_template.format(pipeline=pipeline, version=__version__), False)
     hdu_list = fits.HDUList(hdus)
-    hdu_list.writeto(path, overwrite=overwrite)
+    hdu_list.writeto(written_path, overwrite=overwrite)
     if gzip:
-        os.system(f"gzip -f {path}")
-        path += ".gz"
+        os.system(f"gzip -f {written_path}")
+        written_path += ".gz"
     
-    return (path, hdu_list) if full_output else path    
+    return (written_path, hdu_list) if full_output else written_path    
 
 
-def create_astra_all_visit_product(
+def create_all_visit_product(
     pipeline_model,
     where=None,
     limit=None,
@@ -401,7 +402,7 @@ def create_astra_all_visit_product(
     pipeline_model = resolve_model(pipeline_model)
     pipeline = pipeline_model.__name__
 
-    path = get_path(output_template.format(pipeline=pipeline, version=__version__))
+    path = get_path(output_template.format(pipeline=pipeline, version=__version__), gzip)
     check_path(path, overwrite)
 
     pipeline_model = resolve_model(pipeline_model)
