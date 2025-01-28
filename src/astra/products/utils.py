@@ -31,7 +31,6 @@ except:
 from collections import OrderedDict
 
 from astropy.io import fits
-from tqdm import tqdm
 from astra import __version__
 from importlib import import_module
 from astra.utils import log, flatten, expand_path
@@ -303,7 +302,7 @@ def get_binary_table_hdu(
             continue
 
     data = { name: [] for name in fields.keys() }
-    for result in tqdm(q.iterator(), desc="Collecting results", total=limit or q.count()):
+    for result in q.iterator():
         
         if isinstance(result, dict):        
             for name, value in result.items():
@@ -344,6 +343,7 @@ def get_binary_table_hdu(
     for i, name in enumerate(hdu.data.dtype.names, start=1):
         field = fields[original_names[name]]
         hdu.header.comments[f"TTYPE{i}"] = field.help_text
+        hdu.header[f"TCOMM{i}"] = field.help_text
 
     # Add category groupings.
     add_category_headers(hdu, models, original_names, upper)
