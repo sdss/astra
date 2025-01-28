@@ -213,7 +213,10 @@ class FerreCoarse(PipelineOutputModel, FerreOutputMixin):
     flag_c_m_atm_grid_edge_bad = ferre_flags.flag(2**18)
     flag_n_m_atm_grid_edge_warn = ferre_flags.flag(2**19)
     flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**20)    
-
+    flag_caused_timeout = ferre_flags.flag(2**21, help_text="Caused timeout in downstream tasks")
+    flag_affected_by_timeout = ferre_flags.flag(2**22, help_text="Affected by timeout")    
+    flag_multiple_equally_good_coarse_results = ferre_flags.flag(2**23, help_text="Multiple equally good coarse results")
+    flag_no_good_coarse_result = ferre_flags.flag(2**24, "No good result from coarse grid")
 
 
 

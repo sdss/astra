@@ -48,6 +48,8 @@ def penalize_coarse_stellar_parameter_result(result: FerreCoarse, warn_multiplie
     if result.flag_logg_ferre_fail:
         penalized_rchi2 *= fail_multiplier
     
+    if not np.isfinite(penalized_rchi2):
+        penalized_rchi2 = np.inf
     return penalized_rchi2
 
         

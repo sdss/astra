@@ -7,6 +7,7 @@ from peewee import (
     PostgresqlDatabase,
     FieldAccessor,
     JOIN,
+    BooleanField as RawBooleanField
 )
 from astra.fields import (
     TextField,
@@ -32,6 +33,7 @@ from collections import OrderedDict
 from astropy.io import fits
 from tqdm import tqdm
 from astra import __version__
+from importlib import import_module
 from astra.utils import log, flatten, expand_path
 from astra import models as astra_models
 from typing import Union
@@ -214,7 +216,12 @@ def create_source_primary_hdu_cards(
 
 def resolve_model(model_or_model_name):
     if isinstance(model_or_model_name, str):
-        return getattr(astra_models, model_or_model_name)
+        *pkg, name = model_or_model_name.split(".")
+        if pkg:
+            parent = import_module(f"astra.models.{pkg[0]}")
+            return getattr(parent, name)        
+        else:
+            return getattr(astra_models, model_or_model_name)
     else:
         return model_or_model_name
 
@@ -402,6 +409,7 @@ def fits_column_kwargs(field, values, upper, name=None, default_n_pixels=0, warn
         # Require at least one character for text fields
         TextField: lambda v: dict(format="A{}".format(max(1, max(len(_) for _ in v)) if len(v) > 0 else 1)),
         BooleanField: lambda v: dict(format="L"),
+        RawBooleanField: lambda v: dict(format="L"), # for flag_warn, flag_bad
         IntegerField: lambda v: dict(format="J"),
         FloatField: lambda v: dict(format="E"), # single precision
         AutoField: lambda v: dict(format="K"),

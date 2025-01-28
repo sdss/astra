@@ -6,8 +6,11 @@ from collections import OrderedDict
 from peewee import BooleanField, JOIN
 from astropy.io import fits
 from astra import __version__
-from astra.utils import log, expand_path
-from astra.models import Source, ApogeeVisitSpectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar, BossVisitSpectrum, BossCombinedSpectrum
+from astra.utils import log, expand_path, version_string_to_integer
+from astra.models.source import Source
+from astra.models.apogee import ApogeeVisitSpectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar
+from astra.models.boss import BossVisitSpectrum
+from astra.models.mwm import BossCombinedSpectrum
 from astra.products.utils import (get_fields, get_basic_header, get_binary_table_hdu, check_path, resolve_model)
 
 get_path = lambda bn: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}")
@@ -110,11 +113,13 @@ def create_astra_best_product(
         else:
             select_fields.append(f)
 
+    current_version = version_string_to_integer(__version__) // 1000
+
     q = (
         pipeline_model
         .select(*select_fields)
         .join(Source)
-        .where(pipeline_model.v_astra == __version__)
+        .where(pipeline_model.v_astra_major_minor == current_version)
     )   
 
     if where: # Need to check, otherwise it requires AND with previous where.
@@ -282,13 +287,15 @@ def create_astra_all_star_product(
         )
         if distinct_spectrum_pk:
             q = q.distinct(spectrum_model.spectrum_pk)
+
+        current_version = version_string_to_integer(__version__) // 1000
         q = (
             q
             .join(pipeline_model, on=(pipeline_model.spectrum_pk == spectrum_model.spectrum_pk))
             .switch(spectrum_model)
             .join(Source, on=(Source.pk == spectrum_model.source_pk))
             #.where(spectrum_model.telescope.startswith(observatory))
-            .where(pipeline_model.v_astra == __version__)
+            .where(pipeline_model.v_astra_major_minor == current_version)
         )
         if where: # Need to check, otherwise it requires AND with previous where.
             q = q.where(where)
@@ -484,13 +491,15 @@ def create_astra_all_visit_product(
                 .join(drp_spectrum_model, JOIN.LEFT_OUTER, on=(spectrum_model.drp_spectrum_pk == drp_spectrum_model.spectrum_pk))
                 .switch(spectrum_model)
             )
+
+        current_version = version_string_to_integer(__version__) // 1000
             
         q = (
             q
             .join(pipeline_model, on=(pipeline_model.spectrum_pk == spectrum_model.spectrum_pk))
             .switch(spectrum_model)
             .join(Source, on=(Source.pk == spectrum_model.source_pk))
-            .where(pipeline_model.v_astra == __version__)
+            .where(pipeline_model.v_astra_major_minor == current_version)
             #.where(spectrum_model.telescope.startswith(observatory))
         )
         if where: # Need to check, otherwise it requires AND with previous where.

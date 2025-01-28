@@ -4,6 +4,7 @@ import concurrent.futures
 from typing import Iterable, Optional
 from astra.utils import log, list_to_dict
 from astra.models.aspcap import FerreCoarse
+from astra.models.aspcap import ASPCAP
 from astra.pipelines.aspcap.coarse import penalize_coarse_stellar_parameter_result
 from astra.pipelines.ferre.utils import parse_header_path
 from astra.pipelines.aspcap.continuum import MedianFilter
@@ -28,13 +29,13 @@ def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_pa
         this = FerreCoarse(**kwds)
         # TODO: Make the penalized rchi2 a property of the FerreCoarse class.
         this.penalized_rchi2 = penalize_coarse_stellar_parameter_result(this)
-
+            
         best = None
         try:
             existing = best_coarse_results[this.spectrum_pk]
         except KeyError:
             best = this
-        else:            
+        else:
             if this.penalized_rchi2 < existing.penalized_rchi2:
                 best = this
             elif this.penalized_rchi2 > existing.penalized_rchi2:
@@ -46,13 +47,19 @@ def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_pa
             if best is None:
                 log.error(f"Error for {kwds} - best is None. {existing} {existing.penalized_rchi2} {this} {this.penalized_rchi2}")
             else:
-                best.ferre_time_coarse = this.t_elapsed + existing.t_elapsed
+                best.ferre_time_coarse = (this.t_elapsed or np.nan) + (existing.t_elapsed or np.nan)
             
+            if not np.isfinite(this.penalized_rchi2):
+                best.flag_affected_by_timeout = True
+
         finally:            
             best_coarse_results[this.spectrum_pk] = best
 
 
     spectra_dict = { s.spectrum_pk: s for s in spectra }
+
+    no_good_result = set(spectra_dict.keys()).difference(best_coarse_results.keys())
+    coarse_failures = [ASPCAP.from_spectrum(spectra_dict[spectrum_pk], flag_no_good_coarse_result=True) for spectrum_pk in no_good_result]
 
     if pre_continuum is None:
         pre_computed_continuum = { s.spectrum_pk: 1 for s in spectra }
@@ -106,4 +113,4 @@ def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_pa
         )
         stellar_parameter_plans.append([group_task_kwds[header_path]])
 
-    return (stellar_parameter_plans, best_coarse_results)
+    return (stellar_parameter_plans, best_coarse_results, coarse_failures)

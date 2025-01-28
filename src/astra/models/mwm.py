@@ -1,30 +1,18 @@
-from peewee import (
-    AutoField,
-    FloatField,
-    BooleanField,
-    DateTimeField,
-    BigIntegerField,
-    IntegerField,
-    TextField,
-    ForeignKeyField,
-    DeferredForeignKey,
-    fn,
-)
 import datetime
 import numpy as np
 from astra import __version__
 from astra.utils import log
-
+from peewee import fn, DeferredForeignKey
 from playhouse.hybrid import hybrid_property
-
+from astra.fields import (
+    ArrayField, AutoField, FloatField, BooleanField, DateTimeField, BigIntegerField, IntegerField, TextField,    
+    ForeignKeyField, PixelArray, BitField, LogLambdaArrayAccessor
+)
 from astra.models.base import BaseModel
 from astra.models.boss import BossVisitSpectrum
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum, SpectrumMixin
-from astra.models.fields import PixelArray, BitField, LogLambdaArrayAccessor
 from astra.glossary import Glossary
-
-from playhouse.postgres_ext import ArrayField
 
 
 class MWMStarMixin(BaseModel):

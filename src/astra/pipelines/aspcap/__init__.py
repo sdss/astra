@@ -144,14 +144,15 @@ def aspcap(
         coarse_results, coarse_failures = _aspcap_stage("coarse", coarse_plans, *stage_args)    
         yield from coarse_failures
 
-
-        stellar_parameter_plans, best_coarse_results = plan_stellar_parameters_stage(
+        stellar_parameter_plans, best_coarse_results, more_coarse_failures = plan_stellar_parameters_stage(
             spectra=spectra, 
             parent_dir=parent_dir,
             coarse_results=coarse_results,
             weight_path=weight_path,
             n_threads=n_threads
         )
+        
+        yield from more_coarse_failures
         param_results, param_failures = _aspcap_stage("params", stellar_parameter_plans, *stage_args)
         yield from param_failures
 
@@ -300,6 +301,7 @@ def _aspcap_stage(
     current_processes, current_threads, currently_loading = (0, 0, 0)
     pre_processed_futures, ferre_futures, post_processed_futures = ([], [], [])
     n_started_executions, n_planned_executions, timings = (0, len(plans), {})
+    spectrum_primary_keys_causing_timeout = []
 
     at_capacity = lambda p, t, c: (
         p >= max_processes,
@@ -330,31 +332,34 @@ def _aspcap_stage(
             #do_logger("awaiting message")
             state = parent.recv()
 
-            delta_n_loading = state.get("n_loading", 0)
-            delta_n_complete = state.get("n_complete", 0)
-            currently_loading += delta_n_loading
-            current_threads += state.get("n_threads", 0)
-            current_processes += state.get("n_processes", 0)
-            do_logger(f"state: {state}")
-            if progress is not None:
-                progress_kwds = dict(advance=delta_n_complete)
-                task_name = get_task_name(state['input_nml_path'])
-                if delta_n_loading != 0:
-                    color = "yellow" if delta_n_loading > 0 else "white"
-                    progress_kwds.update(description=f"  [{color}]{task_name}")
-                progress.update(ferre_tasks[task_name], **progress_kwds)
-                progress.update(stage_task_id, advance=delta_n_complete)
+            if timeout_on_spectrum_pk := state.get("timeout_on_spectrum_pk", None):
+                spectrum_primary_keys_causing_timeout.append(timeout_on_spectrum_pk)
+            else:
+                delta_n_loading = state.get("n_loading", 0)
+                delta_n_complete = state.get("n_complete", 0)
+                currently_loading += delta_n_loading
+                current_threads += state.get("n_threads", 0)
+                current_processes += state.get("n_processes", 0)
+                do_logger(f"state: {state}")
+                if progress is not None:
+                    progress_kwds = dict(advance=delta_n_complete)
+                    task_name = get_task_name(state['input_nml_path'])
+                    if delta_n_loading != 0:
+                        color = "yellow" if delta_n_loading > 0 else "white"
+                        progress_kwds.update(description=f"  [{color}]{task_name}")
+                    progress.update(ferre_tasks[task_name], **progress_kwds)
+                    progress.update(stage_task_id, advance=delta_n_complete)
 
-            elif pb is not None:
-                worker_limit, thread_limit, loading_limit = at_capacity(current_processes, current_threads, currently_loading)
-                pb.set_description(
-                    f"ASPCAP {stage} ("
-                    f"thread {current_threads}/{max_threads}{'*' if thread_limit else ''}; "
-                    f"proc {current_processes}/{max_processes}{'*' if worker_limit else ''}; "
-                    f"load {currently_loading}/{max_concurrent_loading}{'*' if loading_limit else ''}; "
-                    f"job {n_started_executions}/{n_planned_executions})"
-                )
-                pb.update(delta_n_complete)
+                elif pb is not None:
+                    worker_limit, thread_limit, loading_limit = at_capacity(current_processes, current_threads, currently_loading)
+                    pb.set_description(
+                        f"ASPCAP {stage} ("
+                        f"thread {current_threads}/{max_threads}{'*' if thread_limit else ''}; "
+                        f"proc {current_processes}/{max_processes}{'*' if worker_limit else ''}; "
+                        f"load {currently_loading}/{max_concurrent_loading}{'*' if loading_limit else ''}; "
+                        f"job {n_started_executions}/{n_planned_executions})"
+                    )
+                    pb.update(delta_n_complete)
             #do_logger("ok")
 
         #do_logger("getting ferre future")
@@ -458,6 +463,11 @@ def _aspcap_stage(
                 do_logger("ok")
                 result["t_overhead"] = t_overhead
                 result["t_elapsed"] = np.sum(np.atleast_1d(t_elapsed))
+            
+            if result["spectrum_pk"] in spectrum_primary_keys_causing_timeout:
+                result["flag_caused_timeout"] = True
+                do_logger(f"assigned {result['spectrum_pk']} as causing timeout")
+            
             successes.append(result)
     
     do_logger(f"doing thing {post_processed_futures}")
@@ -480,6 +490,7 @@ def ferre(
     pipe,
     max_sigma_outlier=10,
     max_t_elapsed=600,
+    max_t_grid_load=600,
     communicate_on_start=True
 ):
 
@@ -506,7 +517,12 @@ def ferre(
         def monitor():
             while not ferre_hanging.is_set():
                 do_logger(f"monitor {max_sigma_outlier} {max_t_elapsed} {t_awaiting} in {cwd}")
-                if (max_sigma_outlier is not None or max_t_elapsed is not None) and t_awaiting:
+
+
+                if (
+                    ((max_sigma_outlier is not None or max_t_elapsed is not None) and t_awaiting)
+                or  (max_t_grid_load is not None and t_overhead is None and ((time() - t_start) > max_t_grid_load))
+                ):
                     n_await = len(t_awaiting)
                     n_execution = 0 if len(t_elapsed) == 0 else max(list(map(len, t_elapsed.values())))
                     n_complete = sum([len(v) == n_execution for v in t_elapsed.values()])
@@ -559,6 +575,15 @@ def ferre(
                             except:
                                 None
                             break
+                    elif (t_overhead is None and max_t_grid_load is not None and (time() - t_start) > max_t_grid_load):
+                        do_logger(f"hanging on grid load {input_nml_path}")
+                        ferre_hanging.set()
+                        try:
+                            process.kill()
+                        except:
+                            None
+                        break
+
                 sleep(1)
 
         monitor = threading.Thread(target=monitor)
@@ -608,9 +633,10 @@ def ferre(
             fp.write(stderr)
 
         if ferre_hanging.is_set():
-            if is_list_mode:
-                n_execution = 0 if len(t_elapsed) == 0 else max(list(map(len, t_elapsed.values())))
-                n_spectra_done_in_last_execution = len([v for v in t_elapsed.values() if len(v) == n_execution])
+            n_execution = 0 if len(t_elapsed) == 0 else max(list(map(len, t_elapsed.values())))
+            n_spectra_done_in_last_execution = len([v for v in t_elapsed.values() if len(v) == n_execution])
+
+            if is_list_mode and n_spectra_done_in_last_execution > 0:
                 pipe.send(dict(input_nml_path=input_nml_path, n_complete=-n_spectra_done_in_last_execution))
 
                 with open(input_nml_path, "r") as fp:
@@ -645,22 +671,27 @@ def ferre(
                 for k, v in this_t_elapsed.items():
                     t_elapsed.setdefault(k, [])
                     t_elapsed[k].extend(v)
-                
-            """
+            
             else:
-                if new_input_nml_path is not None:                    
-                    debug(f"doing new thing for {new_input_nml_path}, {exclude_indices}")
-                    pipe.send(dict(input_nml_path=input_nml_path, n_threads=-n_threads)) 
-                    foo = ferre(new_input_nml_path, cwd, n_obj - n_complete + len(ignored), n_threads, pipe)
-                    # Merge results of partials together.
-                    return foo
-            """
-        
-        else:
-            # Just kill the process. Don't bother with the failed things.
-            # TODO: Send back which items we were waiting on at the time, so we can mark them as the problematic ones.
-            do_logger(f"hanging on {input_nml_path} {cwd} {return_code} {t_overhead} {t_elapsed}")
-            do_logger(t_awaiting)
+                # Just kill the process. Don't bother with the failed things.
+                # TODO: Send back which items we were waiting on at the time, so we can mark them as the problematic ones.
+                do_logger(f"hanging on {input_nml_path} {cwd} {return_code} {t_overhead} {t_elapsed}")
+                pipe.send(dict(input_nml_path=input_nml_path, n_threads=-n_threads_to_release, n_complete=n_obj - n_complete, n_processes=-1))
+                # Send back the spectrum causing the hanging.
+                
+                try:
+                    parameter_input_path = os.path.join(os.path.dirname(input_nml_path), "parameter.input")
+                    input_names = np.loadtxt(parameter_input_path, usecols=(0, ), dtype=str)
+            
+                    for index_1_based in t_awaiting.keys():
+                        parsed = parse_ferre_spectrum_name(input_names[int(index_1_based) - 1])
+                        pipe.send(dict(timeout_on_spectrum_pk=parsed["spectrum_pk"]))
+
+                except:
+                    None
+
+                do_logger(t_awaiting)
+                do_logger(f"done hanging")
 
         # Set ferre_hanging to kill the daemon thread.
         ferre_hanging.set()
