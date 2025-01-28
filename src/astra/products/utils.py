@@ -302,8 +302,9 @@ def get_binary_table_hdu(
             continue
 
     data = { name: [] for name in fields.keys() }
+    total = 0
     for result in q.iterator():
-        
+        total += 1
         if isinstance(result, dict):        
             for name, value in result.items():
                 if value is None:
@@ -315,6 +316,8 @@ def get_binary_table_hdu(
                 if value is None:
                     value = get_fill_value(field, None)
                 data[name].append(value)
+
+    log.info(f"Creating binary table HDU with {total} rows.")
     
     # Create the columns.
     original_names, columns, = ({}, [])

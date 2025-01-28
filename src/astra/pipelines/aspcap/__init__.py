@@ -140,19 +140,17 @@ def aspcap(
         for spectrum in spectra_with_no_initial_guess:
             yield ASPCAP.from_spectrum(spectrum, flag_no_suitable_initial_guess=True)
 
-
         coarse_results, coarse_failures = _aspcap_stage("coarse", coarse_plans, *stage_args)    
         yield from coarse_failures
 
-        stellar_parameter_plans, best_coarse_results, more_coarse_failures = plan_stellar_parameters_stage(
+        stellar_parameter_plans, best_coarse_results = plan_stellar_parameters_stage(
             spectra=spectra, 
             parent_dir=parent_dir,
             coarse_results=coarse_results,
             weight_path=weight_path,
             n_threads=n_threads
         )
-        
-        yield from more_coarse_failures
+
         param_results, param_failures = _aspcap_stage("params", stellar_parameter_plans, *stage_args)
         yield from param_failures
 
@@ -166,105 +164,110 @@ def aspcap(
         )            
         
         abundance_results, abundance_failures = _aspcap_stage("abundances", abundance_plans, *stage_args, ferre_kwds=dict(max_sigma_outlier=10, max_t_elapsed=30))
+
+        # Bring it all together baby.
+        result_kwds = {}
+        for r in param_results:
+            coarse = best_coarse_results[r["spectrum_pk"]]
+            v_sini = 10**(r.get("log10_v_sini", np.nan))
+            e_v_sini = r.get("e_log10_v_sini", np.nan) * v_sini * np.log(10)
+            v_micro = 10**(r.get("log10_v_micro", np.nan))
+            e_v_micro = r.get("e_log10_v_micro", np.nan) * v_micro * np.log(10)
+            r.update(
+                raw_teff=r["teff"],
+                raw_e_teff=r["e_teff"],
+                raw_logg=r["logg"],
+                raw_e_logg=r["e_logg"],
+                raw_v_micro=v_micro,
+                raw_e_v_micro=e_v_micro,
+                raw_v_sini=v_sini,
+                raw_e_v_sini=e_v_sini,
+                raw_m_h_atm=r["m_h"],
+                raw_e_m_h_atm=r["e_m_h"],
+                raw_alpha_m_atm=r.get("alpha_m", np.nan),
+                raw_e_alpha_m_atm=r.get("e_alpha_m", np.nan),
+                raw_c_m_atm=r.get("c_m", np.nan),
+                raw_e_c_m_atm=r.get("e_c_m", np.nan),
+                raw_n_m_atm=r.get("n_m", np.nan),
+                raw_e_n_m_atm=r.get("e_n_m", np.nan),
+                m_h_atm=r["m_h"],
+                e_m_h_atm=r["e_m_h"],
+                alpha_m_atm=r.get("alpha_m", np.nan),
+                e_alpha_m_atm=r.get("e_alpha_m", np.nan),
+                c_m_atm=r.get("c_m", np.nan),
+                e_c_m_atm=r.get("e_c_m", np.nan),
+                n_m_atm=r.get("n_m", np.nan),
+                e_n_m_atm=r.get("e_n_m", np.nan),
+                v_sini=v_sini,
+                e_v_sini=e_v_sini,
+                v_micro=v_micro,
+                e_v_micro=e_v_micro,
+                coarse_teff=coarse.teff,
+                coarse_logg=coarse.logg,
+                coarse_v_micro=10**(coarse.log10_v_micro or np.nan),
+                coarse_v_sini=10**(coarse.log10_v_sini or np.nan),
+                coarse_m_h_atm=coarse.m_h,
+                coarse_alpha_m_atm=coarse.alpha_m,
+                coarse_c_m_atm=coarse.c_m,
+                coarse_n_m_atm=coarse.n_m,
+                coarse_rchi2=coarse.rchi2,
+                coarse_penalized_rchi2=coarse.penalized_rchi2,
+                coarse_result_flags=coarse.ferre_flags,
+                coarse_short_grid_name=coarse.short_grid_name,
+                initial_teff=coarse.initial_teff,
+                initial_logg=coarse.initial_logg,
+                initial_v_micro=10**(coarse.initial_log10_v_micro or np.nan),
+                initial_v_sini=10**(coarse.initial_log10_v_sini or np.nan),
+                initial_m_h_atm=coarse.initial_m_h,
+                initial_alpha_m_atm=coarse.initial_alpha_m,
+                initial_c_m_atm=coarse.initial_c_m,
+                initial_n_m_atm=coarse.initial_n_m,    
+                ferre_time_coarse=coarse.t_elapsed,
+                ferre_time_params=r["t_elapsed"],
+                pwd=parent_dir,
+            )
+            result_kwds[r["spectrum_pk"]] = r
+        
+        for r in abundance_results:
+            species = get_species(r["weight_path"])
+            label = species.lower() if species.lower() == "c_12_13" else f"{species.lower()}_h"
+
+            for key in ("m_h", "alpha_m", "c_m", "n_m"):
+                if not r.get(f"flag_{key}_frozen", False):
+                    break
+            else:
+                raise ValueError(f"Can't figure out which label to use")
+
+            value, e_value = (r[key], r[f"e_{key}"])
+
+            if not ABUNDANCE_RELATIVE_TO_H[species] and value is not None:
+                # [X/M] = [X/H] - [M/H]
+                # [X/H] = [X/M] + [M/H]                
+                value += result_kwds[r["spectrum_pk"]]["m_h_atm"]
+                e_value = np.sqrt(e_value**2 + result_kwds[r["spectrum_pk"]]["e_m_h_atm"]**2)
+                
+            kwds = {
+                f"{label}_rchi2": r["rchi2"],
+                f"{label}": value,
+                f"e_{label}": e_value,
+                f"raw_{label}": value,
+                f"raw_e_{label}": e_value,
+                f"{label}_flags": FerreChemicalAbundances(**r).ferre_flags     
+            }            
+            result_kwds[r["spectrum_pk"]].update(kwds)
+        
+        spectra_by_pk = {s.spectrum_pk: s for s in spectra}
+        for spectrum_pk, kwds in result_kwds.items():
+            yield ASPCAP.from_spectrum(spectra_by_pk[spectrum_pk], **kwds)
+
+        f = np.random.randn()
+        do_logger(f"{f:.2f} closing parent")
         parent.close()
+        do_logger(f"{f:.2f} closed parent. closing child")
         child.close()
+        do_logger(f"{f:.2f} closing child. shutting down executor")
         executor.shutdown(wait=False, cancel_futures=True)
-
-    # Bring it all together baby.
-    result_kwds = {}
-    for r in param_results:
-        coarse = best_coarse_results[r["spectrum_pk"]]
-        v_sini = 10**(r.get("log10_v_sini", np.nan))
-        e_v_sini = r.get("e_log10_v_sini", np.nan) * v_sini * np.log(10)
-        v_micro = 10**(r.get("log10_v_micro", np.nan))
-        e_v_micro = r.get("e_log10_v_micro", np.nan) * v_micro * np.log(10)
-        r.update(
-            raw_teff=r["teff"],
-            raw_e_teff=r["e_teff"],
-            raw_logg=r["logg"],
-            raw_e_logg=r["e_logg"],
-            raw_v_micro=v_micro,
-            raw_e_v_micro=e_v_micro,
-            raw_v_sini=v_sini,
-            raw_e_v_sini=e_v_sini,
-            raw_m_h_atm=r["m_h"],
-            raw_e_m_h_atm=r["e_m_h"],
-            raw_alpha_m_atm=r.get("alpha_m", np.nan),
-            raw_e_alpha_m_atm=r.get("e_alpha_m", np.nan),
-            raw_c_m_atm=r.get("c_m", np.nan),
-            raw_e_c_m_atm=r.get("e_c_m", np.nan),
-            raw_n_m_atm=r.get("n_m", np.nan),
-            raw_e_n_m_atm=r.get("e_n_m", np.nan),
-            m_h_atm=r["m_h"],
-            e_m_h_atm=r["e_m_h"],
-            alpha_m_atm=r.get("alpha_m", np.nan),
-            e_alpha_m_atm=r.get("e_alpha_m", np.nan),
-            c_m_atm=r.get("c_m", np.nan),
-            e_c_m_atm=r.get("e_c_m", np.nan),
-            n_m_atm=r.get("n_m", np.nan),
-            e_n_m_atm=r.get("e_n_m", np.nan),
-            v_sini=v_sini,
-            e_v_sini=e_v_sini,
-            v_micro=v_micro,
-            e_v_micro=e_v_micro,
-            coarse_teff=coarse.teff,
-            coarse_logg=coarse.logg,
-            coarse_v_micro=10**(coarse.log10_v_micro or np.nan),
-            coarse_v_sini=10**(coarse.log10_v_sini or np.nan),
-            coarse_m_h_atm=coarse.m_h,
-            coarse_alpha_m_atm=coarse.alpha_m,
-            coarse_c_m_atm=coarse.c_m,
-            coarse_n_m_atm=coarse.n_m,
-            coarse_rchi2=coarse.rchi2,
-            coarse_penalized_rchi2=coarse.penalized_rchi2,
-            coarse_result_flags=coarse.ferre_flags,
-            coarse_short_grid_name=coarse.short_grid_name,
-            initial_teff=coarse.initial_teff,
-            initial_logg=coarse.initial_logg,
-            initial_v_micro=10**(coarse.initial_log10_v_micro or np.nan),
-            initial_v_sini=10**(coarse.initial_log10_v_sini or np.nan),
-            initial_m_h_atm=coarse.initial_m_h,
-            initial_alpha_m_atm=coarse.initial_alpha_m,
-            initial_c_m_atm=coarse.initial_c_m,
-            initial_n_m_atm=coarse.initial_n_m,    
-            ferre_time_coarse=coarse.t_elapsed,
-            ferre_time_params=r["t_elapsed"],
-            pwd=parent_dir,
-        )
-        result_kwds[r["spectrum_pk"]] = r
-    
-    for r in abundance_results:
-        species = get_species(r["weight_path"])
-        label = species.lower() if species.lower() == "c_12_13" else f"{species.lower()}_h"
-
-        for key in ("m_h", "alpha_m", "c_m", "n_m"):
-            if not r.get(f"flag_{key}_frozen", False):
-                break
-        else:
-            raise ValueError(f"Can't figure out which label to use")
-
-        value, e_value = (r[key], r[f"e_{key}"])
-
-        if not ABUNDANCE_RELATIVE_TO_H[species] and value is not None:
-            # [X/M] = [X/H] - [M/H]
-            # [X/H] = [X/M] + [M/H]                
-            value += result_kwds[r["spectrum_pk"]]["m_h_atm"]
-            e_value = np.sqrt(e_value**2 + result_kwds[r["spectrum_pk"]]["e_m_h_atm"]**2)
-            
-        kwds = {
-            f"{label}_rchi2": r["rchi2"],
-            f"{label}": value,
-            f"e_{label}": e_value,
-            f"raw_{label}": value,
-            f"raw_e_{label}": e_value,
-            f"{label}_flags": FerreChemicalAbundances(**r).ferre_flags     
-        }            
-        result_kwds[r["spectrum_pk"]].update(kwds)
-    
-    spectra_by_pk = {s.spectrum_pk: s for s in spectra}
-    for spectrum_pk, kwds in result_kwds.items():
-        yield ASPCAP.from_spectrum(spectra_by_pk[spectrum_pk], **kwds)
-
+        do_logger(f"{f:.2f} shut down executor")
 
 def _aspcap_stage(
     stage, 
@@ -512,7 +515,7 @@ def ferre(
             else:
                 command.append(input_nml_path)
         
-        process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, close_fds=True)
 
         def monitor():
             while not ferre_hanging.is_set():

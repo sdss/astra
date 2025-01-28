@@ -24,7 +24,7 @@ def ignore_field_name_callable(field_name):
 def create_astra_best_product(
     where=None,
     limit=None,
-    output_template="astraFrankenstein-{version}.fits",
+    output_template="astraFrankenstein-{version_major_minor}.fits",
     ignore_field_name_callable=ignore_field_name_callable,
     name_conflict_strategy=None,
     distinct_spectrum_pk=True,
@@ -76,7 +76,13 @@ def create_astra_best_product(
         
     from astra.models.best import MWMBest as pipeline_model
 
-    path = get_path(output_template.format(version=__version__), gzip)
+    path = get_path(
+        output_template.format(
+            version=__version__,
+            version_major_minor=".".join(__version__.split(".")[:2])
+        ), 
+        gzip
+    )
     check_path(path, overwrite)
     
     kwds = dict(
@@ -153,7 +159,7 @@ def create_all_star_product(
     apogee_where=None,
     boss_spectrum_model=BossCombinedSpectrum,
     apogee_spectrum_model=ApogeeCoaddedSpectrumInApStar,
-    output_template="astraAllStar{pipeline}-{version}.fits",
+    output_template="astraAllStar{pipeline}-{version_major_minor}.fits",
     ignore_field_name_callable=ignore_field_name_callable,
     name_conflict_strategy=None,
     distinct_spectrum_pk=True,
@@ -216,7 +222,14 @@ def create_all_star_product(
     pipeline_model = resolve_model(pipeline_model)
     pipeline = pipeline_model.__name__
 
-    path = get_path(output_template.format(pipeline=pipeline, version=__version__), gzip)
+    path = get_path(
+        output_template.format(
+            pipeline=pipeline, 
+            version=__version__,
+            version_major_minor=".".join(__version__.split(".")[:2])
+        ), 
+        gzip
+    )
     check_path(path, overwrite)
 
     pipeline_model = resolve_model(pipeline_model)
@@ -313,7 +326,14 @@ def create_all_star_product(
         )
         hdus.append(hdu)
 
-    written_path = get_path(output_template.format(pipeline=pipeline, version=__version__), False)
+    written_path = get_path(
+        output_template.format(
+            pipeline=pipeline, 
+            version=__version__,
+            version_major_minor=".".join(__version__.split(".")[:2])
+        ),
+        False
+    )
     hdu_list = fits.HDUList(hdus)
     hdu_list.writeto(written_path, overwrite=overwrite)
     if gzip:
@@ -331,7 +351,7 @@ def create_all_visit_product(
     apogee_where=None,
     boss_spectrum_model=BossVisitSpectrum,
     apogee_spectrum_model=ApogeeVisitSpectrumInApStar,
-    output_template="astraAllVisit{pipeline}-{version}.fits",    
+    output_template="astraAllVisit{pipeline}-{version_major_minor}.fits",    
     ignore_field_name_callable=ignore_field_name_callable,
     name_conflict_strategy=None,
     distinct_spectrum_pk=True,
@@ -402,7 +422,14 @@ def create_all_visit_product(
     pipeline_model = resolve_model(pipeline_model)
     pipeline = pipeline_model.__name__
 
-    path = get_path(output_template.format(pipeline=pipeline, version=__version__), gzip)
+    path = get_path(
+        output_template.format(
+            pipeline=pipeline, 
+            version=__version__,
+            version_major_minor=".".join(__version__.split(".")[:2])
+        ), 
+        gzip
+    )
     check_path(path, overwrite)
 
     pipeline_model = resolve_model(pipeline_model)

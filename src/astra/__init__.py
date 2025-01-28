@@ -1,8 +1,8 @@
+from collections import Counter
 from inspect import isgeneratorfunction
 from decorator import decorator
-from peewee import IntegrityError, JOIN
+from peewee import IntegrityError, ProgrammingError, JOIN
 from sdsstools.configuration import get_config
-
 from astra.utils import log, Timer, resolve_task, resolve_model, get_return_type, expects_spectrum_types, version_string_to_integer, get_task_group_by_string
 
 NAME = "astra"
@@ -106,7 +106,7 @@ def task(
                     raise
 
 
-def bulk_insert_or_replace_pipeline_results(results):
+def bulk_insert_or_replace_pipeline_results(results, avoid_integrity_exceptions=True):
     """
     Insert a batch of results to the database.
     
@@ -126,23 +126,47 @@ def bulk_insert_or_replace_pipeline_results(results):
 
     # We cannot guarantee that the order of the RETURNING clause will be the same as the input order.
     # We need the `task_pk` generated, and we need (`spectrum_pk`, `v_astra`) to map to the results list, and we need
-    # `created` so that we can attach it to the object.        
-    q = (
-        model
-        .insert_many(r.__data__ for r in results)
-        .returning(
-            model.task_pk, 
-            model.spectrum_pk, 
-            model.v_astra, 
-            model.created
+    # `created` so that we can attach it to the object.
+    try:
+        q = (
+            model
+            .insert_many(r.__data__ for r in results)
+            .returning(
+                model.task_pk, 
+                model.spectrum_pk, 
+                model.v_astra, 
+                model.created
+            )
+            .on_conflict(
+                conflict_target=[model.spectrum_pk, model.v_astra_major_minor],
+                preserve=preserve
+            )
+            .tuples()
+            .execute()
         )
-        .on_conflict(
-            conflict_target=[model.spectrum_pk, model.v_astra_major_minor],
-            preserve=preserve
-        )
-        .tuples()
-        .execute()
-    )
+    except ProgrammingError:
+        # This could happen if we are trying to insert the same record twice.
+        offending_spectrum_pks = [spectrum_pk for spectrum_pk, count in Counter([r.spectrum_pk for r in results]).items() if count > 1]
+        if len(offending_spectrum_pks) > 1:
+            log.error(f"Tried to insert the same record twice:\n" + "\n".join([f"\t{spectrum_pk}, {v_astra_major_minor}: {count}" for (spectrum_pk, v_astra_major_minor), count in offending_spectrum_pks]))
+            for r in results:
+                if r.spectrum_pk in offending_spectrum_pks:
+                    log.error(f"Offending record {r.spectrum_pk}: {r.__data__}")
+            
+            if avoid_integrity_exceptions:
+                log.error("Going to ignore the second records and try again.")
+                spectrum_pks = set()
+                _results = []
+                for r in results:
+                    if r.spectrum_pk in spectrum_pks:
+                        continue
+                    spectrum_pks.add(r.spectrum_pk)
+                    _results.append(r)
+
+                return bulk_insert_or_replace_pipeline_results(_results, avoid_integrity_exceptions=False)
+            else:
+                raise
+
     results_dict = {(r.spectrum_pk, r.v_astra // 1000): r for r in results}
     for task_pk, spectrum_pk, v_astra, created in q:
         r = results_dict.pop((spectrum_pk, v_astra // 1000))

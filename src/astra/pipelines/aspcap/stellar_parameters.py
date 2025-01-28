@@ -58,8 +58,8 @@ def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_pa
 
     spectra_dict = { s.spectrum_pk: s for s in spectra }
 
-    no_good_result = set(spectra_dict.keys()).difference(best_coarse_results.keys())
-    coarse_failures = [ASPCAP.from_spectrum(spectra_dict[spectrum_pk], flag_no_good_coarse_result=True) for spectrum_pk in no_good_result]
+    #no_good_result = set(spectra_dict.keys()).difference(best_coarse_results.keys())
+    #coarse_failures = [ASPCAP.from_spectrum(spectra_dict[spectrum_pk], flag_no_good_coarse_result=True) for spectrum_pk in no_good_result]
 
     if pre_continuum is None:
         pre_computed_continuum = { s.spectrum_pk: 1 for s in spectra }
@@ -113,4 +113,4 @@ def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_pa
         )
         stellar_parameter_plans.append([group_task_kwds[header_path]])
 
-    return (stellar_parameter_plans, best_coarse_results, coarse_failures)
+    return (stellar_parameter_plans, best_coarse_results)
