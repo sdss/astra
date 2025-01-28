@@ -14,6 +14,8 @@ class Product(str, Enum):
     mwmAllStar = "mwmAllStar"
     mwmAllVisit = "mwmAllVisit"
     astraAllStarASPCAP = "astraAllStarASPCAP"
+    astraAllStarAPOGEENet = "astraAllStarAPOGEENet"
+    astraAllVisitAPOGEENet = "astraAllVisitAPOGEENet"
 
 @app.command()
 def version():
@@ -33,20 +35,34 @@ def create(
         create_mwm_all_star_product,
         create_mwm_all_visit_product
     )
-    from astra.products.pipeline_summary import create_astra_all_star_product
-    from astra.models.apogee import ApogeeCoaddedSpectrumInApStar
+    from astra.products.pipeline_summary import create_all_star_product, create_all_visit_product
+    from astra.models.apogee import ApogeeCoaddedSpectrumInApStar, ApogeeVisitSpectrumInApStar
     mapping = (
         {
             Product.mwmTargets: (create_mwm_targets_product, {}),
             Product.mwmAllVisit: (create_mwm_all_visit_product, {}),
             Product.mwmAllStar: (create_mwm_all_star_product, {}),
             Product.astraAllStarASPCAP: (
-                create_astra_all_star_product, 
+                create_all_star_product, 
                 {
                     "pipeline_model": "aspcap.ASPCAP",
                     "apogee_spectrum_model": ApogeeCoaddedSpectrumInApStar
                 }
             ),
+            Product.astraAllStarAPOGEENet: (
+                create_all_star_product,
+                {
+                    "pipeline_model": "apogeenet.ApogeeNet",
+                    "apogee_spectrum_model": ApogeeCoaddedSpectrumInApStar
+                }
+            ),
+            Product.astraAllVisitAPOGEENet: (
+                create_all_visit_product,
+                {
+                    "pipeline_model": "apogeenet.ApogeeNet",
+                    "apogee_spectrum_model": ApogeeVisitSpectrumInApStar
+                }
+            )
         }
     )    
 
