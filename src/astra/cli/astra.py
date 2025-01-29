@@ -109,6 +109,10 @@ def srun(
     model, q = next(generate_queries_for_task(task, model, limit))
 
     total = q.count()
+    if total == 0:
+        log.info(f"No {model.__name__} spectra to process.")
+        sys.exit(0)
+
     workers = nodes * procs
     limit = int(np.ceil(total / workers))
     today = datetime.now().strftime("%Y-%m-%d")
