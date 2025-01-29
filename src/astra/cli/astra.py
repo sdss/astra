@@ -128,7 +128,7 @@ def srun(
 
         # Load a whole bunch of sruns in processes
         futures = {}
-        with TemporaryDirectory(dir=expand_path("$PBS"), prefix=f"{task}-{today}-", delete=False) as td:
+        with TemporaryDirectory(dir=expand_path("$PBS"), prefix=f"{task}-{today}-") as td:
             p.print(f"Working directory: {td}")
             for n in range(nodes):
                 job_name = f"{task}" + (f"-{n}" if nodes > 1 else "")
