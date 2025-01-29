@@ -680,7 +680,8 @@ def ferre(
                 # Just kill the process. Don't bother with the failed things.
                 # TODO: Send back which items we were waiting on at the time, so we can mark them as the problematic ones.
                 do_logger(f"hanging on {input_nml_path} {cwd} {return_code} {t_overhead} {t_elapsed}")
-                pipe.send(dict(input_nml_path=input_nml_path, n_threads=-n_threads_to_release, n_complete=n_obj - n_complete, n_processes=-1))
+                # Note that we don't need to send n_processes=-1 because we already sent it above before we wrote out stdout/stderr
+                pipe.send(dict(input_nml_path=input_nml_path, n_threads=-n_threads_to_release, n_complete=n_obj - n_complete))
                 # Send back the spectrum causing the hanging.
                 
                 try:
