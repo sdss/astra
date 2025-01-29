@@ -547,10 +547,18 @@ def create_all_visit_product(
         )
         hdus.append(hdu)
 
+    written_path = get_path(
+        output_template.format(
+            pipeline=pipeline, 
+            version=__version__,
+            version_major_minor=".".join(__version__.split(".")[:2])
+        ),
+        False
+    )
     hdu_list = fits.HDUList(hdus)
-    hdu_list.writeto(path, overwrite=overwrite)
+    hdu_list.writeto(written_path, overwrite=overwrite)
     if gzip:
-        os.system(f"gzip -f {path}")
-        path += ".gz"
+        os.system(f"gzip -f {written_path}")
+        written_path += ".gz"
     
-    return (path, hdu_list) if full_output else path    
+    return (written_path, hdu_list) if full_output else written_path    
