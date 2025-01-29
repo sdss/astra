@@ -25,9 +25,10 @@ from astra.pipelines.aspcap.abundances import plan_abundances_stage, get_species
 #from astra.pipelines.aspcap.stellar_parameters import stellar_parameters, post_stellar_parameters
 from astra.pipelines.aspcap.utils import ABUNDANCE_RELATIVE_TO_H
 
+RAND = np.random.randint(0, 1000)
 
 def do_logger(*foo):
-    with open("astra.log", "a") as fp:
+    with open(f"{RAND}.log", "a") as fp:
         fp.write(" ".join(map(str, foo)) + "\n")
 
 def _is_list_mode(path):
@@ -330,7 +331,7 @@ def _aspcap_stage(
 
     def check_capacity(current_processes, current_threads, currently_loading):
 
-        #do_logger("doing poll check")
+        do_logger(f"check capacity {current_processes} {current_threads} {currently_loading} {len(ferre_futures)}")
         while parent.poll(): 
             #do_logger("awaiting message")
             state = parent.recv()
@@ -444,7 +445,7 @@ def _aspcap_stage(
             n_started_executions += 1
 
     # All submitted. Now wait for them to finish.
-    while current_processes or len(ferre_futures) > 0:
+    while len(ferre_futures) > 0:
         current_processes, current_threads, currently_loading = check_capacity(current_processes, current_threads, currently_loading)
 
     do_logger(f"waiting for ferre futures {len(ferre_futures)} {len(post_processed_futures)}")
