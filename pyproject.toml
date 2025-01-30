@@ -31,7 +31,8 @@ dependencies = [
   "h5py",
   "thread",
   "typer",
-  "dustmaps"
+  "dustmaps",
+  "fitsio"
 ]
 #requires-python = ">= 3.9"
 

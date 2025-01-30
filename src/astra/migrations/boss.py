@@ -22,6 +22,11 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
     Migrate all new BOSS visit information (`specFull` files) stored in the spAll file, which is generated
     by the SDSS-V BOSS data reduction pipeline.
     """
+    if queue is None:
+        class NoQueue:
+            def put(self, *args, **kwargs):
+                pass
+        queue = NoQueue()
 
     from astra.models.base import database
     from astra.models.boss import BossVisitSpectrum
@@ -93,11 +98,9 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
         "delta_ra": lambda x: list(map(float, x.split())),
         "delta_dec": lambda x: list(map(float, x.split()))
     }
-
-    #with fits.open(path) as hdul:
-    #queue.put(dict(de))
-    with fits.open(path) as hdul:
-
+    columns = list(translations.keys())
+    
+    with fitsio.read(path, ext=1, columns=columns) as spAll:
         most_recent_mjd = 0
         if incremental:
             most_recent = (
@@ -111,7 +114,7 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
                 most_recent_mjd = most_recent.mjd
                 queue.put(dict(total=None, description=f"Filtering BOSS {run2d} spectra since {most_recent_mjd}"))
 
-        spAll = hdul[1].data
+
         mask = spAll["MJD"] >= most_recent_mjd
 
         if limit is not None:
