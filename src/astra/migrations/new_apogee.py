@@ -331,8 +331,8 @@ def migrate_apogee_visits(apred: str, queue=None, batch_size: int = 1000, increm
 
     max_rv_visit_pk, max_visit_pk = (0, 0)
     if incremental:
-        max_rv_visit_pk += RvVisit.select(fn.MAX(RvVisit.pk)).scalar() or 0
-        max_visit_pk += Visit.select(fn.MAX(Visit.pk)).scalar() or 0
+        max_rv_visit_pk += ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.rv_visit_pk)).scalar() or 0
+        max_visit_pk += ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.spectrum_pk)).scalar() or 0
 
     # Ingest most recent RV measurements for each star.
     # TODO: Should this really be by `starver`, or should we do it by `created`?
@@ -506,7 +506,7 @@ def migrate_apogee_visits(apred: str, queue=None, batch_size: int = 1000, increm
         .where(Source.sdss_id.in_(list(new_source_data.keys())))
         .tuples()
     )
-    sdss_id_to_source_pk.update({ sdss_id: pk for pk, sdsss_id in q.iterator() })
+    sdss_id_to_source_pk.update({ sdss_id: pk for pk, sdss_id in q.iterator() })
 
     # Assign source primary keys to the spectrum data.
     for r in spectrum_data:
