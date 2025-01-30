@@ -225,7 +225,10 @@ def _pre_process_ferre(
         batch_initial_parameters.append(initial_parameters)
         index += 1
 
-    assert np.all(np.array(batch_e_flux) > 0)
+    if np.any(batch_e_flux < 0):
+        bad = batch_e_flux < 0
+        batch_e_flux[bad] = LARGE        
+        log.warning(f"{np.sum(bad):.0} pixels had error values below 0!")
     
     #if len(skipped) > 0:
     #    log.warning(f"Skipping {len(skipped)} spectra ({100 * len(skipped) / len(spectra):.0f}%; of {len(spectra)})")
