@@ -66,6 +66,9 @@ def plan_abundances_stage(
             continuum_cache[prefix]
         except:
             P = 7514
+            for basename in ("rectified_model_flux", "model_flux", "rectified_flux"):
+                os.system(f"vaffoff {prefix}/parameter.input {prefix}/{basename}.output")
+
             rectified_model_flux = np.atleast_2d(np.loadtxt(f"{prefix}/rectified_model_flux.output", usecols=range(1, 1+P)))
             model_flux = np.atleast_2d(np.loadtxt(f"{prefix}/model_flux.output", usecols=range(1, 1+P)))
             rectified_flux = np.atleast_2d(np.loadtxt(f"{prefix}/rectified_flux.output", usecols=range(1, 1+P)))
