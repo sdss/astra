@@ -397,7 +397,7 @@ def migrate(
                 process_task(migrate_twomass_photometry, description="Ingesting 2MASS photometry"),
                 process_task(migrate_unwise_photometry, description="Ingesting unWISE photometry"),
                 process_task(migrate_glimpse_photometry, description="Ingesting GLIMPSE photometry"),
-                #process_task(migrate_specfull_metadata_from_image_headers, description="Ingesting specFull metadata"),
+                process_task(migrate_specfull_metadata_from_image_headers, description="Ingesting specFull metadata"),
 
 
                 process_task(migrate_dithered_metadata, description="Ingesting APOGEE dithered metadata"),
@@ -408,7 +408,7 @@ def migrate(
                 process_task(fix_unsigned_apogee_flags, description="Fix unsigned APOGEE flags"),
                 process_task(migrate_targeting_cartons, description="Ingesting targeting cartons"),
                 process_task(compute_f_night_time_for_apogee_visits, description="Computing f_night for APOGEE visits"),                        
-                #process_task(update_visit_spectra_counts, description="Updating visit spectra counts"),               
+                process_task(update_visit_spectra_counts, description="Updating visit spectra counts"),               
             ]
             # reddening needs unwise, 2mass, glimpse, 
             task_gaia, task_twomass, task_unwise, task_glimpse, task_specfull, *_ = [t for p, t, q in ptq]

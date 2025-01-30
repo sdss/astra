@@ -495,6 +495,7 @@ def ferre(
     max_sigma_outlier=10,
     max_t_elapsed=600,
     max_t_grid_load=600,
+    max_t_communicate=600,
     communicate_on_start=True
 ):
 
@@ -505,7 +506,7 @@ def ferre(
         is_list_mode = _is_list_mode(input_nml_path)
 
         ferre_hanging = threading.Event()
-        stdout, n_complete, t_start, t_overhead, t_awaiting, t_elapsed, exclude_indices, n_threads_to_release = ([], 0, time(), None, {}, {}, [], max(0, n_threads))
+        stdout, n_complete, t_start, t_last_communication, t_overhead, t_awaiting, t_elapsed, exclude_indices, n_threads_to_release = ([], 0, time(), time(), None, {}, {}, [], max(0, n_threads))
 
         command = ["ferre.x"]
         if is_list_mode:
@@ -521,6 +522,15 @@ def ferre(
         def monitor():
             while not ferre_hanging.is_set():
                 do_logger(f"monitor {max_sigma_outlier} {max_t_elapsed} {t_awaiting} in {cwd}")
+
+                if (max_t_communicate is not None and (time() - t_last_communication) > max_t_communicate):
+                    do_logger(f"hanging no communication")        
+                    ferre_hanging.set()
+                    try:
+                        process.kill()
+                    except:
+                        None
+                    break                    
 
 
                 if (
@@ -598,12 +608,15 @@ def ferre(
             line = process.stdout.readline()
 
             if match := REGEX_NEXT_OBJECT.search(line):
+                t_last_communication = time()
                 t_awaiting[int(match.group(1))] = -time()
                 if t_overhead is None:
                     t_overhead = time() - t_start
                     pipe.send(dict(input_nml_path=input_nml_path, n_loading=-1))
                                 
             if match := REGEX_COMPLETED.search(line):
+                t_last_communication = time()
+                
                 key = match.group(2)
                 t_elapsed.setdefault(key, [])
                 t_elapsed[key].append(t_awaiting.pop(int(match.group(1))) + time())
