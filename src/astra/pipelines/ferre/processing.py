@@ -225,6 +225,8 @@ def _pre_process_ferre(
         batch_initial_parameters.append(initial_parameters)
         index += 1
 
+
+    batch_e_flux = np.array(batch_e_flux)
     if np.any(batch_e_flux < 0):
         bad = batch_e_flux < 0
         batch_e_flux[bad] = LARGE        
@@ -235,7 +237,6 @@ def _pre_process_ferre(
 
     if not batch_initial_parameters:
         return (pwd, 0, 0, skipped)
-
 
 
     synthfile_full_path = control_kwds["synthfile(1)"]

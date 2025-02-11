@@ -99,7 +99,7 @@ def srun(
     import concurrent.futures
     import subprocess
     from datetime import datetime
-    from tempfile import TemporaryDirectory
+    from tempfile import TemporaryDirectory, mkdtemp
     from peewee import JOIN
     from importlib import import_module
     from astra import models, __version__, generate_queries_for_task
@@ -128,60 +128,60 @@ def srun(
 
         # Load a whole bunch of sruns in processes
         futures = {}
-        with TemporaryDirectory(dir=expand_path("$PBS"), prefix=f"{task}-{today}-") as td:
-            p.print(f"Working directory: {td}")
-            for n in range(nodes):
-                job_name = f"{task}" + (f"-{n}" if nodes > 1 else "")
-                # TODO: Let's not hard code this here.
-                commands = ["export CLUSTER=1"]
-                for page in range(n * procs, (n + 1) * procs):
-                    commands.append(f"astra run {task} {model.__name__} --limit {limit} --page {page + 1} &")
-                commands.append("wait")
+        td = mkdtemp(dir=expand_path("$PBS"), prefix=f"{task}-{today}-")    
+        p.print(f"Working directory: {td}")
+        for n in range(nodes):
+            job_name = f"{task}" + (f"-{n}" if nodes > 1 else "")
+            # TODO: Let's not hard code this here.
+            commands = ["export CLUSTER=1"]
+            for page in range(n * procs, (n + 1) * procs):
+                commands.append(f"astra run {task} {model.__name__} --limit {limit} --page {page + 1} &")
+            commands.append("wait")
 
-                script_path = f"{td}/node_{n}.sh"
-                with open(script_path, "w") as fp:
-                    fp.write("\n".join(commands))
+            script_path = f"{td}/node_{n}.sh"
+            with open(script_path, "w") as fp:
+                fp.write("\n".join(commands))
 
-                os.system(f"chmod +x {script_path}")
-                executable = [
-                    "srun",
-                    "--nodes=1",
-                    f"--partition={partition}",
-                    f"--account={account}",
-                    f"--job-name={job_name}",
-                    f"--time={time}",
-                    f"--output={td}/{n}.out",
-                    f"--error={td}/{n}.err",
-                ]
-                if mem is not None:
-                    executable.append(f"--mem={mem}")
-                if gres is not None:
-                    executable.append(f"--gres={gres}")
-                
-                executable.extend(["bash", "-c", f"{script_path}"])
+            os.system(f"chmod +x {script_path}")
+            executable = [
+                "srun",
+                "--nodes=1",
+                f"--partition={partition}",
+                f"--account={account}",
+                f"--job-name={job_name}",
+                f"--time={time}",
+                f"--output={td}/{n}.out",
+                f"--error={td}/{n}.err",
+            ]
+            if mem is not None:
+                executable.append(f"--mem={mem}")
+            if gres is not None:
+                executable.append(f"--gres={gres}")
+            
+            executable.extend(["bash", "-c", f"{script_path}"])
 
-                t = p.add_task(description=f"Running {job_name}", total=None)
-                job = executor.submit(
-                    subprocess.run,
-                    executable,
-                    capture_output=True
-                )
-                futures[job] = (n, t)
-                        
-            max_returncode = 0
-            for future in concurrent.futures.as_completed(futures.keys()):                
-                n, t = futures[future]
-                result = future.result()
-                if result.returncode == 0:
-                    # TODO: Cat the output file?
-                    p.update(t, description=f"Completed")
-                    p.remove_task(t)
-                else:
-                    p.update(t, description=f"Error code {result.returncode} returned from {task}-{n}")
-                    p.print(result.stderr.decode("utf-8"))
-                
-                max_returncode = max(max_returncode, result.returncode)
-    
+            t = p.add_task(description=f"Running {job_name}", total=None)
+            job = executor.submit(
+                subprocess.run,
+                executable,
+                capture_output=True
+            )
+            futures[job] = (n, t)
+                    
+        max_returncode = 0
+        for future in concurrent.futures.as_completed(futures.keys()):                
+            n, t = futures[future]
+            result = future.result()
+            if result.returncode == 0:
+                # TODO: Cat the output file?
+                p.update(t, description=f"Completed")
+                p.remove_task(t)
+            else:
+                p.update(t, description=f"Error code {result.returncode} returned from {task}-{n}")
+                p.print(result.stderr.decode("utf-8"))
+            
+            max_returncode = max(max_returncode, result.returncode)
+
     sys.exit(max_returncode)
 
 
