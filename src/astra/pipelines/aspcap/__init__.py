@@ -34,6 +34,24 @@ def do_logger(*foo):
 def _is_list_mode(path):
     return "input_list.nml" in path
 
+def _safe_pre_process_ferre(*args, **kwargs):
+    try:
+        return pre_process_ferre(*args, **kwargs)
+    except:
+        do_logger(f"Exception in pre_process_ferre {args} {kwargs}")
+
+def _safe_post_process_ferre(*args, **kwargs):
+    try:
+        return post_process_ferre(*args, **kwargs)
+    except:
+        do_logger(f"Exception in post_process_ferre {args} {kwargs}")
+
+def _safe_ferre(*args, **kwargs):
+    try:
+        return ferre(*args, **kwargs)
+    except:
+        do_logger(f"Exception in ferre {args} {kwargs}")
+
 @task
 def aspcap(
     spectra: Iterable[ApogeeCoaddedSpectrumInApStar], 
@@ -115,8 +133,7 @@ def aspcap(
         os.chmod(parent_dir, 0o755)
 
     parent, child = Pipe()
-    with concurrent.futures.ProcessPoolExecutor(max_workers=max(max_threads, max_processes)) as executor:
-
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max(max_threads, max_processes)) as executor:    
         stage_args = [executor, parent, child, parent_dir, max_processes, max_threads, max_concurrent_loading, soft_thread_ratio]
         if live_renderable is not None:
             from rich.panel import Panel
@@ -267,8 +284,8 @@ def aspcap(
         do_logger(f"{f:.2f} closed parent. closing child")
         child.close()
         do_logger(f"{f:.2f} closing child. shutting down executor")
-        executor.shutdown(wait=False, cancel_futures=True)
-        do_logger(f"{f:.2f} shut down executor")
+        #executor.shutdown(wait=False, cancel_futures=True)
+        #do_logger(f"{f:.2f} shut down executor")
 
 def _aspcap_stage(
     stage, 
@@ -317,7 +334,7 @@ def _aspcap_stage(
     for plan in plans:
         (
             executor
-            .submit(pre_process_ferre, plan)
+            .submit(_safe_pre_process_ferre, plan)
             .add_done_callback(lambda future: pre_processed_futures.insert(0, future))
         )
         total += sum(map(len, (p["spectra"] for p in plan)))
@@ -402,7 +419,7 @@ def _aspcap_stage(
             # TODO: Should `timings` and `post_process_ferre` take directories or input_nml_paths?
             task_name = get_task_name(os.path.dirname(input_nml_path))
             timings[task_name] = (t_overhead, t_elapsed)
-            post_processed_futures.append(executor.submit(post_process_ferre, input_nml_path, pwd))
+            post_processed_futures.append(executor.submit(_safe_post_process_ferre, input_nml_path, pwd))
             ferre_futures.remove(ferre_future)
             do_logger("removed ferre futures")
 
@@ -434,7 +451,7 @@ def _aspcap_stage(
                     break
 
             if n_obj > 0:                    
-                ferre_futures.append(executor.submit(ferre, input_nml_path, pwd, n_obj, n_ferre_threads, child, communicate_on_start=False, **(ferre_kwds or {})))
+                ferre_futures.append(executor.submit(_safe_ferre, input_nml_path, pwd, n_obj, n_ferre_threads, child, communicate_on_start=False, **(ferre_kwds or {})))
                 # Do the communication here ourselves because otherwise we will submit too many jobs before they start.
                 if progress is not None:
                     task_name = get_task_name(input_nml_path)
@@ -485,6 +502,7 @@ def _aspcap_stage(
 
 REGEX_NEXT_OBJECT = re.compile(r"next object #\s+(\d+)")
 REGEX_COMPLETED = re.compile(r"\s+(\d+)\s(\d+_[\d\w_]+)") # assumes input ids start with an integer and underscore
+
 
 def ferre(
     input_nml_path,

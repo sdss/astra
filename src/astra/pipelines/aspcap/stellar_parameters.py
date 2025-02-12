@@ -67,7 +67,7 @@ def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_pa
         fun = pre_continuum()
 
         futures = []
-        with concurrent.futures.ProcessPoolExecutor(os.cpu_count()) as executor:
+        with concurrent.futures.ThreadPoolExecutor(os.cpu_count()) as executor:
             for r in best_coarse_results.values():
                 spectrum = spectra_dict[r.spectrum_pk]
                 futures.append(executor.submit(_pre_compute_continuum, r, spectrum, fun))
