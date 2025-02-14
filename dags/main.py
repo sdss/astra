@@ -16,7 +16,7 @@ with DAG(
     task_migrate = BashOperator(
         task_id="migrate",
         bash_command=f"astra migrate --apred {APRED}",# --run2d {RUN2D} --apred {APRED}",
-        execution_timeout=timedelta(hours=1)
+        #execution_timeout=timedelta(hours=1)
     )
 
     with TaskGroup(group_id="SummarySpectrumProducts") as summary_spectrum_products:

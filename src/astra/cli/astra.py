@@ -95,16 +95,24 @@ def srun(
 
     import os
     import sys
+    import json
     import numpy as np
     import concurrent.futures
     import subprocess
+    import pickle
     from datetime import datetime
     from tempfile import TemporaryDirectory, mkdtemp
     from peewee import JOIN
     from importlib import import_module
     from astra import models, __version__, generate_queries_for_task
-    from astra.utils import silenced, expand_path
-    from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn 
+    from astra.utils import silenced, expand_path, log, resolve_task, accepts_live_renderable
+    from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn, TimeElapsedColumn
+    from rich.live import Live
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.logging import RichHandler
+    from rich.console import Console
+    from logging import FileHandler
 
     model, q = next(generate_queries_for_task(task, model, limit))
 
@@ -117,70 +125,131 @@ def srun(
     limit = int(np.ceil(total / workers))
     today = datetime.now().strftime("%Y-%m-%d")
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        transient=not in_airflow_context
-    ) as p:
+    # Re-direct log handler
+    live_renderable = Table.grid()
+    console = Console()
+    if not accepts_live_renderable(resolve_task(task)):
+        overall_progress = Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        )
+        live_renderable.add_row(Panel(overall_progress, title=task))
+    
+    with Live(live_renderable, console=console, redirect_stdout=False, redirect_stderr=False) as live:
+        log.handlers.clear()
+        log.handlers.extend([
+            RichHandler(console=live.console, markup=True, rich_tracebacks=True),
+        ])
 
-        executor = concurrent.futures.ProcessPoolExecutor(nodes)
+        #with Progress(
+        #    SpinnerColumn(),
+        #    TextColumn("[progress.description]{task.description}"),
+        #    BarColumn(),
+        #    transient=not in_airflow_context
+        #) as p:
+        futures = []
+        with concurrent.futures.ProcessPoolExecutor(nodes) as executor:
+            # Load a whole bunch of sruns in processes
+            td = mkdtemp(dir=expand_path("$PBS"), prefix=f"{task}-{today}-")    
+            log.info(f"Working directory: {td}")
 
-        # Load a whole bunch of sruns in processes
-        futures = {}
-        td = mkdtemp(dir=expand_path("$PBS"), prefix=f"{task}-{today}-")    
-        p.print(f"Working directory: {td}")
-        for n in range(nodes):
-            job_name = f"{task}" + (f"-{n}" if nodes > 1 else "")
-            # TODO: Let's not hard code this here.
-            commands = ["export CLUSTER=1"]
-            for page in range(n * procs, (n + 1) * procs):
-                commands.append(f"astra run {task} {model.__name__} --limit {limit} --page {page + 1} &")
-            commands.append("wait")
+            status_path_locks = {}
+            items_in_row = []
+            for n in range(nodes):
+                job_name = f"{task}" + (f"-{n}" if nodes > 1 else "")
 
-            script_path = f"{td}/node_{n}.sh"
-            with open(script_path, "w") as fp:
-                fp.write("\n".join(commands))
+                progress = Progress(
+                    "[progress.description]{task.description}",
+                    BarColumn(),
+                    MofNCompleteColumn(),
+                    TimeElapsedColumn()
+                )
+                items_in_row.append(Panel.fit(progress, title=job_name, padding=(0, 2, 0, 2)))
 
-            os.system(f"chmod +x {script_path}")
-            executable = [
-                "srun",
-                "--nodes=1",
-                f"--partition={partition}",
-                f"--account={account}",
-                f"--job-name={job_name}",
-                f"--time={time}",
-                f"--output={td}/{n}.out",
-                f"--error={td}/{n}.err",
-            ]
-            if mem is not None:
-                executable.append(f"--mem={mem}")
-            if gres is not None:
-                executable.append(f"--gres={gres}")
-            
-            executable.extend(["bash", "-c", f"{script_path}"])
+                if len(items_in_row) == 2 or n == (nodes - 1):
+                    live_renderable.add_row(*items_in_row)
+                    items_in_row = []
+                status_path_locks[progress] = {}
 
-            t = p.add_task(description=f"Running {job_name}", total=None)
-            job = executor.submit(
-                subprocess.run,
-                executable,
-                capture_output=True
-            )
-            futures[job] = (n, t)
+                # TODO: Let's not hard code this here.
+                commands = ["export CLUSTER=1"]
+                for page in range(n * procs, (n + 1) * procs):
+                    status_path = f"{td}/live-{n}-{page}"
+                    status_path_locks[progress][status_path] = 0
+                    commands.append(f"astra run {task} {model.__name__} --limit {limit} --page {page + 1} --live-renderable-path {status_path} &")
+                commands.append("wait")
+
+                script_path = f"{td}/node_{n}.sh"
+                with open(script_path, "w") as fp:
+                    fp.write("\n".join(commands))
+
+                os.system(f"chmod +x {script_path}")
+                executable = [
+                    "srun",
+                    "--nodes=1",
+                    f"--partition={partition}",
+                    f"--account={account}",
+                    f"--job-name={job_name}",
+                    f"--time={time}",
+                    f"--output={td}/{n}.out",
+                    f"--error={td}/{n}.err",
+                ]
+                if mem is not None:
+                    executable.append(f"--mem={mem}")
+                if gres is not None:
+                    executable.append(f"--gres={gres}")
+                
+                executable.extend(["bash", "-c", f"{script_path}"])
+
+                futures.append(
+                    executor.submit(
+                        subprocess.run,
+                        executable,
+                        capture_output=True
+                    )
+                )
                     
-        max_returncode = 0
-        for future in concurrent.futures.as_completed(futures.keys()):                
-            n, t = futures[future]
-            result = future.result()
-            if result.returncode == 0:
-                # TODO: Cat the output file?
-                p.update(t, description=f"Completed")
-                p.remove_task(t)
-            else:
-                p.update(t, description=f"Error code {result.returncode} returned from {task}-{n}")
-                p.print(result.stderr.decode("utf-8"))
-            
-            max_returncode = max(max_returncode, result.returncode)
+            max_returncode, mappings = (0, {})
+            while len(futures):
+                try:
+                    future = next(concurrent.futures.as_completed(futures, timeout=1))
+                except TimeoutError:
+                    pass
+                else:
+                    futures.remove(future)
+                    max_returncode = max(max_returncode, future.result().returncode)
+
+                for progress, kwds in status_path_locks.items():
+                    for path, skip in kwds.items():
+                        
+                        # copy the contents to a temp file
+                        try:
+                            with open(path, "r") as fp:
+                                for n in range(skip):
+                                    next(fp)
+                                content = fp.readlines()
+                        except FileNotFoundError:
+                            continue
+                        except:
+                            # no content
+                            continue
+                        
+                        kwds[path] += len(content)
+                            
+                        for line in content:
+                            try:
+                                command, *state = json.loads(line.rstrip())
+                                if command == "add_task":
+                                    number, args, kwds = state
+                                    mappings[(path, number)] = progress.add_task(*args, **kwds)
+                                elif command == "update":
+                                    (ref_num, *args), kwds = state
+                                    progress.update(mappings[(path, ref_num)], *args, **kwds)
+                            except Exception as e:
+                                log.exception(f"Failed to parse line: {line} - {e}")
+                                continue
 
     sys.exit(max_returncode)
 
@@ -196,6 +265,7 @@ def run(
         )] = None,
     limit: Annotated[int, typer.Option(help="Limit the number of spectra.", min=1)] = None,
     page: Annotated[int, typer.Option(help="Page to start results from (`limit` spectra per `page`).", min=1)] = None,
+    live_renderable_path: Annotated[str, typer.Option(hidden=True)] = None
 ):
     """Run an Astra task on spectra."""
     from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn 
@@ -216,7 +286,8 @@ def run(
     # Re-direct log handler
     console = Console()
 
-    if not fun_accepts_live_renderable:
+    use_local_renderable = (live_renderable_path is None) and not fun_accepts_live_renderable
+    if use_local_renderable:
         overall_progress = Progress(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
@@ -233,12 +304,12 @@ def run(
 
         for model, q in generate_queries_for_task(fun, spectrum_model, limit, page=page):            
             if total := q.count():
-                if not fun_accepts_live_renderable:
+                if use_local_renderable:
                     task = overall_progress.add_task(model.__name__, total=total)
-                for r in fun(q, live_renderable=live_renderable):
-                    if not fun_accepts_live_renderable:
+                for r in fun(q, live_renderable=(live_renderable_path or live_renderable)):
+                    if use_local_renderable:
                         overall_progress.update(task, advance=1)
-                if not fun_accepts_live_renderable:
+                if use_local_renderable:
                     overall_progress.update(task, completed=True)
 
     """

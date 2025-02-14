@@ -3,6 +3,9 @@ import numpy as np
 import concurrent.futures
 import subprocess
 import re
+import json
+import fcntl
+import pickle
 from multiprocessing import Pipe, Lock
 from datetime import datetime
 from tempfile import mkdtemp
@@ -26,10 +29,17 @@ from astra.pipelines.aspcap.abundances import plan_abundances_stage, get_species
 from astra.pipelines.aspcap.utils import ABUNDANCE_RELATIVE_TO_H
 
 RAND = np.random.randint(0, 1000)
+from socket import gethostname
+
+HOSTNAME = gethostname()
 
 def do_logger(*foo):
-    with open(f"{RAND}.log", "a") as fp:
+    with open(f"/scratch/general/nfs1/u6020307/pbs/{HOSTNAME}-{RAND}.log", "a") as fp:
         fp.write(" ".join(map(str, foo)) + "\n")
+
+#cd /scratch/general/nfs1/u6020307/pbs/aspcap-2025-02-12-ax1pzxtc
+
+#subprocess.check_output("echo `hostname`"))
 
 def _is_list_mode(path):
     return "input_list.nml" in path
@@ -51,6 +61,8 @@ def _safe_ferre(*args, **kwargs):
         return ferre(*args, **kwargs)
     except:
         do_logger(f"Exception in ferre {args} {kwargs}")
+
+
 
 @task
 def aspcap(
@@ -132,10 +144,42 @@ def aspcap(
         parent_dir = mkdtemp(prefix=f"{datetime.now().strftime('%Y-%m-%d')}-", dir=_dir)
         os.chmod(parent_dir, 0o755)
 
+    from time import sleep
     parent, child = Pipe()
     with concurrent.futures.ProcessPoolExecutor(max_workers=max(max_threads, max_processes)) as executor:    
         stage_args = [executor, parent, child, parent_dir, max_processes, max_threads, max_concurrent_loading, soft_thread_ratio]
-        if live_renderable is not None:
+        if isinstance(live_renderable, str):
+            class FakeProgress:
+                def __init__(self, path):
+                    self.path = path
+                    self.task_counter = 0
+                    if not os.path.exists(path):
+                        with open(path, "w"):
+                            pass
+                    return None
+
+                def append(self, data):
+                    try:
+                        r = json.dumps(data) + "\n"
+                        with open(self.path, "a") as fp:
+                            fp.write(r)
+                        return True
+                    except Exception as e:
+                        do_logger(f"Exception appending to file: {e}")
+                        return False
+                
+                def update(self, *args, **kwargs):
+                    return self.append(("update", args, kwargs))
+                
+                def add_task(self, *args, **kwargs):
+                    self.task_counter += 1
+                    self.append(("add_task", self.task_counter, args, kwargs))
+                    return self.task_counter
+
+            progress = FakeProgress(live_renderable)
+            stage_args += [progress]
+
+        elif live_renderable is not None:
             from rich.panel import Panel
             from rich.progress import (Progress, BarColumn, MofNCompleteColumn, TimeElapsedColumn)
             progress = Progress(
@@ -279,10 +323,12 @@ def aspcap(
             yield ASPCAP.from_spectrum(spectra_by_pk[spectrum_pk], **kwds)
 
         f = np.random.randn()
-        do_logger(f"{f:.2f} closing parent")
-        parent.close()
-        do_logger(f"{f:.2f} closed parent. closing child")
-        child.close()
+        if not isinstance(parent, str):
+            do_logger(f"{f:.2f} closing parent")
+            parent.close()
+            do_logger(f"{f:.2f} closed parent. closing child")
+            child.close()
+        
         do_logger(f"{f:.2f} closing child. shutting down executor")
         #executor.shutdown(wait=False, cancel_futures=True)
         #do_logger(f"{f:.2f} shut down executor")
@@ -308,7 +354,10 @@ def _aspcap_stage(
             "params": "Stellar parameters",
             "abundances": "Chemical abundances"
         }
-        stage_task_id = progress.add_task(f"[bold blue]{full_names.get(stage, stage)}[/bold blue]")
+        stage_name = f"{full_names.get(stage, stage)}"
+        if os.getenv("CLUSTER", False):
+            stage_name += f" @ {HOSTNAME}"
+        stage_task_id = progress.add_task(f"[bold blue]{stage_name}[/bold blue]")
 
     def get_task_name(path):
         *__, stage_name, task_name, base_name = path.split("/")
@@ -352,7 +401,6 @@ def _aspcap_stage(
         while parent.poll(): 
             #do_logger("awaiting message")
             state = parent.recv()
-
             if timeout_on_spectrum_pk := state.get("timeout_on_spectrum_pk", None):
                 spectrum_primary_keys_causing_timeout.append(timeout_on_spectrum_pk)
             else:
@@ -538,85 +586,96 @@ def ferre(
         process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, close_fds=True)
 
         def monitor():
-            while not ferre_hanging.is_set():
-                do_logger(f"monitor {max_sigma_outlier} {max_t_elapsed} {t_awaiting} in {cwd}")
+            try:
+                while not ferre_hanging.is_set():
+                    do_logger(f"monitor {max_sigma_outlier} {max_t_elapsed} {t_awaiting} in {cwd}")
 
-                if (max_t_communicate is not None and (time() - t_last_communication) > max_t_communicate):
-                    do_logger(f"hanging no communication")        
-                    ferre_hanging.set()
-                    try:
-                        process.kill()
-                    except:
-                        None
-                    break                    
+                    if (max_t_communicate is not None and (time() - t_last_communication) > max_t_communicate):
+                        do_logger(f"hanging no communication")        
+                        ferre_hanging.set()
+                        try:
+                            process.kill()
+                        except:
+                            None
+                        break                    
 
-
-                if (
-                    ((max_sigma_outlier is not None or max_t_elapsed is not None) and t_awaiting)
-                or  (max_t_grid_load is not None and t_overhead is None and ((time() - t_start) > max_t_grid_load))
-                ):
-                    n_await = len(t_awaiting)
-                    n_execution = 0 if len(t_elapsed) == 0 else max(list(map(len, t_elapsed.values())))
-                    n_complete = sum([len(v) == n_execution for v in t_elapsed.values()])
-                    
-                    t_elapsed_per_spectrum_execution = []
-                    for k, v in t_elapsed.items():
-                        t_elapsed_per_spectrum_execution.extend(v)
-
-                    do_logger(f"checking on {n_await} things {len(t_awaiting)} {len(t_elapsed_per_spectrum_execution)} {max_t_elapsed} {max_sigma_outlier}")
 
                     if (
-                       (len(t_awaiting) > 0)
-                    and (max_t_elapsed is not None or max_sigma_outlier is not None)
+                        ((max_sigma_outlier is not None or max_t_elapsed is not None) and t_awaiting)
+                    or  (max_t_grid_load is not None and t_overhead is None and ((time() - t_start) > max_t_grid_load))
                     ):
+                        n_await = len(t_awaiting)
+                        n_execution = 0 if len(t_elapsed) == 0 else max(list(map(len, t_elapsed.values())))
+                        n_complete = sum([len(v) == n_execution for v in t_elapsed.values()])
                         
-                        if len(t_elapsed_per_spectrum_execution) == 0:
-                            median = 120.0
-                            stddev = 10.0
-                        else:
-                            median = np.median(t_elapsed_per_spectrum_execution)
-                            stddev = np.std(t_elapsed_per_spectrum_execution)
-                            if stddev == 0:
+                        t_elapsed_per_spectrum_execution = []
+                        for k, v in t_elapsed.items():
+                            t_elapsed_per_spectrum_execution.extend(v)
+
+                        do_logger(f"checking on {n_await} things {len(t_awaiting)} {len(t_elapsed_per_spectrum_execution)} {max_t_elapsed} {max_sigma_outlier}")
+
+                        if (
+                        (len(t_awaiting) > 0)
+                        and (max_t_elapsed is not None or max_sigma_outlier is not None)
+                        ):
+                            
+                            if len(t_elapsed_per_spectrum_execution) == 0:
+                                median = 120.0
                                 stddev = 10.0
+                            else:
+                                median = np.median(t_elapsed_per_spectrum_execution)
+                                stddev = np.std(t_elapsed_per_spectrum_execution)
+                                if stddev == 0:
+                                    stddev = 10.0
 
-                        t_awaiting_elapsed = { k: (time() + v) for k, v in t_awaiting.items() }                        
-                        waiting_elapsed = max(t_awaiting_elapsed.values())
-                        sigma_outlier = (waiting_elapsed - median)/stddev
+                            t_awaiting_elapsed = { k: (time() + v) for k, v in t_awaiting.items() }                        
+                            waiting_elapsed = max(t_awaiting_elapsed.values())
+                            sigma_outlier = (waiting_elapsed - median)/stddev
 
 
-                        # We want to be sure that we have a reasonable estimate of the wait time for existing things.
-                        # We can use previous executions to estimate this, if it is part of a list mode.
-                        is_hanging = [
-                            # The indices we get from FERRE stdout are 1-indexed, not 0-indexed.
-                            (k - 1) for k, v in t_awaiting_elapsed.items()
-                            if (
-                                (max_t_elapsed is None or v > max_t_elapsed)
-                            and (max_sigma_outlier is None or ((v - median)/stddev) > max_sigma_outlier)
-                            )
-                        ]                    
-                        do_logger(f"median / stddev {median:.2} {stddev:.2f} {t_awaiting_elapsed} {waiting_elapsed:.2f} {sigma_outlier} {is_hanging}")
+                            # We want to be sure that we have a reasonable estimate of the wait time for existing things.
+                            # We can use previous executions to estimate this, if it is part of a list mode.
+                            is_hanging = [
+                                # The indices we get from FERRE stdout are 1-indexed, not 0-indexed.
+                                (k - 1) for k, v in t_awaiting_elapsed.items()
+                                if (
+                                    (max_t_elapsed is None or v > max_t_elapsed)
+                                and (max_sigma_outlier is None or ((v - median)/stddev) > max_sigma_outlier)
+                                )
+                            ]                    
+                            do_logger(f"median / stddev {median:.2} {stddev:.2f} {t_awaiting_elapsed} {waiting_elapsed:.2f} {sigma_outlier} {is_hanging}")
 
-                        # TODO: strace the process and check that it is waiting on FUTEX_PRIVATE_WAIT before killing it?                
-                        # Need to kill and re-run the process.
-                        if is_hanging: 
-                            exclude_indices.extend(is_hanging) 
-                            do_logger(f"hanging {is_hanging}")        
+                            # TODO: strace the process and check that it is waiting on FUTEX_PRIVATE_WAIT before killing it?                
+                            # Need to kill and re-run the process.
+                            if is_hanging: 
+                                exclude_indices.extend(is_hanging) 
+                                do_logger(f"hanging {is_hanging}")        
+                                ferre_hanging.set()
+                                try:
+                                    process.kill()
+                                except:
+                                    None
+                                break
+                        elif (t_overhead is None and max_t_grid_load is not None and (time() - t_start) > max_t_grid_load):
+                            do_logger(f"hanging on grid load {input_nml_path}")
                             ferre_hanging.set()
                             try:
                                 process.kill()
                             except:
                                 None
                             break
-                    elif (t_overhead is None and max_t_grid_load is not None and (time() - t_start) > max_t_grid_load):
-                        do_logger(f"hanging on grid load {input_nml_path}")
-                        ferre_hanging.set()
-                        try:
-                            process.kill()
-                        except:
-                            None
-                        break
 
-                sleep(1)
+                    sleep(1)
+            except Exception as e:
+                do_logger(f"MONITOR DIED {input_nml_path}")
+                do_logger(e)
+                # We better kill ferre because we can't monitor it anymore.
+                ferre_hanging.set()
+                try:
+                    process.kill()
+                except:
+                    None
+
 
         monitor = threading.Thread(target=monitor)
         monitor.daemon = True
@@ -637,7 +696,11 @@ def ferre(
                 
                 key = match.group(2)
                 t_elapsed.setdefault(key, [])
-                t_elapsed[key].append(t_awaiting.pop(int(match.group(1))) + time())
+                try:
+                    t = t_awaiting.pop(int(match.group(1))) + time()
+                except:
+                    t = np.nan
+                t_elapsed[key].append(t)
                 n_complete += 1
                 n_remaining = n_obj - n_complete
 
@@ -688,17 +751,36 @@ def ferre(
                             t_elapsed[k].extend(v)
                     #do_logger(f"DONE REPROCESSING {failed_input_nml_path} {updated_nml_path}")
                     """
-
+                
                 prefix, suffix = input_nml_path.split(".nml")
                 suffix = suffix.lstrip(".")
                 suffix = (int(suffix) + 1) if suffix != "" else 1
                 new_path = f"{prefix}.nml.{suffix}"
 
-                with open(new_path, "w") as fp:
-                    fp.write("\n".join(unprocessed_input_nml_paths))
-                
                 # Release these threads and process so it's balanced out when the sub-ferre process takes them
                 pipe.send(dict(input_nml_path=input_nml_path, n_threads=-n_threads)) 
+
+                # Need to check if the last two NML list paths had the same number of rows.
+                # If they do, it means we are in an infinite loop.
+                if suffix >= 3:
+                    with open(f"{prefix}.nml.{suffix - 1}", "r") as fp:
+                        n_prev = len(fp.readlines())
+                    with open(f"{prefix}.nml.{suffix - 2}", "r") as fp:
+                        n_prev_prev = len(fp.readlines())
+                    
+                    if n_prev == n_prev_prev:
+                        do_logger(f"detected infinite loop {input_nml_path} {n_prev} {n_prev_prev}")
+                        failed_relative_path, *unprocessed_input_nml_paths = unprocessed_input_nml_paths
+
+                        # Try to run FERRE in non-list mode on the failed path
+                        *_, this_t_overhead, this_t_elapsed = ferre(failed_relative_path, cwd, n_obj, n_threads, pipe, max_sigma_outlier, max_t_elapsed)
+                        t_overhead = (t_overhead or 0) + this_t_overhead
+                        for k, v in this_t_elapsed.items():
+                            t_elapsed.setdefault(k, [])
+                            t_elapsed[k].extend(v)
+                        
+                with open(new_path, "w") as fp:
+                    fp.write("\n".join(unprocessed_input_nml_paths))                
                 
                 *_, this_t_overhead, this_t_elapsed = ferre(new_path, cwd, n_obj - n_complete + n_spectra_done_in_last_execution, n_threads, pipe, max_sigma_outlier, max_t_elapsed)
 
