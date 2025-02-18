@@ -134,9 +134,10 @@ def snow_white(
                 log_H=np.array(tl[u'logg_H']).astype(float)
                 eT_H=np.array(tl[u'eteff_H']).astype(float)
                 elog_H=np.array(tl[u'elogg_H']).astype(float)
-                if spectrum.source.gaia_dr3_source_id in sourceID: #if there is a photometric solution use that as starting point
-                    first_T=T_H[sourceID==spectrum.source.gaia_dr3_source_id][0]
-                    first_g=log_H[sourceID==spectrum.source.gaia_dr3_source_id][0]*100
+                GaiaID=str(spectrum.source.gaia_dr3_source_id)
+                if GaiaID in sourceID: #if there is a photometric solution use that as starting point
+                    first_T=T_H[sourceID==GaiaID][0]
+                    first_g=log_H[sourceID==GaiaID][0]*100
                     initial=1
                 if first_T > 80000:
                     first_T=80000
@@ -201,12 +202,12 @@ def snow_white(
                     if first_T <=13000.:
                         tmp_Tg,tmp_chi= grid_param[grid_param[:,0]>13000.], grid_chi[grid_param[:,0]>13000.]
                         second_T= tmp_Tg[tmp_chi==np.min(tmp_chi)][0][0]
-                        fit_params['teff'] = lmfit.Parameter(name="teff",value=second_T,min=13000,max=80000)
+                        fit_params['teff'] = lmfit.Parameter(name="teff",value=second_T,min=12000,max=80000)
 
                     elif first_T >13000.:
                         tmp_Tg,tmp_chi= grid_param[grid_param[:,0]<13000.], grid_chi[grid_param[:,0]<13000.]
                         second_T= tmp_Tg[tmp_chi==np.min(tmp_chi)][0][0]
-                        fit_params['teff'] = lmfit.Parameter(name="teff",value=second_T,min=3000,max=13000)
+                        fit_params['teff'] = lmfit.Parameter(name="teff",value=second_T,min=3000,max=14000)
 
                     if second_T>=16000 and second_T<=40000:
                         line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop.dat'),skiprows=1)
