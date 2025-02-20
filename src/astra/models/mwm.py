@@ -10,9 +10,17 @@ from astra.fields import (
 )
 from astra.models.base import BaseModel
 from astra.models.boss import BossVisitSpectrum
+from astra.models.pipeline import PipelineOutputModel
 from astra.models.source import Source
 from astra.models.spectrum import Spectrum, SpectrumMixin
 from astra.glossary import Glossary
+
+from peewee import SQL, ForeignKeyField
+from astra import __version__
+from astra.fields import (AutoField, FloatField, TextField, BitField, DateTimeField, IntegerField)
+from astra.models.base import BaseModel
+from astra.utils import version_string_to_integer
+
 
 
 class MWMStarMixin(BaseModel):
@@ -38,6 +46,36 @@ class MWMVisitMixin(BaseModel):
 get_boss_ext = lambda i: (dict(apo25m=1, lco25m=2)[i.telescope])
 get_apogee_ext = lambda i: (dict(apo1m=3, apo25m=3, lco25m=4)[i.telescope])
 transform_flat = lambda x, *_: np.array(x).flatten()
+
+
+
+class MWMSpectrumProductStatus(BaseModel):
+
+    source_pk = ForeignKeyField(Source, null=False, index=True, lazy_load=False, column_name="source_pk")
+    
+    #> Astra Metadata
+    task_pk = AutoField()
+    v_astra = IntegerField(default=version_string_to_integer(__version__))
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
+    t_elapsed = FloatField(null=True)
+    t_overhead = FloatField(null=True)
+    tag = TextField(default="", index=True)
+    # The /1000 here is set in `astra.utils.version_string_to_integer` and `astra.utils.version_integer_to_string`.
+    v_astra_major_minor = IntegerField(constraints=[SQL("GENERATED ALWAYS AS (v_astra / 1000) STORED")], _hidden=True)
+
+    flags = BitField(default=0, help_text="Flags for the status of the spectrum products")
+    flag_skipped_because_no_sdss_id = flags.flag(2**0, "Source was skipped because no SDSS ID exists")
+    flag_skipped_because_not_stellar_like = flags.flag(2**1, "Source was skipped because it is not stellar-like")
+    flag_attempted_but_exception = flags.flag(2**2, "An exception was raised during processing")
+    flag_created_mwm_visit = flags.flag(2**3, "MWM visit spectrum was created")
+    flag_created_mwm_star = flags.flag(2**4, "MWM star spectrum was created")
+    
+    class Meta:
+        constraints = [
+            SQL("UNIQUE (source_pk, v_astra_major_minor)")
+        ]
+
 
 class BossRestFrameVisitSpectrum(MWMVisitMixin, SpectrumMixin):
 
@@ -512,6 +550,7 @@ class ApogeeRestFrameVisitSpectrum(MWMVisitMixin, SpectrumMixin):
         unique=True,
         lazy_load=False,
         help_text=Glossary.spectrum_pk,
+        column_name="spectrum_pk"
     )
     # Won't appear in a header group because it is first referenced in `Source`.
     source = ForeignKeyField(
@@ -567,6 +606,7 @@ class ApogeeRestFrameVisitSpectrum(MWMVisitMixin, SpectrumMixin):
     
     #> Statistics and Spectrum Quality 
     snr = FloatField(null=True, help_text=Glossary.snr)
+    in_stack = BooleanField(null=False, help_text=Glossary.in_stack)
     spectrum_flags = BitField(default=0, help_text=Glossary.spectrum_flags)
     
     # From https://github.com/sdss/apogee_drp/blob/630d3d45ecff840d49cf75ac2e8a31e22b543838/python/apogee_drp/utils/bitmask.py#L110

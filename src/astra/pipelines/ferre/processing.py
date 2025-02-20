@@ -19,6 +19,8 @@ def pre_process_ferre(plans):
     if len(plans) == 1:
         input_nml_path, total, n_threads, skipped = processed[0]
         pwd = os.path.dirname(input_nml_path)
+        if "/abundances/" in pwd.lower():
+            pwd = os.path.dirname(pwd)
         return (input_nml_path, pwd, total, n_threads, skipped)
     else:
         # Abundance mode.
@@ -68,7 +70,7 @@ def _pre_process_ferre(
     continuum_segment: Optional[int] = None,
     continuum_reject: float = 0.3,
     continuum_observations_flag: int = 1,
-    full_covariance: bool = True,
+    full_covariance: bool = False, # buyer beware: there are deep parallelism bugs in ferre
     pca_project: bool = False,
     pca_chi: bool = False,
     f_access: int = 0,
@@ -242,10 +244,23 @@ def _pre_process_ferre(
     synthfile_full_path = control_kwds["synthfile(1)"]
     if reference_pixel_arrays_for_abundance_run:
         control_kwds["synthfile(1)"] = os.path.basename(synthfile_full_path)
+        #control_kwds["algor"] = 1 # ALGOR 3 dies in abundance mode sometimes
     else:
         control_kwds["synthfile(1)"] = os.path.basename(synthfile_full_path)
 
-    control_kwds_formatted = utils.format_ferre_control_keywords(control_kwds, n_obj=1 + index)
+    # Create directory and write the control file        
+    os.makedirs(absolute_pwd, exist_ok=True)
+
+    # Copy filter file to absolute pwd.
+    if control_kwds.get("filterfile", None) is not None:
+        os.system(f"cp {control_kwds['filterfile']} {absolute_pwd}/{os.path.basename(control_kwds['filterfile'])}")
+
+        if reference_pixel_arrays_for_abundance_run:
+            control_kwds["filterfile"] = f"{absolute_pwd.split('/')[-1]}/{os.path.basename(control_kwds['filterfile'])}"
+        else:
+            control_kwds["filterfile"] = os.path.basename(control_kwds["filterfile"])
+
+    control_kwds_formatted = utils.format_ferre_control_keywords(control_kwds, n_obj=len(batch_names))
 
     # Convert list of dicts of initial parameters to array.
     batch_initial_parameters_array = utils.validate_initial_and_frozen_parameters(
@@ -255,8 +270,6 @@ def _pre_process_ferre(
         clip_initial_parameters_to_boundary_edges=True,
         clip_epsilon_percent=1,
     )
-    # Create directory and write the control file        
-    os.makedirs(absolute_pwd, exist_ok=True)
     target_path_prefix = None
     if reference_pixel_arrays_for_abundance_run:
         if write_input_pixel_arrays:
@@ -268,6 +281,7 @@ def _pre_process_ferre(
         for suffix in ("hdr", "unf"):
             if not os.path.exists(f"{target_path_prefix}.{suffix}"):
                 os.system(f"ln -s {synthfile_full_path[:-4]}.{suffix} {target_path_prefix}.{suffix}")
+
 
 
     with open(os.path.join(absolute_pwd, "input.nml"), "w") as fp:
@@ -452,6 +466,7 @@ def _post_process_ferre(input_nml_path, pwd=None, skip_pixel_arrays=False, **kwa
     header_path = control_kwds["SYNTHFILE(1)"]
     if not os.path.exists(header_path):
         header_path = os.path.join(pwd, header_path)
+
     headers, *segment_headers = utils.read_ferre_headers(expand_path(header_path))
     bad_lower = headers["LLIMITS"] + headers["STEPS"] / 8
     bad_upper = headers["ULIMITS"] - headers["STEPS"] / 8

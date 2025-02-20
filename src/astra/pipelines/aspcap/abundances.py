@@ -15,7 +15,7 @@ def plan_abundances_stage(
     parent_dir: str,
     stellar_parameter_results, 
     element_weight_paths: str,
-    use_ferre_list_mode: Optional[bool] = False,
+    use_ferre_list_mode: Optional[bool] = True,
     continuum_order: Optional[int] = -1,
     continuum_flag: Optional[int] = 0,
     continuum_observations_flag: Optional[int] = 0,

@@ -90,6 +90,19 @@ def expects_spectrum_types(fun):
     except:
         return (spectrum_types, )
 
+def expects_source_types(fun):
+    try:
+        signature = inspect.signature(fun)
+        annotation = signature.parameters["sources"].annotation
+        annotated_type = annotation.__args__[0]
+    except:
+        raise RuntimeError(f"Could not parse expected spectrum types from the function signature of {fun}")
+    
+    try:
+        return annotated_type.__args__
+    except:
+        return (annotated_type, )
+
 
 def get_return_type(fun):
     try:

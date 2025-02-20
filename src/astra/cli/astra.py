@@ -306,7 +306,7 @@ def run(
             if total := q.count():
                 if use_local_renderable:
                     task = overall_progress.add_task(model.__name__, total=total)
-                for r in fun(q, live_renderable=(live_renderable_path or live_renderable)):
+                for r in fun(q, live=True, live_renderable=(live_renderable_path or live_renderable)):
                     if use_local_renderable:
                         overall_progress.update(task, advance=1)
                 if use_local_renderable:

@@ -46,7 +46,7 @@ def separate_bitmasks(bitmasks):
     for q in range(1 + q_max):
         separated[q] = []
         for bitmask in bitmasks:
-            is_set = (bitmask & np.uint64(2**q)) > 0
+            is_set = (bitmask & np.int64(2**q)) > 0
             separated[q].append(np.clip(is_set, 0, 1).astype(float))
     return separated
 
@@ -80,12 +80,14 @@ def resample(old_wavelength, new_wavelength, flux, ivar, n_res, pixel_flags=None
 
         # do a smoothing of bad pixels
         flux_smooth = smooth_filter(flux[i])
-        var_smooth = smooth_filter(1/ivar[i])
+        with np.errstate(divide='ignore', invalid='ignore'):
+            var_smooth = smooth_filter(1/ivar[i])
         
         bad = (ivar[i] == 0) | (flux[i] < 0) | ~np.isfinite(flux[i]) | ~np.isfinite(ivar[i])
         
         sinc_flux = flux[i].copy()
-        sinc_var = 1/ivar[i]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            sinc_var = 1/ivar[i]
         
         sinc_flux[bad] = flux_smooth[bad]
         sinc_var[bad] = var_smooth[bad]
@@ -96,7 +98,8 @@ def resample(old_wavelength, new_wavelength, flux, ivar, n_res, pixel_flags=None
             ]
         )
         new_flux[finite] = finite_flux
-        new_ivar[finite] = finite_e_flux**(-2)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            new_ivar[finite] = finite_e_flux**(-2)
 
         if pixel_flags is not None:
         
@@ -208,7 +211,8 @@ def pixel_weighted_spectrum(
 
     #cont = np.median(continuum, axis=0)  # TODO: is this right?
     stacked_ivar = np.sum(ivar, axis=0)
-    stacked_flux = np.sum(flux * ivar, axis=0) / stacked_ivar #* cont
+    with np.errstate(divide="ignore", invalid="ignore"):
+        stacked_flux = np.sum(flux * ivar, axis=0) / stacked_ivar #* cont
 
     stacked_bitmask = np.bitwise_or.reduce(bitmask.astype(int), 0)
     return (stacked_flux, stacked_ivar, stacked_bitmask, continuum, meta)
@@ -240,7 +244,7 @@ def resample_apmadgics(spectrum, n_res):
 
 
 def wave_to_pixel(wave, wave0):
-    """convert wavelength to pixel given wavelength array
+    r"""convert wavelength to pixel given wavelength array
     Args :
        wave(s) : wavelength(s) (\AA) to get pixel of
        wave0 : array with wavelength as a function of pixel number

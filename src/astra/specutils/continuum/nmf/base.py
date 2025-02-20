@@ -74,7 +74,9 @@ class BaseNMFSinusoidsContinuum(object):
                 sj, ej = (j * self.n_parameters_per_region, (j + 1) * self.n_parameters_per_region)
                 A = self.continuum_design_matrix[mask, sj:ej]
                 MTM = A.T @ (continuum_ivar[i, mask][:, None] * A)
-                MTy = A.T @ (continuum_ivar[i, mask] * continuum_flux[i, mask])
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", category=RuntimeWarning)
+                    MTy = A.T @ (continuum_ivar[i, mask] * continuum_flux[i, mask])
                 try:
                     theta[i, j] = np.linalg.solve(MTM, MTy)
                 except np.linalg.LinAlgError:

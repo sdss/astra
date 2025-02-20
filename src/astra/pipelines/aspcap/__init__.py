@@ -225,7 +225,7 @@ def aspcap(
             use_ferre_list_mode=use_ferre_list_mode
         )            
         
-        abundance_results, abundance_failures = _aspcap_stage("abundances", abundance_plans, *stage_args, ferre_kwds=dict(max_sigma_outlier=10, max_t_elapsed=30))
+        abundance_results, abundance_failures = _aspcap_stage("abundances", abundance_plans, *stage_args, use_ferre_list_mode=use_ferre_list_mode)#, ferre_kwds=dict(max_sigma_outlier=10, max_t_elapsed=30))
 
         # Bring it all together baby.
         result_kwds = {}
@@ -345,7 +345,8 @@ def _aspcap_stage(
     max_concurrent_loading, 
     soft_thread_ratio, 
     progress=None,
-    ferre_kwds=None
+    ferre_kwds=None,
+    use_ferre_list_mode=False,
 ):
     pb = None
     if progress is not None:
@@ -360,8 +361,12 @@ def _aspcap_stage(
         stage_task_id = progress.add_task(f"[bold blue]{stage_name}[/bold blue]")
 
     def get_task_name(path):
-        *__, stage_name, task_name, base_name = path.split("/")
-        return task_name
+        if stage == "abundances" and not use_ferre_list_mode:
+            *__, stage_name, grid_name, species, base_name = path.split("/")
+            return f"{grid_name}/{species}"
+        else:
+            *__, stage_name, task_name, base_name = path.split("/")
+            return task_name
         
     # FERRE can be limited by at least three mechanisms:
     # 1. Too many threads requested (CPU limited).
@@ -387,7 +392,6 @@ def _aspcap_stage(
             .add_done_callback(lambda future: pre_processed_futures.insert(0, future))
         )
         total += sum(map(len, (p["spectra"] for p in plan)))
-    
     if progress is not None:
         progress.update(stage_task_id, completed=0, total=total)
     else:
@@ -418,6 +422,15 @@ def _aspcap_stage(
                         progress_kwds.update(description=f"  [{color}]{task_name}")
                     progress.update(ferre_tasks[task_name], **progress_kwds)
                     progress.update(stage_task_id, advance=delta_n_complete)
+
+                    try:
+                        if stage == "abundances" and not use_ferre_list_mode and progress._tasks[ferre_tasks[task_name]].completed:
+                            progress.update(ferre_tasks[task_name], visible=False, refresh=True)
+                    except:
+                        None
+
+                    #for task_id in ferre_tasks.values():
+                    #progress.update(task_id, completed=True, visible=False, refresh=True)
 
                 elif pb is not None:
                     worker_limit, thread_limit, loading_limit = at_capacity(current_processes, current_threads, currently_loading)

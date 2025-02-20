@@ -1,8 +1,8 @@
 import numpy as np
+import datetime
 from functools import cache
 from peewee import fn, PostgresqlDatabase
 from playhouse.hybrid import hybrid_method
-
 from astra.models.base import database, BaseModel
 from astra.fields import (
     AutoField,
@@ -512,7 +512,9 @@ class Source(BaseModel):
     n_apogee_visits = IntegerField(null=True)
     apogee_min_mjd = IntegerField(null=True)
     apogee_max_mjd = IntegerField(null=True)
-    #updated_mwm_visit_mwm_star_products = DateTimeField(null=True)
+
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
     
 
     @property

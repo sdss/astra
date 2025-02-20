@@ -1,5 +1,6 @@
 from astra.fields import (ArrayField, FloatField, IntegerField, BitField)
 from astra.models.pipeline import PipelineOutputModel
+from astra.glossary import Glossary
 
 class NMFRectify(PipelineOutputModel):
     

@@ -2,7 +2,9 @@
 
 import numpy as np
 from peewee import JOIN, fn
-from astra.models import Source, ApogeeVisitSpectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar, BossVisitSpectrum
+from astra.models.source import Source
+from astra.models.apogee import ApogeeVisitSpectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar
+from astra.models.boss import BossVisitSpectrum
 from astra.specutils.resampling import resample, pixel_weighted_spectrum
 from astra.specutils.continuum.nmf.apogee import ApogeeNMFContinuum
 
@@ -58,7 +60,7 @@ def prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, telesco
             try:
                 value = getattr(result, name)
             except FileNotFoundError:
-                raise
+                break
             except:
                 if name == "sdss_id":
                     value = sdss_id
@@ -124,7 +126,7 @@ def prepare_apogee_resampled_visit_and_coadd_spectra_from_apstar(source, telesco
             "sdss_id": sdss_id,
         }
         for name, field in visit_fields.items():
-            if name in ("pk", "v_astra", "continuum", "nmf_rchi2", "nmf_rectified_model_flux", "continuum", "nmf_flags"): 
+            if name in ("pk", "v_astra", "continuum", "nmf_rchi2", "nmf_rectified_model_flux", "continuum", "nmf_flags") or name in visit: 
                 continue
             elif name == "sdss_id":
                 value = sdss_id
