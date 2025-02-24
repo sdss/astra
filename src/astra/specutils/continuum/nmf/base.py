@@ -284,7 +284,8 @@ class BaseNMFSinusoidsContinuum(object):
         
             # build a mas using ivar and region masks
             use = ~self.get_mask(ivar).flatten()
-            sigma = ivar**-0.5
+            with np.errstate(divide="ignore", invalid="ignore"):
+                sigma = ivar**-0.5
             
             C, P = self.components.shape
             A_slice = A[:, C:]

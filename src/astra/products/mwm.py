@@ -43,28 +43,41 @@ def create_mwmVisit_and_mwmStar_products(
     max_workers: Optional[int] = 128,
     **kwargs
 ) -> Iterable[MWMSpectrumProductStatus]:
-    for source in sources:
-        cartons = source.sdss5_cartons
-        has_sdss_id = (source.sdss_id is not None)
-        is_stellar_like = (
-            "mwm" in cartons["mapper"]
-            or source.sdss4_apogee_id is not None
-            or set(cartons["name"]).intersection(STELLAR_LIKE_CARTON_NAMES)
-        )
-        if has_sdss_id and is_stellar_like:
-            source_pk, flagged_exception, created_visit, created_star = _create_mwmVisit_and_mwmStar_products(source, apreds, run2ds, debug=True, overwrite=True)
-        else:
-            flagged_exception = created_visit = created_star = False
 
-        yield MWMSpectrumProductStatus(
-            source_pk=source.pk, 
-            flag_skipped_because_no_sdss_id=not has_sdss_id,
-            flag_skipped_because_not_stellar_like=not is_stellar_like,
-            flag_attempted_but_exception=flagged_exception,
-            flag_created_mwm_visit=created_visit,
-            flag_created_mwm_star=created_star
-        )
-    
+    futures = []        
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for source in sources:
+            cartons = source.sdss5_cartons
+            has_sdss_id = (source.sdss_id is not None)
+            is_stellar_like = (
+                "mwm" in cartons["mapper"]
+                or source.sdss4_apogee_id is not None
+                or set(cartons["name"]).intersection(STELLAR_LIKE_CARTON_NAMES)
+            )
+            if has_sdss_id and is_stellar_like:
+                futures.append(executor.submit(_create_mwmVisit_and_mwmStar_products, source, apreds, run2ds))
+                #source_pk, flagged_exception, created_visit, created_star = _create_mwmVisit_and_mwmStar_products(source, apreds, run2ds, debug=True, overwrite=True)
+            else:
+                yield MWMSpectrumProductStatus(
+                    source_pk=source.pk, 
+                    flag_skipped_because_no_sdss_id=not has_sdss_id,
+                    flag_skipped_because_not_stellar_like=not is_stellar_like,
+                    flag_attempted_but_exception=False,
+                    flag_created_mwm_visit=False,
+                    flag_created_mwm_star=False
+                )
+
+        for future in concurrent.futures.as_completed(futures):
+            source_pk, flagged_exception, created_visit, created_star = future.result()
+            yield MWMSpectrumProductStatus(
+                source_pk=source_pk, 
+                flag_skipped_because_no_sdss_id=False,
+                flag_skipped_because_not_stellar_like=False,
+                flag_attempted_but_exception=flagged_exception,
+                flag_created_mwm_visit=created_visit,
+                flag_created_mwm_star=created_star
+            )
+        
     """
     futures = []        
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:        
@@ -99,91 +112,6 @@ def create_mwmVisit_and_mwmStar_products(
                 flag_created_mwm_star=flag_created_mwm_star
             )
     """
-
-
-@task
-def old_create_all_mwm_products(apreds=("dr17", "1.4"), run2ds=("v6_1_3", ), page=None, limit=None, max_workers=1, **kwargs):
-    warnings.simplefilter("ignore") # astropy fits warnings
-
-    from astra.models.apogee import ApogeeVisitSpectrum
-    from astra.models.boss import BossVisitSpectrum
-    from peewee import JOIN
-
-
-    if isinstance(apreds, str):
-        apreds = (apreds, )
-    if isinstance(run2ds, str):
-        run2ds = (run2ds, )
-
-    if apreds is not None and run2ds is not None:
-        q_apogee = (
-            ApogeeVisitSpectrum
-            .select(ApogeeVisitSpectrum.source_pk)
-            .distinct(ApogeeVisitSpectrum.source_pk)
-            .where(ApogeeVisitSpectrum.apred.in_(apreds))
-            .alias("q_apogee")
-        )
-        q_boss = (
-            BossVisitSpectrum
-            .select(BossVisitSpectrum.source_pk)
-            .distinct(BossVisitSpectrum.source_pk)
-            .where(BossVisitSpectrum.run2d.in_(run2ds))
-            .alias("q_boss")
-        )
-
-        q = (
-            Source
-            .select()
-            .distinct(Source.pk)
-            .where(
-                Source.sdss_id.is_null(False)
-            &   DEFAULT_MWM_WHERE
-            )
-            .join(q_apogee, JOIN.LEFT_OUTER, on=(q_apogee.c.source_pk == Source.pk))
-            .switch(Source)
-            .join(q_boss, JOIN.LEFT_OUTER, on=(q_boss.c.source_pk == Source.pk))
-            .where(
-                (~q_apogee.c.source_pk.is_null())
-            |   (~q_boss.c.source_pk.is_null())
-            )
-        )       
-
-    else:
-        raise NotImplementedError
-
-    q = q.order_by(Source.pk.desc())
-
-    if page is not None and limit is not None:
-        q = q.paginate(page, limit)
-        total = limit
-    elif limit is not None:
-        q = q.limit(limit)
-        total = limit
-    else:
-        total = None
-        
-    if max_workers > 1:
-        
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
-        
-        futures = []
-        for source in tqdm(q, total=total, desc="Submitting"):
-            futures.append(executor.submit(create_mwmVisit_and_mwmStar_products, source, apreds, run2ds))
-        
-        completed = []
-        with tqdm(total=len(futures)) as pb:
-            for future in concurrent.futures.as_completed(futures):
-                completed.append(future.result())
-                pb.update()
-
-    else:   
-        for source in tqdm(q, total=total, desc="Creating"):     
-            try:
-                create_mwmVisit_and_mwmStar_products(source, apreds, run2ds, **kwargs)
-            except:
-                log.exception(f"Exception trying to create mwmVisit/mwmStar products for {source}")
-                raise 
-    yield None
 
 
 def _create_mwmVisit_and_mwmStar_products(
