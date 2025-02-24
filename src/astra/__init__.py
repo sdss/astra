@@ -72,8 +72,6 @@ def task(
                 if not write_to_database:
                     yield result
                 else:
-                    if live:
-                        yield result
                     results.append(result)
                     n += 1
             
@@ -91,9 +89,7 @@ def task(
                         # Add estimated overheads to each result.
                         timer.add_overheads(results)
                         try:
-                            r = bulk_insert_or_replace_pipeline_results(results)
-                            if not live:
-                                yield from r
+                            yield from bulk_insert_or_replace_pipeline_results(results)
                         except:
                             log.exception(f"Exception trying to insert results to database:")
                             if re_raise_exceptions:
@@ -111,9 +107,7 @@ def task(
             timer.add_overheads(results)
             try:
                 # Write any remaining results to the database.
-                r = bulk_insert_or_replace_pipeline_results(results)
-                if not live:
-                    yield from r
+                yield from bulk_insert_or_replace_pipeline_results(results)
             except:
                 log.exception(f"Exception trying to insert results to database:")
                 if re_raise_exceptions:
