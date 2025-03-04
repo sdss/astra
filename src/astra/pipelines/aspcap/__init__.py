@@ -738,7 +738,7 @@ def ferre(
         process.stdout.close()
         process.stderr.close()
 
-        pipe.send(dict(input_nml_path=input_nml_path, n_processes=-1)) 
+        pipe.send(dict(input_nml_path=input_nml_path, n_processes=-1))
 
         with open(os.path.join(cwd, f"stdout"), "w") as fp:
             fp.write("".join(stdout))
@@ -830,6 +830,12 @@ def ferre(
 
                 debugger(t_awaiting)
                 debugger(f"done hanging")
+
+        else:
+            # Close out the process in case we didn't grep all the targets from stdout
+            # e.g.: /uufs/chpc.utah.edu/common/home/sdss51/sdsswork/mwm/spectro/astra/0.7.0/pipelines/aspcap/2025-02-23-nl4_j6g0/params/lco25m_d_GKd
+            pipe.send(dict(input_nml_path=input_nml_path, n_complete=n_obj - n_complete)) 
+
 
         # Set ferre_hanging to kill the daemon thread.
         ferre_hanging.set()
