@@ -13,6 +13,9 @@ class Product(str, Enum):
     mwmTargets = "mwmTargets"
     mwmAllStar = "mwmAllStar"
     mwmAllVisit = "mwmAllVisit"
+    mwmStar = "mwmStar"
+    mwmVisit = "mwmVisit"
+    mwmVisit_mwmStar = "mwmVisit/mwmStar"
     astraAllStarASPCAP = "astraAllStarASPCAP"
     astraAllStarAPOGEENet = "astraAllStarAPOGEENet"
     astraAllVisitAPOGEENet = "astraAllVisitAPOGEENet"
@@ -36,9 +39,15 @@ def create(
         create_mwm_all_visit_product
     )
     from astra.products.pipeline_summary import create_all_star_product, create_all_visit_product
+    from astra.products.mwm import create_mwmVisit_and_mwmStar_products
     from astra.models.apogee import ApogeeCoaddedSpectrumInApStar, ApogeeVisitSpectrumInApStar
+    
+    mwmVisit_mwmStar_args = (run, dict(task="astra.products.mwm.create_mwmVisit_and_mwmStar_products"))
     mapping = (
         {
+            Product.mwmVisit: mwmVisit_mwmStar_args,
+            Product.mwmStar: mwmVisit_mwmStar_args,
+            Product.mwmVisit_mwmStar: mwmVisit_mwmStar_args,
             Product.mwmTargets: (create_mwm_targets_product, {}),
             Product.mwmAllVisit: (create_mwm_all_visit_product, {}),
             Product.mwmAllStar: (create_mwm_all_star_product, {}),
@@ -68,8 +77,9 @@ def create(
 
     for product in products:
         fun, kwargs = mapping[product]
-        path = fun(overwrite=overwrite, limit=limit, **kwargs)
-        typer.echo(f"Created {product}: {path}")
+        r = fun(overwrite=overwrite, limit=limit, **kwargs)
+        if isinstance(r, str):
+            typer.echo(f"Created {product}: {r}")
 
 
 @app.command()
@@ -265,7 +275,8 @@ def run(
         )] = None,
     limit: Annotated[int, typer.Option(help="Limit the number of spectra.", min=1)] = None,
     page: Annotated[int, typer.Option(help="Page to start results from (`limit` spectra per `page`).", min=1)] = None,
-    live_renderable_path: Annotated[str, typer.Option(hidden=True)] = None
+    live_renderable_path: Annotated[str, typer.Option(hidden=True)] = None,
+    **kwargs
 ):
     """Run an Astra task on spectra."""
     from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn 
@@ -306,7 +317,7 @@ def run(
             if total := q.count():
                 if use_local_renderable:
                     task = overall_progress.add_task(model.__name__, total=total)
-                for r in fun(q, live=True, live_renderable=(live_renderable_path or live_renderable)):
+                for r in fun(q, live=True, live_renderable=(live_renderable_path or live_renderable), **kwargs):
                     if use_local_renderable:
                         overall_progress.update(task, advance=1)
                 if use_local_renderable:

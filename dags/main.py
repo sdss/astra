@@ -43,7 +43,7 @@ with DAG(
         BashOperator(task_id="mwmAllVisit", bash_command='astra create mwmAllVisit --overwrite')
 
     with TaskGroup(group_id="SpectrumProducts") as spectrum_products:
-        BashOperator(task_id="mwmVisit_mwmStar", bash_command="astra srun astra.products.mwm.create_mwmVisit_and_mwmStar_products --nodes 1")
+        BashOperator(task_id="mwmVisit_mwmStar", bash_command="astra create mwmVisit/mwmStar --limit 10000")
 
     with TaskGroup(group_id="ApogeeNet") as apogeenet:
         (
