@@ -42,6 +42,8 @@ with DAG(
         BashOperator(task_id="mwmTargets", bash_command='astra create mwmTargets --overwrite')
         BashOperator(task_id="mwmAllVisit", bash_command='astra create mwmAllVisit --overwrite')
 
+    with TaskGroup(group_id="SpectrumProducts") as spectrum_products:
+        BashOperator(task_id="mwmVisit_mwmStar", bash_command="astra srun astra.products.mwm.create_mwmVisit_and_mwmStar_products --nodes 1")
 
     with TaskGroup(group_id="ApogeeNet") as apogeenet:
         (
@@ -72,7 +74,7 @@ with DAG(
                 task_id="aspcap",
                 # We should be able to do ~20,000 spectra per node per day.
                 # To be safe while testing, let's do 4 nodes with 40,000 spectra (should be approx 12 hrs wall time)
-                bash_command="astra srun aspcap --limit 40000 --nodes 8"
+                bash_command='astra srun aspcap --limit 100000 --nodes 8 --time="48:00:00"'
             )
         ) >> (
             BashOperator(
@@ -85,6 +87,6 @@ with DAG(
 
     repo >> task_migrate
 
-    task_migrate >> summary_spectrum_products
+    task_migrate >> (summary_spectrum_products, spectrum_products)
     task_migrate >> apogeenet
     task_migrate >> aspcap
