@@ -4,7 +4,7 @@ import os
 import concurrent.futures
 from astropy.io import fits
 from astropy.io.fits.card import VerifyWarning
-from peewee import JOIN
+from peewee import JOIN, ModelSelect
 from tqdm import tqdm
 from astra import task, __version__
 from astra.utils import log
@@ -44,39 +44,73 @@ def create_mwmVisit_and_mwmStar_products(
     **kwargs
 ) -> Iterable[MWMSpectrumProductStatus]:
 
-    futures = []        
+    futures = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for source in sources:
-            cartons = source.sdss5_cartons
-            has_sdss_id = (source.sdss_id is not None)
-            is_stellar_like = (
-                "mwm" in cartons["mapper"]
-                or source.sdss4_apogee_id is not None
-                or set(cartons["name"]).intersection(STELLAR_LIKE_CARTON_NAMES)
+        # When executed from the command line, `sources` will be a `peewee.ModelSelect` 
+        # object that includes a whole bunch of sources that we are not interested in.
+        # This includes non-stellar things, and things without a SDSS ID.
+
+        # If we can handle them efficiently through sub-queries, we should.
+        if isinstance(sources, ModelSelect):
+            where_skip = (Source.sdss_id.is_null() | ~DEFAULT_MWM_WHERE)
+            parent = sources.alias('parent')
+            q_skip = (
+                Source
+                .select()
+                .join(parent, on=(Source.pk == parent.c.pk))
+                .where(where_skip)
             )
-            if has_sdss_id and is_stellar_like:
-                futures.append(executor.submit(_create_mwmVisit_and_mwmStar_products, source, apreds, run2ds))
-                #source_pk, flagged_exception, created_visit, created_star = _create_mwmVisit_and_mwmStar_products(source, apreds, run2ds, debug=True, overwrite=True)
-            else:
+            for source in q_skip:
+                sdss_id_is_none = (source.sdss_id is None) 
                 yield MWMSpectrumProductStatus(
                     source_pk=source.pk, 
-                    flag_skipped_because_no_sdss_id=not has_sdss_id,
-                    flag_skipped_because_not_stellar_like=not is_stellar_like,
+                    flag_skipped_because_no_sdss_id=sdss_id_is_none,
+                    flag_skipped_because_not_stellar_like=not sdss_id_is_none,
                     flag_attempted_but_exception=False,
                     flag_created_mwm_visit=False,
                     flag_created_mwm_star=False
                 )
 
-        for future in concurrent.futures.as_completed(futures):
-            source_pk, flagged_exception, created_visit, created_star = future.result()
-            yield MWMSpectrumProductStatus(
-                source_pk=source_pk, 
-                flag_skipped_because_no_sdss_id=False,
-                flag_skipped_because_not_stellar_like=False,
-                flag_attempted_but_exception=flagged_exception,
-                flag_created_mwm_visit=created_visit,
-                flag_created_mwm_star=created_star
+            q_no_skip = (
+                Source
+                .select()
+                .join(parent, on=(Source.pk == parent.c.pk))
+                .where(~where_skip)
             )
+            for source in q_no_skip:
+                futures.append(executor.submit(_create_mwmVisit_and_mwmStar_products, source, apreds, run2ds))
+        else:
+            for source in sources:
+                cartons = source.sdss5_cartons
+                has_sdss_id = (source.sdss_id is not None)
+                is_stellar_like = (
+                    "mwm" in cartons["mapper"]
+                    or source.sdss4_apogee_id is not None
+                    or set(cartons["name"]).intersection(STELLAR_LIKE_CARTON_NAMES)
+                )
+                if has_sdss_id and is_stellar_like:
+                    futures.append(executor.submit(_create_mwmVisit_and_mwmStar_products, source, apreds, run2ds))
+                    #source_pk, flagged_exception, created_visit, created_star = _create_mwmVisit_and_mwmStar_products(source, apreds, run2ds, debug=True, overwrite=True)
+                else:
+                    yield MWMSpectrumProductStatus(
+                        source_pk=source.pk, 
+                        flag_skipped_because_no_sdss_id=not has_sdss_id,
+                        flag_skipped_because_not_stellar_like=not is_stellar_like,
+                        flag_attempted_but_exception=False,
+                        flag_created_mwm_visit=False,
+                        flag_created_mwm_star=False
+                    )
+
+    for future in concurrent.futures.as_completed(futures):
+        source_pk, flagged_exception, created_visit, created_star = future.result()
+        yield MWMSpectrumProductStatus(
+            source_pk=source_pk, 
+            flag_skipped_because_no_sdss_id=False,
+            flag_skipped_because_not_stellar_like=False,
+            flag_attempted_but_exception=flagged_exception,
+            flag_created_mwm_visit=created_visit,
+            flag_created_mwm_star=created_star
+        )
         
     """
     futures = []        
