@@ -74,7 +74,8 @@ with DAG(
                 task_id="aspcap",
                 # We should be able to do ~20,000 spectra per node per day.
                 # To be safe while testing, let's do 4 nodes with 40,000 spectra (should be approx 12 hrs wall time)
-                bash_command='astra srun aspcap --limit 10000 --nodes 8 --time="48:00:00"'
+                #bash_command='astra srun aspcap --limit 10000 --nodes 8 --time="48:00:00"'
+                bash_command='cd ~/vast/astra/; source .venv/bin/activate; astra srun aspcap --limit 1000 --nodes 8 --time="48:00:00"'
             )
         ) >> (
             BashOperator(
