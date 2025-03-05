@@ -42,34 +42,44 @@ def create(
     from astra.products.mwm import create_mwmVisit_and_mwmStar_products
     from astra.models.apogee import ApogeeCoaddedSpectrumInApStar, ApogeeVisitSpectrumInApStar
     
-    mwmVisit_mwmStar_args = (run, dict(task="astra.products.mwm.create_mwmVisit_and_mwmStar_products"))
+    mwmVisit_mwmStar_args = (
+        run, 
+        dict(
+            task="astra.products.mwm.create_mwmVisit_and_mwmStar_products", 
+            batch_size=1,
+            overwrite=overwrite
+        )
+    )
     mapping = (
         {
             Product.mwmVisit: mwmVisit_mwmStar_args,
             Product.mwmStar: mwmVisit_mwmStar_args,
             Product.mwmVisit_mwmStar: mwmVisit_mwmStar_args,
-            Product.mwmTargets: (create_mwm_targets_product, {}),
-            Product.mwmAllVisit: (create_mwm_all_visit_product, {}),
-            Product.mwmAllStar: (create_mwm_all_star_product, {}),
+            Product.mwmTargets: (create_mwm_targets_product, dict(overwrite=overwrite)),
+            Product.mwmAllVisit: (create_mwm_all_visit_product, dict(overwrite=overwrite)),
+            Product.mwmAllStar: (create_mwm_all_star_product, dict(overwrite=overwrite)),
             Product.astraAllStarASPCAP: (
                 create_all_star_product, 
                 {
                     "pipeline_model": "aspcap.ASPCAP",
-                    "apogee_spectrum_model": ApogeeCoaddedSpectrumInApStar
+                    "apogee_spectrum_model": ApogeeCoaddedSpectrumInApStar,
+                    "overwrite": overwrite
                 }
             ),
             Product.astraAllStarAPOGEENet: (
                 create_all_star_product,
                 {
                     "pipeline_model": "apogeenet.ApogeeNet",
-                    "apogee_spectrum_model": ApogeeCoaddedSpectrumInApStar
+                    "apogee_spectrum_model": ApogeeCoaddedSpectrumInApStar,
+                    "overwrite": overwrite
                 }
             ),
             Product.astraAllVisitAPOGEENet: (
                 create_all_visit_product,
                 {
                     "pipeline_model": "apogeenet.ApogeeNet",
-                    "apogee_spectrum_model": ApogeeVisitSpectrumInApStar
+                    "apogee_spectrum_model": ApogeeVisitSpectrumInApStar,
+                    "overwrite": overwrite
                 }
             )
         }
@@ -77,7 +87,7 @@ def create(
 
     for product in products:
         fun, kwargs = mapping[product]
-        r = fun(overwrite=overwrite, limit=limit, **kwargs)
+        r = fun(limit=limit, **kwargs)
         if isinstance(r, str):
             typer.echo(f"Created {product}: {r}")
 
@@ -275,8 +285,7 @@ def run(
         )] = None,
     limit: Annotated[int, typer.Option(help="Limit the number of spectra.", min=1)] = None,
     page: Annotated[int, typer.Option(help="Page to start results from (`limit` spectra per `page`).", min=1)] = None,
-    live_renderable_path: Annotated[str, typer.Option(hidden=True)] = None,
-    **kwargs
+    live_renderable_path: Annotated[str, typer.Option(hidden=True)] = None
 ):
     """Run an Astra task on spectra."""
     from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn 
@@ -380,9 +389,7 @@ def migrate(
         migrate_from_spall_file,
         migrate_specfull_metadata_from_image_headers
     )
-    #from astra.migrations.apogee import (
-    #    migrate_apvisit_metadata_from_image_headers,
-    #)
+    #from astra.migrations.apogee import migrate_apvisit_metadata_from_image_headers
     from astra.migrations.new_apogee import (
         migrate_apogee_spectra_from_sdss5_apogee_drpdb,
         migrate_dithered_metadata
@@ -511,10 +518,10 @@ def migrate(
                                 # Add a bunch more tasks!
                                 new_tasks = [
                                     process_task(migrate_gaia_dr3_astrometry_and_photometry, description="Ingesting Gaia DR3 astrometry and photometry"),
-                                    process_task(migrate_zhang_stellar_parameters, description="Ingesting Zhang stellar parameters"),
-                                    process_task(migrate_bailer_jones_distances, description="Ingesting Bailer-Jones distances"),                 
+                                    #process_task(migrate_zhang_stellar_parameters, description="Ingesting Zhang stellar parameters"),
+                                    #process_task(migrate_bailer_jones_distances, description="Ingesting Bailer-Jones distances"),                 
                                     #process_task(migrate_gaia_synthetic_photometry, description="Ingesting Gaia synthetic photometry"),
-                                    process_task(compute_n_neighborhood, description="Computing n_neighborhood"),
+                                    #process_task(compute_n_neighborhood, description="Computing n_neighborhood"),
                                 ]
                                 reddening_requires.update({t for p, t, q in new_tasks[:3]}) # reddening needs Gaia astrometry, Zhang parameters, and Bailer-Jones distances
                                 additional_tasks.extend(new_tasks)
