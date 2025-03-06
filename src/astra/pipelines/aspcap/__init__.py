@@ -383,7 +383,7 @@ def _aspcap_stage(
 
     at_capacity = lambda p, t, c: (
         p >= max_processes,
-        t >= (soft_thread_ratio * max_threads),
+        (t >= (soft_thread_ratio * max_threads)) and (p > 0),
         c >= max_concurrent_loading
     )
 
@@ -488,6 +488,12 @@ def _aspcap_stage(
             debugger("removed ferre futures")
 
         #debugger(f"CHECKING CAPACITY: {current_processes} {current_threads} {currently_loading}")
+
+        # check that there isn't some aggregating error in the capacity check.
+        if current_processes == 0 and currently_loading == 0 and current_threads > 0:
+            debugger("resetting thread count")
+            current_threads = 0
+
         return (current_processes, current_threads, currently_loading)
 
     while n_planned_executions > n_started_executions:
@@ -510,9 +516,10 @@ def _aspcap_stage(
                 failures[spectrum.spectrum_pk] = ASPCAP.from_spectrum(spectrum, **kwds)
 
             while True:
+                debugger("l513")
                 current_processes, current_threads, currently_loading = check_capacity(current_processes, current_threads, currently_loading)
                 if not any(at_capacity(current_processes, current_threads, currently_loading)):
-                    break
+                    break                
 
             if n_obj > 0:                    
                 ferre_futures.append(executor.submit(_safe_ferre, input_nml_path, pwd, n_obj, n_ferre_threads, child, communicate_on_start=False, **(ferre_kwds or {})))
