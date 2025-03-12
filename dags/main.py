@@ -20,13 +20,8 @@ with DAG(
 
     repo = BashOperator(
         task_id="repo",
-        bash_command=(
-            f"cd $MWM_ASTRA/software/astra; "
-            f"git checkout {REPO_BRANCH}; "
-            f"git pull"
-        ),
+        bash_command="module load astra"
     )
-
     """
     task_migrate = BashOperator(
         task_id="migrate",
