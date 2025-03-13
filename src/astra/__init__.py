@@ -195,9 +195,16 @@ def bulk_insert_or_replace_pipeline_results(results, avoid_integrity_exceptions=
 
 
 
-def generate_queries_for_task(task, input_model=None, limit=None, page=None):
+def generate_queries_for_task(
+    task, 
+    input_model=None, 
+    limit=None, 
+    page=None
+):
     """
     Generate queries for input data that need to be processed by the given task.
+
+    Queries will be ordered by modified time (most recent first).
 
     :param task:
         The task name, or callable.
@@ -244,6 +251,7 @@ def generate_queries_for_task(task, input_model=None, limit=None, page=None):
                     (output_model.source_pk.is_null())
                 |   (Source.modified > output_model.modified)
                 )
+                .order_by(Source.modified.desc())
             )
         else:                
             where = (
@@ -262,6 +270,7 @@ def generate_queries_for_task(task, input_model=None, limit=None, page=None):
                 .join(Spectrum)
                 .join(output_model, JOIN.LEFT_OUTER, on=on)
                 .where(where)
+                .order_by(input_model.modified.desc())
             )
         if group_by_string is not None:
             group_by_resolved = []
