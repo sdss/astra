@@ -4,22 +4,25 @@ from astra.migrations.utils import enumerate_new_spectrum_pks, upsert_many, NoQu
 from tqdm import tqdm
 from subprocess import check_output
 import concurrent.futures
+from astra.utils import log
 
 
 
-
-def migrate_apogee_spectra_from_sdss5_apogee_drpdb(apred: str, queue=None, **kwargs):
+def migrate_apogee_spectra_from_sdss5_apogee_drpdb(apred: str, queue=None, limit=None, incremental=True, **kwargs):
     queue = queue or NoQueue()
 
     # Let's do visits first.
-    n_new_sources, n_new_spectra, n_updated_spectra = migrate_apogee_visits(apred, queue=queue, **kwargs)
-
+    v_n_new_sources, v_n_new_spectra, v_n_updated_spectra = migrate_apogee_visits(apred, queue=queue, limit=limit, incremental=incremental, **kwargs)
+    
     # Now do co-added spectra.
-    n_new_sources, n_new_spectra, n_updated_spectra = migrate_apogee_coadds(apred, queue=queue, **kwargs)
-        
+    c_n_new_sources, c_n_new_spectra, c_n_updated_spectra = migrate_apogee_coadds(apred, queue=queue, limit=limit, incremental=incremental, **kwargs)
+    
     # Now we need to check all the apStar files for the ApogeeVisitSpectrumInApStar entries,
     # and for whether it was dithered or not.
     queue.put(Ellipsis)
+    log.info(f"APOGEE {apred}: {v_n_new_spectra} new visits; {v_n_updated_spectra} updated visits; {v_n_new_sources} new sources")
+    log.info(f"APOGEE {apred}: {c_n_new_spectra} new coadds; {c_n_updated_spectra} updated coadds; {c_n_new_sources} new sources")
+    
     return None
 
 def _migrate_dithered_metadata(pk, absolute_path):
@@ -94,7 +97,7 @@ def migrate_dithered_metadata(
     return n
 
 
-def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, incremental=True):
+def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=None, incremental=True):
 
     from astra.models.apogee import ApogeeVisitSpectrum, ApogeeCoaddedSpectrumInApStar
     from astra.models.base import database
@@ -203,6 +206,7 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, increm
             (Star.apred_vers == apred)
         &   (Star.pk > max_star_pk)
         )
+        .limit(limit)
         .dicts()
     )
 
@@ -257,7 +261,7 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, increm
         .where(Source.sdss_id.in_(list(new_source_data.keys())))
         .tuples()
     )
-    sdss_id_to_source_pk.update({ sdss_id: pk for pk, sdsss_id in q.iterator() })
+    sdss_id_to_source_pk.update({ sdss_id: pk for pk, sdss_id in q.iterator() })
 
     # Assign source primary keys to the spectrum data.
     source_only_keys = set(source_keys) - {"healpix"}
@@ -312,7 +316,7 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, increm
     return (n_new_sources, n_new_coadd_spectra, n_updated_coadd_spectra)
 
 
-def migrate_apogee_visits(apred: str, queue=None, batch_size: int = 1000, incremental=True):
+def migrate_apogee_visits(apred: str, queue=None, batch_size: int = 1000, limit=None, incremental=True):
 
     from astra.models.apogee import ApogeeVisitSpectrum, ApogeeCoaddedSpectrumInApStar
     from astra.models.base import database
@@ -450,6 +454,7 @@ def migrate_apogee_visits(apred: str, queue=None, batch_size: int = 1000, increm
             (Visit.apred == apred)
         &   (Visit.pk > max_visit_pk)
         )
+        .limit(limit)
         .dicts()    
     )
 
@@ -497,7 +502,7 @@ def migrate_apogee_visits(apred: str, queue=None, batch_size: int = 1000, increm
                     .on_conflict_ignore()
                     .execute()
                 )
-                queue.put(dict(advance=batch_size))
+                queue.put(dict(advance=min(batch_size, len(chunk))))
 
     # Get the new source primary keys.
     q = (
@@ -564,7 +569,7 @@ def migrate_apogee_visits(apred: str, queue=None, batch_size: int = 1000, increm
             )
             for pk in q:
                 n_updated_visit_spectra += 1
-            queue.put(dict(advance=batch_size))
+            queue.put(dict(advance=min(batch_size, len(chunk))))
 
     n_new_visit_spectra = assign_spectrum_pks(ApogeeVisitSpectrum, batch_size, queue)
 
@@ -624,5 +629,5 @@ def assign_spectrum_pks(model, batch_size, queue):
                 .where(model.pk.in_(batch))
                 .execute()
             )
-            queue.put(dict(advance=batch_size))
+            queue.put(dict(advance=min(batch_size, len(batch))))
     return n

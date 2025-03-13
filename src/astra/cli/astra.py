@@ -366,6 +366,9 @@ def run(
 def migrate(
     apred: Optional[str] = typer.Option(None, help="APOGEE data reduction pipeline version."),
     run2d: Optional[str] = typer.Option(None, help="BOSS data reduction pipeline version."),
+    limit: Optional[int] = typer.Option(None, help="Limit the number of spectra to migrate."),
+    metadata: Optional[bool] = typer.Option(True, help="Migrate metadata (e.g., photometry, astrometry)."),
+    incremental: Optional[bool] = typer.Option(True, help="Only attempt to migrate new spectra.")
 ):
     """Migrate spectra and auxillary information to the Astra database."""
 
@@ -374,6 +377,7 @@ def migrate(
     from signal import SIGKILL
     from rich.console import Console
     from rich.progress import Text, Progress, SpinnerColumn, Text, TextColumn, TaskProgressColumn, TimeRemainingColumn, TimeElapsedColumn, BarColumn, MofNCompleteColumn as _MofNCompleteColumn
+    from rich.logging import RichHandler
 
     class MofNCompleteColumn(_MofNCompleteColumn):
         def render(self, task):
@@ -420,12 +424,21 @@ def migrate(
         migrate_carton_assignments_to_bigbitfield,
         migrate_targeting_cartons
     )
-    from astra.utils import silenced
+    from astra.utils import log, silenced
     import sys
     if in_airflow_context:
         console = Console(file=sys.stdout)
     else:
         console = Console()
+
+    log.handlers.clear()
+    log.handlers.extend([
+        RichHandler(
+            console=console, 
+            markup=True, 
+            rich_tracebacks=True
+        ),
+    ])
 
     ptq = []
     try:
@@ -438,7 +451,7 @@ def migrate(
             TimeRemainingColumn(),
             console=Console(),
             transient=not in_airflow_context
-        ) as progress:
+        ) as progress:    
 
             def process_task(target, *args, description=None, **kwargs):
                 queue = mp.Queue()
@@ -451,6 +464,7 @@ def migrate(
                 task = progress.add_task(description=(description or ""), total=None)
                 return (process, task, queue)
 
+            log.info("Starting migration..")
             
             if apred is not None or run2d is not None:
                 if apred is not None:
@@ -458,7 +472,15 @@ def migrate(
                         from astra.migrations.apogee import migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb 
                         ptq.append(process_task(migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb, description="Ingesting APOGEE dr17 spectra"))
                     else:
-                        ptq.append(process_task(migrate_apogee_spectra_from_sdss5_apogee_drpdb, apred, description=f"Ingesting APOGEE {apred} spectra"))
+                        ptq.append(
+                            process_task(
+                                migrate_apogee_spectra_from_sdss5_apogee_drpdb,
+                                apred,
+                                limit=limit,
+                                incremental=incremental,
+                                description=f"Ingesting APOGEE {apred} spectra"
+                            )
+                        )
                 if run2d is not None:
                     ptq.append(process_task(migrate_from_spall_file, run2d, description=f"Ingesting BOSS {run2d} spectra"))
                                 
@@ -481,74 +503,75 @@ def migrate(
                             pass
 
             # Now that we have sources and spectra, we can do other things.
-            ptq = [
-                process_task(migrate_gaia_source_ids, description="Ingesting Gaia DR3 source IDs"),
-                process_task(migrate_twomass_photometry, description="Ingesting 2MASS photometry"),
-                process_task(migrate_unwise_photometry, description="Ingesting unWISE photometry"),
-                process_task(migrate_glimpse_photometry, description="Ingesting GLIMPSE photometry"),
-                process_task(migrate_specfull_metadata_from_image_headers, description="Ingesting specFull metadata"),
+            if metadata:
+                ptq = [
+                    process_task(migrate_gaia_source_ids, description="Ingesting Gaia DR3 source IDs"),
+                    process_task(migrate_twomass_photometry, description="Ingesting 2MASS photometry"),
+                    process_task(migrate_unwise_photometry, description="Ingesting unWISE photometry"),
+                    process_task(migrate_glimpse_photometry, description="Ingesting GLIMPSE photometry"),
+                    process_task(migrate_specfull_metadata_from_image_headers, description="Ingesting specFull metadata"),
 
 
-                process_task(migrate_dithered_metadata, description="Ingesting APOGEE dithered metadata"),
-                #process_task(migrate_apvisit_metadata_from_image_headers, description="Ingesting apVisit metadata"),                
-                process_task(migrate_healpix, description="Ingesting HEALPix values"),
-                process_task(migrate_tic_v8_identifier, description="Ingesting TIC v8 identifiers"),
-                process_task(update_galactic_coordinates, description="Computing Galactic coordinates"),
-                process_task(fix_unsigned_apogee_flags, description="Fix unsigned APOGEE flags"),
-                process_task(migrate_targeting_cartons, description="Ingesting targeting cartons"),
-                process_task(compute_f_night_time_for_apogee_visits, description="Computing f_night for APOGEE visits"),                        
-                process_task(update_visit_spectra_counts, description="Updating visit spectra counts"),               
-            ]
-            # reddening needs unwise, 2mass, glimpse, 
-            task_gaia, task_twomass, task_unwise, task_glimpse, task_specfull, *_ = [t for p, t, q in ptq]
-            reddening_requires = {task_twomass, task_unwise, task_glimpse, task_gaia}
-            started_reddening = False
-            awaiting = set(t for p, t, q in ptq)
-            while awaiting:
-                additional_tasks = []
-                for p, t, q in ptq:
-                    try:
-                        r = q.get(False)
-                        if r is Ellipsis:
-                            progress.update(t, completed=True)
-                            awaiting.remove(t)
-                            p.join()
-                            progress.update(t, visible=False)
-                            if t == task_gaia:
-                                # Add a bunch more tasks!
-                                new_tasks = [
-                                    process_task(migrate_gaia_dr3_astrometry_and_photometry, description="Ingesting Gaia DR3 astrometry and photometry"),
-                                    #process_task(migrate_zhang_stellar_parameters, description="Ingesting Zhang stellar parameters"),
-                                    #process_task(migrate_bailer_jones_distances, description="Ingesting Bailer-Jones distances"),                 
-                                    #process_task(migrate_gaia_synthetic_photometry, description="Ingesting Gaia synthetic photometry"),
-                                    #process_task(compute_n_neighborhood, description="Computing n_neighborhood"),
-                                ]
-                                reddening_requires.update({t for p, t, q in new_tasks[:3]}) # reddening needs Gaia astrometry, Zhang parameters, and Bailer-Jones distances
-                                additional_tasks.extend(new_tasks)
-                            if t == task_specfull:
-                                additional_tasks.append(
-                                    process_task(compute_f_night_time_for_boss_visits, description="Computing f_night for BOSS visits")
-                                )
-                            if t == task_unwise:
-                                additional_tasks.append(
-                                    process_task(compute_w1mag_and_w2mag, description="Computing W1, W2 mags")
-                                )
-                            if not started_reddening and not (awaiting & reddening_requires):
-                                started_reddening = True
-                                #additional_tasks.append(
-                                #    process_task(update_reddening, description="Computing extinction")
-                                #)
-                        else:
-                            progress.update(t, **r)
-                            if "completed" in r and r.get("completed", None) == 0:
-                                # reset the task
-                                progress.reset(t)
+                    process_task(migrate_dithered_metadata, description="Ingesting APOGEE dithered metadata"),
+                    #process_task(migrate_apvisit_metadata_from_image_headers, description="Ingesting apVisit metadata"),
+                    process_task(migrate_healpix, description="Ingesting HEALPix values"),
+                    process_task(migrate_tic_v8_identifier, description="Ingesting TIC v8 identifiers"),
+                    process_task(update_galactic_coordinates, description="Computing Galactic coordinates"),
+                    process_task(fix_unsigned_apogee_flags, description="Fix unsigned APOGEE flags"),
+                    process_task(migrate_targeting_cartons, description="Ingesting targeting cartons"),
+                    process_task(compute_f_night_time_for_apogee_visits, description="Computing f_night for APOGEE visits"),                        
+                    process_task(update_visit_spectra_counts, description="Updating visit spectra counts"),               
+                ]
+                # reddening needs unwise, 2mass, glimpse, 
+                task_gaia, task_twomass, task_unwise, task_glimpse, task_specfull, *_ = [t for p, t, q in ptq]
+                reddening_requires = {task_twomass, task_unwise, task_glimpse, task_gaia}
+                started_reddening = False
+                awaiting = set(t for p, t, q in ptq)
+                while awaiting:
+                    additional_tasks = []
+                    for p, t, q in ptq:
+                        try:
+                            r = q.get(False)
+                            if r is Ellipsis:
+                                progress.update(t, completed=True)
+                                awaiting.remove(t)
+                                p.join()
+                                progress.update(t, visible=False)
+                                if t == task_gaia:
+                                    # Add a bunch more tasks!
+                                    new_tasks = [
+                                        process_task(migrate_gaia_dr3_astrometry_and_photometry, description="Ingesting Gaia DR3 astrometry and photometry"),
+                                        #process_task(migrate_zhang_stellar_parameters, description="Ingesting Zhang stellar parameters"),
+                                        #process_task(migrate_bailer_jones_distances, description="Ingesting Bailer-Jones distances"),                 
+                                        #process_task(migrate_gaia_synthetic_photometry, description="Ingesting Gaia synthetic photometry"),
+                                        #process_task(compute_n_neighborhood, description="Computing n_neighborhood"),
+                                    ]
+                                    reddening_requires.update({t for p, t, q in new_tasks[:3]}) # reddening needs Gaia astrometry, Zhang parameters, and Bailer-Jones distances
+                                    additional_tasks.extend(new_tasks)
+                                if t == task_specfull:
+                                    additional_tasks.append(
+                                        process_task(compute_f_night_time_for_boss_visits, description="Computing f_night for BOSS visits")
+                                    )
+                                if t == task_unwise:
+                                    additional_tasks.append(
+                                        process_task(compute_w1mag_and_w2mag, description="Computing W1, W2 mags")
+                                    )
+                                if not started_reddening and not (awaiting & reddening_requires):
+                                    started_reddening = True
+                                    #additional_tasks.append(
+                                    #    process_task(update_reddening, description="Computing extinction")
+                                    #)
+                            else:
+                                progress.update(t, **r)
+                                if "completed" in r and r.get("completed", None) == 0:
+                                    # reset the task
+                                    progress.reset(t)
 
-                    except mp.queues.Empty:
-                        pass
+                        except mp.queues.Empty:
+                            pass
 
-                ptq.extend(additional_tasks)
-                awaiting |= set(t for p, t, q in additional_tasks)
+                    ptq.extend(additional_tasks)
+                    awaiting |= set(t for p, t, q in additional_tasks)
 
     except KeyboardInterrupt:  
         """
