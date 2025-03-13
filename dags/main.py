@@ -4,7 +4,7 @@ from airflow.operators.bash import BashOperator
 from airflow.utils.task_group import TaskGroup
 
 REPO_BRANCH = "dev"
-APRED, RUN2D = ("1.4", "v6_2_0")
+APRED, RUN2D = ("1.5", "v6_2_0")
 
 # APRED for DR20 will be 1.5
 # RUN2D for DR20 will be v6_2_0
@@ -41,12 +41,13 @@ with DAG(
         BashOperator(task_id="mwmVisit_mwmStar", bash_command="astra create mwmVisit/mwmStar --limit 10000")
 
     with TaskGroup(group_id="ApogeeNet") as apogeenet:
-        (
+        apogeenet_star = (
             BashOperator(
                 task_id="star",
                 bash_command='astra srun apogeenet apogee.ApogeeCoaddedSpectrumInApStar --mem=16000 --gres="gpu:v100" --account="notchpeak-gpu" --time="48:00:00"'
             )
-        ) >> (
+        )
+        apogeenet_star >> (
             BashOperator(
                 task_id="create_all_star_product",
                 bash_command="astra create astraAllStarAPOGEENet --overwrite"
@@ -70,7 +71,7 @@ with DAG(
                 # We should be able to do ~20,000 spectra per node per day.
                 # To be safe while testing, let's do 4 nodes with 40,000 spectra (should be approx 12 hrs wall time)
                 #bash_command='astra srun aspcap --limit 10000 --nodes 8 --time="48:00:00"'
-                bash_command='astra srun aspcap --limit 20000 --nodes 8 --time="48:00:00"'
+                bash_command='astra srun aspcap --limit 50000 --nodes 8 --time="48:00:00"'
             )
         ) >> (
             BashOperator(
@@ -85,4 +86,4 @@ with DAG(
 
     task_migrate >> (summary_spectrum_products, spectrum_products)
     task_migrate >> apogeenet
-    task_migrate >> aspcap
+    (task_migrate, apogeenet_star) >> aspcap
