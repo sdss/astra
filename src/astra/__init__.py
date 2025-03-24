@@ -198,6 +198,7 @@ def bulk_insert_or_replace_pipeline_results(results, avoid_integrity_exceptions=
 def generate_queries_for_task(
     task, 
     input_model=None, 
+    sdss_ids=None,
     limit=None, 
     page=None
 ):
@@ -212,6 +213,9 @@ def generate_queries_for_task(
     :param input_model: [optional]
         The input spectrum model. If `None` is given then a query will be generated for each
         spectrum model expected by the task, based on the task function signature.
+    
+    :param sdss_ids: [optional]
+        A list of SDSS IDs to filter the input model. 
     
     :param limit: [optional]
         Limit the number of rows for each spectrum model query.
@@ -234,7 +238,16 @@ def generate_queries_for_task(
     output_model = get_return_type(fun)
     group_by_string = get_task_group_by_string(fun)
     
+
+
     for input_model in input_models:
+        where = (
+            output_model.spectrum_pk.is_null()
+        |   (input_model.modified > output_model.modified)
+        )
+        if sdss_ids is not None:
+            where &= (Source.sdss_id.in_(sdss_ids))
+
         if input_model == Source:
             q = (
                 Source
@@ -247,17 +260,10 @@ def generate_queries_for_task(
                     &   (Source.pk == output_model.source_pk)
                     )
                 )
-                .where(
-                    (output_model.source_pk.is_null())
-                |   (Source.modified > output_model.modified)
-                )
+                .where(where)
                 .order_by(Source.modified.desc())
             )
         else:                
-            where = (
-                output_model.spectrum_pk.is_null()
-            |   (input_model.modified > output_model.modified)
-            )
             on = (
                 (output_model.v_astra_major_minor == current_version)
             &   (input_model.spectrum_pk == output_model.spectrum_pk)

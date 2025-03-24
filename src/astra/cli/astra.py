@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import typer
 import os
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from typing_extensions import Annotated
 from enum import Enum
 
@@ -100,6 +100,7 @@ def srun(
             "The input model to use (e.g., `ApogeeCombinedSpectrum`, `BossCombinedSpectrum`). "
         )
         )] = None,
+    sdss_ids: Annotated[List[int], typer.Argument(help="Restrict to some set of SDSS IDs.")] = None,
     nodes: Annotated[int, typer.Option(help="The number of nodes to use.", min=1)] = 1,
     procs: Annotated[int, typer.Option(help="The number of `astra` processes to use per node.", min=1)] = 1,
     limit: Annotated[int, typer.Option(help="Limit the number of inputs.", min=1)] = None,
@@ -110,6 +111,18 @@ def srun(
     time: Annotated[str, typer.Option(help="Wall-time")] = "24:00:00",
 ):
     """Distribute an Astra task over many nodes using Slurm."""
+
+    # check that spectrum_model is not an integer
+    try:
+        model = int(model)
+    except:
+        None
+    else:
+        if sdss_ids is None:
+            sdss_ids = [model]
+        else:
+            sdss_ids.append(model)
+        model = None
 
     partition = partition or account
 
@@ -134,7 +147,7 @@ def srun(
     from rich.console import Console
     from logging import FileHandler
 
-    model, q = next(generate_queries_for_task(task, model, limit))
+    model, q = next(generate_queries_for_task(task, model, sdss_ids=sdss_ids, limit=limit))
 
     total = q.count()
     if total == 0:
@@ -193,12 +206,17 @@ def srun(
                     items_in_row = []
                 status_path_locks[progress] = {}
 
+                if sdss_ids is None:
+                    sdss_id_str = ""
+                else:
+                    sdss_id_str = " ".join(map(str, sdss_ids))
+
                 # TODO: Let's not hard code this here.
                 commands = ["export CLUSTER=1"]
                 for page in range(n * procs, (n + 1) * procs):
                     status_path = f"{td}/live-{n}-{page}"
                     status_path_locks[progress][status_path] = 0
-                    commands.append(f"astra run {task} {model.__name__} --limit {limit} --page {page + 1} --live-renderable-path {status_path} &")
+                    commands.append(f"astra run {task} {model.__name__} {sdss_id_str} --limit {limit} --page {page + 1} --live-renderable-path {status_path} &")
                 commands.append("wait")
 
                 script_path = f"{td}/node_{n}.sh"
@@ -283,11 +301,25 @@ def run(
             "If `None` is given then all spectrum models accepted by the task will be analyzed."
         )
         )] = None,
+    sdss_ids: Annotated[List[int], typer.Argument(help="Restrict to some set of SDSS IDs.")] = None,
     limit: Annotated[int, typer.Option(help="Limit the number of spectra.", min=1)] = None,
     page: Annotated[int, typer.Option(help="Page to start results from (`limit` spectra per `page`).", min=1)] = None,
-    live_renderable_path: Annotated[str, typer.Option(hidden=True)] = None
+    live_renderable_path: Annotated[str, typer.Option(hidden=True)] = None,
 ):
     """Run an Astra task on spectra."""
+
+    # check that spectrum_model is not an integer
+    try:
+        spectrum_model = int(spectrum_model)
+    except:
+        None
+    else:
+        if sdss_ids is None:
+            sdss_ids = [spectrum_model]
+        else:
+            sdss_ids.append(spectrum_model)
+        spectrum_model = None
+            
     from rich.progress import Progress, SpinnerColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn, BarColumn, MofNCompleteColumn 
     from rich.live import Live
     from rich.panel import Panel
@@ -298,6 +330,9 @@ def run(
 
     from astra import models, __version__, generate_queries_for_task
     from astra.utils import log, resolve_task, accepts_live_renderable
+
+
+
 
     fun = resolve_task(task)
     fun_accepts_live_renderable = accepts_live_renderable(fun)
@@ -322,7 +357,7 @@ def run(
             RichHandler(console=live.console, markup=True, rich_tracebacks=True),
         ])
 
-        for model, q in generate_queries_for_task(fun, spectrum_model, limit, page=page):            
+        for model, q in generate_queries_for_task(fun, spectrum_model, sdss_ids=sdss_ids, limit=limit, page=page):            
             if total := q.count():
                 if use_local_renderable:
                     task = overall_progress.add_task(model.__name__, total=total)
