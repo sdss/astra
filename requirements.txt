@@ -1,6 +1,6 @@
 numpy
 scipy
-astropy==5.1
+astropy==5.3.3
 tqdm
 pip
 pyyaml
