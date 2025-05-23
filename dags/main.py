@@ -6,9 +6,6 @@ from airflow.utils.task_group import TaskGroup
 REPO_BRANCH = "dev"
 APRED, RUN2D = ("1.5", "v6_2_0")
 
-# APRED for DR20 will be 1.5
-# RUN2D for DR20 will be v6_2_0
-
 
 with DAG(
     "astra", 
@@ -22,23 +19,17 @@ with DAG(
         task_id="repo",
         bash_command="module load astra"
     )
-    """
     task_migrate = BashOperator(
         task_id="migrate",
         bash_command=f"astra migrate --apred {APRED}",# --run2d {RUN2D} --apred {APRED}",
-    )
-    """
-    task_migrate = BashOperator(
-        task_id="migrate",
-        bash_command="sleep 1"
     )
     
     with TaskGroup(group_id="SummarySpectrumProducts") as summary_spectrum_products:
         BashOperator(task_id="mwmTargets", bash_command='astra create mwmTargets --overwrite')
         BashOperator(task_id="mwmAllVisit", bash_command='astra create mwmAllVisit --overwrite')
 
-    with TaskGroup(group_id="SpectrumProducts") as spectrum_products:
-        BashOperator(task_id="mwmVisit_mwmStar", bash_command="astra create mwmVisit/mwmStar --limit 10000")
+    #with TaskGroup(group_id="SpectrumProducts") as spectrum_products:
+    #    BashOperator(task_id="mwmVisit_mwmStar", bash_command="astra create mwmVisit/mwmStar --limit 10000")
 
     with TaskGroup(group_id="ApogeeNet") as apogeenet:
         apogeenet_star = (
@@ -84,6 +75,6 @@ with DAG(
 
     repo >> task_migrate
 
-    task_migrate >> (summary_spectrum_products, spectrum_products)
+    task_migrate >> (summary_spectrum_products, ) #spectrum_products)
     task_migrate >> apogeenet
     (task_migrate, apogeenet_star) >> aspcap

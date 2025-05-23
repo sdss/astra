@@ -1,9 +1,8 @@
-
-from peewee import JOIN, chunked, Case, fn, SQL, EXCLUDED
-from astra.migrations.utils import enumerate_new_spectrum_pks, upsert_many, NoQueue
-from tqdm import tqdm
-from subprocess import check_output
 import concurrent.futures
+from peewee import JOIN, chunked, Case, fn, SQL, EXCLUDED
+from subprocess import check_output
+
+from astra.migrations.utils import enumerate_new_spectrum_pks, upsert_many, NoQueue
 from astra.utils import log
 
 
@@ -39,8 +38,6 @@ def _migrate_dithered_metadata(pk, absolute_path):
         # file not found, or corrupted
         dithered = None
     return (pk, dithered)
-
-
 
 def migrate_dithered_metadata(
     max_workers=64, 
