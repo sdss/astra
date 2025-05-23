@@ -555,7 +555,7 @@ def migrate(
                     process_task(fix_unsigned_apogee_flags, description="Fix unsigned APOGEE flags"),
                     process_task(migrate_targeting_cartons, description="Ingesting targeting cartons"),
                     process_task(compute_f_night_time_for_apogee_visits, description="Computing f_night for APOGEE visits"),                        
-                    process_task(update_visit_spectra_counts, description="Updating visit spectra counts"),               
+                    process_task(update_visit_spectra_counts, description="Updating visit spectra counts"),
                 ]
                 # reddening needs unwise, 2mass, glimpse, 
                 task_gaia, task_twomass, task_unwise, task_glimpse, task_specfull, *_ = [t for p, t, q in ptq]
@@ -580,12 +580,21 @@ def migrate(
                                 awaiting.remove(t)
                                 p.join()
                                 progress.update(t, visible=False)
+                                """
                                 if t == task_gaia and len(additional_gaia_task_partials) > 0:
                                     f, kwds = additional_gaia_task_partials.pop(0)
                                     task_gaia = process_task(f, **kwds)
                                     additional_tasks.append(task_gaia)
                                     if f in (migrate_gaia_dr3_astrometry_and_photometry, migrate_zhang_stellar_parameters, migrate_bailer_jones_distances):
                                         reddening_requires.update({task_gaia})
+                                """
+                                if t == task_gaia:
+                                    for f, kwds in additional_gaia_task_partials:
+                                        new_task = process_task(f, **kwds)
+                                        additional_tasks.append(new_task)
+                                        if f in (migrate_gaia_dr3_astrometry_and_photometry, migrate_zhang_stellar_parameters, migrate_bailer_jones_distances):
+                                            reddening_requires.update({new_task})                                        
+                                            
                                 if t == task_specfull:
                                     additional_tasks.append(
                                         process_task(compute_f_night_time_for_boss_visits, description="Computing f_night for BOSS visits")
