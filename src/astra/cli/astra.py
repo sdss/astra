@@ -559,6 +559,14 @@ def migrate(
                 ]
                 # reddening needs unwise, 2mass, glimpse, 
                 task_gaia, task_twomass, task_unwise, task_glimpse, task_specfull, *_ = [t for p, t, q in ptq]
+                # These need to be run in sequence
+                additional_gaia_task_partials = [
+                    (migrate_gaia_dr3_astrometry_and_photometry, dict(description="Ingesting Gaia DR3 astrometry and photometry")),
+                    (migrate_zhang_stellar_parameters, dict(description="Ingesting Zhang stellar parameters")),
+                    (migrate_bailer_jones_distances, dict(description="Ingesting Bailer-Jones distances")), 
+                    (migrate_gaia_synthetic_photometry, dict(description="Ingesting Gaia synthetic photometry")),
+                    (compute_n_neighborhood, dict(description="Computing n_neighborhood")),
+                ]
                 reddening_requires = {task_twomass, task_unwise, task_glimpse, task_gaia}
                 started_reddening = False
                 awaiting = set(t for p, t, q in ptq)
@@ -572,17 +580,12 @@ def migrate(
                                 awaiting.remove(t)
                                 p.join()
                                 progress.update(t, visible=False)
-                                if t == task_gaia:
-                                    # Add a bunch more tasks!
-                                    new_tasks = [
-                                        process_task(migrate_gaia_dr3_astrometry_and_photometry, description="Ingesting Gaia DR3 astrometry and photometry"),
-                                        #process_task(migrate_zhang_stellar_parameters, description="Ingesting Zhang stellar parameters"),
-                                        #process_task(migrate_bailer_jones_distances, description="Ingesting Bailer-Jones distances"),                 
-                                        #process_task(migrate_gaia_synthetic_photometry, description="Ingesting Gaia synthetic photometry"),
-                                        #process_task(compute_n_neighborhood, description="Computing n_neighborhood"),
-                                    ]
-                                    reddening_requires.update({t for p, t, q in new_tasks[:3]}) # reddening needs Gaia astrometry, Zhang parameters, and Bailer-Jones distances
-                                    additional_tasks.extend(new_tasks)
+                                if t == task_gaia and len(additional_gaia_task_partials) > 0:
+                                    f, kwds = additional_gaia_task_partials.pop(0)
+                                    task_gaia = process_task(f, **kwds)
+                                    additional_tasks.append(task_gaia)
+                                    if f in (migrate_gaia_dr3_astrometry_and_photometry, migrate_zhang_stellar_parameters, migrate_bailer_jones_distances):
+                                        reddening_requires.update({task_gaia})
                                 if t == task_specfull:
                                     additional_tasks.append(
                                         process_task(compute_f_night_time_for_boss_visits, description="Computing f_night for BOSS visits")
@@ -593,9 +596,7 @@ def migrate(
                                     )
                                 if not started_reddening and not (awaiting & reddening_requires):
                                     started_reddening = True
-                                    #additional_tasks.append(
-                                    #    process_task(update_reddening, description="Computing extinction")
-                                    #)
+                                    additional_tasks.append(process_task(update_reddening, description="Computing extinction"))
                             else:
                                 progress.update(t, **r)
                                 if "completed" in r and r.get("completed", None) == 0:
