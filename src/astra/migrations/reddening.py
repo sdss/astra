@@ -227,10 +227,14 @@ def update_reddening(
         for chunk in chunked(q, batch_size):
             updated = []
             for source in chunk:
-                s = _update_reddening_on_source(source, *maps)
-                if s is not None:
-                    updated.append(s)    
-            
+                if (
+                    (source.ra is not None and source.dec is not None)
+                and (np.all(np.isfinite([source.ra, source.dec])))
+                ):
+                    s = _update_reddening_on_source(source, *maps)
+                    if s is not None:
+                        updated.append(s)    
+                
             if len(updated) > 0:
                 Source.bulk_update(updated, fields)
             
