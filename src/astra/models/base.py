@@ -105,7 +105,32 @@ def get_database_and_schema(config):
                     database = AstraDatabaseConnection(autoconnect=True)
                     database.set_profile("astra")
                     '''
-                    database = PostgresqlDatabase(
+
+                    from peewee import OperationalError, __exception_wrapper__
+
+
+                    class RetryOperationalError(object):
+
+                        def execute_sql(self, sql, params=None, commit=True):
+                            try:
+                                cursor = (
+                                    super(RetryOperationalError, self)
+                                    .execute_sql(sql, params, commit)
+                                )
+                            except OperationalError:
+                                if not self.is_closed():
+                                    self.close()
+                                with __exception_wrapper__:
+                                    cursor = self.cursor()
+                                    cursor.execute(sql, params or ())
+                                    if commit and not self.in_transaction():
+                                        self.commit()
+                            return cursor
+
+                    class _PostgresqlDatabase(RetryOperationalError, PostgresqlDatabase):
+                        pass
+
+                    database = _PostgresqlDatabase(
                         config["database"]["dbname"], 
                         **kwds
                     )
