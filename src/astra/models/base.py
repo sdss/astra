@@ -4,11 +4,10 @@ __all__ = ["BaseModel", "database"]
 import os
 import re
 import numpy as np
-
 from peewee import (
     Field,
     Model,
-    PostgresqlDatabase,
+    PostgresqlDatabase as _PostgresqlDatabase,
     TextField,
     FloatField,
     BooleanField,
@@ -17,7 +16,9 @@ from peewee import (
     BigIntegerField,
     ForeignKeyField,
     DateTimeField,
-    JOIN
+    JOIN,
+    OperationalError,
+    __exception_wrapper__
 )
 from inspect import getsource
 from playhouse.sqlite_ext import SqliteExtDatabase
@@ -30,6 +31,26 @@ BLANK_CARD = (" ", " ", None)
 FILLER_CARD = (FILLER_CARD_KEY, *_) = ("TTYPE0", "Water cuggle", None)
 
 
+class ResilientDatabase(object):
+    def execute_sql(self, sql, params=None, commit=True):
+        try:
+            cursor = (
+                super(ResilientDatabase, self)
+                .execute_sql(sql, params, commit)
+            )
+        except OperationalError:
+            if not self.is_closed():
+                self.close()
+            with __exception_wrapper__:
+                cursor = self.cursor()
+                cursor.execute(sql, params or ())
+                if commit and not self.in_transaction():
+                    self.commit()
+        return cursor
+
+
+class PostgresqlDatabase(ResilientDatabase, _PostgresqlDatabase):
+    pass
 
 # Note that we can't use a DatabaseProxy and define it later because we also need to be
 # able to dynamically set the schema, which seems to be impossible with a DatabaseProxy.
@@ -95,46 +116,7 @@ def get_database_and_schema(config):
                     keys = ("user", "host", "password", "port")
                     kwds = dict([(k, config["database"][k]) for k in keys if k in config["database"]])
                     kwds.setdefault("autorollback", True)
-
-                    '''
-                    print("TODO: ANDY COME BACK TO THIS")
-                    from sdssdb.connection import PeeweeDatabaseConnection
-                    class AstraDatabaseConnection(PeeweeDatabaseConnection):
-                        dbname = config["database"]["dbname"]
-                    
-                    database = AstraDatabaseConnection(autoconnect=True)
-                    database.set_profile("astra")
-                    '''
-
-                    from peewee import OperationalError, __exception_wrapper__
-
-
-                    class RetryOperationalError(object):
-
-                        def execute_sql(self, sql, params=None, commit=True):
-                            try:
-                                cursor = (
-                                    super(RetryOperationalError, self)
-                                    .execute_sql(sql, params, commit)
-                                )
-                            except OperationalError:
-                                if not self.is_closed():
-                                    self.close()
-                                with __exception_wrapper__:
-                                    cursor = self.cursor()
-                                    cursor.execute(sql, params or ())
-                                    if commit and not self.in_transaction():
-                                        self.commit()
-                            return cursor
-
-                    class _PostgresqlDatabase(RetryOperationalError, PostgresqlDatabase):
-                        pass
-
-                    database = _PostgresqlDatabase(
-                        config["database"]["dbname"], 
-                        **kwds
-                    )
-
+                    database = PostgresqlDatabase(config["database"]["dbname"], **kwds)
                     schema = config["database"].get("schema", None)
 
                 except:
@@ -193,9 +175,7 @@ class BaseModel(Model):
         #> New category header
         """
 
-
-
-        pattern = '\s{4}#>\s*(.+)\n\s{4}([\w|\d|_]+)\s*='
+        pattern = r'\s{4}#>\s*(.+)\n\s{4}([\w|\d|_]+)\s*='
         source_code = getsource(cls)
         category_headers = []
         for header, field_name in re.findall(pattern, source_code):
@@ -212,7 +192,7 @@ class BaseModel(Model):
     @classmethod
     @property
     def category_comments(cls):
-        pattern = '\s{4}([\w|\d|_]+)\s*=.+\n\s{4}#<\s*(.+)'
+        pattern = r'\s{4}([\w|\d|_]+)\s*=.+\n\s{4}#<\s*(.+)'
         source_code = getsource(cls)
         comments = []
         for field_name, comment in re.findall(pattern, source_code):
