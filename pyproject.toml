@@ -2,7 +2,7 @@
 name = "astra"
 version = "0.7.0" 
 readme = "README.md"
-license = {text = "LICENSE.md"}
+license = "GPL-3.0-or-later"
 description = "Analysis framework for SDSS-V / MWM." 
 keywords = ["astronomy software"]
 authors = [
