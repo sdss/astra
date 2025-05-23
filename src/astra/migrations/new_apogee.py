@@ -117,7 +117,11 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
 
     max_star_pk = 0
     if incremental:
-        max_star_pk += Star.select(fn.MAX(Star.pk)).scalar() or 0
+        max_star_pk = (
+            ApogeeCoaddedSpectrumInApStar
+            .select(fn.MAX(ApogeeCoaddedSpectrumInApStar.star_pk))
+            .scalar() or 0
+        )
 
     # In continuous operations mode, the APOGEE DRP does not update the `star` table to have unique `star_pk`,
     # so we have to sub-query to get the most recent co-add.
