@@ -1,4 +1,5 @@
 import numpy as np
+import datetime
 from astropy.time import Time
 import astropy.coordinates as coord
 import astropy.units as u
@@ -369,6 +370,8 @@ def update_visit_spectra_counts(
     from astra.models.source import Source
     from astra.models.apogee import ApogeeVisitSpectrum
     from astra.models.boss import BossVisitSpectrum
+    from astra.models.spectrum import Spectrum
+    # We should only update sources where the max MJD is more recent than when the source was 'modified'.
 
     if queue is None:
         queue = NoQueue()
@@ -391,21 +394,34 @@ def update_visit_spectra_counts(
             ApogeeVisitSpectrum.fiber,
             ApogeeVisitSpectrum.plate,
             ApogeeVisitSpectrum.field,                 
-        )    
+        )
     )
     if apogee_where is not None:
         sq_apogee = sq_apogee.where(apogee_where)
 
-    q_apogee_counts = (
+    sq_apogee_counts = (
         ApogeeVisitSpectrum
         .select(
             ApogeeVisitSpectrum.source.alias("pk"),
             fn.count(ApogeeVisitSpectrum.pk).alias("n_apogee_visits"),
             fn.min(ApogeeVisitSpectrum.mjd).alias("apogee_min_mjd"),
             fn.max(ApogeeVisitSpectrum.mjd).alias("apogee_max_mjd"),
+            fn.max(ApogeeVisitSpectrum.created).alias("apogee_max_created"),
         )
         .join(sq_apogee, on=(sq_apogee.c.pk == ApogeeVisitSpectrum.pk))
         .group_by(ApogeeVisitSpectrum.source_pk)
+    )
+    q_apogee_counts = (
+        ApogeeVisitSpectrum
+        .select(
+            ApogeeVisitSpectrum.source_pk.alias("pk"),
+            sq_apogee_counts.c.n_apogee_visits,
+            sq_apogee_counts.c.apogee_min_mjd,
+            sq_apogee_counts.c.apogee_max_mjd,
+        )
+        .join(Source, on=(ApogeeVisitSpectrum.source_pk == Source.pk))
+        .join(sq_apogee_counts, on=(sq_apogee_counts.c.pk == ApogeeVisitSpectrum.source_pk))
+        .where(sq_apogee_counts.c.apogee_max_created > Source.modified)
         .dicts()
     )
 
@@ -430,27 +446,43 @@ def update_visit_spectra_counts(
     if boss_where is not None:
         sq_boss = sq_boss.where(boss_where)
     
-    q_boss_counts = (
+    sq_boss_counts = (
         BossVisitSpectrum
         .select(
             BossVisitSpectrum.source.alias("pk"),
             fn.count(BossVisitSpectrum.pk).alias("n_boss_visits"),
             fn.min(BossVisitSpectrum.mjd).alias("boss_min_mjd"),
             fn.max(BossVisitSpectrum.mjd).alias("boss_max_mjd"),
+            fn.max(BossVisitSpectrum.created).alias("boss_max_created"),
         )
         .join(sq_boss, on=(sq_boss.c.pk == BossVisitSpectrum.pk))       
         .group_by(BossVisitSpectrum.source_pk)
+    )
+    q_boss_counts = (
+        BossVisitSpectrum
+        .select(
+            BossVisitSpectrum.source_pk.alias("pk"),
+            sq_boss_counts.c.n_boss_visits,
+            sq_boss_counts.c.boss_min_mjd,
+            sq_boss_counts.c.boss_max_mjd,
+        )
+        .join(Source, on=(BossVisitSpectrum.source_pk == Source.pk))
+        .join(sq_boss_counts, on=(sq_boss_counts.c.pk == BossVisitSpectrum.source_pk))
+        .where(sq_boss_counts.c.boss_max_created > Source.modified)
         .dicts()
     )
 
+    now = datetime.datetime.now()
+
     # merge counts
-    update = {}
+    counts = {}
     queue.put(dict(total=q_apogee_counts.count(), completed=0, description="Querying APOGEE visit counts"))
     for i, each in enumerate(q_apogee_counts.iterator()):
         pk = each["pk"]
         if pk is not None and each["apogee_min_mjd"] is not None:
-            update.setdefault(pk, {})
-            update[pk].update(each)
+            counts.setdefault(pk, {})
+            counts[pk].update(each)
+            counts[pk]["modified"] = now
         if i > 0 and i % k == 0:
             queue.put(dict(advance=k))
 
@@ -458,37 +490,44 @@ def update_visit_spectra_counts(
     for i, each in enumerate(q_boss_counts.iterator()):
         pk = each["pk"]
         if pk is not None and each["boss_min_mjd"] is not None:
-            update.setdefault(pk, {})
-            update[pk].update(each)
+            counts.setdefault(pk, {})
+            counts[pk].update(each)
+            counts[pk]["modified"] = now
         if i > 0 and i % k == 0:
             queue.put(dict(advance=k))
     
-    queue.put(dict(total=len(update), description="Updating source visit counts", completed=0))
-    for chunk in chunked(update.values(), batch_size):
-        with database.atomic():
-            (
-                Source
-                .insert_many(chunk)
-                .on_conflict(
-                    conflict_target=[Source.pk],
-                    preserve=[
-                        Source.n_apogee_visits,
-                        Source.n_boss_visits,
-                        Source.apogee_min_mjd,
-                        Source.apogee_max_mjd,
-                        Source.boss_min_mjd,
-                        Source.boss_max_mjd
-                    ],
-                    where=(
-                        (EXCLUDED.n_apogee_visits > Source.n_apogee_visits)
-                    |   (EXCLUDED.n_boss_visits > Source.n_boss_visits)
-                    |   ((EXCLUDED.n_apogee_visits > 0) & (Source.n_apogee_visits.is_null()))
-                    |   ((EXCLUDED.n_boss_visits > 0) & (Source.n_boss_visits.is_null()))
+    if len(counts) > 0:
+        queue.put(dict(total=len(counts), description="Updating source visit counts", completed=0))
+        for chunk in chunked(counts.values(), batch_size):
+            with database.atomic():
+                (
+                    Source
+                    .insert_many(chunk)
+                    .on_conflict(
+                        conflict_target=[Source.pk],
+                        preserve=[
+                            Source.n_apogee_visits,
+                            Source.n_boss_visits,
+                            Source.apogee_min_mjd,
+                            Source.apogee_max_mjd,
+                            Source.boss_min_mjd,
+                            Source.boss_max_mjd,
+                            Source.modified,
+                        ],
+                        where=(
+                            (EXCLUDED.n_apogee_visits >= Source.n_apogee_visits)
+                        |   (EXCLUDED.n_boss_visits >= Source.n_boss_visits)
+                        |   (EXCLUDED.apogee_min_mjd != Source.apogee_min_mjd)
+                        |   (EXCLUDED.apogee_max_mjd != Source.apogee_max_mjd)
+                        |   (EXCLUDED.boss_min_mjd != Source.boss_min_mjd)
+                        |   (EXCLUDED.boss_max_mjd != Source.boss_max_mjd)
+                        |   ((EXCLUDED.n_apogee_visits > 0) & (Source.n_apogee_visits.is_null()))
+                        |   ((EXCLUDED.n_boss_visits > 0) & (Source.n_boss_visits.is_null()))
+                        )
                     )
+                    .execute()
                 )
-                .execute()
-            )
-            queue.put(dict(advance=batch_size))
+                queue.put(dict(advance=batch_size))
 
     queue.put(Ellipsis)
     return None

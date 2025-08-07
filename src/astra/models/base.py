@@ -18,8 +18,11 @@ from peewee import (
     DateTimeField,
     JOIN,
     OperationalError,
+    InternalError,
+    DatabaseError,
     __exception_wrapper__
 )
+import time
 from inspect import getsource
 from playhouse.sqlite_ext import SqliteExtDatabase
 from sdsstools.configuration import get_config
@@ -32,22 +35,99 @@ FILLER_CARD = (FILLER_CARD_KEY, *_) = ("TTYPE0", "Water cuggle", None)
 
 
 class ResilientDatabase(object):
-    def execute_sql(self, sql, params=None, commit=True):
-        try:
-            cursor = (
-                super(ResilientDatabase, self)
-                .execute_sql(sql, params, commit)
-            )
-        except OperationalError:
-            if not self.is_closed():
-                self.close()
-            with __exception_wrapper__:
-                cursor = self.cursor()
-                cursor.execute(sql, params or ())
-                if commit and not self.in_transaction():
-                    self.commit()
-        return cursor
+    def __init__(self, *args, **kwargs):
+        super(ResilientDatabase, self).__init__(*args, **kwargs)
+        self.max_retries = 10
+        self.retry_delay = 0.5
 
+    def execute_sql(self, sql, params=None, commit=True):
+        retries = 0
+        while retries < self.max_retries:
+            try:
+                # Ensure a connection is established (Peewee handles this largely)
+                # and that we're in a fresh state for each attempt.
+                # Peewee's .atomic() context manager is ideal for managing transactions.
+                # If we're not explicitly in a transaction block, Peewee might
+                # autocommit or handle it on a per-query basis.
+                # The core idea here is that if a transaction aborts, we need to
+                # ensure the next attempt is with a fresh transaction.
+
+                # Peewee's 'Database' class (which your base class likely inherits from)
+                # has context managers like .atomic() or .transaction() for this.
+                # If your `super().execute_sql` method itself wraps in a transaction,
+                # you might need to adjust how you handle it.
+
+                # Best practice: if you are using Peewee, use its transaction managers
+                # or ensure autocommit behavior when retrying.
+
+                # Let's assume your 'super().execute_sql' potentially uses a transaction
+                # or relies on the connection being in a good state.
+                # We'll add a rollback before retrying if an InternalError occurs.
+
+                cursor = super(ResilientDatabase, self).execute_sql(sql, params, commit)
+                return cursor
+
+            except OperationalError as e:
+                log.warning(f"OperationalError encountered: {e}. Retrying SQL query (attempt {retries + 1}/{self.max_retries}).")
+                retries += 1
+                # Check for "database is locked" or similar transient errors
+                if "database is locked" in str(e).lower() or "deadlock" in str(e).lower():
+                    # Rollback any active transaction on this connection to clear its state
+                    # This is crucial for Peewee if it manages transactions
+                    try:
+                        #if self.is_connection_active_and_in_transaction(): # Custom helper
+                        self.rollback() # Peewee's rollback method
+                    except Exception as rb_e:
+                        log.error(f"Error during rollback after OperationalError: {rb_e}")
+                        # If rollback itself fails, the connection might be truly unusable.
+                        # Consider closing and re-opening the connection here if necessary.
+                        # For Peewee, db.close() followed by db.connect() might be needed.
+
+                    time.sleep(self.retry_delay * (2 ** (retries - 1)))
+                else:
+                    # If it's an OperationalError but not a retryable one, re-raise
+                    raise
+
+            except InternalError as e:
+                log.warning(f"InternalError encountered: {e}. Attempting rollback and retry (attempt {retries + 1}/{self.max_retries}).")
+                retries += 1
+                # This is the key for "transaction is aborted". You MUST rollback.
+                try:
+                    if self.is_connection_active_and_in_transaction(): # Custom helper
+                        self.rollback() # Peewee's rollback method
+                        log.info("Rolled back transaction due to InternalError.")
+                except Exception as rb_e:
+                    log.error(f"Error during rollback after InternalError: {rb_e}")
+                    # If rollback fails here, the connection is likely permanently broken.
+                    # It's best to close and re-open the connection.
+                    self.close()
+                    self.connect() # Assuming these methods exist and are managed by your Peewee setup.
+                
+                # A short delay can still be helpful if the error was due to a temporary server-side issue.
+                time.sleep(self.retry_delay * (2 ** (retries - 1)))
+
+            except DatabaseError as e:
+                # Catch general database errors not covered by specific exceptions,
+                # if you want to retry those as well.
+                log.warning(f"DatabaseError encountered: {e}. Retrying (attempt {retries + 1}/{self.max_retries}).")
+                retries += 1
+                try:
+                    if self.is_connection_active_and_in_transaction():
+                        self.rollback()
+                        log.info("Rolled back transaction due to DatabaseError.")
+                except Exception as rb_e:
+                    log.error(f"Error during rollback after DatabaseError: {rb_e}")
+                    self.close()
+                    self.connect()
+                time.sleep(self.retry_delay * (2 ** (retries - 1)))
+
+            except Exception as e:
+                # Catch any other unexpected exceptions and re-raise them immediately
+                log.error(f"An unhandled exception occurred: {e}")
+                raise
+
+        log.error(f"SQL query failed after {self.max_retries} retries: {sql}")
+        raise DatabaseError(f"Failed to execute SQL query after {self.max_retries} retries due to persistent database error.")
 
 class PostgresqlDatabase(ResilientDatabase, _PostgresqlDatabase):
     pass

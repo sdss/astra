@@ -171,7 +171,16 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
 
     @property
     def path(self):
-        if self.run2d.startswith("v6_2"):
+        if self.run2d == "v6_2_1":
+            return (
+                f"$SAS_BASE_DIR/"
+                f"ipl-4/"
+                f"spectro/boss/redux/"
+                f"{self.run2d}/spectra/daily/full/{self.field_group}/{self.pad_fieldid}{self.isplate}/{self.mjd}/"
+                f"spec-{self.pad_fieldid}-{self.mjd}-{self.catalogid}.fits"
+            )
+
+        elif self.run2d.startswith("v6_2"):
             return (
                 f"$SAS_BASE_DIR/"
                 f"sdsswork/bhm/boss/spectro/redux/"
