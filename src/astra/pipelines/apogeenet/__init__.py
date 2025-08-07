@@ -274,7 +274,11 @@ from typing import Optional, Iterable, Union
 
 
 @task
-def apogeenet(spectra: Iterable[Union[ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar]], num_uncertainty_draws: Optional[int] = 20, **kwargs) -> Iterable[ApogeeNet]:
+def apogeenet(
+    spectra: Iterable[Union[ApogeeCoaddedSpectrumInApStar, ApogeeVisitSpectrumInApStar]], 
+    num_uncertainty_draws: Optional[int] = 20, 
+    **kwargs
+) -> Iterable[ApogeeNet]:
     """
     Run the ANet (APOGEENet III) pipeline.
    
