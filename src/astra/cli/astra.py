@@ -97,7 +97,8 @@ def srun(
     task: Annotated[str, typer.Argument(help="The task name to run (e.g., `aspcap`, or `astra.pipelines.aspcap.aspcap`).")],
     model: Annotated[str, typer.Argument(
         help=(
-            "The input model to use (e.g., `ApogeeCombinedSpectrum`, `BossCombinedSpectrum`). "
+            "The input model to use (e.g., `ApogeeCombinedSpectrum`, `BossCombinedSpectrum`). If no model is given then "
+            "only the first model accepted by that task (that has spectra) will be used."
         )
         )] = None,
     sdss_ids: Annotated[List[int], typer.Argument(help="Restrict to some set of SDSS IDs.")] = None,
@@ -147,16 +148,25 @@ def srun(
     from rich.console import Console
     from logging import FileHandler
 
-    model, q = next(generate_queries_for_task(task, model, sdss_ids=sdss_ids, limit=limit))
+    queries = generate_queries_for_task(task, model, sdss_ids=sdss_ids, limit=limit)
 
-    total = q.count()
-    if total == 0:
-        log.info(f"No {model.__name__} spectra to process.")
+    considered_models = []
+    for model, q in queries:
+        total = q.count()
+        if total == 0:
+            considered_models.append(model)
+            continue
+        else:
+            break
+    else:
+        log.info(f"No {', or '.join([m.__name__ for m in considered_models])} spectra to process.")
         sys.exit(0)
-
+    
     workers = nodes * procs
     limit = int(np.ceil(total / workers))
     today = datetime.now().strftime("%Y-%m-%d")
+
+    os.makedirs(expand_path("$PBS"), exist_ok=True)
 
     # Re-direct log handler
     live_renderable = Table.grid()
@@ -403,7 +413,8 @@ def migrate(
     run2d: Optional[str] = typer.Option(None, help="BOSS data reduction pipeline version."),
     limit: Optional[int] = typer.Option(None, help="Limit the number of spectra to migrate."),
     metadata: Optional[bool] = typer.Option(True, help="Migrate metadata (e.g., photometry, astrometry)."),
-    incremental: Optional[bool] = typer.Option(True, help="Only attempt to migrate new spectra.")
+    incremental: Optional[bool] = typer.Option(True, help="Only attempt to migrate new spectra."),
+    extinction: Optional[bool] = typer.Option(False, help="Compute extinction."),
 ):
     """Migrate spectra and auxillary information to the Astra database."""
 
@@ -603,7 +614,7 @@ def migrate(
                                     additional_tasks.append(
                                         process_task(compute_w1mag_and_w2mag, description="Computing W1, W2 mags")
                                     )
-                                if not started_reddening and not (awaiting & reddening_requires):
+                                if not started_reddening and not (awaiting & reddening_requires) and extinction:
                                     started_reddening = True
                                     additional_tasks.append(process_task(update_reddening, description="Computing extinction"))
                             else:
@@ -663,7 +674,10 @@ def init(
         for package in init_model_packages:
             import_module(f"astra.models.{package}")
         
-        models = set(BaseModel.__subclasses__()) - {PipelineOutputModel}
+        models = (
+            set(BaseModel.__subclasses__())
+        |   set(PipelineOutputModel.__subclasses__())
+        ) - {PipelineOutputModel}
         
         if drop_tables:
             tables_to_drop = [m for m in models if m.table_exists()]
@@ -677,10 +691,11 @@ def init(
                 database.drop_tables(tables_to_drop, cascade=True)
             progress.remove_task(t)
 
-        t = progress.add_task(description="Creating tables", total=len(models))
+        t = progress.add_task(description=f"Creating tables", total=len(models))
         with database.atomic():
             database.create_tables(models)
-        
 
+    typer.echo(f"Created {len(models)} tables in the Astra database.")
+    
 if __name__ == "__main__":
     app()
