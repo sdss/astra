@@ -663,7 +663,7 @@ class Source(BaseModel):
 @cache
 def get_carton_to_bit_mapping():
     from astropy.table import Table
-    t = Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_1_with_groups.csv"))
+    t = Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_3_with_groups.csv"))
     t.sort("bit")
     return t
 

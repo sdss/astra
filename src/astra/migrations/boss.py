@@ -82,6 +82,8 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
         "DELTA_DEC_LIST": "delta_dec",
         "SN_MEDIAN_ALL": "snr",
 
+        "SPEC_FILE": "spec_file",
+
         # Some additional identifiers that we don't necessarily need, but will take for now
         "CATALOGID_V0": "catalogid_v0",
         "CATALOGID_V0P5": "catalogid_v0p5",
@@ -118,7 +120,7 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
     mask = spAll["MJD"] >= most_recent_mjd
 
     if limit is not None:
-        index = np.where(np.cumsum(mask) == limit)[0]
+        index = np.where(np.cumsum(mask) == limit)[0][0]
         mask[index:] = False
 
     total = sum(mask)
@@ -320,7 +322,7 @@ def _migrate_specfull_metadata(spectra, fields, raise_exceptions=True, full_outp
 
         name = field.name
         if line[8:10] != "= ": # not a key=value line
-            log.warning(f"Skipping line '{line}' because not a valid line")
+            #log.warning(f"Skipping line '{line}' because not a valid line")
             continue
 
         if name == "plateid":
@@ -383,7 +385,7 @@ def migrate_specfull_metadata_from_image_headers(
     )
     
     fields = {
-        BossVisitSpectrum.plateid: "PLATEID",
+        BossVisitSpectrum.plateid: "PLATEID", 
         BossVisitSpectrum.cartid: "CARTID",
         BossVisitSpectrum.mapid: "MAPID",
         BossVisitSpectrum.slitid: "SLITID",
@@ -419,14 +421,6 @@ def migrate_specfull_metadata_from_image_headers(
 
     executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
 
-    queue.put(dict(total=q.count()))
-    specFulls, futures, total = ({}, [], 0)
-    for chunk in chunked(q, batch_size):
-        futures.append(executor.submit(_migrate_specfull_metadata, chunk, fields))
-        #for total, spec in enumerate(chunk, start=1 + total):
-        for spec in chunk:
-            specFulls[spec.pk] = spec
-    
     defaults = {
         "n_guide": -1,
         "airtemp": np.nan,
@@ -434,7 +428,17 @@ def migrate_specfull_metadata_from_image_headers(
         "n_std": -1
     }
 
+    queue.put(dict(total=q.count(), description="Scraping specFull headers"))
+    specFulls, futures, total = ({}, [], 0)
     all_missing_counts = {}
+    for chunk in chunked(q, batch_size):
+        futures.append(executor.submit(_migrate_specfull_metadata, chunk, fields))
+        #for total, spec in enumerate(chunk, start=1 + total):
+        for spec in chunk:
+            specFulls[spec.pk] = spec
+        queue.put(dict(advance=len(chunk)))
+        
+    queue.put(dict(total=len(futures), completed=0, description="Parsing specFull metadata"))
     for future in concurrent.futures.as_completed(futures):
         metadata, missing_counts = future.result()
         for name, missing_count in missing_counts.items():

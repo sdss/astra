@@ -59,6 +59,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     fieldid = IntegerField()
     catalogid = BigIntegerField()
     healpix = IntegerField()
+    spec_file = TextField(help_text="BOSS specFull basename")
 
     #> Exposure Information
     n_exp = IntegerField(null=True)
@@ -176,8 +177,11 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
                 f"$SAS_BASE_DIR/"
                 f"ipl-4/"
                 f"spectro/boss/redux/"
-                f"{self.run2d}/spectra/daily/full/{self.field_group}/{self.pad_fieldid}{self.isplate}/{self.mjd}/"
-                f"spec-{self.pad_fieldid}-{self.mjd}-{self.catalogid}.fits"
+                f"{self.run2d}/spectra/daily/full/{self.field_group}/{self.pad_fieldid}{self.isplate}/{self.mjd}/"                
+                (
+                    self.spec_file 
+                or  f"spec-{self.pad_fieldid}-{self.mjd}-{self.catalogid}.fits"
+                )
             )
 
         elif self.run2d.startswith("v6_2"):

@@ -578,6 +578,7 @@ def migrate(
                     (migrate_gaia_synthetic_photometry, dict(description="Ingesting Gaia synthetic photometry")),
                     (compute_n_neighborhood, dict(description="Computing n_neighborhood")),
                 ]
+                ptq_gaia = []
                 reddening_requires = {task_twomass, task_unwise, task_glimpse, task_gaia}
                 started_reddening = False
                 awaiting = set(t for p, t, q in ptq)
@@ -591,20 +592,13 @@ def migrate(
                                 awaiting.remove(t)
                                 p.join()
                                 progress.update(t, visible=False)
-                                """
-                                if t == task_gaia and len(additional_gaia_task_partials) > 0:
+                                if (t == task_gaia or t in ptq_gaia) and len(additional_gaia_task_partials) > 0:
                                     f, kwds = additional_gaia_task_partials.pop(0)
-                                    task_gaia = process_task(f, **kwds)
-                                    additional_tasks.append(task_gaia)
+                                    new_task = process_task(f, **kwds)
+                                    additional_tasks.append(new_task)
+                                    ptq_gaia.append(new_task)
                                     if f in (migrate_gaia_dr3_astrometry_and_photometry, migrate_zhang_stellar_parameters, migrate_bailer_jones_distances):
-                                        reddening_requires.update({task_gaia})
-                                """
-                                if t == task_gaia:
-                                    for f, kwds in additional_gaia_task_partials:
-                                        new_task = process_task(f, **kwds)
-                                        additional_tasks.append(new_task)
-                                        if f in (migrate_gaia_dr3_astrometry_and_photometry, migrate_zhang_stellar_parameters, migrate_bailer_jones_distances):
-                                            reddening_requires.update({new_task})                                        
+                                        reddening_requires.update({new_task})                                        
                                             
                                 if t == task_specfull:
                                     additional_tasks.append(
