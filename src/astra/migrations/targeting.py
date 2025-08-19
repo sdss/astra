@@ -8,27 +8,7 @@ from astropy.table import join
 from astra.migrations.utils import NoQueue
 
 def get_carton_to_bit_mapping():
-    return Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_1_with_groups.csv"))
-
-
-def merge_carton_to_bit_mapping_and_meta():
-    
-    targets = Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_1.csv"))
-    meta = Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_1_groups.csv"))
-
-    # assign the metadata to each bit mapping
-    bit_mapping = join(targets, meta, keys=("label", ))
-    
-    # drop unnecessary columns (for us) and rename others
-    del bit_mapping["pk"]
-
-    bit_mapping.rename_column("program_1", "program")
-    bit_mapping.rename_column("program_2", "alt_program")
-    bit_mapping.rename_column("altname", "alt_name")
-    bit_mapping.sort(["bit"])
-    bit_mapping.rename_column("Carton_pk", "carton_pk")
-    
-    bit_mapping.write(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_1_with_groups.csv"))
+    return Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_3_with_groups.csv"))
 
 def migrate_targeting_cartons(where=(Source.sdss5_target_flags == b""), batch_size=500, queue=None):
 
