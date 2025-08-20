@@ -32,7 +32,11 @@ def migrate_from_spall_file(run2d, queue, gzip=True, limit=None, batch_size=1000
     if queue is None:
         queue = NoQueue()
 
-    path = expand_path(f"$BOSS_SPECTRO_REDUX/{run2d}/summary/daily/spAll-{run2d}.fits")
+    # Handle fucking frozen bullshit.
+    if run2d == "v6_2_1":
+        path = expand_path(f"$SAS_BASE_DIR/ipl-4/spectro/boss/redux/v6_2_1/summary/daily/spAll-v6_2_1.fits")
+    else:
+        path = expand_path(f"$BOSS_SPECTRO_REDUX/{run2d}/summary/daily/spAll-{run2d}.fits")
     if gzip:
         path += ".gz"
     
