@@ -15,15 +15,17 @@ with DAG(
     catchup=False,
 ) as dag:
 
+    """
     repo = BashOperator(
         task_id="repo",
         bash_command="module load astra"
     )
     task_migrate = BashOperator(
         task_id="migrate",
-        bash_command=f"astra migrate --apred {APRED}",# --run2d {RUN2D} --apred {APRED}",
+        bash_command="sleep 1"
+        #bash_command=f"astra migrate --apred {APRED}",# --run2d {RUN2D} --apred {APRED}",
     )
-    
+    """
     with TaskGroup(group_id="SummarySpectrumProducts") as summary_spectrum_products:
         BashOperator(task_id="mwmTargets", bash_command='astra create mwmTargets --overwrite')
         BashOperator(task_id="mwmAllVisit", bash_command='astra create mwmAllVisit --overwrite')
@@ -62,7 +64,8 @@ with DAG(
                 # We should be able to do ~20,000 spectra per node per day.
                 # To be safe while testing, let's do 4 nodes with 40,000 spectra (should be approx 12 hrs wall time)
                 #bash_command='astra srun aspcap --limit 10000 --nodes 8 --time="48:00:00"'
-                bash_command='astra srun aspcap --limit 50000 --nodes 4 --time="48:00:00"'
+                #bash_command='astra srun aspcap --limit 125000 --nodes 10 --time="96:00:00"'
+                bash_command='astra srun aspcap --limit 125000 --nodes 10 --time="96:00:00" --qos=sdss-np-urgent --partition=sdss-np --account=sdss-np'
             )
         ) >> (
             BashOperator(
@@ -73,8 +76,10 @@ with DAG(
             
 
 
-    repo >> task_migrate
+    #repo >> task_migrate
 
-    task_migrate >> (summary_spectrum_products, ) #spectrum_products)
-    task_migrate >> apogeenet
-    (task_migrate, apogeenet_star) >> aspcap
+    #task_migrate >> (summary_spectrum_products, ) #spectrum_products)
+    #task_migrate >> apogeenet
+    #(task_migrate, apogeenet_star) >> aspcap
+    #apogeenet_star >> aspcap
+

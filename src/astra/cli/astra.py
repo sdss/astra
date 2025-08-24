@@ -107,6 +107,7 @@ def srun(
     limit: Annotated[int, typer.Option(help="Limit the number of inputs.", min=1)] = None,
     account: Annotated[str, typer.Option(help="Slurm account")] = "sdss-np",
     partition: Annotated[str, typer.Option(help="Slurm partition")] = None,
+    qos: Annotated[str, typer.Option(help="Slurm QoS")] = None,
     gres: Annotated[str, typer.Option(help="Slurm generic resources")] = None,
     mem: Annotated[str, typer.Option(help="Memory per node")] = None,
     time: Annotated[str, typer.Option(help="Wall-time")] = "24:00:00",
@@ -244,6 +245,8 @@ def srun(
                     f"--output={td}/{n}.out",
                     f"--error={td}/{n}.err",
                 ]
+                if qos is not None:
+                    executable.append(f"--qos={qos}")
                 if mem is not None:
                     executable.append(f"--mem={mem}")
                 if gres is not None:
