@@ -1,4 +1,5 @@
 import datetime
+import numpy as np
 from astra import __version__
 from astra.models.base import BaseModel
 from astra.models.source import Source
@@ -48,8 +49,8 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
 
     @property
     def e_flux(self):
-        raise NotImplementedError("TODO: use common ivar_to_error function")
-        return self.ivar**-0.5
+        with np.errstate(divide="ignore"):
+            return self.ivar**-0.5
 
     #> Data Product Keywords
     release = TextField()
@@ -173,15 +174,16 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
     @property
     def path(self):
         if self.run2d == "v6_2_1":
+            basename = (
+                    self.spec_file 
+                or  f"spec-{self.pad_fieldid}-{self.mjd}-{self.catalogid}.fits"                    
+            )
             return (
                 f"$SAS_BASE_DIR/"
                 f"ipl-4/"
                 f"spectro/boss/redux/"
-                f"{self.run2d}/spectra/daily/full/{self.field_group}/{self.pad_fieldid}{self.isplate}/{self.mjd}/"                
-                (
-                    self.spec_file 
-                or  f"spec-{self.pad_fieldid}-{self.mjd}-{self.catalogid}.fits"
-                )
+                f"{self.run2d}/spectra/daily/full/{self.field_group}/{self.pad_fieldid}{self.isplate}/{self.mjd}/"
+                f"{basename}"                
             )
 
         elif self.run2d.startswith("v6_2"):
