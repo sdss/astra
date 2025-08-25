@@ -1,6 +1,7 @@
 import scipy.optimize as op # build problems
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Union
 from astra import task
+from astra.models.apogee import ApogeeCoaddedSpectrumInApStar, ApogeeVisitSpectrumInApStar
 from astra.models.astronn import AstroNN
 #from astra.pipelines.astronn.utils import read_model # for TensorFlow version
 from astra.pipelines.astronn.network import read_model # for PyTorch version
@@ -9,7 +10,7 @@ from peewee import ModelSelect
 
 @task
 def astronn(
-    spectra: Iterable,
+    spectra: Iterable[Union[ApogeeCoaddedSpectrumInApStar, ApogeeVisitSpectrumInApStar]],
     #model_path: str = "$MWM_ASTRA/pipelines/astronn/astroNN_retrain_2_shi",     # for TensorFlow version
     model_path: str = "$MWM_ASTRA/pipelines/astronn/astroNN_model_parameter_dr17_shi.pt", # for PyTorch version
     parallel: Optional[bool] = True,

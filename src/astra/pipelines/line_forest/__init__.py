@@ -169,30 +169,30 @@ def _line_forest(spectrum, steps, reps, debug=False):
                 scatter[0]=0
                 window=window+scatter
 
-                predictions = unnormalize(np.array(model(window[0:1,:,:])))
+                predictions = unnormalize(np.array(model(window[0:1,:,:])["dense_3"]))
 
                 if np.abs(predictions[0,2])>0.5: 
                     eqw, abs = (predictions[0, 0], predictions[0, 1])
                     detection_stat = predictions[0, 2]
 
-                    predictions = unnormalize(np.array(model(window[1:,:,:])))  
+                    predictions = unnormalize(np.array(model(window[1:,:,:])["dense_3"]))  
 
                     a = np.where(np.abs(predictions[1:,2])>0.5)[0]
                     detection_raw = np.round(len(a)/reps,2)
                     
                     if detection_raw>0.3:
                         result_kwds.update({
-                            f"eqw_{name.lower()}": eqw,
-                            f"abs_{name.lower()}": abs,
-                            f"detection_stat_{name.lower()}": detection_stat,
-                            f"detection_raw_{name.lower()}": detection_raw
+                            f"eqw_{name.lower()}": float(eqw),
+                            f"abs_{name.lower()}": float(abs),
+                            f"detection_stat_{name.lower()}": float(detection_stat),
+                            f"detection_raw_{name.lower()}": float(detection_raw)
                         })
 
                         if len(a)>2:
                             result_kwds.update({
-                                f"eqw_percentiles_{name.lower()}": np.round(np.percentile(predictions[1:,0][a],[16,50,84]),4),
-                                f"abs_percentiles_{name.lower()}": np.round(np.percentile(predictions[1:,1][a],[16,50,84]),4),
-                            }) 
+                                f"eqw_percentiles_{name.lower()}": list(map(float, np.round(np.percentile(predictions[1:,0][a],[16,50,84]),4))),
+                                f"abs_percentiles_{name.lower()}": list(map(float, np.round(np.percentile(predictions[1:,1][a],[16,50,84]),4))),
+                            })
             except:
                 log.exception(f"Exception when measuring {name} for spectrum {spectrum.__class__} {spectrum.pk}")
                 if debug:
@@ -222,7 +222,10 @@ def unnormalize(predictions):
 def read_model(path):
     import tensorflow as tf
     tf.autograph.set_verbosity(0)
-    return tf.keras.models.load_model(expand_path(path),compile=False)
+    #return tf.keras.models.load_model(expand_path(path),compile=False)
+    return tf.keras.layers.TFSMLayer(expand_path(path), call_endpoint='serving_default')
+
+
 
 # TODO: move this to a utility
 def airtovac(wave_air) :

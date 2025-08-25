@@ -359,8 +359,9 @@ linear_grid = torch.linspace(MIN_WL, MAX_WL, steps=FLUX_LEN)
 interpolate_flux = partial(interpolate_flux, linear_grid=linear_grid)
 interpolate_flux_err = partial(interpolate_flux_err, linear_grid=linear_grid)   
 
+
 @task
-def bossnet(spectra: Iterable[BossVisitSpectrum], num_uncertainty_draws: Optional[int] = 20) -> Iterable[BossNet]:
+def bossnet(spectra: Iterable[BossVisitSpectrum], num_uncertainty_draws: Optional[int] = 20, **kwargs) -> Iterable[BossNet]:
     
     model = BossNetModel()
     model_path = expand_path("$MWM_ASTRA/pipelines/BossNet/deconstructed_model")

@@ -11,19 +11,7 @@ from astra.pipelines.astronn_dist.base import _prepare_data, _worker, parallel_b
 
 @task
 def astronn_dist(
-    spectra: Optional[Iterable] = (
-        ApogeeCoaddedSpectrumInApStar
-        .select()
-        .join(
-            AstroNNdist, 
-            JOIN.LEFT_OUTER,
-            on=(
-                (ApogeeCoaddedSpectrumInApStar.spectrum_pk == AstroNNdist.spectrum_pk)
-            &   (AstroNNdist.v_astra == __version__)
-            )
-        )
-        .where(AstroNNdist.spectrum_pk.is_null())
-    ),
+    spectra: Iterable[ApogeeCoaddedSpectrumInApStar],
     #model_path: str = "$MWM_ASTRA/pipelines/astroNN_dist/astroNN_gaia_dr17_model_3", # for TensorFlow version
     model_path: str = "$MWM_ASTRA/pipelines/astroNN_dist/astroNN_dist_model_parameter.pt",  # for PyTorch version
     #model_path: str = "/uufs/chpc.utah.edu/common/home/sdss50/sdsswork/users/u6039136/software/git/astroNN_projects/astroNN_dist_model_parameter.pt",  # for PyTorch version
