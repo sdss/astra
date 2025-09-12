@@ -414,6 +414,10 @@ def synthG(spectrum_w,spectrum_f):
 
 def R_from_Teff_logg(Teff, logg,atm="thick"):
     from scipy import interpolate
+    if Teff>79400:
+        Teff=79400
+    if logg<7:
+        logg=7
     if atm=="thick":
         #MGRID=pd.read_csv("CO_thickH_processed.csv")
         MGRID=pd.read_csv(os.path.join(PIPELINE_DATA_DIR, "new_MR_H.csv"))
