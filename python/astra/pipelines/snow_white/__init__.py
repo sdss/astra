@@ -21,7 +21,18 @@ from astra.models.snow_white import SnowWhite
 
 PIPELINE_DATA_DIR = expand_path(f"$MWM_ASTRA/pipelines/snow_white")
 LARGE = 1e3
-
+def refit(fit_params,spec_nl,emu,wref):
+    if first_T>=16000 and first_T<=40000:
+        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop.dat'),skiprows=1,max_rows=4) #exclude Halpha. It is needed in exception
+    elif first_T>=8000 and first_T<16000:
+        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_cool.dat'),skiprows=1,max_rows=4)
+    elif first_T<8000:
+        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_vcool.dat'),max_rows=5)
+    elif first_T>40000:
+        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_hot.dat'),skiprows=1,max_rows=4)
+    l_crop = line_crop[(line_crop[:,0]>spec_w.min()) & (line_crop[:,1]<spec_w.max())]
+    new_best= lmfit.minimize(fitting_scripts.line_func_rv,fit_params,args=(spec_nl,l_crop,emu,wref),method="least_squares",loss='soft_l1')
+    return(new_best)
 @task
 def snow_white(
     spectra: Optional[Iterable[SpectrumMixin]] = (
@@ -52,11 +63,11 @@ def snow_white(
         kf = pickle._load(f, fix_imports=True)
 
 
-    wref = np.load(os.path.join(PIPELINE_DATA_DIR, "wref.npy"))
+    wref = np.load(os.path.join(PIPELINE_DATA_DIR, "wref_sdss.npy"))
 
     # Once again, we hhave to put this stupid hack in
     sys.path.insert(0, os.path.dirname(__file__))
-    with open(os.path.join(PIPELINE_DATA_DIR, "emu_file"), 'rb') as pickle_file:
+    with open(os.path.join(PIPELINE_DATA_DIR, "emu_file_sdss"), 'rb') as pickle_file:
         emu = pickle.load(pickle_file)
 
     for spectrum in spectra:
@@ -139,54 +150,57 @@ def snow_white(
                     first_T=T_H[sourceID==GaiaID][0]
                     first_g=log_H[sourceID==GaiaID][0]*100
                     initial=1
-                if first_T > 80000:
-                    first_T=80000
-                if first_g < 701:
-                    first_g=701
+                if first_T > 120000:
+                    first_T=120000
+                if first_g < 601:
+                    first_g=601_
                 if first_T>=16000 and first_T<=40000:
-                    line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop.dat'),skiprows=1) #exclude Halpha. It is needed in exception
+                    line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop.dat'),skiprows=0,max_rows=5) #exclude Halpha. It is needed in exception
                 elif first_T>=8000 and first_T<16000:
-                    line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_cool.dat'),skiprows=1)
+                    line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_cool.dat'),skiprows=0,max_rows=6)
                 elif first_T<8000:
-                    line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_vcool.dat'),skiprows=1)
+                    line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_vcool.dat'),skiprows=0,max_rows=5)
                 elif first_T>40000:
-                    line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_hot.dat'),skiprows=1)
+                    line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_hot.dat'),skiprows=0,max_rows=5)
                 l_crop = line_crop[(line_crop[:,0]>spec_w.min()) & (line_crop[:,1]<spec_w.max())]
                 
                     
                 # initiate parameters for the fit
                 fit_params = lmfit.Parameters()
-                fit_params['teff'] = lmfit.Parameter(name="teff",value=first_T,min=3000,max=80000)
-                fit_params['logg'] = lmfit.Parameter(name="logg",value=first_g,min=701,max=949)
+                fit_params['teff'] = lmfit.Parameter(name="teff",value=first_T,min=4000,max=120000)
+                fit_params['logg'] = lmfit.Parameter(name="logg",value=first_g,min=6    01,max=949)
                 fit_params['rv'] = lmfit.Parameter(name="rv",value=0.2, min=-80, max=80) #this is a wavelenght shift not a radial velocity. since a eparate module finds rv
 
                 #new normalization rotine working just on the balmer lines
                 spec_nl=fitting_scripts.da_line_normalize(spectra,l_crop,mod=False)
                 
                 #this calls the scripts in fitting_scipts and does the actual fitting
-                new_best= lmfit.minimize(fitting_scripts.line_func_rv,fit_params,args=(spec_nl,l_crop,emu,wref))
+                new_best= lmfit.minimize(fitting_scripts.line_func_rv,fit_params,args=(spec_nl,l_crop,emu,wref),method="least_squares",loss='soft_l1')
                 #problematic nodes results can sometimes be fixed by excluding certain lines
-                prob_list=[7.01,9.49,7.5,8.2,8.]
+                prob_list=[7.6,7.9,8.0,8.1,8.2,8.3,8.4,8.5,8.7,8.9]
                 if round(new_best.params['logg'].value/100,4) in prob_list:
-                    if first_T>=16000 and first_T<=40000:
-                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop.dat'),max_rows=6)
-                    elif first_T>=8000 and first_T<16000:
-                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_cool.dat'),max_rows=6)
-                    elif first_T<8000:
-                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_vcool.dat'),max_rows=5)
-                    elif first_T>40000:
-                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_hot.dat'),max_rows=6)
-                    l_crop = line_crop[(line_crop[:,0]>spec_w.min()) & (line_crop[:,1]<spec_w.max())]
-                    new_best= lmfit.minimize(fitting_scripts.line_func_rv,fit_params,args=(spec_nl,l_crop,emu,wref))
-
+                     fit_params['logg'] = lmfit.Parameter(name="logg",value=800,min=601,max=949)
+                     new_best=refit(fit_params,spec_nl,emu,wref)    
 
                 best_T=new_best.params['teff'].value
-                best_Te=new_best.params['teff'].stderr
+                b#est_Te=new_best.params['teff'].stderr
                 best_g=new_best.params['logg'].value
-                best_ge=new_best.params['logg'].stderr
+                #best_ge=new_best.params['logg'].stderr
                 shift=new_best.params['rv'].value
                 chi2=new_best.redchi #can easily get a chi2 
-
+                #refit using solution and leastsq to get uncertainties
+                err_params = lmfit.Parameters()
+                err_params['teff'] = lmfit.Parameter(name="teff",value=best_T,min=4000,max=120000)
+                err_params['logg'] = lmfit.Parameter(name="logg",value=best_g,min=601,max=949)
+                err_params['rv']= lmfit.Parameter(name="rv",value=best_rv, min=-80, max=80)
+                err_best=lmfit.minimize(fitting_scripts.line_func_rv,err_params,args=(spec_nl,l_crop,emu,wref),method="leastsq")
+                best_Te=err_best.params['teff'].stderr
+                best_ge=err_best.params['logg'].stderr
+                
+                if best_Te==None:
+                    best_Te=0.0 
+                if best_ge==None:
+                    best_ge=0.0
                 if initial ==1:
                     esult_kwds.update(
                         teff=best_T,
@@ -196,38 +210,51 @@ def snow_white(
                     
                 elif initial ==0: #if initial guess not from photometric result need to repeat for hot/cold solution
                     fit_params = lmfit.Parameters()
-                    fit_params['logg'] = lmfit.Parameter(name="logg",value=800,min=701,max=949) #stick with logg 800
+                    fit_params['logg'] = lmfit.Parameter(name="logg",value=800,min=601,max=949) #stick with logg 800
                     fit_params['rv'] = lmfit.Parameter(name="rv",value=0.2, min=-80, max=80)
         
                     if first_T <=13000.:
                         tmp_Tg,tmp_chi= grid_param[grid_param[:,0]>13000.], grid_chi[grid_param[:,0]>13000.]
                         second_T= tmp_Tg[tmp_chi==np.min(tmp_chi)][0][0]
-                        fit_params['teff'] = lmfit.Parameter(name="teff",value=second_T,min=12000,max=80000)
+                        fit_params['teff'] = lmfit.Parameter(name="teff",value=second_T,min=12000,max=120000)
 
                     elif first_T >13000.:
                         tmp_Tg,tmp_chi= grid_param[grid_param[:,0]<13000.], grid_chi[grid_param[:,0]<13000.]
                         second_T= tmp_Tg[tmp_chi==np.min(tmp_chi)][0][0]
-                        fit_params['teff'] = lmfit.Parameter(name="teff",value=second_T,min=3000,max=14000)
+                        fit_params['teff'] = lmfit.Parameter(name="teff",value=second_T,min=4000,max=14000)
 
                     if second_T>=16000 and second_T<=40000:
-                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop.dat'),skiprows=1)
+                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop.dat'),skiprows=0,max_rows=5)
                     elif second_T>=8000 and second_T<16000:
-                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_cool.dat'),skiprows=1)
+                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_cool.dat'),skiprows=0,max_rows=5)
                     elif second_T<8000:
-                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_vcool.dat'),skiprows=1)
+                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_vcool.dat'),skiprows=0,max_rows=6)
                     elif second_T>40000:
-                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_hot.dat'),skiprows=1)
+                        line_crop = np.loadtxt(os.path.join(PIPELINE_DATA_DIR, 'line_crop_hot.dat'),skiprows=0,max_rows=5)
                     l_crop = line_crop[(line_crop[:,0]>spec_w.min()) & (line_crop[:,1]<spec_w.max())]
                 
                 #====================find second solution ==============================================
-                    second_best= lmfit.minimize(fitting_scripts.line_func_rv,fit_params,args=(spec_nl,l_crop,emu,wref),method="leastsq")
+                    second_best= lmfit.minimize(fitting_scripts.line_func_rv,fit_params,args=(spec_nl,l_crop,emu,wref),method="least_squares",loss='soft_l1')
+                    if round(second_best.params['logg'].value/100,4) in prob_list:
+                        second_best=refit(fit_params,spec_nl,emu,wref)
                     best_T2=second_best.params['teff'].value
-                    best_Te2=second_best.params['teff'].stderr
+                    #best_Te2=second_best.params['teff'].stderr
                     best_g2=second_best.params['logg'].value
-                    best_ge2=second_best.params['logg'].stderr
+                    #best_ge2=second_best.params['logg'].stderr
                     shift2=second_best.params['rv'].value
                     chi2_2=second_best.redchi #can easily get a chi2 
-
+                    #refit using solution and leastsq to get uncertainties
+                    err_params2 = lmfit.Parameters()
+                    err_params2['teff'] = lmfit.Parameter(name="teff",value=best_T2,min=4000,max=120000)
+                    err_params2['logg'] = lmfit.Parameter(name="logg",value=best_g2,min=601,max=949)
+                    err_params2['rv']= lmfit.Parameter(name="rv",value=best_rv2, min=-80, max=80)
+                    err_best2=lmfit.minimize(fitting_scripts.line_func_rv,err_params2,args=(spec_nl,l_crop,emu,wref),method="leastsq")
+                    best_Te2=err_best2.params['teff'].stderr
+                    best_ge2=err_best2.params['logg'].stderr
+                    if best_Te2==None:
+                        best_Te2=0.0
+                    if best_ge2==None:
+                        best_ge2=0.0
                
                 #========================use gaia G mag and parallax to solve for hot vs cold solution
                 
