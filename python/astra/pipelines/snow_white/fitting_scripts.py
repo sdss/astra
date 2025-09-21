@@ -171,8 +171,61 @@ def norm_spectra(spectra,model=True,add_infinity=False,mod=True):
 #======================================================================
     return spectra_ret, cont_flux
 
+def line_func_rv(params, _sn, _l, emu, wref):
+    import numpy as np
+    from scipy import interpolate
 
-def line_func_rv(params,_sn, _l,emu,wref):
+    parvals = params.valuesdict()
+    _T = parvals['teff']
+    _g = parvals['logg']
+    _rv = parvals['rv']
+
+    # Generate model spectrum
+    recovered = generate_modelDA(_T, _g, emu)
+    model = np.stack((wref, recovered), axis=-1)
+    #model = convolve_gaussian_R(model, 1700)
+    model[:, 0] += _rv  # Doppler shift
+
+    # Normalize model
+    norm_model = da_line_normalize(model, _l)
+    m_wave_n, m_flux_n = norm_model[:, 0], norm_model[:, 1]
+
+    # Observed data
+    sn_w, sn_f, sn_e = _sn[:, 0], _sn[:, 1], _sn[:, 2]
+
+    residuals = []
+
+    for i in range(len(_l)):
+        l0, l1 = _l[i, 0], _l[i, 1]
+
+        # Mask observed data within window
+        mask = (sn_w >= l0) & (sn_w <= l1)
+        w_obs = sn_w[mask]
+        f_obs = sn_f[mask]
+        e_obs = sn_e[mask]
+
+        if len(w_obs) < 3:
+            continue  # skip poorly sampled regions
+
+        # Interpolate model to observed wavelengths
+        try:
+            interp_model = interpolate.interp1d(m_wave_n, m_flux_n, kind='linear', bounds_error=False, fill_value="extrapolate")
+            f_model = interp_model(w_obs)
+        except Exception:
+            return np.ones(len(residuals)) * 1e6  # Fallback if interpolation fails
+
+        # Compute residuals for this line
+        line_resid = (f_obs - f_model) / e_obs
+        residuals.append(line_resid)
+
+    if len(residuals) == 0:
+        # Fallback in case no lines matched — return high residuals
+        return np.ones(10) * 1e6
+
+    # Flatten into one residual vector (now length only depends on _sn and _l, not params)
+    return np.concatenate(residuals)
+    
+def line_func_rv_old(params,_sn, _l,emu,wref):
     import lmfit
     parvals = params.valuesdict()
     _T = parvals['teff']
