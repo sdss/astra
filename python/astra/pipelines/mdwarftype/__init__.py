@@ -1,6 +1,7 @@
 import concurrent.futures
 import numpy as np
 import os
+from scipy.optimize import curve_fit
 from typing import Iterable
 from peewee import chunked
 from tqdm import tqdm
@@ -57,8 +58,8 @@ def _mdwarf_type(spectra, template_flux, template_type):
             mask = (7495 <= spectrum.wavelength) * (spectrum.wavelength <= 7505)
             continuum = np.nanmean(spectrum.flux[mask])
 
-            flux = spectrum.flux / continuum
-            ivar = continuum * spectrum.ivar * continuum
+            flux = rectification_spectrum(spectrum.flux / continuum)
+            ivar = rectification_ivar(spectrum.ivar,flux)
             chi2s = np.nansum((flux - template_flux)**2 * ivar, axis=1)
             index = np.argmin(chi2s)
             chi2 = chi2s[index]
@@ -112,3 +113,17 @@ def read_and_resample_template(path):
     # Interpolate to the BOSS wavelength grid
     return np.interp(common_wavelength, 10**log_wl, flux, left=np.nan, right=np.nan)
 
+def quad_func(x, a, b, c):
+    return (a * (x ** 2)) + (b * x) + c
+
+
+def rectification_spectrum(spectrum):
+    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum)), spectrum) #fits quadratic function
+    rectified_spec = (spectrum / quad_func(np.arange(0, len(spectrum)), *best_fit[0]) ) - 1 #divides spectrum by best fit
+    return rectified_spec
+
+
+def rectification_ivar(ivar,spectrum):
+    best_fit = curve_fit(quad_func, np.arange(0, len(spectrum)), spectrum) #fits quadratic function
+    rectified_ivar = (ivar * (quad_func(np.arange(0, len(spectrum)), *best_fit[0]))**2 ) #divides spectrum by best fit
+    return rectified_ivar
