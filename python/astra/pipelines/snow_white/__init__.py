@@ -255,10 +255,11 @@ def snow_white(
                         best_Te2=0.0
                     if best_ge2==None:
                         best_ge2=0.0
-                    bp_rp=spectrum.source.bp_mag-spectrum.source.rp_mag
                 #========================use gaia G mag and parallax to solve for hot vs cold solution
                 
                     #T_true=fitting_scripts.hot_vs_cold(best_T,best_g/100,best_T2,best_g2/100,spectrum.source.plx or np.nan,spectrum.source.g_mag or np.nan,emu,wref)
+                    #new function uses bp-rp colour instead of parallax and G magnitude.
+                    bp_rp=spectrum.source.bp_mag-spectrum.source.rp_mag
                     T_true=fitting_scripts.hot_vs_cold_col(best_T,best_g/100,best_T2,best_g2/100,bp_rp,emu,wref)
 
                     if T_true==best_T:
