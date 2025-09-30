@@ -183,7 +183,7 @@ def snow_white(
                      new_best=refit(fit_params,spec_nl,emu,wref)    
 
                 best_T=new_best.params['teff'].value
-                b#est_Te=new_best.params['teff'].stderr
+                #best_Te=new_best.params['teff'].stderr
                 best_g=new_best.params['logg'].value
                 #best_ge=new_best.params['logg'].stderr
                 shift=new_best.params['rv'].value
