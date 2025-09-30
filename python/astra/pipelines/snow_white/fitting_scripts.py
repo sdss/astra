@@ -171,8 +171,61 @@ def norm_spectra(spectra,model=True,add_infinity=False,mod=True):
 #======================================================================
     return spectra_ret, cont_flux
 
+def line_func_rv(params, _sn, _l, emu, wref):
+    import numpy as np
+    from scipy import interpolate
 
-def line_func_rv(params,_sn, _l,emu,wref):
+    parvals = params.valuesdict()
+    _T = parvals['teff']
+    _g = parvals['logg']
+    _rv = parvals['rv']
+
+    # Generate model spectrum
+    recovered = generate_modelDA(_T, _g, emu)
+    model = np.stack((wref, recovered), axis=-1)
+    #model = convolve_gaussian_R(model, 1700)
+    model[:, 0] += _rv  # Doppler shift
+
+    # Normalize model
+    norm_model = da_line_normalize(model, _l)
+    m_wave_n, m_flux_n = norm_model[:, 0], norm_model[:, 1]
+
+    # Observed data
+    sn_w, sn_f, sn_e = _sn[:, 0], _sn[:, 1], _sn[:, 2]
+
+    residuals = []
+
+    for i in range(len(_l)):
+        l0, l1 = _l[i, 0], _l[i, 1]
+
+        # Mask observed data within window
+        mask = (sn_w >= l0) & (sn_w <= l1)
+        w_obs = sn_w[mask]
+        f_obs = sn_f[mask]
+        e_obs = sn_e[mask]
+
+        if len(w_obs) < 3:
+            continue  # skip poorly sampled regions
+
+        # Interpolate model to observed wavelengths
+        try:
+            interp_model = interpolate.interp1d(m_wave_n, m_flux_n, kind='linear', bounds_error=False, fill_value="extrapolate")
+            f_model = interp_model(w_obs)
+        except Exception:
+            return np.ones(len(residuals)) * 1e6  # Fallback if interpolation fails
+
+        # Compute residuals for this line
+        line_resid = (f_obs - f_model) / e_obs
+        residuals.append(line_resid)
+
+    if len(residuals) == 0:
+        # Fallback in case no lines matched — return high residuals
+        return np.ones(10) * 1e6
+
+    # Flatten into one residual vector (now length only depends on _sn and _l, not params)
+    return np.concatenate(residuals)
+    
+def line_func_rv_old(params,_sn, _l,emu,wref):
     import lmfit
     parvals = params.valuesdict()
     _T = parvals['teff']
@@ -360,22 +413,46 @@ def convolve_gaussian_R(spec, R):
   new_spec=np.stack((x,new_tmp[:,1]),axis=-1)
   return new_spec
 
+def hot_vs_cold_col(T1,g1,T2,g2,bp_rp,emu,wref):
+    M_bol_sun, Teff_sun, Rsun_cm, R_sun_pc = 4.75, 5780., 69.5508e9, 2.2539619954370203e-08
+    R1=R_from_Teff_logg(T1, g1)
+    R2=R_from_Teff_logg(T2, g2)
+    print(T1,g1,"parameters1")
+    print(T2,g2,"parameters2")
+    print("bp_rp=",bp_rp)
+    flux1=generate_modelDA(T1,g1*100,emu)
+    wave1=wref
+    flux2=generate_modelDA(T2,g2*100,emu)
+    wave2=wref
+       
+    flux_bp1,mag_bp1=synthBp(wave1,flux1)
+    flux_rp1,mag_rp1=synthRp(wave1,flux1)
 
+    flux_bp2,mag_bp2=synthBp(wave2,flux2)
+    flux_rp2,mag_rp2=synthRp(wave2,flux2)
+    bp_rp1=mag_bp1-mag_rp1
+    bp_rp2=mag_bp2-mag_rp2
+    if abs(bp_rp1-bp_rp)<=abs(bp_rp2-bp_rp):
+        return(T1)
+    else:
+        return(T2)
+        
 def hot_vs_cold(T1,g1,T2,g2,parallax,GaiaG,emu,wref):
     M_bol_sun, Teff_sun, Rsun_cm, R_sun_pc = 4.75, 5780., 69.5508e9, 2.2539619954370203e-08
     R1=R_from_Teff_logg(T1, g1)
     R2=R_from_Teff_logg(T2, g2)
     mod1=generate_modelDA(T1,g1*100,emu)
-    flux1=(mod1/1e8)/((1000/parallax)*3.086e18)
-    flux1=flux1/((1000/parallax)*3.086e18)
-    flux1=flux1*(np.pi*(R1*Rsun_cm)**2)
+    #flux1=(mod1/1e8)/((1000/parallax)*3.086e18)
+    #flux1=flux1/((1000/parallax)*3.086e18)
+    #flux1=flux1*(np.pi*(R1*Rsun_cm)**2)
+    flux1=((mod1)/((1000/parallax)*3.086e18)**2)*4*(np.pi*(R1*Rsun_cm)**2)
     wave1=wref
     mod2=generate_modelDA(T2,g2*100,emu)
     #flux2=(mod2/1e8)/(((1000/parallax)*3.086e18)**2)*(np.pi*(R2*Rsun_cm)**2)
-    flux2=(mod2/1e8)/((1000/parallax)*3.086e18)
-    flux2=flux2/((1000/parallax)*3.086e18)
-    flux2=flux2*(np.pi*(R2*Rsun_cm)**2)
-    
+    #flux2=(mod2/1e8)/((1000/parallax)*3.086e18)
+    #flux2=flux2/((1000/parallax)*3.086e18)
+    #flux2=flux2*(np.pi*(R2*Rsun_cm)**2)
+    flux2=((mod2)/((1000/parallax)*3.086e18)**2)*4*(np.pi*(R2*Rsun_cm)**2)
     wave2=wref
     flux_G1,mag_G1=synthG(wave1,flux1)
     flux_G2,mag_G2=synthG(wave2,flux2)
@@ -411,9 +488,62 @@ def synthG(spectrum_w,spectrum_f):
     fluxval=nf*(ew**2 * 1.e-8 / c)
     new_mag = -2.5 * np.log10(fluxval / (zp * 1.e-23))
     return  nf,new_mag
+def synthBp(spectrum_w,spectrum_f):
+    #spec=np.stack((spectrum_w, spectrum_f),axis=-1)
+    fmin=3302.
+    fmax=6739.
+    filter_w,filter_r=np.loadtxt(os.path.join(PIPELINE_DATA_DIR,"GAIA_GAIA3.Gbp.dat"),usecols=(0,1),unpack=True)    
+    ifT = np.interp(spectrum_w, filter_w,filter_r, left=0., right=0.)
+    nonzero = np.where(ifT > 0)[0]
+    nonzero_start = max(0, min(nonzero) - 5)
+    nonzero_end = min(len(ifT), max(nonzero) + 5)
+    ind = np.zeros(len(ifT), dtype=bool)
+    ind[nonzero_start:nonzero_end] = True
+ 
+    spec_flux = spectrum_f[ind]
+    a = np.trapz( ifT[ind] * spec_flux*spectrum_w[ind], spectrum_w[ind], axis=-1)
+    b = np.trapz( ifT[ind]*spectrum_w[ind], spectrum_w[ind])
+    if (np.isinf(a).any() | np.isinf(b).any()):
+        print("Warn for inf value")
+    nf=a/b
+    ew=5035.75
+    c=2.99792e10
+    zp=4.07852e-9* ew**2 *1.e15 / c
+    fluxval=nf*(ew**2 * 1.e-8 / c)
+    new_mag = -2.5 * np.log10(fluxval / (zp * 1.e-23))
+    return  nf,new_mag
 
+def synthRp(spectrum_w,spectrum_f):
+    #spec=np.stack((spectrum_w, spectrum_f),axis=-1)
+    fmin=6201.
+    fmax=10465.
+    filter_w,filter_r=np.loadtxt(os.path.join(PIPELINE_DATA_DIR,"GAIA_GAIA3.Grp.dat"),usecols=(0,1),unpack=True)    
+    ifT = np.interp(spectrum_w, filter_w,filter_r, left=0., right=0.)
+    nonzero = np.where(ifT > 0)[0]
+    nonzero_start = max(0, min(nonzero) - 5)
+    nonzero_end = min(len(ifT), max(nonzero) + 5)
+    ind = np.zeros(len(ifT), dtype=bool)
+    ind[nonzero_start:nonzero_end] = True
+ 
+    spec_flux = spectrum_f[ind]
+    a = np.trapz( ifT[ind] * spec_flux*spectrum_w[ind], spectrum_w[ind], axis=-1)
+    b = np.trapz( ifT[ind]*spectrum_w[ind], spectrum_w[ind])
+    if (np.isinf(a).any() | np.isinf(b).any()):
+        print("Warn for inf value")
+    nf=a/b
+    ew=7619.96
+    c=2.99792e10
+    zp=1.26902e-9* ew**2 *1.e15 / c
+    fluxval=nf*(ew**2 * 1.e-8 / c)
+    new_mag = -2.5 * np.log10(fluxval / (zp * 1.e-23))
+    return  nf,new_mag
+    
 def R_from_Teff_logg(Teff, logg,atm="thick"):
     from scipy import interpolate
+    if Teff>79400:
+        Teff=79400
+    if logg<7:
+        logg=7
     if atm=="thick":
         #MGRID=pd.read_csv("CO_thickH_processed.csv")
         MGRID=pd.read_csv(os.path.join(PIPELINE_DATA_DIR, "new_MR_H.csv"))
