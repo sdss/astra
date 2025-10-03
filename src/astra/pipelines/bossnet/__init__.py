@@ -349,10 +349,11 @@ def make_prediction(spectra, error, wavlen,num_uncertainty_draws,model,device):
 from astra import task, __version__
 from astra.utils import log, expand_path
 
+from astra.models.mwm import BossCombinedSpectrum
 from astra.models.boss import BossVisitSpectrum
 from astra.models.bossnet import BossNet
 from peewee import JOIN
-from typing import Optional, Iterable
+from typing import Optional, Iterable, Union
 
 MIN_WL, MAX_WL, FLUX_LEN = 3800, 8900, 3900
 linear_grid = torch.linspace(MIN_WL, MAX_WL, steps=FLUX_LEN)
@@ -361,7 +362,7 @@ interpolate_flux_err = partial(interpolate_flux_err, linear_grid=linear_grid)
 
 
 @task
-def bossnet(spectra: Iterable[BossVisitSpectrum], num_uncertainty_draws: Optional[int] = 20, **kwargs) -> Iterable[BossNet]:
+def bossnet(spectra: Iterable[Union[BossVisitSpectrum, BossCombinedSpectrum]], num_uncertainty_draws: Optional[int] = 20, **kwargs) -> Iterable[BossNet]:
     
     model = BossNetModel()
     model_path = expand_path("$MWM_ASTRA/pipelines/BossNet/deconstructed_model")

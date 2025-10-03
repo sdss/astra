@@ -129,7 +129,7 @@ class ResilientDatabase(object):
         log.error(f"SQL query failed after {self.max_retries} retries: {sql}")
         raise DatabaseError(f"Failed to execute SQL query after {self.max_retries} retries due to persistent database error.")
 
-class PostgresqlDatabase(ResilientDatabase, _PostgresqlDatabase):
+class PostgresqlDatabase(_PostgresqlDatabase):
     pass
 
 # Note that we can't use a DatabaseProxy and define it later because we also need to be

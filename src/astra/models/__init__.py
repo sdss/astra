@@ -1,9 +1,10 @@
+from astra.models.source import Source
 from astra.models.apogee import (
     ApogeeCoaddedSpectrumInApStar,
     ApogeeVisitSpectrum,
     ApogeeVisitSpectrumInApStar,
 )
-
+from astra.models.boss import BossVisitSpectrum
 """
 from astra.models.apogeenet import ApogeeNet
 from astra.models.apogeenet_v2 import ApogeeNetV2

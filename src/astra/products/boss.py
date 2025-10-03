@@ -13,7 +13,7 @@ from astra import __version__
 from astra.utils import log
 from astra.products.utils import (
     get_fields_and_pixel_arrays,
-    get_fill_value, 
+    get_fill_value,
 )
 
 boss_continuum_model = BossNMFContinuum()
@@ -25,7 +25,7 @@ def include_boss_spectrum_in_coadd(source, spectrum):
     &   ((spectrum.xcsao_rxc > 6) | ("mwm_wd" in source.sdss5_cartons["program"]))
     &   (spectrum.zwarning_flags <= 0)
     )
-    
+
 
 def include_boss_spectrum_in_rv_calculation(source, spectrum):
     return (
@@ -52,20 +52,24 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2d
     q = q.order_by(BossVisitSpectrum.mjd.asc())
 
     visit_fields = get_fields_and_pixel_arrays((BossVisitSpectrum, ))
-    
+
     visits = []
     v_rads, e_v_rads, in_stack = ([], [], [])
-    for spectrum in q.iterator():           
+    for spectrum in list(q):
         visit = {}
         for name, field in visit_fields.items():
-            if name in ("pk", "v_astra"):
+            if name in ("pk", "v_astra", "source", "modified", "created"):
                 continue
-            
-            value = getattr(spectrum, name)
+
+            try:
+                value = getattr(spectrum, name)
+            except:
+                log.exception(f"Exception trying to access {name} on source {source} {telescope} {run2ds} {spectrum.__data__}")
+                raise
             if value is None:
                 value = get_fill_value(field, fill_values)
             visit[name] = value
-        
+
         in_stack.append(include_boss_spectrum_in_coadd(source, spectrum))
         if include_boss_spectrum_in_rv_calculation(source, spectrum):
             v_rads.append(spectrum.xcsao_v_rad)
@@ -73,23 +77,23 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2d
 
         visit["in_stack"] = in_stack[-1]
         visits.append(visit)
-    
+
     if len(visits) == 0:
         return (None, None)
-    
+
     # Let's resample spectra
     coadd_wavelength = BossCombinedSpectrum().wavelength
     N, P = NP = (len(visits), coadd_wavelength.size)
-    zwarning_flags, gri_gaia_transform_flags = (0, 0)    
+    zwarning_flags, gri_gaia_transform_flags = (0, 0)
     visit_flux, visit_ivar, visit_pixel_flags = (np.zeros(NP), np.zeros(NP), np.zeros(NP, dtype=np.int64))
     for i, (use, visit) in enumerate(zip(in_stack, visits)):
-        if use:            
+        if use:
             v_rad = visit["xcsao_v_rad"]
             zwarning_flags |= visit["zwarning_flags"]
             gri_gaia_transform_flags |= visit["gri_gaia_transform_flags"]
         else:
             v_rad = 0
-        
+
         visit_flux[i], visit_ivar[i], visit_pixel_flags[i] = resample(
             visit["wavelength"] * (1 - v_rad/2.99792458e5),
             coadd_wavelength,
@@ -98,8 +102,8 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2d
             n_res=n_res,
             pixel_flags=visit["pixel_flags"]
         )
-    
-    if any(in_stack):                
+
+    if any(in_stack):
         # Co-add the spectra
         coadd_flux, coadd_ivar, coadd_pixel_flags, *_ = pixel_weighted_spectrum(
             visit_flux[in_stack],
@@ -109,16 +113,16 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2d
         bad_edge = (coadd_wavelength < 3650)
         coadd_flux[bad_edge] = np.nan
         coadd_ivar[bad_edge] = 0
-        
-        # Compute star-level statistics:        
+
+        # Compute star-level statistics:
         coadd_snr = coadd_flux * np.sqrt(coadd_ivar)
         coadd_snr = np.mean(coadd_snr[coadd_ivar > 0])
-            
+
         v_rad, e_v_rad = weighted_average(v_rads, e_v_rads)
         std_v_rad = np.std(v_rads)
         median_e_v_rad = np.median(e_v_rads)
         n_good_rvs = len(v_rads)
-        
+
         xcsao_params = {}
         for key in ("teff", "logg", "fe_h"):
             y, e_y = weighted_average(
@@ -128,10 +132,10 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2d
             xcsao_params[f"xcsao_{key}"] = y
             xcsao_params[f"xcsao_e_{key}"] = e_y
         xcsao_params["xcsao_mean_rxc"] = np.mean([v["xcsao_rxc"] for u, v in zip(in_stack, visits) if u])
-        
+
         # Run NMF on the coadd spectrum.
         (coadd_continuum, ), meta = boss_continuum_model.fit(coadd_flux, coadd_ivar, full_output=True)
-        
+
         # create the coadd spectrum object
         coadd_spectrum = BossCombinedSpectrum(
             source_pk=source.pk,
@@ -148,10 +152,10 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2d
             v_rad=v_rad,
             e_v_rad=e_v_rad,
             std_v_rad=std_v_rad,
-            median_e_v_rad=median_e_v_rad,    
+            median_e_v_rad=median_e_v_rad,
             snr=coadd_snr,
             zwarning_flags=zwarning_flags,
-            gri_gaia_transform_flags=gri_gaia_transform_flags,        
+            gri_gaia_transform_flags=gri_gaia_transform_flags,
             nmf_rchi2=meta["rchi2"],
             **xcsao_params,
         )
@@ -161,11 +165,11 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2d
         coadd_spectrum.pixel_flags = coadd_pixel_flags
         coadd_spectrum.continuum = coadd_continuum
         coadd_spectrum.nmf_rectified_model_flux = meta["rectified_model_flux"]
-        
-        # Now compute continuum coefficients for the visits, conditioned on the model rectified flux    
+
+        # Now compute continuum coefficients for the visits, conditioned on the model rectified flux
         theta, visit_continuum = boss_continuum_model._theta_step(
-            visit_flux, 
-            visit_ivar, 
+            visit_flux,
+            visit_ivar,
             coadd_spectrum.nmf_rectified_model_flux
         )
     else:
@@ -186,7 +190,7 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2d
         visit_spectrum.pixel_flags = visit_pixel_flags[i]
         visit_spectrum.continuum = visit_continuum[i]
         visit_spectra.append(visit_spectrum)
-    
+
     save_spectra = []
     if coadd_spectrum is not None:
         save_spectra.append(coadd_spectrum)
@@ -194,10 +198,31 @@ def prepare_boss_resampled_visit_and_coadd_spectra(source, telescope=None, run2d
 
     for spectrum_pk, spectrum in enumerate_new_spectrum_pks(save_spectra):
         spectrum.spectrum_pk = spectrum_pk
-    
+
     if coadd_spectrum is not None:
+        (
+            BossCombinedSpectrum
+            .delete()
+            .where(
+                (BossCombinedSpectrum.sdss_id == source.sdss_id)
+            &   (BossCombinedSpectrum.telescope == coadd_spectrum.telescope)
+            &   (BossCombinedSpectrum.run2d == coadd_spectrum.run2d)
+            &   (BossCombinedSpectrum.release == coadd_spectrum.release)
+            &   (BossCombinedSpectrum.v_astra == coadd_spectrum.v_astra)
+            )
+            .execute()
+        )
         coadd_spectrum.save()
     if visit_spectra:
+        (
+            BossRestFrameVisitSpectrum
+            .delete()
+            .where(
+                (BossRestFrameVisitSpectrum.drp_spectrum_pk.in_([v.drp_spectrum_pk for v in visit_spectra]))
+            &   (BossRestFrameVisitSpectrum.v_astra == visit_spectra[0].v_astra)
+            )
+            .execute()
+        )
         BossRestFrameVisitSpectrum.bulk_create(visit_spectra)
-            
+
     return (coadd_spectrum, visit_spectra)

@@ -270,6 +270,7 @@ def create_mwm_targets_product(
     if gzip:
         os.system(f"gzip -f {path}")
         path += ".gz"
+    os.system(f"chmod 755 {path}")        
     return (path, hdu_list) if full_output else path    
 
 
@@ -545,4 +546,5 @@ def _create_summary_product(
     if gzip:
         os.system(f"gzip -f {path}")
         path += ".gz"    
+    os.system(f"chmod 755 {path}")        
     return (path, hdu_list) if full_output else path

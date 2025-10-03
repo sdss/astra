@@ -384,7 +384,7 @@ def migrate_specfull_metadata_from_image_headers(
     q = (
         BossVisitSpectrum
         .select()
-        .where(BossVisitSpectrum.alt.is_null() & (BossVisitSpectrum.catalogid > 0))
+        .where(BossVisitSpectrum.alt.is_null())# & (BossVisitSpectrum.catalogid > 0))
         .limit(limit)
     )
     
@@ -475,4 +475,5 @@ def migrate_specfull_metadata_from_image_headers(
         queue.put(dict(advance=batch_size))
     
     queue.put(Ellipsis)
+
     return None

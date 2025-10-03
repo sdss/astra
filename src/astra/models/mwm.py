@@ -247,9 +247,13 @@ class BossRestFrameVisitSpectrum(MWMVisitMixin, SpectrumMixin):
     nmf_rchi2 = FloatField(null=True, help_text=Glossary.nmf_rchi2)
     nmf_flags = BitField(default=0, help_text="NMF Continuum method flags")
 
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
+
     @property
     def e_flux(self):
-        return self.ivar**-0.5
+        with np.errstate(divide='ignore'):
+            return self.ivar**-0.5
 
     class Meta:
         indexes = (
@@ -384,6 +388,9 @@ class BossCombinedSpectrum(MWMStarMixin, SpectrumMixin):
     nmf_rchi2 = FloatField(null=True, help_text=Glossary.nmf_rchi2)
     nmf_flags = BitField(default=0, help_text="NMF Continuum method flags")
 
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
+
     class Meta:
         indexes = (
             (
@@ -508,6 +515,10 @@ class ApogeeCombinedSpectrum(MWMStarMixin, SpectrumMixin):
     nmf_rectified_model_flux = PixelArray(ext=get_apogee_ext, transform=transform_flat, help_text=Glossary.nmf_rectified_model_flux)
     nmf_rchi2 = FloatField(null=True, help_text=Glossary.nmf_rchi2)
     nmf_flags = BitField(default=0, help_text="NMF Continuum method flags")
+
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
+
 
     class Meta:
         indexes = (
@@ -666,6 +677,9 @@ class ApogeeRestFrameVisitSpectrum(MWMVisitMixin, SpectrumMixin):
     continuum = PixelArray(ext=get_apogee_ext, help_text=Glossary.continuum)
     nmf_rchi2 = FloatField(null=True, help_text=Glossary.nmf_rchi2)
     nmf_flags = BitField(default=0, help_text="NMF Continuum method flags")
+    
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
 
     @hybrid_property
     def flag_bad(self):

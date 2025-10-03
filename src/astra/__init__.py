@@ -6,7 +6,7 @@ from sdsstools.configuration import get_config
 from astra.utils import log, Timer, resolve_task, resolve_model, get_return_type, expects_source_types, expects_spectrum_types, version_string_to_integer, get_task_group_by_string
 
 NAME = "astra"
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 @decorator
 def task(
@@ -17,7 +17,7 @@ def task(
     batch_size: int = 1000,
     write_frequency: int = 300,
     write_to_database: bool = True,
-    re_raise_exceptions: bool = True, 
+    re_raise_exceptions: bool = False, 
     **kwargs
 ):
     """
@@ -54,6 +54,8 @@ def task(
 
     if not isgeneratorfunction(function):
         log.warning(f"Tasks should be generators that `yield` results, but {function} does not `yield`.")
+
+    print(batch_size, kwargs)    
 
     n, results = (0, [])
     with Timer(
@@ -183,11 +185,14 @@ def bulk_insert_or_replace_pipeline_results(results, avoid_integrity_exceptions=
                 raise
 
     results_dict = {(getattr(r, first_conflict_target_name), r.v_astra // 1000): r for r in results}
-    for task_pk, pk, v_astra, created in q:
-        r = results_dict.pop((pk, v_astra // 1000))
-        r.__data__.update(task_pk=task_pk, created=created)
-        r._dirty.clear()
-        yield r
+    try:
+        for task_pk, pk, v_astra, created in q:
+            r = results_dict.pop((pk, v_astra // 1000))
+            r.__data__.update(task_pk=task_pk, created=created)
+            r._dirty.clear()
+            yield r
+    except:
+        ...
 
     if len(results_dict) > 0:
         raise IntegrityError("Failed to insert all results into the database.")
@@ -238,17 +243,14 @@ def generate_queries_for_task(
     output_model = get_return_type(fun)
     group_by_string = get_task_group_by_string(fun)
     
-
-
     for input_model in input_models:
-        where = (
-            output_model.spectrum_pk.is_null()
-        |   (input_model.modified > output_model.modified)
-        )
-        if sdss_ids is not None:
-            where &= (Source.sdss_id.in_(sdss_ids))
-
         if input_model == Source:
+            where = (
+                output_model.source_pk.is_null()
+            |   (input_model.modified > output_model.modified)
+            )
+            if sdss_ids is not None:
+                where &= (Source.sdss_id.in_(sdss_ids))
             q = (
                 Source
                 .select()
@@ -264,6 +266,13 @@ def generate_queries_for_task(
                 .order_by(Source.modified.desc())
             )
         else:                
+            where = (
+                output_model.spectrum_pk.is_null()
+            |   (input_model.modified > output_model.modified)
+            )
+            if sdss_ids is not None:
+                where &= (Source.sdss_id.in_(sdss_ids))
+
             on = (
                 (output_model.v_astra_major_minor == current_version)
             &   (input_model.spectrum_pk == output_model.spectrum_pk)

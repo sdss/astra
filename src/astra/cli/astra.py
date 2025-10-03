@@ -19,12 +19,22 @@ class Product(str, Enum):
     astraAllStarASPCAP = "astraAllStarASPCAP"
     astraAllStarAPOGEENet = "astraAllStarAPOGEENet"
     astraAllVisitAPOGEENet = "astraAllVisitAPOGEENet"
+    astraAllStarBOSSNet = "astraAllStarBOSSNet"
+    astraAllVisitBOSSNet = "astraAllVisitBOSSNet"
+    astraAllStarLineForest = "astraAllStarLineForest"
+    astraAllVisitLineForest = "astraAllVisitLineForest"
+    astraAllStarAstroNN = "astraAllStarAstroNN"
+    astraAllVisitAstroNN = "astraAllVisitAstroNN"
+    astraAllStarAstroNNDist = "astraAllStarAstroNNDist"
+
+
 
 @app.command()
 def version():
     """Print the version of Astra."""
     from astra import __version__
     typer.echo(f"Astra version: {__version__}")    
+
 
 @app.command()
 def create(
@@ -41,6 +51,8 @@ def create(
     from astra.products.pipeline_summary import create_all_star_product, create_all_visit_product
     from astra.products.mwm import create_mwmVisit_and_mwmStar_products
     from astra.models.apogee import ApogeeCoaddedSpectrumInApStar, ApogeeVisitSpectrumInApStar
+    from astra.models.boss import BossVisitSpectrum
+    from astra.models.mwm import (BossCombinedSpectrum, ApogeeCombinedSpectrum, BossRestFrameVisitSpectrum, ApogeeRestFrameVisitSpectrum)
     
     mwmVisit_mwmStar_args = (
         run, 
@@ -79,6 +91,62 @@ def create(
                 {
                     "pipeline_model": "apogeenet.ApogeeNet",
                     "apogee_spectrum_model": ApogeeVisitSpectrumInApStar,
+                    "overwrite": overwrite
+                }
+            ),
+            Product.astraAllStarBOSSNet: (
+                create_all_star_product,
+                {
+                    "pipeline_model": "bossnet.BossNet",
+                    "boss_spectrum_model": BossCombinedSpectrum,
+                    "overwrite": overwrite
+                }
+            ),
+            Product.astraAllVisitBOSSNet: (
+                create_all_visit_product,
+                {
+                    "pipeline_model": "bossnet.BossNet",
+                    "boss_spectrum_model": BossVisitSpectrum,
+                    "overwrite": overwrite
+                }
+            ),
+            Product.astraAllStarLineForest: (
+                create_all_star_product,
+                {
+                    "pipeline_model": "line_forest.LineForest",
+                    "boss_spectrum_model": BossCombinedSpectrum,
+                    "overwrite": overwrite
+                }
+            ),
+            Product.astraAllVisitLineForest: (
+                create_all_visit_product,
+                {
+                    "pipeline_model": "line_forest.LineForest",
+                    "boss_spectrum_model": BossVisitSpectrum,
+                    "overwrite": overwrite
+                }
+            ),
+            Product.astraAllStarAstroNN: (
+                create_all_star_product,
+                {
+                    "pipeline_model": "astronn.AstroNN",
+                    "apogee_spectrum_model": ApogeeCoaddedSpectrumInApStar,
+                    "overwrite": overwrite
+                }
+            ),
+            Product.astraAllVisitAstroNN: (
+                create_all_visit_product,
+                {
+                    "pipeline_model": "astronn.AstroNN",
+                    "apogee_spectrum_model": ApogeeVisitSpectrumInApStar,
+                    "overwrite": overwrite
+                }
+            ),
+            Product.astraAllStarAstroNNDist: (
+                create_all_star_product,
+                {
+                    "pipeline_model": "astronn_dist.AstroNNDist",
+                    "apogee_spectrum_model": ApogeeCoaddedSpectrumInApStar,
                     "overwrite": overwrite
                 }
             )
@@ -365,10 +433,10 @@ def run(
         live_renderable.add_row(Panel(overall_progress, title=task))
     
     with Live(live_renderable, console=console, redirect_stdout=False, redirect_stderr=False) as live:
-        log.handlers.clear()
-        log.handlers.extend([
-            RichHandler(console=live.console, markup=True, rich_tracebacks=True),
-        ])
+        #log.handlers.clear()
+        #log.handlers.extend([
+        #    RichHandler(console=live.console, markup=True, rich_tracebacks=True),
+        #])
 
         for model, q in generate_queries_for_task(fun, spectrum_model, sdss_ids=sdss_ids, limit=limit, page=page):            
             if total := q.count():
@@ -410,11 +478,25 @@ def run(
     """
 
 
+def wrapper(target, *args, **kwargs):
+    try:
+        r = target(*args, **kwargs)
+    except Exception as e:                    
+        q = kwargs.get("queue", None)
+        e.add_note(f"\n\nRaised in {target.__name__}()")
+        if q is not None:
+            q.put(e)
+    else:
+        q = kwargs.get("queue", None)
+        if q is not None:
+            q.put(Ellipsis)
+
 @app.command()
 def migrate(
     apred: Optional[str] = typer.Option(None, help="APOGEE data reduction pipeline version."),
     run2d: Optional[str] = typer.Option(None, help="BOSS data reduction pipeline version."),
     limit: Optional[int] = typer.Option(None, help="Limit the number of spectra to migrate."),
+    max_mjd: Optional[int] = typer.Option(None, help="Maximum MJD of spectra to migrate."),
     metadata: Optional[bool] = typer.Option(True, help="Migrate metadata (e.g., photometry, astrometry)."),
     incremental: Optional[bool] = typer.Option(True, help="Only attempt to migrate new spectra."),
     extinction: Optional[bool] = typer.Option(False, help="Compute extinction."),
@@ -424,9 +506,25 @@ def migrate(
     import os
     import multiprocessing as mp
     from signal import SIGKILL
+    
+    # Set multiprocessing start method to avoid logger inheritance
+    try:
+        mp.set_start_method('fork', force=True)
+    except RuntimeError:
+        # If 'fork' is not available (like on Windows), fall back to default
+        try:
+            mp.set_start_method('spawn', force=True)
+        except RuntimeError:
+            pass  # Already set
+    
     from rich.console import Console
     from rich.progress import Text, Progress, SpinnerColumn, Text, TextColumn, TaskProgressColumn, TimeRemainingColumn, TimeElapsedColumn, BarColumn, MofNCompleteColumn as _MofNCompleteColumn
     from rich.logging import RichHandler
+    from rich.live import Live
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text as RichText
+    from collections import deque
 
     class MofNCompleteColumn(_MofNCompleteColumn):
         def render(self, task):
@@ -445,7 +543,8 @@ def migrate(
     #from astra.migrations.apogee import migrate_apvisit_metadata_from_image_headers
     from astra.migrations.new_apogee import (
         migrate_apogee_spectra_from_sdss5_apogee_drpdb,
-        migrate_dithered_metadata
+        migrate_dithered_metadata,
+        migrate_apogee_visits_in_apStar_files
     )
     from astra.migrations.catalog import (
         migrate_healpix,
@@ -480,45 +579,55 @@ def migrate(
     else:
         console = Console()
 
-    log.handlers.clear()
-    log.handlers.extend([
-        RichHandler(
-            console=console, 
-            markup=True, 
-            rich_tracebacks=True
-        ),
-    ])
+    
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+    )
+    
+    def create_live_renderable():
+        """Create the live renderable layout"""
+        return Panel(progress, title="Migration Progress", border_style="blue")
 
     ptq = []
     try:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            MofNCompleteColumn(),
-            TimeElapsedColumn(),
-            TimeRemainingColumn(),
-            console=Console(),
-            transient=not in_airflow_context
-        ) as progress:    
-
+        with Live(create_live_renderable(), console=console, redirect_stdout=False, redirect_stderr=False, refresh_per_second=4) as live:
+            log.handlers.clear()
             def process_task(target, *args, description=None, **kwargs):
                 queue = mp.Queue()
 
                 kwds = dict(queue=queue)
                 kwds.update(kwargs)
-                process = mp.Process(target=target, args=args, kwargs=kwds)
+                # Set the multiprocessing start method to 'spawn' to avoid logger inheritance issues
+                process = mp.Process(target=wrapper, args=(target, *args), kwargs=kwds)
                 process.start()
 
                 task = progress.add_task(description=(description or ""), total=None)
                 return (process, task, queue)
 
-            log.info("Starting migration..")
+            def update_display():
+                """Update the live display"""
+                live.update(create_live_renderable())
+
+            import time
+            last_update = 0
             
+            def update_display_throttled():
+                """Update display, but not more than once per second"""
+                nonlocal last_update
+                current_time = time.time()
+                if current_time - last_update > 1.0:  # Update at most once per second
+                    update_display()
+                    last_update = current_time
+                
             if apred is not None or run2d is not None:
                 if apred is not None:
                     if apred == "dr17":
-                        from astra.migrations.apogee import migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb 
+                        from astra.migrations.new_apogee import migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb 
                         ptq.append(process_task(migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb, description="Ingesting APOGEE dr17 spectra"))
                     else:
                         ptq.append(
@@ -532,7 +641,7 @@ def migrate(
                         )
                 if run2d is not None:
                     ptq.append(process_task(migrate_from_spall_file, run2d, description=f"Ingesting BOSS {run2d} spectra"))
-                                
+                     
                 awaiting = set(t for p, t, q in ptq)
                 while awaiting:
                     for p, t, q in ptq:
@@ -543,6 +652,9 @@ def migrate(
                                 awaiting.remove(t)
                                 p.join()
                                 progress.update(t, visible=False)
+                            elif isinstance(r, Exception):
+                                log.exception(r)
+                                raise r                                
                             else:
                                 progress.update(t, **r)
                                 if "completed" in r and r.get("completed", None) == 0:
@@ -550,7 +662,10 @@ def migrate(
                                     progress.reset(t)
                         except mp.queues.Empty:
                             pass
-
+                    
+                    # Update log display periodically
+                    update_display_throttled()
+            
             # Now that we have sources and spectra, we can do other things.
             if metadata:
                 ptq = [
@@ -563,6 +678,7 @@ def migrate(
 
                     process_task(migrate_dithered_metadata, description="Ingesting APOGEE dithered metadata"),
                     #process_task(migrate_apvisit_metadata_from_image_headers, description="Ingesting apVisit metadata"),
+                    process_task(migrate_apogee_visits_in_apStar_files, "1.5", description="Creating ApogeeVisitSpectrumInApStar entries"),
                     process_task(migrate_healpix, description="Ingesting HEALPix values"),
                     process_task(migrate_tic_v8_identifier, description="Ingesting TIC v8 identifiers"),
                     process_task(update_galactic_coordinates, description="Computing Galactic coordinates"),
@@ -592,7 +708,10 @@ def migrate(
                             r = q.get(False)
                             if r is Ellipsis:
                                 progress.update(t, completed=True)
-                                awaiting.remove(t)
+                                try:
+                                    awaiting.remove(t)
+                                except:
+                                    None
                                 p.join()
                                 progress.update(t, visible=False)
                                 if (t == task_gaia or t in ptq_gaia) and len(additional_gaia_task_partials) > 0:
@@ -607,13 +726,16 @@ def migrate(
                                     additional_tasks.append(
                                         process_task(compute_f_night_time_for_boss_visits, description="Computing f_night for BOSS visits")
                                     )
-                                if t == task_unwise:
+                                elif t == task_unwise:
                                     additional_tasks.append(
                                         process_task(compute_w1mag_and_w2mag, description="Computing W1, W2 mags")
                                     )
                                 if not started_reddening and not (awaiting & reddening_requires) and extinction:
                                     started_reddening = True
                                     additional_tasks.append(process_task(update_reddening, description="Computing extinction"))
+                            elif isinstance(r, Exception):
+                                log.exception(r)
+                                raise r
                             else:
                                 progress.update(t, **r)
                                 if "completed" in r and r.get("completed", None) == 0:
@@ -625,6 +747,9 @@ def migrate(
 
                     ptq.extend(additional_tasks)
                     awaiting |= set(t for p, t, q in additional_tasks)
+                    
+                    # Update log display periodically
+                    update_display_throttled()
 
     except KeyboardInterrupt:  
         """
@@ -636,6 +761,21 @@ def migrate(
         """
         raise KeyboardInterrupt
 
+@app.command()
+def grant_permissions(
+    group: str = typer.Argument(..., help="The UNIX group to grant permissions to."),
+):
+    """Grant permissions on the Astra database schema to a UNIX group."""
+    from astra.models.base import BaseModel, database
+    from astra.utils import log
+
+    schema = BaseModel._meta.schema
+    log.info(f"Granting permissions on schema {schema} to group '{group}'")
+    database.execute_sql(
+        f"grant all privileges on schema {schema} to group {group};"
+        f"grant all privileges on all tables in schema {schema} to {group};"
+    )
+    
 
 
 @app.command()
@@ -667,6 +807,8 @@ def init(
             "astronn",
             "source",
             "spectrum",
+            "line_forest",
+            "mwm"
         )
         for package in init_model_packages:
             import_module(f"astra.models.{package}")

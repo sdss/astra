@@ -14,8 +14,9 @@ from specutils import Spectrum1D
 from specutils.manipulation import SplineInterpolatedResampler
 from collections import OrderedDict
 
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Union
 
+from astra.models.mwm import BossCombinedSpectrum
 from astra.models.boss import BossVisitSpectrum
 from astra.models.line_forest import LineForest
 from peewee import ModelSelect
@@ -76,19 +77,26 @@ LINES = [
 ]
 
 @task
-def line_forest(spectra: Iterable[BossVisitSpectrum], steps: int = 128, reps: int = 100, max_workers: int = 1, limit: Optional[int] = None, **kwargs) -> Iterable[LineForest]:
+def line_forest(
+    spectra: Iterable[Union[BossVisitSpectrum, BossCombinedSpectrum]],
+    steps: int = 128,
+    reps: int = 100,
+    max_workers: int = 1,
+    limit: Optional[int] = None,
+    **kwargs
+) -> Iterable[LineForest]:
     """
     Measure spectral line strengths.
 
     :param spectra:
         Input BOSS spectra.
-    
+
     :param steps:
         Number of steps to use when sampling the line profile.
-    
+
     :param reps:
         Number of times to repeat the measurement.
-    
+
     :param max_workers:
         Maximum number of workers to use.
     """
@@ -99,30 +107,37 @@ def line_forest(spectra: Iterable[BossVisitSpectrum], steps: int = 128, reps: in
     if isinstance(spectra, ModelSelect):
         spectra = spectra.iterator()
 
-    executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
+    if max_workers > 1:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
 
-    futures = []
-    with tqdm(total=0, desc="Chunking") as pb:            
-        for total, spectrum in enumerate(spectra, start=1):
-            futures.append(executor.submit(_line_forest, spectrum, steps, reps))
-            pb.update()
+            futures = []
+            with tqdm(total=0, desc="Chunking") as pb:
+                for total, spectrum in enumerate(spectra, start=1):
+                    futures.append(executor.submit(_line_forest, spectrum, steps, reps))
+                    pb.update()
 
-    with tqdm(total=total) as pb:
-        for future in concurrent.futures.as_completed(futures):
-            result = future.result()
+            with tqdm(total=total) as pb:
+                for future in concurrent.futures.as_completed(futures):
+                    result = future.result()
+                    if result is not None:
+                        yield result
+                    pb.update()
+
+    else:
+        for spectrum in tqdm(spectra):
+            result = _line_forest(spectrum, steps, reps, **kwargs)
             if result is not None:
                 yield result
-            pb.update()
-        
 
-def _line_forest(spectrum, steps, reps, debug=False):
-        
+
+def _line_forest(spectrum, steps, reps, debug=False, **kwargs):
+
     models = {
         "zlines.model": read_model(os.path.join(f"$MWM_ASTRA/pipelines/lineforest/zlines2.model")),
         "hlines.model": read_model(os.path.join(f"$MWM_ASTRA/pipelines/lineforest/hlines2.model")),
     }
 
-    try:    
+    try:
         flux = np.copy(spectrum.flux)
         e_flux = np.copy(spectrum.e_flux)
         median_e_flux = np.median(e_flux[np.isfinite(e_flux)])
@@ -133,11 +148,11 @@ def _line_forest(spectrum, steps, reps, debug=False):
         bad_pixel = (flux <= 0) | (~np.isfinite(flux))
         e_flux[high_error] = 5 * median_e_flux
         flux[bad_pixel] = 1
-        
+
         # TODO: increase flux error at bad pixels?
         uncertainty = e_flux/flux/np.log(10)
         uncertainty[~np.isfinite(uncertainty)] = 5 * median_e_flux
-        
+
         specs = Spectrum1D(
             spectral_axis=spectrum.wavelength * u.Angstrom,
             flux=u.Quantity(np.log10(flux)),
@@ -153,11 +168,11 @@ def _line_forest(spectrum, steps, reps, debug=False):
         ))
 
         for name, model_path, wavelength_air, minmax in LINES:
-            
+
             try:
-                    
+
                 wavelength_vac = airtovac(wavelength_air)
-                
+
                 model = models[os.path.basename(model_path)]
 
                 spec = spline(specs, (np.linspace(-minmax, minmax, steps) + wavelength_vac) * u.AA)
@@ -171,15 +186,15 @@ def _line_forest(spectrum, steps, reps, debug=False):
 
                 predictions = unnormalize(np.array(model(window[0:1,:,:])["dense_3"]))
 
-                if np.abs(predictions[0,2])>0.5: 
+                if np.abs(predictions[0,2])>0.5:
                     eqw, abs = (predictions[0, 0], predictions[0, 1])
                     detection_stat = predictions[0, 2]
 
-                    predictions = unnormalize(np.array(model(window[1:,:,:])["dense_3"]))  
+                    predictions = unnormalize(np.array(model(window[1:,:,:])["dense_3"]))
 
                     a = np.where(np.abs(predictions[1:,2])>0.5)[0]
                     detection_raw = np.round(len(a)/reps,2)
-                    
+
                     if detection_raw>0.3:
                         result_kwds.update({
                             f"eqw_{name.lower()}": float(eqw),
@@ -198,11 +213,11 @@ def _line_forest(spectrum, steps, reps, debug=False):
                 if debug:
                     raise
                 continue
-                            
+
     except:
         log.warning(f"Exception when running line_forest for spectrum {spectrum.__class__} {spectrum.pk}")
         if debug:
-            raise 
+            raise
         return None
     else:
         return LineForest(**result_kwds)
@@ -230,11 +245,11 @@ def read_model(path):
 # TODO: move this to a utility
 def airtovac(wave_air) :
     """ Convert air wavelengths to vacuum wavelengths
-        Corrects for the index of refraction of air under standard conditions.  
+        Corrects for the index of refraction of air under standard conditions.
         Wavelength values below 2000 A will not be altered.  Accurate to about 10 m/s.
         From IDL Astronomy Users Library, which references Ciddor 1996 Applied Optics 35, 1566
     """
-    if not isinstance(wave_air, np.ndarray) : 
+    if not isinstance(wave_air, np.ndarray) :
         air = np.array([wave_air])
     else :
         air = wave_air
@@ -248,4 +263,4 @@ def airtovac(wave_air) :
         fact = 1. +  5.792105E-2/(238.0185E0 - sigma2) + 1.67917E-3/( 57.362E0 - sigma2)
 
         vac[g] = air[g]*fact              #Convert Wavelength
-    return vac    
+    return vac

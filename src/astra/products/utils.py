@@ -36,6 +36,7 @@ from importlib import import_module
 from astra.utils import log, flatten, expand_path
 from astra import models as astra_models
 from typing import Union
+from tqdm import tqdm
 from astra.glossary import Glossary
 
 DATETIME_FMT = "%y-%m-%d %H:%M:%S"
@@ -202,13 +203,21 @@ def create_source_primary_hdu_cards(
         (" ", s("HDU Descriptions"), None),
         BLANK_CARD,
         ("COMMENT", "HDU 0: Summary information only", None),
-        ("COMMENT", f"HDU 1: BOSS {context}", None),
-        ("COMMENT", f"HDU 2: APOGEE {context}", None),
-        #("COMMENT", f"HDU 1: BOSS {context} from Apache Point Observatory"),
-        #("COMMENT", f"HDU 2: BOSS {context} from Las Campanas Observatory"),
-        #("COMMENT", f"HDU 3: APOGEE {context} from Apache Point Observatory"),
-        #("COMMENT", f"HDU 4: APOGEE {context} from Las Campanas Observatory"),
     ])
+    if context == "results":
+        cards.extend([
+            ("COMMENT", f"HDU 1: BOSS {context}", None),
+            ("COMMENT", f"HDU 2: APOGEE {context}", None),
+        ])
+    elif context == "spectra":
+        cards.extend([
+            ("COMMENT", f"HDU 1: BOSS {context} from Apache Point Observatory"),
+            ("COMMENT", f"HDU 2: BOSS {context} from Las Campanas Observatory"),
+            ("COMMENT", f"HDU 3: APOGEE {context} from Apache Point Observatory"),
+            ("COMMENT", f"HDU 4: APOGEE {context} from Las Campanas Observatory"),
+        ])
+    else:
+        raise ValueError(f"unknown context '{context}'")
     
     return (cards, original_names)
     
@@ -303,7 +312,7 @@ def get_binary_table_hdu(
 
     data = { name: [] for name in fields.keys() }
     total = 0
-    for result in q.iterator():
+    for result in tqdm(q.iterator()):
         total += 1
         if isinstance(result, dict):        
             for name, value in result.items():
@@ -317,11 +326,11 @@ def get_binary_table_hdu(
                     value = get_fill_value(field, None)
                 data[name].append(value)
 
-    log.info(f"Creating binary table HDU with {total} rows.")
+    log.info(f"Creating binary table HDU with {total:,} rows.")
     
     # Create the columns.
     original_names, columns, = ({}, [])
-    for name, field in fields.items():
+    for name, field in tqdm(fields.items()):
         if isinstance(field, ArrayField):
             # Do a hack to deal with delta_ra, delta_dec
             if len(data[name]) > 0:
@@ -340,7 +349,9 @@ def get_binary_table_hdu(
         original_names[kwds['name']] = name
         columns.append(fits.Column(**kwds))    
 
+
     hdu = fits.BinTableHDU.from_columns(columns, header=header)
+    log.info("HDU created")
 
     # Add comments for each field.
     for i, name in enumerate(hdu.data.dtype.names, start=1):
@@ -352,6 +363,7 @@ def get_binary_table_hdu(
     add_category_headers(hdu, models, original_names, upper)
     add_category_comments(hdu, models, original_names, upper)
 
+    log.info("Added category headers and comments")
     # TODO: Add comments for flag definitions?
     
     # Add checksums.
@@ -360,6 +372,8 @@ def get_binary_table_hdu(
     hdu.header.insert("CHECKSUM", (" ", "DATA INTEGRITY"))
     hdu.header.insert("CHECKSUM", BLANK_CARD)
     hdu.add_checksum()
+
+    log.info("Added checksums")
     return hdu
 
 
@@ -578,13 +592,14 @@ def get_basic_header(
             (" ", s("HDU Descriptions"), None),
             BLANK_CARD,
             ("COMMENT", "HDU 0: Summary information only", None),
-            ("COMMENT", "HDU 1: BOSS spectra", None),
-            ("COMMENT", "HDU 2: APOGEE spectra", None),
-        ])        
-        #("COMMENT", "HDU 1: BOSS spectra taken at Apache Point Observatory"),
-        #("COMMENT", "HDU 2: BOSS spectra taken at Las Campanas Observatory"),
-        #("COMMENT", "HDU 3: APOGEE spectra taken at Apache Point Observatory"),
-        #("COMMENT", "HDU 4: APOGEE spectra taken at Las Campanas Observatory"),
+            #("COMMENT", "HDU 1: BOSS spectra", None),
+            #("COMMENT", "HDU 2: APOGEE spectra", None),
+            #])        
+            ("COMMENT", "HDU 1: BOSS spectra taken at Apache Point Observatory"),
+            ("COMMENT", "HDU 2: BOSS spectra taken at Las Campanas Observatory"),
+            ("COMMENT", "HDU 3: APOGEE spectra taken at Apache Point Observatory"),
+            ("COMMENT", "HDU 4: APOGEE spectra taken at Las Campanas Observatory"),
+        ])
 
     return fits.Header(cards)    
 

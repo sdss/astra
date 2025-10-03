@@ -420,7 +420,14 @@ def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[
         )
         .join(CatalogToStar, JOIN.LEFT_OUTER, on=(CatalogToStar.target_id == Star.apstar_id))        
         .join(Catalog, JOIN.LEFT_OUTER, on=(CatalogToStar.catalogid == Catalog.catalogid))        
-        .join(SDSS_ID_Flat, JOIN.LEFT_OUTER, on=(SDSS_ID_Flat.catalogid == Catalog.catalogid))
+        .join(
+            SDSS_ID_Flat, 
+            JOIN.LEFT_OUTER, 
+            on=(
+                (SDSS_ID_Flat.catalogid == Catalog.catalogid)
+            &   (SDSS_ID_Flat.rank == 1)
+            )
+        )
         .join(SDSS_ID_Stacked, JOIN.LEFT_OUTER, on=(SDSS_ID_Stacked.sdss_id == SDSS_ID_Flat.sdss_id))
         .join(CatalogToGaia_DR2, JOIN.LEFT_OUTER, on=(CatalogToGaia_DR2.catalog == Catalog.catalogid))
         .join(CatalogToGaia_DR3, JOIN.LEFT_OUTER, on=(CatalogToGaia_DR3.catalog == CatalogToGaia_DR2.catalogid))

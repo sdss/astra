@@ -9,8 +9,8 @@ from astra.utils import version_string_to_integer
 
 class PipelineOutputModel(BaseModel):
 
-    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False, column_name="source_pk")
-    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False, column_name="spectrum_pk")
+    source_pk = ForeignKeyField(Source, null=True, index=True, lazy_load=False, column_name="source_pk", on_delete="CASCADE")
+    spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False, column_name="spectrum_pk", on_delete="CASCADE")
     
     #> Astra Metadata
     task_pk = AutoField()

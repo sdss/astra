@@ -364,7 +364,8 @@ def update_visit_spectra_counts(
     boss_where=None,
     batch_size=10_000,   
     queue=None,
-    k=1000
+    k=1000,
+    incremental=False
 ):
     from astra.models.base import database
     from astra.models.source import Source
@@ -421,9 +422,13 @@ def update_visit_spectra_counts(
         )
         .join(Source, on=(ApogeeVisitSpectrum.source_pk == Source.pk))
         .join(sq_apogee_counts, on=(sq_apogee_counts.c.pk == ApogeeVisitSpectrum.source_pk))
-        .where(sq_apogee_counts.c.apogee_max_created > Source.modified)
-        .dicts()
     )
+    if incremental:
+        q_apogee_counts = (
+            q_apogee_counts
+            .where(sq_apogee_counts.c.apogee_max_created > Source.modified)
+        )
+    q_apogee_counts = q_apogee_counts.dicts()
 
     sq_boss = (
         BossVisitSpectrum
@@ -468,9 +473,13 @@ def update_visit_spectra_counts(
         )
         .join(Source, on=(BossVisitSpectrum.source_pk == Source.pk))
         .join(sq_boss_counts, on=(sq_boss_counts.c.pk == BossVisitSpectrum.source_pk))
-        .where(sq_boss_counts.c.boss_max_created > Source.modified)
-        .dicts()
     )
+    if incremental:
+        q_boss_counts = (
+            q_boss_counts        
+            .where(sq_boss_counts.c.boss_max_created > Source.modified)
+        )
+    q_boss_counts = q_boss_counts.dicts()
 
     now = datetime.datetime.now()
 

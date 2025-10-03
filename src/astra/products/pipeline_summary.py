@@ -340,6 +340,7 @@ def create_all_star_product(
         os.system(f"gzip -f {written_path}")
         written_path += ".gz"
     
+    os.system(f"chmod 755 {written_path}")
     return (written_path, hdu_list) if full_output else written_path    
 
 
@@ -560,5 +561,6 @@ def create_all_visit_product(
     if gzip:
         os.system(f"gzip -f {written_path}")
         written_path += ".gz"
-    
+        
+    os.system(f"chmod 755 {written_path}")
     return (written_path, hdu_list) if full_output else written_path    

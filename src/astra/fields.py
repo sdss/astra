@@ -19,7 +19,7 @@ from peewee import (
 from playhouse.postgres_ext import ArrayField as _ArrayField
 import h5py
 from astropy.io import fits
-from astra.utils import expand_path
+from astra.utils import expand_path, log
 from astra.glossary import Glossary
 
 class GlossaryFieldMixin:
@@ -30,7 +30,7 @@ class GlossaryFieldMixin:
         self.column_name = self.column_name or name
         if set_attribute:
             setattr(model, name, self.accessor_class(model, self, name))
-        
+
         if self.help_text is None:
             self.help_text = getattr(Glossary, self.name, None)
 
@@ -68,7 +68,7 @@ class TextField(GlossaryFieldMixin, _TextField):
 class BitField(GlossaryFieldMixin, _BitField):
 
     """A binary bitfield field that allows for `help_text` to be specified in each `FlagDescriptor`."""
-    
+
     def __init__(self, *args, **kwargs):
         kwargs.setdefault('default', 0)
         super(_BitField, self).__init__(*args, **kwargs)
@@ -94,8 +94,8 @@ class BitField(GlossaryFieldMixin, _BitField):
                         help_text = getattr(Glossary, flag_name, None)
                     except:
                         None
-                self.help_text = help_text 
-                
+                self.help_text = help_text
+
                 super(FlagDescriptor, self).__init__()
 
             def clear(self):
@@ -103,7 +103,7 @@ class BitField(GlossaryFieldMixin, _BitField):
 
             def set(self):
                 return self._field.bin_or(self._value)
-                
+
             def __get__(self, instance, instance_type=None):
                 if instance is None:
                     return self
@@ -122,12 +122,12 @@ class BitField(GlossaryFieldMixin, _BitField):
 
             def __sql__(self, ctx):
                 return ctx.sql(self._field.bin_and(self._value) != 0)
-        
+
         return FlagDescriptor(self, value, help_text)
 
 
 class BasePixelArrayAccessor(object):
-    
+
     """A base pixel array accessor."""
 
     def __init__(self, model, field, name, ext, column_name, transform=None, help_text=None, **kwargs):
@@ -135,7 +135,7 @@ class BasePixelArrayAccessor(object):
         self.field = field
         self.name = name
         self.ext = ext
-        self.column_name = column_name 
+        self.column_name = column_name
         self.transform = transform
         self.help_text = help_text
         self.kwargs = kwargs
@@ -153,9 +153,9 @@ class BasePixelArrayAccessor(object):
         except AttributeError:
             instance.__pixel_data__ = {}
         return None
-        
+
 class PickledPixelArrayAccessor(BasePixelArrayAccessor):
-    
+
     """A class to access pixel arrays stored in a pickle file."""
 
     def __get__(self, instance, instance_type=None):
@@ -169,55 +169,59 @@ class PickledPixelArrayAccessor(BasePixelArrayAccessor):
                 instance.__pixel_data__ = {}
                 with open(expand_path(instance.path), "rb") as fp:
                     instance.__pixel_data__.update(pickle.load(fp))
-                
+
                 return instance.__pixel_data__[self.name]
 
         return self.field
 
 
 class PixelArrayAccessorFITS(BasePixelArrayAccessor):
-    
+
     """A class to access pixel arrays stored in a FITS file."""
 
     def __get__(self, instance, instance_type=None):
         if instance is not None:
             self._initialise_pixel_array(instance)
-            
+
             try:
                 return instance.__pixel_data__[self.name]
             except KeyError:
-                # Load them all.
-                instance.__pixel_data__ = {}
-                with fits.open(expand_path(instance.path)) as image:
-                    for name, accessor in instance._meta.pixel_fields.items():
+                try:
+                    # Load them all.
+                    instance.__pixel_data__ = {}
+                    with fits.open(expand_path(instance.path)) as image:
+                        for name, accessor in instance._meta.pixel_fields.items():
 
-                        if callable(accessor.ext):
-                            ext = accessor.ext(instance)
-                        else:
-                            ext = accessor.ext
+                            if callable(accessor.ext):
+                                ext = accessor.ext(instance)
+                            else:
+                                ext = accessor.ext
 
-                        if ext is None:
-                            # non-FITSy looking thing
-                            continue
-                    
-                        data = image[ext].data
-                        
-                        try:
-                            value = data[accessor.column_name] # column acess
-                        except:
-                            value = data # image access
-                        
-                        value = np.copy(value)
-                        
-                        if accessor.transform is not None:
-                            value = accessor.transform(value, image, instance)
-                        
-                        instance.__pixel_data__.setdefault(name, value)
-                
+                            if ext is None:
+                                # non-FITSy looking thing
+                                continue
+
+                            data = image[ext].data
+
+                            try:
+                                value = data[accessor.column_name] # column acess
+                            except:
+                                value = data # image access
+
+                            value = np.copy(value)
+
+                            if accessor.transform is not None:
+                                value = accessor.transform(value, image, instance)
+
+                            instance.__pixel_data__.setdefault(name, value)
+                except:
+                    log.exception(f"Exception loading entry {self.name} from {instance} at {instance.path}")
+                    raise
+
                 return instance.__pixel_data__[self.name]
 
         return self.field
-    
+
 
 class PixelArrayAccessorHDF(BasePixelArrayAccessor):
 
@@ -235,8 +239,8 @@ class PixelArrayAccessorHDF(BasePixelArrayAccessor):
                         value = fp[accessor.column_name][instance.row_index]
                         if accessor.transform is not None:
                             value = accessor.transform(value)
-                        
-                        instance.__pixel_data__.setdefault(name, value)            
+
+                        instance.__pixel_data__.setdefault(name, value)
             finally:
                 return instance.__pixel_data__[self.name]
 
@@ -249,7 +253,7 @@ class LogLambdaArrayAccessor(BasePixelArrayAccessor):
         self.field = field
         self.name = name
         self.ext = ext
-        self.column_name = column_name 
+        self.column_name = column_name
         self.transform = transform
         self.help_text = help_text
         self.naxis = naxis
@@ -257,17 +261,17 @@ class LogLambdaArrayAccessor(BasePixelArrayAccessor):
         self.cdelt = cdelt
 
     def __get__(self, instance, instance_type=None):
-        if instance is not None:         
+        if instance is not None:
             # If we have a manually set pixel array, we don't want to clear that by accident
-            # when we access .wavelength                
+            # when we access .wavelength
             self._initialise_pixel_array(instance)
             try:
-                return instance.__pixel_data__[self.name]            
+                return instance.__pixel_data__[self.name]
             except KeyError:
                 instance.__pixel_data__[self.name] = 10**(self.crval + self.cdelt * np.arange(self.naxis))
             finally:
                 return instance.__pixel_data__[self.name]
-            
+
         return self.field
 
 
@@ -287,14 +291,14 @@ class PixelArray(VirtualField):
         self.name = self.safe_name = name
         self.column_name = self.column_name or name
         attr = self.accessor_class(
-            model, self, name, 
-            ext=self.ext, column_name=self.column_name, 
+            model, self, name,
+            ext=self.ext, column_name=self.column_name,
             transform=self.transform, help_text=self.help_text,
             **(self.accessor_kwargs or {})
-        )        
+        )
         if set_attribute:
             setattr(model, name, attr)
-        
+
         try:
             model._meta.pixel_fields
         except:

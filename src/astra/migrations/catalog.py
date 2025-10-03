@@ -7,6 +7,134 @@ from astra.migrations.utils import NoQueue
 from astra.utils import log, flatten
 import numpy as np
 
+def ensure_sdss_id_rank(queue=None):
+    """
+    Ensure all SDSS ID entries in the database are rank 1.
+    """
+
+    from astra.models.source import Source
+    from astra.migrations.sdss5db.catalogdb import (Catalog, CatalogdbModel)
+
+    queue = queue or NoQueue()
+
+    class SDSS_ID_Flat(CatalogdbModel):
+        class Meta:
+            table_name = "sdss_id_flat"
+
+    source_pks = { 
+        sdss_id: pk \
+        for pk, sdss_id in (
+            Source
+            .select(Source.pk, Source.sdss_id)
+            .tuples()
+        )
+    }
+
+    a = SDSS_ID_Flat.alias()
+    q = (
+        SDSS_ID_Flat
+        .select(
+            SDSS_ID_Flat.sdss_id.alias("old_sdss_id"),
+            a.sdss_id.alias("new_sdss_id")
+        )
+        .join(
+            a,
+            on=(
+                (SDSS_ID_Flat.catalogid == a.catalogid)
+            &   (a.rank == 1)
+            )
+        )
+        .where(
+            SDSS_ID_Flat.sdss_id.in_(tuple(source_pks.keys()))
+        &   (SDSS_ID_Flat.rank != 1)
+        )
+        .tuples()
+    )
+
+    migrate = []
+    for old_sdss_id, new_sdss_id in q:
+        old_pk = source_pks[old_sdss_id]
+
+        # If the NEW sdss id already exists, then we have to delete the old
+        # source entry, and update all existing spectra to point to the new
+        # source entry. This is a massive pain because it requries updating
+        # source_pk on lots of tables...
+        try:
+            s = Source.get(sdss_id=new_sdss_id)
+        except:
+            print(f"{old_sdss_id} -> {new_sdss_id}")
+            Source.update(sdss_id=new_sdss_id).where(Source.pk == old_pk).execute()
+        else:
+            # already exists
+            print(f"{old_sdss_id} -> {new_sdss_id} needs migration")
+            new_pk = s.pk
+            migrate.append((old_pk, old_sdss_id, new_pk, new_sdss_id))
+
+    # Some pipelines (e.g., ASPCAP) reference the source_pk and spectrum_pk in
+    # the actual FERRE files. So if we change the source_pk, we may not be able
+    # to reference the intermediate product.
+
+    # The least destructive thing to do might be to change the source_pk
+    # entries in the spectrum tables, and then delete the source entry and
+    # force that deletion to cascade to the pipeline tables.
+
+    # Then next time the pipelines are run, they will analyse the spectra that
+    # don't yet have results.
+    from astra.models.apogee import (
+        ApogeeCoaddedSpectrumInApStar, 
+        ApogeeVisitSpectrum, 
+        ApogeeVisitSpectrumInApStar
+    )
+    from astra.models.boss import BossVisitSpectrum
+    spectrum_models = (
+        BossVisitSpectrum, 
+        ApogeeVisitSpectrum, 
+        ApogeeVisitSpectrumInApStar,
+        ApogeeCoaddedSpectrumInApStar
+    )
+
+    from astra.models.bossnet import BossNet
+    from astra.models.astronn import AstroNN
+    from astra.models.astronn_dist import AstroNNdist
+    from astra.models.line_forest import LineForest
+    from astra.models.aspcap import ASPCAP
+    from astra.models.apogeenet import ApogeeNet
+
+    pipeline_models = (BossNet, AstroNN, AstroNNdist, LineForest, ApogeeNet)
+
+    for old_pk, old_sdss_id, new_pk, new_sdss_id in tqdm(migrate):
+        if old_pk == new_pk: continue
+
+        for model in spectrum_models:
+            n = (
+                model
+                .update(source_pk=new_pk)
+                .where(model.source_pk == old_pk)
+                .execute()
+            )
+            
+        for model in pipeline_models:
+            (
+                model
+                .update(source_pk=new_pk)
+                .where(model.source_pk == old_pk)
+                .execute()
+            )
+        
+        # ASPCAP is a special one, we must delete it because it references
+        # spectrum_pk and source_pk in the intermediate files
+        (
+            ASPCAP
+            .delete()
+            .where(ASPCAP.source_pk == old_pk)
+            .execute()
+        )
+        # Now delete old entry from Source, since it is no longer referenced.
+        Source.delete().where(Source.pk == old_pk).execute()
+
+    raise a
+
+
 
 def migrate_healpix(
     batch_size: Optional[int] = 500,
