@@ -945,7 +945,7 @@ def migrate(
                 args=(apred, ),
                 description="Ingesting ApogeeVisitSpectrumInApStar entries",
                 depends_on={"apogee_spectra"},
-                writes_to={"apogee_visit_spectrum_in_apstar"}
+                writes_to={"apogee_visit_spectrum_in_ap_star"}
             )
 
     if run2d is not None:
@@ -963,12 +963,23 @@ def migrate(
     # ==========================================================================
     spectra_deps = {"apogee_spectra", "boss_spectra"} & tasks.keys()
 
+    # `apstar_visits` must complete first, not merely run without overlapping writes:
+    # create_sources links ApogeeVisitSpectrumInApStar rows, so if it wins the race those
+    # rows do not exist yet and nothing ever comes back to link them.
+    create_source_deps = spectra_deps | ({"apstar_visits"} & tasks.keys())
+
     tasks["create_sources"] = MigrationTask(
         name="create_sources",
         func=create_sources_and_link_spectra,
         description="Creating sources and linking spectra",
-        depends_on=spectra_deps,
-        writes_to={"source", "boss_visit_spectrum", "apogee_visit_spectrum"}
+        depends_on=create_source_deps,
+        writes_to={
+            "source",
+            "boss_visit_spectrum",
+            "apogee_visit_spectrum",
+            "apogee_visit_spectrum_in_ap_star",
+            "apogee_coadded_spectrum_in_ap_star",
+        }
     )
 
     # ==========================================================================
