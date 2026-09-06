@@ -2,12 +2,85 @@ import concurrent.futures
 import subprocess
 import numpy as np
 from datetime import datetime
-from peewee import JOIN, chunked, Case, fn, SQL, EXCLUDED, IntegrityError
+from peewee import JOIN, chunked, Case, fn, SQL, EXCLUDED, IntegrityError, Tuple
 from typing import Optional
 
 from astra.migrations.utils import enumerate_new_spectrum_pks, upsert_many, ProgressContext
 from astra.utils import expand_path, flatten, log
 from tqdm import tqdm
+
+def _star_has_ingestable_visit(apred: str, max_mjd: int):
+    """
+    An EXISTS clause matching stars that still have a visit once `max_mjd` is applied.
+
+    `max_mjd` filters the visit query but not the star query, so without this we ingest
+    coadds for stars whose visits were all excluded: nothing creates a Source carrying
+    their catalogid, and they can never be linked.
+
+    Matching on catalogid, not just (obj, telescope), is what makes this exact. A star's
+    catalogid can differ from that of its earliest visits, so "this star has some visit
+    before the cutoff" is not sufficient -- it has to have a visit before the cutoff
+    carrying the star's own catalogid, since that is what the Source is created from.
+    """
+    from astra.migrations.sdss5db.apogee_drpdb import Star, Visit
+
+    V = Visit.alias()
+    return fn.EXISTS(
+        V
+        .select(SQL("1"))
+        .where(
+            (V.apred == apred)
+        &   (V.obj == Star.obj)
+        &   (V.telescope == Star.telescope)
+        &   (V.mjd <= max_mjd)
+        &   (V.catalogid == Star.catalogid)
+        )
+    )
+
+
+def _limited_star_selection(apred: str, limit: int, incremental: bool = True, max_mjd: Optional[int] = None):
+    """
+    Build a sub-query selecting the (obj, telescope) pairs that a `limit` applies to.
+
+    `limit` has to mean "this many stars". If it were applied independently to the
+    `visit` and `star` queries we would ingest two nearly disjoint samples: the coadds
+    would be for stars whose visits were never ingested, so no Source would ever carry
+    their catalogid and they could not be linked.
+
+    This is returned as a sub-query rather than a materialised list of pairs because a
+    tuple `IN` with tens of thousands of entries exceeds Postgres' `max_stack_depth`.
+    The `ORDER BY` matters: `LIMIT` without it is not guaranteed to return the same rows
+    each time the sub-query is executed, and it is executed once per calling query.
+    """
+    from astra.models.apogee import ApogeeCoaddedSpectrumInApStar
+    from astra.migrations.sdss5db.apogee_drpdb import Star
+
+    max_star_pk = 0
+    if incremental:
+        max_star_pk = (
+            ApogeeCoaddedSpectrumInApStar
+            .select(fn.MAX(ApogeeCoaddedSpectrumInApStar.star_pk))
+            .scalar() or 0
+        )
+
+    where = (
+        (Star.apred_vers == apred)
+    &   (Star.pk > max_star_pk)
+    )
+    if max_mjd is not None:
+        # Match the cut the coadd and visit queries apply, so the limit selects stars
+        # that will actually be ingested rather than being partly spent on excluded ones.
+        where &= _star_has_ingestable_visit(apred, max_mjd)
+
+    return (
+        Star
+        .select(Star.obj, Star.telescope)
+        .where(where)
+        .group_by(Star.obj, Star.telescope)
+        .order_by(Star.obj, Star.telescope)
+        .limit(limit)
+    )
+
 
 def migrate_apogee_spectra_from_sdss5_apogee_drpdb(apred: str, max_mjd: Optional[int] = None, queue=None, limit=None, incremental=True, **kwargs):
     """
@@ -19,11 +92,19 @@ def migrate_apogee_spectra_from_sdss5_apogee_drpdb(apred: str, max_mjd: Optional
     """
     queue = queue or ProgressContext()
 
-    # Migrate visits
-    v_n_new_spectra, v_n_updated_spectra = migrate_apogee_visits(apred, max_mjd=max_mjd, queue=queue, limit=limit, incremental=incremental, **kwargs)
+    # A `limit` selects stars, and both the visit and coadd queries are then restricted to
+    # those same stars, so every ingested coadd has its visits ingested alongside it.
+    restrict_to_stars = None
+    if limit is not None:
+        restrict_to_stars = _limited_star_selection(apred, limit, incremental=incremental, max_mjd=max_mjd)
 
-    # Migrate co-added spectra
-    c_n_new_spectra, c_n_updated_spectra = migrate_apogee_coadds(apred, queue=queue, limit=limit, incremental=incremental, **kwargs)
+    # Migrate visits
+    v_n_new_spectra, v_n_updated_spectra = migrate_apogee_visits(apred, max_mjd=max_mjd, queue=queue, restrict_to_stars=restrict_to_stars, incremental=incremental, **kwargs)
+
+    # Migrate co-added spectra. `max_mjd` has to be passed here too: it filters visits, so
+    # without it we would ingest coadds for stars that have no ingested visit, and therefore
+    # no Source carrying their catalogid.
+    c_n_new_spectra, c_n_updated_spectra = migrate_apogee_coadds(apred, queue=queue, restrict_to_stars=restrict_to_stars, incremental=incremental, max_mjd=max_mjd, **kwargs)
 
     queue.put(Ellipsis)
     return None
@@ -438,12 +519,23 @@ def migrate_dithered_metadata(
     return n
 
 
-def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=None, incremental=True):
+def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=None, incremental=True, restrict_to_stars=None, max_mjd=None):
     """
     Migrate APOGEE coadd spectrum-level information from the SDSS-V APOGEE DRP database.
 
     This function only loads spectrum-level data. Source creation and spectrum-to-source
     linking should be handled separately (e.g., via create_sources_and_link_spectra).
+
+    :param restrict_to_stars: [optional]
+        A sub-query selecting the (obj, telescope) pairs to ingest, as built by
+        `_limited_star_selection`. Prefer this over `limit`: it lets the same star
+        selection be shared with `migrate_apogee_visits`.
+
+    :param max_mjd: [optional]
+        Only ingest stars that still have a matching visit at or before this MJD (see
+        `_star_has_ingestable_visit`). This has to match the cut `migrate_apogee_visits`
+        applies, otherwise we ingest coadds for stars whose visits were all excluded, and
+        those coadds have no Source to link to.
     """
 
     from astra.models.apogee import ApogeeVisitSpectrum, ApogeeCoaddedSpectrumInApStar
@@ -469,8 +561,33 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
             .scalar() or 0
         )
 
+    restrict_clause = (
+        Tuple(Star.obj, Star.telescope).in_(restrict_to_stars)
+        if restrict_to_stars is not None
+        else None
+    )
+
     # In continuous operations mode, the APOGEE DRP does not update the `star` table to have unique `star_pk`,
     # so we have to sub-query to get the most recent co-add.
+    sq_where = (
+        (Star.apred_vers == apred)
+    &   (Star.pk > max_star_pk)
+    )
+    if restrict_clause is not None:
+        # Safe to narrow here as well as in the outer query: restricting which
+        # (obj, telescope) groups are considered does not change MAX(starver) within
+        # any surviving group, and it keeps this from scanning the whole `star` table.
+        sq_where &= restrict_clause
+
+    # Deliberately NOT pushed into `sq`: catalogid can vary between starver rows of the same
+    # star, so filtering there could make a superseded starver win the MAX and be ingested
+    # in place of the current one. Applied only to the outer query, where it just drops
+    # the star.
+    outer_clause = restrict_clause
+    if max_mjd is not None:
+        mjd_clause = _star_has_ingestable_visit(apred, max_mjd)
+        outer_clause = mjd_clause if outer_clause is None else (outer_clause & mjd_clause)
+
     sq = (
         Star
         .select(
@@ -478,10 +595,7 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
             Star.telescope,
             fn.MAX(Star.starver).alias("max")
         )
-        .where(
-            (Star.apred_vers == apred)
-        &   (Star.pk > max_star_pk)
-        )
+        .where(sq_where)
         .group_by(Star.apogee_id, Star.telescope)
     )
 
@@ -559,8 +673,9 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
             (Star.apred_vers == apred)
         &   (Star.pk > max_star_pk)
         &   (SDSS_ID_Flat.rank == 1)
+        &   (outer_clause if outer_clause is not None else SQL("TRUE"))
         )
-        .limit(limit)
+        .limit(None if restrict_to_stars is not None else limit)
     )
     # Count before converting to dicts (peewee .count() doesn't work well with .dicts())
     q_total = q_base.count()
@@ -643,12 +758,19 @@ def migrate_apogee_visits(
     limit=None,
     incremental=True,
     where_modified=None,
+    restrict_to_stars=None,
 ):
     """
     Migrate APOGEE visit spectrum-level information from the SDSS-V APOGEE DRP database.
 
     This function only loads spectrum-level data. Source creation and spectrum-to-source
     linking should be handled separately (e.g., via create_sources_and_link_spectra).
+
+    :param restrict_to_stars: [optional]
+        A sub-query selecting the (obj, telescope) pairs to ingest, as built by
+        `_limited_star_selection`. Prefer this over `limit`: limiting visits directly
+        gives an arbitrary set of visits that does not correspond to the stars whose
+        coadds are ingested.
 
     :param where_modified: [optional]
         A clause to specify when spectra should be considered as 'modified'. Spectra are already
@@ -819,8 +941,13 @@ def migrate_apogee_visits(
         &   (Visit.pk > max_visit_pk)
         &   (Visit.mjd <= max_mjd)
         &   (SDSS_ID_Flat.rank == 1)
+        &   (
+                Tuple(Visit.obj, Visit.telescope).in_(restrict_to_stars)
+                if restrict_to_stars is not None
+                else SQL("TRUE")
+            )
         )
-        .limit(limit)
+        .limit(None if restrict_to_stars is not None else limit)
     )
     # Count before converting to dicts (peewee .count() doesn't work well with .dicts())
     q_total = q_base.count()
