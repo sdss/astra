@@ -3,7 +3,7 @@
 import os
 import warnings
 from collections import OrderedDict
-from peewee import BooleanField, JOIN
+from peewee import BooleanField, JOIN, SQL
 from astropy.io import fits
 from astra import __version__
 from astra.utils import log, expand_path, version_string_to_integer
@@ -14,6 +14,30 @@ from astra.models.mwm import BossCombinedSpectrum
 from astra.products.utils import (get_fields, get_basic_header, get_binary_table_hdu, check_path, resolve_model)
 
 get_path = lambda bn, gzip: expand_path(f"$MWM_ASTRA/{__version__}/summary/{bn}" + (".gz" if gzip else ""))
+
+
+def sort_by_sdss_id(q, limit, distinct_field=None):
+    """
+    Sort a query by `sdss_id` and apply any limit.
+
+    Postgres requires the leading `ORDER BY` expressions to match the `DISTINCT ON`
+    expressions, so if the query has a `DISTINCT ON` we order the inner query by that
+    field, then wrap it in a sub-query which is sorted by `sdss_id`.
+
+    :param distinct_field: [optional]
+        The field given to `DISTINCT ON`, if any.
+    """
+    if distinct_field is None:
+        return q.order_by(Source.sdss_id.asc()).limit(limit).dicts()
+
+    inner = q.order_by(distinct_field.asc())
+    return (
+        inner
+        .select_from(SQL("*"))
+        .order_by(SQL('"sdss_id" ASC'))
+        .limit(limit)
+        .dicts()
+    )
 
 def ignore_field_name_callable(field_name):
     return (
@@ -315,7 +339,11 @@ def create_all_star_product(
         if instrument_where:
             q = q.where(instrument_where)
 
-        q = q.order_by(Source.sdss_id.asc()).limit(limit).dicts()
+        q = sort_by_sdss_id(
+            q,
+            limit,
+            distinct_field=spectrum_model.spectrum_pk if distinct_spectrum_pk else None
+        )
 
         hdu = get_binary_table_hdu(
             q,
@@ -537,7 +565,11 @@ def create_all_visit_product(
         if instrument_where:
             q = q.where(instrument_where)
 
-        q = q.order_by(Source.sdss_id.asc()).limit(limit).dicts()
+        q = sort_by_sdss_id(
+            q,
+            limit,
+            distinct_field=spectrum_model.spectrum_pk if distinct_spectrum_pk else None
+        )
 
         hdu = get_binary_table_hdu(
             q,
