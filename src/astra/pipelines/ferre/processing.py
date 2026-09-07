@@ -661,7 +661,26 @@ def merge_partial_ferre_outputs(existing_input_nml_path, resumed_input_nml_path,
     return None
 
 
-def re_process_partial_ferre(existing_input_nml_path, pwd=None, exclude_indices=None):
+def re_process_partial_ferre(existing_input_nml_path, pwd=None, exclude_indices=None,
+                             relocate_into=None):
+    """
+    Rebuild a FERRE execution from the objects it did not finish, dropping `exclude_indices`.
+
+    :param relocate_into: [optional]
+        Directory (relative to `pwd`) to write the rebuilt input files into, for inputs that do not
+        already live there.
+
+        This is what makes the abundances (list-mode) layout safe. There, `flux.input` and
+        `e_flux.input` sit in the parent directory and are SHARED by all ~22 element executions,
+        while `PFILE` is element-local. Suffixing in place would have every element write its own
+        `flux.input.1` to that one shared parent path and clobber each other. Pointing
+        `relocate_into` at the element's own directory keeps each rebuilt slice private to the
+        element that needs it.
+
+        Per-element (rather than global) slicing is required, not merely tidier: each element is
+        fitted through its own mask over a different window of the spectrum, so a star that cannot
+        be fitted for one element may be perfectly measurable for another.
+    """
 
     if pwd is None:
         pwd = os.path.dirname(existing_input_nml_path)
@@ -683,17 +702,18 @@ def re_process_partial_ferre(existing_input_nml_path, pwd=None, exclude_indices=
             nobj_index = i
         elif key in keys:
             existing_relative_path = line.split("=")[1].strip("' \n")
-            # All new relative paths must be within this directory
-            # For example, if the flux arrays were stored in the parent directory, we must
-            # store the new ones in THIS directory otherwise we could have two abundance directories
-            # trying to write to the same parent file.
-            # TODO: do that
             new_relative_path = get_new_path(existing_relative_path, new_suffix)
+            if relocate_into:
+                # Keep the rebuilt file inside `relocate_into` unless it is already there, so
+                # executions that share an input (the parent-level flux arrays in list mode) each
+                # get their own private copy instead of racing on one path.
+                head = os.path.dirname(new_relative_path)
+                if os.path.normpath(head) != os.path.normpath(relocate_into):
+                    new_relative_path = os.path.join(
+                        relocate_into, os.path.basename(new_relative_path)
+                    )
             lines[i] = line[:line.index("=")] + f"= '{new_relative_path}'\n"
             paths[key] = (existing_relative_path, new_relative_path)
-
-    # TODO: copy input files to this directory because otherwise we will have partial flux files
-    #       in the parent directory and it gets impossible to track
 
     # Find the things that are already written in all three output files.
     output_path_keys = ["OFFILE", "OPFILE"]
