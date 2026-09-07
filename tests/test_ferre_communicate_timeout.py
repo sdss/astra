@@ -348,6 +348,39 @@ def test_outlier_watchdog_still_fires_once_real_completion_data_exists():
     only condition. Note the sample size: an earlier version of this test used a single completion
     and asserted the watchdog fired, which encoded the very bug that cost GKd its abundances --
     one sample gives stddev 0 and cannot support an outlier judgement at all.
+
+    Six objects are left outstanding rather than two, so that a real share of the thread pool is
+    wedged. With fewer than half the pool waiting this is a drained tail, not a stall, and is
+    deliberately left to max_t_communicate -- see the test below.
+    """
+    lines = [FERRE_BANNER, DONE_READING]
+    lines += [f" next object #        {i}\n" for i in range(1, 17)]
+    lines += [f"          {i} {i-1}_100{i-1}_200{i-1}_0_None\n" for i in range(1, 11)]
+
+    result, _ = run_ferre(
+        lines, stall_after=len(lines),
+        max_t_communicate=60, max_t_communicate_first_result=60,
+        max_t_elapsed=1, max_sigma_outlier=None,
+        n_obj=16,
+    )
+    assert result.outlier_fired, (
+        "with a real completed sample, an object exceeding max_t_elapsed should still be flagged "
+        "-- this watchdog must be suppressed only while the sample is degenerate, not always"
+    )
+
+
+def test_outlier_watchdog_leaves_a_drained_tail_to_max_t_communicate():
+    """
+    A tail of a few slow objects must not be killed by the outlier test.
+
+    The outstanding set shrinks as an execution drains, so once the work runs out "every outstanding
+    object looks slow" is trivially true of the last one or two -- and this test cannot tell a
+    genuinely stuck object from a merely slow one. Killing there costs a grid reload and abandons
+    stars that were about to finish. Sustained silence is much stronger evidence, so the tail is
+    left to max_t_communicate, which reaches the same end state (all outstanding objects excluded)
+    on better grounds.
+
+    Same shape as the test above, but only two of eight threads are still occupied.
     """
     lines = [FERRE_BANNER, DONE_READING]
     lines += [f" next object #        {i}\n" for i in range(1, 13)]
@@ -355,13 +388,17 @@ def test_outlier_watchdog_still_fires_once_real_completion_data_exists():
 
     result, _ = run_ferre(
         lines, stall_after=len(lines),
-        max_t_communicate=60, max_t_communicate_first_result=60,
+        max_t_communicate=5, max_t_communicate_first_result=5,
         max_t_elapsed=1, max_sigma_outlier=None,
         n_obj=12,
     )
-    assert result.outlier_fired, (
-        "with a real completed sample, an object exceeding max_t_elapsed should still be flagged "
-        "-- this watchdog must be suppressed only while the sample is degenerate, not always"
+    assert not result.outlier_fired, (
+        "a two-object tail was killed by the outlier test; with most of the pool idle this is a "
+        "drained execution rather than a stall, and belongs to max_t_communicate"
+    )
+    assert result.communicate_fired, (
+        "the tail must still be cleared by the communication budget, otherwise a genuinely stuck "
+        "tail would hang forever"
     )
 
 
