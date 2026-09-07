@@ -259,7 +259,9 @@ def aspcap(
             abundance_plans,
             *stage_args,
             use_ferre_list_mode=use_ferre_list_mode,
-            ferre_kwds=dict(max_sigma_outlier=10, max_t_elapsed=60)
+            # Abundances is much chattier than the parameter stages (measured completion gaps:
+            # 0.06-0.55s median, 57.6s worst), and this budget is now also what clears a stuck tail.
+            ferre_kwds=dict(max_sigma_outlier=15, max_t_elapsed=300, max_t_communicate=300)
         )
 
         # Bring it all together baby.
@@ -821,10 +823,20 @@ def ferre(
                             # TODO: strace the process and check that it is waiting on FUTEX_PRIVATE_WAIT before killing it?
                             # Need to kill and re-run the process when either out of objects
                             # or resources taken up by hanging objects.
+                            #
+                            # Two conditions, not one. Requiring every outstanding object to look hung
+                            # lets healthy work keep flowing while a few threads are wedged. But the
+                            # outstanding set also shrinks as an execution drains, so near the tail
+                            # "all of them" can mean one or two objects -- and this test cannot tell a
+                            # genuinely stuck object from a merely slow one. Requiring a real share of
+                            # the pool as well keeps the tail out of this test's hands and leaves it to
+                            # max_t_communicate, where sustained silence is far stronger evidence. The
+                            # floor scales with whatever can actually be in flight, so it does not
+                            # disable the test on executions with fewer objects than threads.
                             n_out = len(t_awaiting_elapsed)
-                            n_reqiured = max(1, n_out)
                             n_hanging = len(is_hanging)
-                            if n_hanging >= n_reqiured:
+                            min_hanging = max(1, min(max(0, n_threads), n_obj) // 2)
+                            if n_hanging >= max(1, n_out) and n_hanging >= min_hanging:
                                 exclude_indices.extend(is_hanging)
                                 debugger(f"hanging {is_hanging}")
                                 ferre_hanging.set()
@@ -933,23 +945,60 @@ def ferre(
             n_execution = 0 if len(t_elapsed) == 0 else max(list(map(len, t_elapsed.values())))
             n_spectra_done_in_last_execution = len([v for v in t_elapsed.values() if len(v) == n_execution])
 
-            if is_list_mode and n_spectra_done_in_last_execution > 0:
-                pipe.send(dict(input_nml_path=input_nml_path, n_complete=-n_spectra_done_in_last_execution))
+            if is_list_mode:
+                # List mode fits one element at a time over the same stars, so a kill always lands
+                # inside one specific element. Rebuild THAT element without the objects that hung and
+                # queue it ahead of the elements that have not started yet.
+                #
+                # The two things this must not do, both of which the previous version did:
+                #   * restart the element unchanged -- it re-hits the same star and dies in the same
+                #     place, which is what produced runs of 45 input_list.nml.N files and left every
+                #     element truncated at an identical star index; and
+                #   * drop the element wholesale -- each element is fitted through its own mask over a
+                #     different window of the spectrum, so a star that cannot be fitted for one element
+                #     is often perfectly measurable for the next.
+                #
+                # Because every resume now removes at least one object, the remaining work strictly
+                # decreases and the recursion terminates on its own. That progress guarantee is what
+                # bounds it -- deliberately not a retry counter, which would abandon the survivors.
+                if n_spectra_done_in_last_execution > 0:
+                    pipe.send(dict(input_nml_path=input_nml_path, n_complete=-n_spectra_done_in_last_execution))
 
                 with open(input_nml_path, "r") as fp:
-                    paths = list(map(str.strip, fp.readlines()))
-                    unprocessed_input_nml_paths = paths[max(n_execution - 1, 0):]
+                    paths = [line.strip() for line in fp.readlines() if line.strip()]
 
-                    # Re-process that one failed thing
-                    """
-                    if updated_nml_path is not None:
-                        _, __, this_t_overhead, this_t_elapsed = ferre(updated_nml_path, cwd, n_obj // n_execution - n_spectra_done_in_last_execution, -n_threads, pipe)
-                        t_overhead += this_t_overhead
-                        for k, v in this_t_elapsed.items():
-                            t_elapsed.setdefault(k, [])
-                            t_elapsed[k].extend(v)
-                    #debugger(f"DONE REPROCESSING {failed_input_nml_path} {updated_nml_path}")
-                    """
+                # n_execution counts how many executions the furthest-along spectrum has been through,
+                # so it indexes the element that was running when we killed FERRE.
+                current_index = min(max(n_execution - 1, 0), max(len(paths) - 1, 0))
+                current_relative_path = paths[current_index] if paths else None
+                remaining_relative_paths = paths[current_index + 1:]
+
+                resumed_relative_path = None
+                if current_relative_path is not None:
+                    try:
+                        element_dir = os.path.dirname(current_relative_path)
+                        new_element_nml_path, _ = re_process_partial_ferre(
+                            os.path.join(cwd, current_relative_path),
+                            cwd,
+                            exclude_indices=exclude_indices,
+                            # Keep the rebuilt flux/e_flux slices inside the element's own directory:
+                            # in this layout they are shared with every other element at the parent.
+                            relocate_into=element_dir or None,
+                        )
+                        if new_element_nml_path is not None:
+                            resumed_relative_path = os.path.relpath(new_element_nml_path, cwd)
+                    except Exception as e:
+                        debugger(f"exception rebuilding list element {current_relative_path}: {e}")
+
+                if resumed_relative_path is None:
+                    debugger(
+                        f"list element {current_relative_path} has nothing left to run "
+                        f"(excluded {len(exclude_indices)}); moving on to {len(remaining_relative_paths)} remaining"
+                    )
+
+                next_relative_paths = (
+                    ([resumed_relative_path] if resumed_relative_path else []) + remaining_relative_paths
+                )
 
                 prefix, suffix = input_nml_path.split(".nml")
                 suffix = suffix.lstrip(".")
@@ -960,36 +1009,33 @@ def ferre(
                 # process slot itself is deliberately NOT released here -- see the note above.
                 pipe.send(dict(input_nml_path=input_nml_path, n_threads=-n_threads))
 
-                # Need to check if the last two NML list paths had the same number of rows.
-                # If they do, it means we are in an infinite loop.
-                if suffix >= 3:
-                    with open(f"{prefix}.nml.{suffix - 1}", "r") as fp:
-                        n_prev = len(fp.readlines())
-                    with open(f"{prefix}.nml.{suffix - 2}", "r") as fp:
-                        n_prev_prev = len(fp.readlines())
-
-                    if n_prev == n_prev_prev:
-                        debugger(f"detected infinite loop {input_nml_path} {n_prev} {n_prev_prev}")
-                        failed_relative_path, *unprocessed_input_nml_paths = unprocessed_input_nml_paths
-                        """
-                        # Try to run FERRE in non-list mode on the failed path
-                        *_, this_t_overhead, this_t_elapsed = ferre(failed_relative_path, cwd, n_obj, n_threads, pipe, max_sigma_outlier, max_t_elapsed)
-                        t_overhead = (t_overhead or 0) + this_t_overhead
-                        for k, v in this_t_elapsed.items():
-                            t_elapsed.setdefault(k, [])
-                            t_elapsed[k].extend(v)
-                        """
-                        # TODO: previously when we did it like this, we got into some weird infinite bug where everything hung forever.
-                        # let's skip over it and move on.
-
-                if len(unprocessed_input_nml_paths) > 0:
+                if len(next_relative_paths) > 0:
                     with open(new_path, "w") as fp:
-                        fp.write("\n".join(unprocessed_input_nml_paths))
+                        fp.write("\n".join(next_relative_paths) + "\n")
+
+                    debugger(
+                        f"resuming list {new_path} with {len(next_relative_paths)} element(s), "
+                        f"excluded {len(exclude_indices)} object(s) from {current_relative_path}"
+                    )
 
                     # Re-declare the loading/thread need for the resumed sub-run, but not n_processes
                     # (see the note above) -- communicate_on_start=False suppresses its own declaration.
                     pipe.send(dict(input_nml_path=input_nml_path, n_loading=1, n_threads=n_threads))
-                    *_, this_t_overhead, this_t_elapsed = ferre(new_path, cwd, n_obj - n_complete + n_spectra_done_in_last_execution, n_threads, pipe, max_sigma_outlier, max_t_elapsed, communicate_on_start=False)
+                    *_, this_t_overhead, this_t_elapsed = ferre(
+                        new_path,
+                        cwd,
+                        n_obj - n_complete + n_spectra_done_in_last_execution,
+                        n_threads,
+                        pipe,
+                        max_sigma_outlier=max_sigma_outlier,
+                        max_t_elapsed=max_t_elapsed,
+                        # Previously omitted, so every resumed sub-run silently reverted to the
+                        # function defaults instead of the caller's configuration.
+                        max_t_grid_load=max_t_grid_load,
+                        max_t_communicate=max_t_communicate,
+                        max_t_communicate_first_result=max_t_communicate_first_result,
+                        communicate_on_start=False,
+                    )
                     slot_released = True  # the resumed sub-run owns the release now
 
                     t_overhead = (t_overhead or 0) + this_t_overhead
@@ -997,7 +1043,7 @@ def ferre(
                         t_elapsed.setdefault(k, [])
                         t_elapsed[k].extend(v)
                 else:
-                    # Nothing left after infinite-loop trimming -- truly done, release the process slot.
+                    # Every element is accounted for -- truly done, release the process slot.
                     pipe.send(dict(input_nml_path=input_nml_path, n_processes=-1))
                     slot_released = True
 
