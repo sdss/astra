@@ -482,12 +482,12 @@ class ApogeeCombinedSpectrum(MWMStarMixin, SpectrumMixin):
     doppler_flags = BitField(default=0, help_text="DOPPLER flags") 
 
     #> Radial Velocity (X-Correlation)
-    xcorr_v_rad = FloatField(null=True, help_text=Glossary.v_rad)
-    xcorr_v_rel = FloatField(null=True, help_text=Glossary.v_rel)
-    xcorr_e_v_rel = FloatField(null=True, help_text=Glossary.e_v_rel)
+    # No xcorr_* fields at the star level: apogee_drp.star has no cross-correlation
+    # velocity columns, so there is nothing upstream to migrate. They remain on
+    # ApogeeRestFrameVisitSpectrum, which is populated per visit.
     ccfwhm = FloatField(null=True, help_text=Glossary.ccfwhm)
     autofwhm = FloatField(null=True, help_text=Glossary.autofwhm)
-    n_components = IntegerField(null=True, help_text=Glossary.n_components)    
+    n_components = IntegerField(null=True, help_text=Glossary.n_components)
 
     ##> Provenance
     #input_spectrum_pks = ArrayField(IntegerField, null=True, help_text="DRP visit PKs")

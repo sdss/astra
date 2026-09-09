@@ -488,9 +488,10 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     doppler_flags = BitField(default=0)
 
     #> Radial Velocity (X-Correlation)
-    xcorr_v_rad = FloatField(null=True)
-    xcorr_v_rel = FloatField(null=True)
-    xcorr_e_v_rel = FloatField(null=True)
+    # No xcorr_* fields at the star level: apogee_drp.star has no cross-correlation
+    # velocity columns, so there is nothing upstream to migrate. They remain on
+    # ApogeeVisitSpectrum, where apogee_drp.rv_visit does provide
+    # xcorr_vrel/xcorr_vrelerr/xcorr_vrad.
     ccfwhm = FloatField(null=True)
     autofwhm = FloatField(null=True)
     n_components = IntegerField(null=True)

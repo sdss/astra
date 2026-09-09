@@ -1499,9 +1499,8 @@ def update_apogee_combined_spectra_from_coadds(batch_size=500, queue=None):
         "doppler_e_fe_h",
         "doppler_rchi2",
         "doppler_flags",
-        "xcorr_v_rad",
-        "xcorr_v_rel",
-        "xcorr_e_v_rel",
+        # No xcorr_* here: neither model carries them at the star level, because
+        # apogee_drp.star has no cross-correlation velocity columns.
         "ccfwhm",
         "autofwhm",
         "n_components",
