@@ -180,7 +180,7 @@ class BossVisitSpectrum(BaseModel, SpectrumMixin):
             )
             return (
                 f"$SAS_BASE_DIR/"
-                f"ipl-4/"
+                f"ipl-5/"
                 f"spectro/boss/redux/"
                 f"{self.run2d}/spectra/daily/full/{self.field_group}/{self.pad_fieldid}{self.isplate}/{self.mjd}/"
                 f"{basename}"
