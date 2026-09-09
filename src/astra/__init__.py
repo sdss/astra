@@ -6,7 +6,7 @@ from sdsstools.configuration import get_config
 from astra.utils import log, Timer, resolve_task, resolve_model, get_return_type, expects_source_types, expects_spectrum_types, version_string_to_integer, get_task_group_by_string
 
 NAME = "astra"
-__version__ = "0.9.4"
+__version__ = "1.0.0"
 
 @decorator
 def task(
