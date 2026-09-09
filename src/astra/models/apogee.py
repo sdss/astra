@@ -361,8 +361,8 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         #    template = "$SAS_BASE_DIR/../sdss51/sdsswork/mwm/apogee/spectro/redux/ipl-3-{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits"
         #else:
         template = {
-            "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
-            #"sdss5": "$SAS_BASE_DIR/ipl-4/spectro/apogee/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
+            # "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
+            "sdss5": "$SAS_BASE_DIR/ipl-5/spectro/apogee/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
             "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits"
         }[self.release]
 

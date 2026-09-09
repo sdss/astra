@@ -91,7 +91,7 @@ def migrate_from_spall_file(run2d, queue, max_mjd: Optional[int] = None, gzip=Tr
 
     # Handle frozen data path.
     if run2d == "v6_2_1":
-        path = expand_path(f"$SAS_BASE_DIR/ipl-4/spectro/boss/redux/v6_2_1/summary/daily/spAll-v6_2_1.fits")
+        path = expand_path(f"$SAS_BASE_DIR/ipl-5/spectro/boss/redux/v6_2_1/summary/daily/spAll-v6_2_1.fits")
     else:
         path = expand_path(f"$BOSS_SPECTRO_REDUX/{run2d}/summary/daily/spAll-{run2d}.fits")
     if gzip:

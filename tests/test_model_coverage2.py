@@ -863,7 +863,7 @@ class TestApogeeVisitSpectrumPaths:
     def test_sdss5_path_template(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         template = ApogeeVisitSpectrum.get_path_template("sdss5", "apo25m")
-        assert "ipl-4" in template
+        assert "ipl-5" in template
         assert "{apred}" in template
         assert "{telescope}" in template
 
@@ -894,7 +894,7 @@ class TestApogeeVisitSpectrumPaths:
         r.prefix = "ap"
         r.reduction = ""
         path = r.path
-        assert "ipl-4" in path
+        assert "ipl-5" in path
         assert "daily" in path
         assert "59000" in path
         assert "042" in path  # fiber is zero-padded to 3
@@ -1033,7 +1033,7 @@ class TestApogeeCoadded:
         r.field = ""
         r.prefix = ""
         path = r.path
-        assert "ipl-4" in path
+        assert "ipl-5" in path
         assert "12345" in path
         assert "12" in path  # healpix_group = 12345 // 1000 = 12
 
@@ -1084,7 +1084,7 @@ class TestBossVisitSpectrumPaths:
         r.catalogid = 12345
         r.spec_file = "spec-015000-59000-12345.fits"
         path = r.path
-        assert "ipl-4" in path
+        assert "ipl-5" in path
         assert "spec-015000-59000-12345.fits" in path
 
     def test_path_v6_2_1_without_spec_file(self):
@@ -1096,7 +1096,7 @@ class TestBossVisitSpectrumPaths:
         r.catalogid = 12345
         r.spec_file = None
         path = r.path
-        assert "ipl-4" in path
+        assert "ipl-5" in path
         assert "spec-015000-59000-12345.fits" in path
 
     def test_path_v6_2_x(self):
