@@ -891,7 +891,9 @@ def migrate_sdss4_apogee_id(
         # Check for unique constraint conflict
         if apogee_id in assigned_apogee_ids:
             existing_pk = assigned_apogee_ids[apogee_id]
-            conflicts.append((pk, existing_pk))
+            # Same source reached via multiple catalogids is not a conflict
+            if existing_pk != pk:
+                conflicts.append((pk, existing_pk))
             continue
 
         assigned_apogee_ids[apogee_id] = pk

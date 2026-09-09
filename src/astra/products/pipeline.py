@@ -2,19 +2,24 @@
 
 import os
 import warnings
+import concurrent.futures
+from typing import Iterable, Optional
 from astropy.io import fits
-from peewee import JOIN
+from peewee import JOIN, ModelSelect
 from tqdm import tqdm
-from astra import __version__
+from astra import __version__, task
 from astra.glossary import Glossary
 from astra.utils import log, expand_path, version_string_to_integer
-from astra.models import Source, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar, BossVisitSpectrum
+from astra.models import Source, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar, BossVisitSpectrum, BossCombinedSpectrum
+from astra.models.pipeline import AstraSpectrumProductStatus
+from astra.products.pipeline_registry import PIPELINES
 from astra.products.utils import (
     BLANK_CARD,
     create_source_primary_hdu,
     get_fields_and_pixel_arrays, get_basic_header,
     fits_column_kwargs, get_fill_value, check_path, resolve_model,
-    add_category_headers, add_category_comments, dispersion_array
+    add_category_headers, add_category_comments, dispersion_array,
+    create_source_primary_hdu_cards, create_source_primary_hdu_from_cards
 )
 
 ASTRA_STAR_TEMPLATE = "astraStar{pipeline}-{version}-{sdss_id}.fits"
@@ -183,6 +188,122 @@ def create_visit_pipeline_products_for_all_sources(
             fill_values=fill_values,
             overwrite=overwrite
         )
+
+
+def _pipeline_match_on_clause(pipeline_model, where=None):
+    current_version = version_string_to_integer(__version__) // 1000
+    on_clause = (
+        (pipeline_model.source_pk == Source.pk)
+    &   (pipeline_model.v_astra_major_minor == current_version)
+    )
+    if where is not None:
+        on_clause &= where
+    return on_clause
+
+
+def _create_astraStar_and_astraVisit_product_for_source(source, pipeline_model, spec, overwrite):
+    flag_created_astra_star = False
+    flag_created_astra_visit = False
+    try:
+        if spec.create_star:
+            path = create_star_pipeline_product(
+                source,
+                pipeline_model,
+                boss_spectrum_model=BossCombinedSpectrum,
+                apogee_spectrum_model=ApogeeCoaddedSpectrumInApStar,
+                overwrite=overwrite,
+            )
+            flag_created_astra_star = path is not None
+        if spec.create_visit:
+            path = create_visit_pipeline_product(
+                source,
+                pipeline_model,
+                boss_spectrum_model=BossVisitSpectrum,
+                apogee_spectrum_model=ApogeeVisitSpectrumInApStar,
+                overwrite=overwrite,
+            )
+            flag_created_astra_visit = path is not None
+    except:
+        log.exception(f"Exception creating astraStar/astraVisit products for {source}")
+        return (source.pk, False, False, True)
+    else:
+        return (source.pk, flag_created_astra_star, flag_created_astra_visit, False)
+
+
+@task
+def create_astraStar_and_astraVisit_products(
+    sources: Iterable[Source],
+    pipeline: str = "ASPCAP",
+    max_processes: Optional[int] = 4,
+    overwrite: bool = False,
+    **kwargs,
+) -> Iterable[AstraSpectrumProductStatus]:
+    """
+    Create `astraStar<PIPELINE>` and/or `astraVisit<PIPELINE>` products (whichever levels the
+    given pipeline supports; see `astra.products.pipeline_registry.PIPELINES`) for the given sources.
+
+    :param sources:
+        The sources to create products for.
+
+    :param pipeline:
+        The name of the pipeline (a key in `astra.products.pipeline_registry.PIPELINES`).
+
+    :param max_processes: [optional]
+        The number of threads to use for creating products concurrently.
+
+    :param overwrite: [optional]
+        Overwrite existing product files.
+    """
+    try:
+        spec = PIPELINES[pipeline]
+    except KeyError:
+        raise ValueError(f"Unknown pipeline '{pipeline}'. Available pipelines: {', '.join(PIPELINES)}")
+
+    pipeline_model = resolve_model(spec.model)
+    where = spec.where(pipeline_model) if spec.where is not None else None
+    on_clause = _pipeline_match_on_clause(pipeline_model, where)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_processes) as executor:
+        futures = []
+
+        if isinstance(sources, ModelSelect):
+            # `sources` here is already scoped to sources that need a status row written for this
+            # pipeline (via `generate_queries_for_task`). We still need to split those into sources
+            # that actually have a result from this pipeline (worth attempting) versus those that
+            # don't (record as skipped, so they are never re-queried).
+            parent = sources.alias('parent')
+            q = (
+                Source
+                .select()
+                .join(parent, on=(Source.pk == parent.c.pk))
+                .join(pipeline_model, JOIN.LEFT_OUTER, on=on_clause)
+                .distinct()
+            )
+            q_skip = q.where(pipeline_model.source_pk.is_null())
+            q_no_skip = q.where(pipeline_model.source_pk.is_null(False))
+
+            for source in tqdm(q_skip.iterator(), total=0, desc="skipping"):
+                yield AstraSpectrumProductStatus(
+                    source_pk=source.pk,
+                    pipeline=pipeline,
+                    flag_skipped_because_no_pipeline_result=True,
+                )
+
+            for source in tqdm(q_no_skip.iterator(), total=0, desc="creating futures"):
+                futures.append(executor.submit(_create_astraStar_and_astraVisit_product_for_source, source, pipeline_model, spec, overwrite))
+        else:
+            for source in tqdm(sources, total=0):
+                futures.append(executor.submit(_create_astraStar_and_astraVisit_product_for_source, source, pipeline_model, spec, overwrite))
+
+        for future in concurrent.futures.as_completed(futures):
+            source_pk, flag_created_astra_star, flag_created_astra_visit, flag_attempted_but_exception = future.result()
+            yield AstraSpectrumProductStatus(
+                source_pk=source_pk,
+                pipeline=pipeline,
+                flag_created_astra_star=flag_created_astra_star,
+                flag_created_astra_visit=flag_created_astra_visit,
+                flag_attempted_but_exception=flag_attempted_but_exception,
+            )
 
 
 def create_star_pipeline_product(
@@ -421,7 +542,8 @@ def _create_pipeline_product(
     check_path(path, overwrite)
 
     kwds = dict(upper=upper, fill_values=fill_values)
-    hdus = [create_source_primary_hdu(source, upper=upper)]
+    cards, original_names = create_source_primary_hdu_cards(source, context="spectra", upper=upper, pipeline=pipeline)
+    hdus = [create_source_primary_hdu_from_cards(source, cards, original_names, upper)]
     from astra import models as astra_models
     if isinstance(boss_spectrum_model, str):
         boss_spectrum_model = getattr(astra_models, boss_spectrum_model)
@@ -460,6 +582,7 @@ def _create_pipeline_product(
     ]
 
     all_fields = {}
+    any_rows = False
     for spectrum_model, observatory, instrument, instrument_where, telescope_where in struct:
 
         models = (spectrum_model, pipeline_model)
@@ -504,6 +627,7 @@ def _create_pipeline_product(
 
         data = { name: [] for name in fields.keys() }
         for result in q.iterator():
+            any_rows = True
             for name, field in fields.items():
                 if field.model == pipeline_model:
                     value = getattr(result, name)
@@ -542,6 +666,10 @@ def _create_pipeline_product(
         hdu.add_checksum()
 
         hdus.append(hdu)
+
+    if not any_rows:
+        # No results at all for this source at this level: don't write an empty file.
+        return (None, None) if full_output else None
 
     hdu_list = fits.HDUList(hdus)
     hdu_list.writeto(path, overwrite=overwrite)
@@ -591,6 +719,7 @@ def _create_pipeline_products_for_all_sources(
         q = q.where(boss_where)
     elif apogee_where is not None:
         q = q.where(apogee_where)
+    q = q.order_by(Source.pk)
 
     if page is not None and limit is not None:
         q = q.paginate(page, limit)

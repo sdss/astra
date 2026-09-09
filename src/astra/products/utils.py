@@ -124,19 +124,20 @@ INCLUDE_SOURCE_FIELD_NAMES = (
 
 
 def create_source_primary_hdu(
-    source, 
+    source,
     field_names=INCLUDE_SOURCE_FIELD_NAMES,
-    upper=False
+    upper=False,
+    pipeline=None
 ):
     """
     Create a primary (header only) HDU with basic source-level information only.
-    
+
     The information to include are identifiers, astrometry, and photometry.
-    
+
     Note that the names for some fields are shortened so that they are not prefixed by the FITS 'HIERARCH' cards.
     """
 
-    cards, original_names = create_source_primary_hdu_cards(source, field_names, upper)
+    cards, original_names = create_source_primary_hdu_cards(source, field_names, upper, pipeline=pipeline)
     return create_source_primary_hdu_from_cards(source, cards, original_names, upper)
     
 
@@ -168,9 +169,10 @@ def create_source_primary_hdu_cards(
     source,
     field_names=INCLUDE_SOURCE_FIELD_NAMES,
     upper=False,
-    context="results"
+    context="results",
+    pipeline=None
 ):
-    
+
     created = datetime.datetime.now(datetime.timezone.utc).strftime(DATETIME_FMT)
 
     shortened_names = { k[0]: k[0] if len(k) == 1 else k[1] for k in field_names }
@@ -180,9 +182,13 @@ def create_source_primary_hdu_cards(
         BLANK_CARD,
         (" ", s("Metadata"), None),
         BLANK_CARD,
+    ]
+    if pipeline is not None:
+        cards.append((s("PIPELINE"), pipeline, "Pipeline name"))
+    cards.extend([
         (s("v_astra"), __version__, Glossary.v_astra),
         (s("created"), created, f"File creation time (UTC {DATETIME_FMT})"),
-    ]
+    ])
     original_names = {}
     for name, field in source._meta.fields.items():
         try:

@@ -863,7 +863,7 @@ class TestApogeeVisitSpectrumPaths:
     def test_sdss5_path_template(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         template = ApogeeVisitSpectrum.get_path_template("sdss5", "apo25m")
-        assert "ipl-4" in template
+        assert "ipl-5" in template
         assert "{apred}" in template
         assert "{telescope}" in template
 
@@ -894,7 +894,7 @@ class TestApogeeVisitSpectrumPaths:
         r.prefix = "ap"
         r.reduction = ""
         path = r.path
-        assert "ipl-4" in path
+        assert "ipl-5" in path
         assert "daily" in path
         assert "59000" in path
         assert "042" in path  # fiber is zero-padded to 3
@@ -902,54 +902,54 @@ class TestApogeeVisitSpectrumPaths:
     def test_visit_spectrum_flag_bad(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         assert not r.flag_bad
 
     def test_visit_spectrum_flag_bad_with_bad_pixels(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         r.flag_bad_pixels = True
         assert r.flag_bad
 
     def test_visit_spectrum_flag_bad_with_very_bright_neighbor(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         r.flag_very_bright_neighbor = True
         assert r.flag_bad
 
     def test_visit_spectrum_flag_bad_with_bad_rv(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         r.flag_bad_rv_combination = True
         assert r.flag_bad
 
     def test_visit_spectrum_flag_bad_with_rv_failure(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         r.flag_rv_failure = True
         assert r.flag_bad
 
     def test_visit_spectrum_flag_warn_no_flags(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         assert not r.flag_warn
 
     def test_visit_spectrum_flag_warn_any_flag(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         r.flag_commissioning = True
         assert r.flag_warn
 
     def test_visit_spectrum_many_flags(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         # Set multiple flags
         r.flag_bad_pixels = True
         r.flag_commissioning = True
@@ -965,7 +965,7 @@ class TestApogeeVisitSpectrumPaths:
     def test_visit_spectrum_persist_flags(self):
         from astra.models.apogee import ApogeeVisitSpectrum
         r = ApogeeVisitSpectrum()
-        r.spectrum_flags = 0
+        r.visit_flags = 0
         r.flag_persist_high = True
         assert r.flag_persist_high
         assert r.flag_warn
@@ -1033,7 +1033,7 @@ class TestApogeeCoadded:
         r.field = ""
         r.prefix = ""
         path = r.path
-        assert "ipl-4" in path
+        assert "ipl-5" in path
         assert "12345" in path
         assert "12" in path  # healpix_group = 12345 // 1000 = 12
 
@@ -1084,7 +1084,7 @@ class TestBossVisitSpectrumPaths:
         r.catalogid = 12345
         r.spec_file = "spec-015000-59000-12345.fits"
         path = r.path
-        assert "ipl-4" in path
+        assert "ipl-5" in path
         assert "spec-015000-59000-12345.fits" in path
 
     def test_path_v6_2_1_without_spec_file(self):
@@ -1096,7 +1096,7 @@ class TestBossVisitSpectrumPaths:
         r.catalogid = 12345
         r.spec_file = None
         path = r.path
-        assert "ipl-4" in path
+        assert "ipl-5" in path
         assert "spec-015000-59000-12345.fits" in path
 
     def test_path_v6_2_x(self):

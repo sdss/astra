@@ -583,6 +583,11 @@ def update_reddening(
     if queue is None:
         queue = ProgressContext()
 
+    # check if dustmaps configured
+    if not _dustmaps_are_configured():
+        queue.put(dict(total=None, description="Dust maps not found — running setup"))
+        setup_dustmaps()
+
     # Select only needed columns for efficiency
     q = (
         Source
@@ -674,6 +679,19 @@ def update_reddening(
 
     queue.put(Ellipsis)
     return total_updated
+
+
+def _dustmaps_are_configured(data_dir="$MWM_ASTRA/aux/dust-maps"):
+    """Return True if the required dust map files are present."""
+    data_dir = expand_path(data_dir)
+    req_files = [
+        os.path.join(data_dir, "sfd", "SFD_dust_4096_ngp.fits"),
+        os.path.join(data_dir, "sfd", "SFD_dust_4096_sgp.fits"),
+        os.path.join(data_dir, "bayestar", "bayestar2019.h5"),
+        os.path.join(data_dir, "edenhofer_2023", "mean_and_std_healpix.fits"),
+        os.path.join(data_dir, "edenhofer_2023", "samples_healpix.fits"),
+    ]
+    return all(os.path.exists(f) for f in req_files)
 
 
 def setup_dustmaps(data_dir="$MWM_ASTRA/aux/dust-maps"):

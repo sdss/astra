@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from typing_extensions import Annotated
 from enum import Enum
+import inspect
 
 app = typer.Typer()
 config_app = typer.Typer(help="Manage Astra configuration.")
@@ -216,6 +217,7 @@ class Product(str, Enum):
     mwmVisit = "mwmVisit"
     mwmVisit_mwmStar = "mwmVisit/mwmStar"
     astraAllStarASPCAP = "astraAllStarASPCAP"
+    astraAllVisitASPCAP = "astraAllVisitASPCAP"
     astraAllStarAPOGEENet = "astraAllStarAPOGEENet"
     astraAllVisitAPOGEENet = "astraAllVisitAPOGEENet"
     astraAllStarBOSSNet = "astraAllStarBOSSNet"
@@ -260,11 +262,13 @@ def create(
     from astra.models.apogee import ApogeeCoaddedSpectrumInApStar, ApogeeVisitSpectrumInApStar
     from astra.models.boss import BossVisitSpectrum
     from astra.models.mwm import (BossCombinedSpectrum, ApogeeCombinedSpectrum, BossRestFrameVisitSpectrum, ApogeeRestFrameVisitSpectrum)
+    from astra.models.source import Source
 
     mwmVisit_mwmStar_args = (
-        run,
+        create_mwmVisit_and_mwmStar_products,
         dict(
             task="astra.products.mwm.create_mwmVisit_and_mwmStar_products",
+            sources=Source.select(),
             batch_size=1,
             overwrite=overwrite
         )
@@ -282,6 +286,14 @@ def create(
                 {
                     "pipeline_model": "aspcap.ASPCAP",
                     "apogee_spectrum_model": ApogeeCoaddedSpectrumInApStar,
+                    "overwrite": overwrite
+                }
+            ),
+            Product.astraAllVisitASPCAP: (
+                create_all_visit_product,
+                {
+                    "pipeline_model": "aspcap.ASPCAP",
+                    "apogee_spectrum_model": ApogeeVisitSpectrumInApStar,
                     "overwrite": overwrite
                 }
             ),
@@ -411,8 +423,13 @@ def create(
     for product in products:
         fun, kwargs = mapping[product]
         r = fun(limit=limit, **kwargs)
-        if isinstance(r, str):
+        if inspect.isgenerator(r):
+            for _ in r:
+                pass
+        elif isinstance(r, str):
             typer.echo(f"Created {product}: {r}")
+        else:
+            pass
 
 
 @app.command()
@@ -436,6 +453,9 @@ def srun(
     time: Annotated[str, typer.Option(help="Wall-time")] = "24:00:00",
     exclusive: Annotated[bool, typer.Option(help="Use exclusive node allocation.")] = True,
     only_missing: Annotated[bool, typer.Option("--only-missing", help="Only include rows missing from the output model (skip those with stale results).")] = False,
+    pipeline: Annotated[str, typer.Option(help="Pipeline name, for tasks parameterized by pipeline (e.g. `ASPCAP`).")] = None,
+    apreds: Annotated[List[str], typer.Option(help="APOGEE reduction version(s), for tasks that accept an `apreds` parameter.")] = None,
+    run2ds: Annotated[List[str], typer.Option(help="BOSS reduction version(s), for tasks that accept a `run2ds` parameter.")] = None,
 ):
     """Distribute an Astra task over many nodes using Slurm."""
 
@@ -474,7 +494,7 @@ def srun(
     from rich.console import Console
     from logging import FileHandler
 
-    queries = generate_queries_for_task(task, model, sdss_ids=sdss_ids, limit=limit, missing_only=only_missing)
+    queries = generate_queries_for_task(task, model, sdss_ids=sdss_ids, limit=limit, missing_only=only_missing, pipeline=pipeline)
 
     considered_models = []
     for model, q in queries:
@@ -547,13 +567,18 @@ def srun(
                 else:
                     sdss_id_str = " ".join(map(str, sdss_ids))
 
+                only_missing_flag = " --only-missing" if only_missing else ""
+                pipeline_flag = f" --pipeline {pipeline}" if pipeline is not None else ""
+                apreds_flag = "".join(f" --apreds {a}" for a in apreds) if apreds else ""
+                run2ds_flag = "".join(f" --run2ds {r}" for r in run2ds) if run2ds else ""
+                extra_flags = f"{only_missing_flag}{pipeline_flag}{apreds_flag}{run2ds_flag}"
+
                 # TODO: Let's not hard code this here.
                 commands = ["export CLUSTER=1"]
                 for page in range(n * procs, (n + 1) * procs):
                     status_path = f"{td}/live-{n}-{page}"
                     status_path_locks[progress][status_path] = 0
-                    only_missing_flag = " --only-missing" if only_missing else ""
-                    commands.append(f"astra run {task} {model.__name__} {sdss_id_str} --limit {limit} --page {page + 1}{only_missing_flag} --live-renderable-path {status_path} &")
+                    commands.append(f"astra run {task} {model.__name__} {sdss_id_str} --limit {limit} --page {page + 1}{extra_flags} --live-renderable-path {status_path} &")
                 commands.append("wait")
 
                 script_path = f"{td}/node_{n}.sh"
@@ -648,6 +673,9 @@ def run(
     live_renderable_path: Annotated[str, typer.Option(hidden=True)] = None,
     dry_run: Annotated[bool, typer.Option(help="Print the queries that would be run without executing them.")] = False,
     only_missing: Annotated[bool, typer.Option("--only-missing", help="Only include rows missing from the output model (skip those with stale results).")] = False,
+    pipeline: Annotated[str, typer.Option(help="Pipeline name, for tasks parameterized by pipeline (e.g. `ASPCAP`).")] = None,
+    apreds: Annotated[List[str], typer.Option(help="APOGEE reduction version(s), for tasks that accept an `apreds` parameter.")] = None,
+    run2ds: Annotated[List[str], typer.Option(help="BOSS reduction version(s), for tasks that accept a `run2ds` parameter.")] = None,
 ):
     """Run an Astra task on spectra."""
 
@@ -730,15 +758,22 @@ def run(
         limit=limit,
         page=page,
         missing_only=only_missing,
+        pipeline=pipeline,
     )
     from time import sleep
 
-
+    extra_kwargs = {}
+    if pipeline is not None:
+        extra_kwargs["pipeline"] = pipeline
+    if apreds:
+        extra_kwargs["apreds"] = apreds
+    if run2ds:
+        extra_kwargs["run2ds"] = run2ds
 
     with Live(live_renderable, console=console, redirect_stdout=False, redirect_stderr=False) as live:
         for model, q in iterable:
             if total := q.count():
-                worker = fun(q, live=True, live_renderable=(live_renderable_path or live_renderable))
+                worker = fun(q, live=True, live_renderable=(live_renderable_path or live_renderable), **extra_kwargs)
 
                 if use_local_renderable or (overall_progress is not None):
                     task_id = overall_progress.add_task(model.__name__)
@@ -834,6 +869,7 @@ def migrate(
     from astra.migrations.apogee import (
         migrate_apogee_spectra_from_sdss5_apogee_drpdb,
         migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb,
+        migrate_sdss4_dr17_apogee_coadded_spectra_from_visits,
         migrate_dithered_metadata,
         migrate_apogee_visits_in_apStar_files
     )
@@ -909,7 +945,7 @@ def migrate(
                 args=(apred, ),
                 description="Ingesting ApogeeVisitSpectrumInApStar entries",
                 depends_on={"apogee_spectra"},
-                writes_to={"apogee_visit_spectrum_in_apstar"}
+                writes_to={"apogee_visit_spectrum_in_ap_star"}
             )
 
     if run2d is not None:
@@ -927,12 +963,23 @@ def migrate(
     # ==========================================================================
     spectra_deps = {"apogee_spectra", "boss_spectra"} & tasks.keys()
 
+    # `apstar_visits` must complete first, not merely run without overlapping writes:
+    # create_sources links ApogeeVisitSpectrumInApStar rows, so if it wins the race those
+    # rows do not exist yet and nothing ever comes back to link them.
+    create_source_deps = spectra_deps | ({"apstar_visits"} & tasks.keys())
+
     tasks["create_sources"] = MigrationTask(
         name="create_sources",
         func=create_sources_and_link_spectra,
         description="Creating sources and linking spectra",
-        depends_on=spectra_deps,
-        writes_to={"source", "boss_visit_spectrum", "apogee_visit_spectrum"}
+        depends_on=create_source_deps,
+        writes_to={
+            "source",
+            "boss_visit_spectrum",
+            "apogee_visit_spectrum",
+            "apogee_visit_spectrum_in_ap_star",
+            "apogee_coadded_spectrum_in_ap_star",
+        }
     )
 
     # ==========================================================================
@@ -969,6 +1016,17 @@ def migrate(
             depends_on={"gaia_source_ids"},
             writes_to={"source"}
         )
+        if apred == "dr17":
+            # Coadds are matched to sources via Source.sdss4_apogee_id, so this can only
+            # run after sdss4_apogee_id is populated -- NOT as part of the Phase 1
+            # apogee_spectra task, which runs before Source even exists.
+            tasks["dr17_coadds"] = MigrationTask(
+                name="dr17_coadds",
+                func=migrate_sdss4_dr17_apogee_coadded_spectra_from_visits,
+                description="Deriving APOGEE DR17 coadded spectra",
+                depends_on={"sdss4_apogee_id", "apogee_spectra"},
+                writes_to={"apogee_coadded_spectrum_in_ap_star"}
+            )
         tasks["gaia_astrometry"] = MigrationTask(
             name="gaia_astrometry",
             func=migrate_gaia_dr3_astrometry_and_photometry,

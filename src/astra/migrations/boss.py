@@ -91,7 +91,7 @@ def migrate_from_spall_file(run2d, queue, max_mjd: Optional[int] = None, gzip=Tr
 
     # Handle frozen data path.
     if run2d == "v6_2_1":
-        path = expand_path(f"$SAS_BASE_DIR/ipl-4/spectro/boss/redux/v6_2_1/summary/daily/spAll-v6_2_1.fits")
+        path = expand_path(f"$SAS_BASE_DIR/ipl-5/spectro/boss/redux/v6_2_1/summary/daily/spAll-v6_2_1.fits")
     else:
         path = expand_path(f"$BOSS_SPECTRO_REDUX/{run2d}/summary/daily/spAll-{run2d}.fits")
     if gzip:
@@ -461,29 +461,35 @@ def migrate_specfull_metadata_from_image_headers(
 
     specFulls, futures = ({}, [])
     all_missing_counts = {}
-    with queue.subtask("Scraping specFull headers", total=None) as scrape_step:
-        for chunk in chunked(q, batch_size):
-            futures.append(executor.submit(_migrate_specfull_metadata, chunk, fields))
-            for spec in chunk:
-                specFulls[spec.pk] = spec
-            scrape_step.update(advance=len(chunk))
-        scrape_step.update(total=len(specFulls), completed=len(specFulls))
+    try:
+        with queue.subtask("Scraping specFull headers", total=None) as scrape_step:
+            for chunk in chunked(q, batch_size):
+                futures.append(executor.submit(_migrate_specfull_metadata, chunk, fields))
+                for spec in chunk:
+                    specFulls[spec.pk] = spec
+                scrape_step.update(advance=len(chunk))
+            scrape_step.update(total=len(specFulls), completed=len(specFulls))
 
-    with queue.subtask("Parsing specFull metadata", total=len(futures)) as parse_step:
-        for future in concurrent.futures.as_completed(futures):
-            metadata, missing_counts = future.result()
-            for name, missing_count in missing_counts.items():
-                all_missing_counts.setdefault(name, 0)
-                all_missing_counts[name] += missing_count
+        with queue.subtask("Parsing specFull metadata", total=len(futures)) as parse_step:
+            for future in concurrent.futures.as_completed(futures):
+                metadata, missing_counts = future.result()
+                for name, missing_count in missing_counts.items():
+                    all_missing_counts.setdefault(name, 0)
+                    all_missing_counts[name] += missing_count
 
-            for pk, meta in metadata.items():
-                for key, value in meta.items():
-                    setattr(specFulls[pk], key, value)
-                for key, value in defaults.items():
-                    if key not in meta:
+                for pk, meta in metadata.items():
+                    for key, value in meta.items():
                         setattr(specFulls[pk], key, value)
+                    for key, value in defaults.items():
+                        if key not in meta:
+                            setattr(specFulls[pk], key, value)
 
-            parse_step.update(advance=1)
+                parse_step.update(advance=1)
+    finally:
+        # Always tear down the worker pool; a leaked ProcessPoolExecutor can
+        # deadlock interpreter shutdown (especially under the 'fork' start
+        # method), which hangs the migration scheduler's process.join().
+        executor.shutdown(wait=True)
 
     with queue.subtask("Ingesting specFull metadata", total=len(specFulls)) as ingest_step:
         for chunk in chunked(specFulls.values(), batch_size):

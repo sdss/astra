@@ -241,14 +241,14 @@ class FerreStellarParameters(PipelineOutputMixin, FerreOutputMixin):
     upstream = ForeignKeyField(FerreCoarse, column_name="upstream_pk", index=True)
 
     #> Astra Metadata
-    task_pk = AutoField()
-    v_astra = TextField(default=__version__)
-    created = DateTimeField(default=datetime.datetime.now)
-    modified = DateTimeField(default=datetime.datetime.now)
-    t_elapsed = FloatField(null=True)
-    t_overhead = FloatField(null=True)
-    tag = TextField(default="", index=True)
-
+    #task_pk = AutoField()
+    #v_astra = TextField(default=__version__)
+    #created = DateTimeField(default=datetime.datetime.now)
+    #modified = DateTimeField(default=datetime.datetime.now)
+    #t_elapsed = FloatField(null=True)
+    #t_overhead = FloatField(null=True)
+    #tag = TextField(default="", index=True)
+    
     #> Grid and Working Directory
     pwd = TextField(default="")
     short_grid_name = TextField(default="")
@@ -347,8 +347,8 @@ class FerreStellarParameters(PipelineOutputMixin, FerreOutputMixin):
     flag_c_m_atm_grid_edge_bad = ferre_flags.flag(2**18)
     flag_n_m_atm_grid_edge_warn = ferre_flags.flag(2**19)
     flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**20)
-
-
+    flag_caused_timeout = ferre_flags.flag(2**21, help_text="Caused timeout in downstream tasks")
+    flag_affected_by_timeout = ferre_flags.flag(2**22, help_text="Affected by timeout")
 
 
     '''
@@ -377,20 +377,20 @@ class FerreChemicalAbundances(PipelineOutputMixin, FerreOutputMixin):
     @cached_property
     def ferre_e_flux(self):
         return self._get_input_pixel_array("../e_flux.input")
-
+    
     #source_pk = ForeignKeyField(Source, index=True, lazy_load=False)
     #spectrum_pk = ForeignKeyField(Spectrum, index=True, lazy_load=False)
     upstream = ForeignKeyField(FerreStellarParameters, column_name="upstream_pk", index=True)
 
     #> Astra Metadata
-    task_pk = AutoField()
-    v_astra = TextField(default=__version__)
-    created = DateTimeField(default=datetime.datetime.now)
-    modified = DateTimeField(default=datetime.datetime.now)
-    t_elapsed = FloatField(null=True)
-    t_overhead = FloatField(null=True)
-    tag = TextField(default="", index=True)
-
+    #task_pk = AutoField()
+    #v_astra = TextField(default=__version__)
+    #created = DateTimeField(default=datetime.datetime.now)
+    #modified = DateTimeField(default=datetime.datetime.now)
+    #t_elapsed = FloatField(null=True)
+    #t_overhead = FloatField(null=True)
+    #tag = TextField(default="", index=True)
+    
     #> Grid and Working Directory
     pwd = TextField(default="")
     short_grid_name = TextField(default="")
@@ -486,7 +486,8 @@ class FerreChemicalAbundances(PipelineOutputMixin, FerreOutputMixin):
     flag_c_m_atm_grid_edge_bad = ferre_flags.flag(2**18)
     flag_n_m_atm_grid_edge_warn = ferre_flags.flag(2**19)
     flag_n_m_atm_grid_edge_bad = ferre_flags.flag(2**20)
-
+    flag_caused_timeout = ferre_flags.flag(2**21, help_text="Caused timeout in downstream tasks")
+    flag_affected_by_timeout = ferre_flags.flag(2**22, help_text="Affected by timeout")
 
     '''
     class Meta:

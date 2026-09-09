@@ -2,12 +2,85 @@ import concurrent.futures
 import subprocess
 import numpy as np
 from datetime import datetime
-from peewee import JOIN, chunked, Case, fn, SQL, EXCLUDED, IntegrityError
+from peewee import JOIN, chunked, Case, fn, SQL, EXCLUDED, IntegrityError, Tuple
 from typing import Optional
 
 from astra.migrations.utils import enumerate_new_spectrum_pks, upsert_many, ProgressContext
 from astra.utils import expand_path, flatten, log
 from tqdm import tqdm
+
+def _star_has_ingestable_visit(apred: str, max_mjd: int):
+    """
+    An EXISTS clause matching stars that still have a visit once `max_mjd` is applied.
+
+    `max_mjd` filters the visit query but not the star query, so without this we ingest
+    coadds for stars whose visits were all excluded: nothing creates a Source carrying
+    their catalogid, and they can never be linked.
+
+    Matching on catalogid, not just (obj, telescope), is what makes this exact. A star's
+    catalogid can differ from that of its earliest visits, so "this star has some visit
+    before the cutoff" is not sufficient -- it has to have a visit before the cutoff
+    carrying the star's own catalogid, since that is what the Source is created from.
+    """
+    from astra.migrations.sdss5db.apogee_drpdb import Star, Visit
+
+    V = Visit.alias()
+    return fn.EXISTS(
+        V
+        .select(SQL("1"))
+        .where(
+            (V.apred == apred)
+        &   (V.obj == Star.obj)
+        &   (V.telescope == Star.telescope)
+        &   (V.mjd <= max_mjd)
+        &   (V.catalogid == Star.catalogid)
+        )
+    )
+
+
+def _limited_star_selection(apred: str, limit: int, incremental: bool = True, max_mjd: Optional[int] = None):
+    """
+    Build a sub-query selecting the (obj, telescope) pairs that a `limit` applies to.
+
+    `limit` has to mean "this many stars". If it were applied independently to the
+    `visit` and `star` queries we would ingest two nearly disjoint samples: the coadds
+    would be for stars whose visits were never ingested, so no Source would ever carry
+    their catalogid and they could not be linked.
+
+    This is returned as a sub-query rather than a materialised list of pairs because a
+    tuple `IN` with tens of thousands of entries exceeds Postgres' `max_stack_depth`.
+    The `ORDER BY` matters: `LIMIT` without it is not guaranteed to return the same rows
+    each time the sub-query is executed, and it is executed once per calling query.
+    """
+    from astra.models.apogee import ApogeeCoaddedSpectrumInApStar
+    from astra.migrations.sdss5db.apogee_drpdb import Star
+
+    max_star_pk = 0
+    if incremental:
+        max_star_pk = (
+            ApogeeCoaddedSpectrumInApStar
+            .select(fn.MAX(ApogeeCoaddedSpectrumInApStar.star_pk))
+            .scalar() or 0
+        )
+
+    where = (
+        (Star.apred_vers == apred)
+    &   (Star.pk > max_star_pk)
+    )
+    if max_mjd is not None:
+        # Match the cut the coadd and visit queries apply, so the limit selects stars
+        # that will actually be ingested rather than being partly spent on excluded ones.
+        where &= _star_has_ingestable_visit(apred, max_mjd)
+
+    return (
+        Star
+        .select(Star.obj, Star.telescope)
+        .where(where)
+        .group_by(Star.obj, Star.telescope)
+        .order_by(Star.obj, Star.telescope)
+        .limit(limit)
+    )
+
 
 def migrate_apogee_spectra_from_sdss5_apogee_drpdb(apred: str, max_mjd: Optional[int] = None, queue=None, limit=None, incremental=True, **kwargs):
     """
@@ -19,11 +92,19 @@ def migrate_apogee_spectra_from_sdss5_apogee_drpdb(apred: str, max_mjd: Optional
     """
     queue = queue or ProgressContext()
 
-    # Migrate visits
-    v_n_new_spectra, v_n_updated_spectra = migrate_apogee_visits(apred, max_mjd=max_mjd, queue=queue, limit=limit, incremental=incremental, **kwargs)
+    # A `limit` selects stars, and both the visit and coadd queries are then restricted to
+    # those same stars, so every ingested coadd has its visits ingested alongside it.
+    restrict_to_stars = None
+    if limit is not None:
+        restrict_to_stars = _limited_star_selection(apred, limit, incremental=incremental, max_mjd=max_mjd)
 
-    # Migrate co-added spectra
-    c_n_new_spectra, c_n_updated_spectra = migrate_apogee_coadds(apred, queue=queue, limit=limit, incremental=incremental, **kwargs)
+    # Migrate visits
+    v_n_new_spectra, v_n_updated_spectra = migrate_apogee_visits(apred, max_mjd=max_mjd, queue=queue, restrict_to_stars=restrict_to_stars, incremental=incremental, **kwargs)
+
+    # Migrate co-added spectra. `max_mjd` has to be passed here too: it filters visits, so
+    # without it we would ingest coadds for stars that have no ingested visit, and therefore
+    # no Source carrying their catalogid.
+    c_n_new_spectra, c_n_updated_spectra = migrate_apogee_coadds(apred, queue=queue, restrict_to_stars=restrict_to_stars, incremental=incremental, max_mjd=max_mjd, **kwargs)
 
     queue.put(Ellipsis)
     return None
@@ -38,100 +119,105 @@ def migrate_apogee_visits_in_apStar_files(apred: str, max_workers=16, queue=None
     queue = queue or ProgressContext()
 
     executor = concurrent.futures.ProcessPoolExecutor(max_workers)
-    q = (
-        ApogeeCoaddedSpectrumInApStar
-        .select()
-        .where(
-            (ApogeeCoaddedSpectrumInApStar.apred == apred)
-        &   (ApogeeCoaddedSpectrumInApStar.mean_fiber.is_null())
+    try:
+        q = (
+            ApogeeCoaddedSpectrumInApStar
+            .select()
+            .where(
+                (ApogeeCoaddedSpectrumInApStar.apred == apred)
+            )
+            .limit(limit)
+            .iterator()
         )
-        .limit(limit)
-        .iterator()
-    )
 
-    apStar_spectra, futures = ({}, [])
-    total = 0
-    with queue.subtask("Getting apStar metadata", total=None) as get_step:
-        for total, spectrum in enumerate(q, start=1):
-            futures.append(executor.submit(_get_apstar_metadata, spectrum))
-            apStar_spectra[spectrum.spectrum_pk] = spectrum
-            get_step.update(advance=1)
-        get_step.update(total=total, completed=total)
+        apStar_spectra, futures = ({}, [])
+        total = 0
+        with queue.subtask("Getting apStar metadata", total=None) as get_step:
+            for total, spectrum in enumerate(q, start=1):
+                futures.append(executor.submit(_get_apstar_metadata, spectrum))
+                apStar_spectra[spectrum.spectrum_pk] = spectrum
+                get_step.update(advance=1)
+            get_step.update(total=total, completed=total)
 
-    visit_spectrum_data = []
-    failed_spectrum_pks = []
-    with queue.subtask("Collecting apStar metadata", total=total) as collect_step:
-        for future in concurrent.futures.as_completed(futures):
-            result = future.result()
-            for spectrum_pk, metadata in result.items():
-                if metadata is None:
-                    failed_spectrum_pks.append(spectrum_pk)
-                    continue
+        visit_spectrum_data = []
+        failed_spectrum_pks = []
+        with queue.subtask("Collecting apStar metadata", total=total) as collect_step:
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                for spectrum_pk, metadata in result.items():
+                    if metadata is None:
+                        failed_spectrum_pks.append(spectrum_pk)
+                        continue
 
-                spectrum = apStar_spectra[spectrum_pk]
+                    spectrum = apStar_spectra[spectrum_pk]
 
-                mjds = []
-                sfiles = [metadata[f"SFILE{i}"] for i in range(1, int(metadata["NVISITS"]) + 1)]
-                for sfile in sfiles:
-                    #if spectrum.telescope == "apo1m":
-                    #    #"$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{mjd}/apVisit-{apred}-{mjd}-{reduction}.fits"
-                    #    # sometimes it is stored as a float AHGGGGHGGGGHGHGHGH
-                    #    mjds.append(int(float(sfile.split("-")[2])))
-                    #else:
-                    #    mjds.append(int(float(sfile.split("-")[3])))
-                    #    # "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/{prefix}Visit-{apred}-{plate}-{mjd}-{fiber:0>3}.fits"
-                    # NOTE: For SDSS5 data this is index 4: 'apVisit-1.2-apo25m-5339-59715-103.fits'
-                    mjds.append(int(float(sfile.split("-")[4])))
+                    mjds = []
+                    sfiles = [metadata[f"SFILE{i}"] for i in range(1, int(metadata["NVISITS"]) + 1)]
+                    for sfile in sfiles:
+                        #if spectrum.telescope == "apo1m":
+                        #    #"$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{mjd}/apVisit-{apred}-{mjd}-{reduction}.fits"
+                        #    # sometimes it is stored as a float AHGGGGHGGGGHGHGHGH
+                        #    mjds.append(int(float(sfile.split("-")[2])))
+                        #else:
+                        #    mjds.append(int(float(sfile.split("-")[3])))
+                        #    # "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/{prefix}Visit-{apred}-{plate}-{mjd}-{fiber:0>3}.fits"
+                        # NOTE: For SDSS5 data this is index 4: 'apVisit-1.2-apo25m-5339-59715-103.fits'
+                        mjds.append(int(float(sfile.split("-")[4])))
 
-                assert len(sfiles) == int(metadata["NVISITS"])
+                    assert len(sfiles) == int(metadata["NVISITS"])
 
-                spectrum.snr = float(metadata["SNR"])
-                spectrum.mean_fiber = float(metadata["MEANFIB"])
-                spectrum.std_fiber = float(metadata["SIGFIB"])
-                spectrum.n_good_visits = int(metadata["NVISITS"])
-                spectrum.n_good_rvs = int(metadata["NVISITS"])
-                spectrum.v_rad = float(metadata.get("VRAD", metadata.get("VHBARY")))
-                spectrum.e_v_rad = float(metadata["VERR"])
-                spectrum.std_v_rad = float(metadata["VSCATTER"])
-                spectrum.median_e_v_rad = float(metadata.get("VERR_MED", np.nan))
-                spectrum.spectrum_flags = metadata["STARFLAG"]
+                    spectrum.snr = float(metadata["SNR"])
+                    spectrum.mean_fiber = float(metadata["MEANFIB"])
+                    spectrum.std_fiber = float(metadata["SIGFIB"])
+                    spectrum.n_good_visits = int(metadata["NVISITS"])
+                    spectrum.n_good_rvs = int(metadata["NVISITS"])
+                    spectrum.v_rad = float(metadata.get("VRAD", metadata.get("VHBARY")))
+                    spectrum.e_v_rad = float(metadata["VERR"])
+                    spectrum.std_v_rad = float(metadata["VSCATTER"])
+                    spectrum.median_e_v_rad = float(metadata.get("VERR_MED", np.nan))
+                    spectrum.star_flags = metadata["STARFLAG"]
 
-                # The MJDS in the apStar file only list the MJDs that were included in the stack.
-                # But there could be other MJDs which were not included in the stack.
-                # TODO: To be consistent elsewhere we should probably not update these based on
-                spectrum.min_mjd = min(mjds)
-                spectrum.max_mjd = max(mjds)
+                    # The MJDS in the apStar file only list the MJDs that were included in the stack.
+                    # But there could be other MJDs which were not included in the stack.
+                    # TODO: To be consistent elsewhere we should probably not update these based on
+                    spectrum.min_mjd = min(mjds)
+                    spectrum.max_mjd = max(mjds)
 
-                star_kwds = dict(
-                    source_pk=spectrum.source_pk,
-                    release=spectrum.release,
-                    filetype=spectrum.filetype,
-                    apred=spectrum.apred,
-                    apstar=spectrum.apstar,
-                    obj=spectrum.obj,
-                    telescope=spectrum.telescope,
-                    #field=spectrum.field,
-                    #prefix=spectrum.prefix,
-                    #reduction=spectrum.obj if spectrum.telescope == "apo1m" else None
-                )
-                for i, sfile in enumerate(sfiles, start=1):
-                    #if spectrum.telescope != "apo1m":
-                    #    plate = sfile.split("-")[2]
-                    #else:
-                    #    # plate not known..
-                    #    plate = metadata["FIELD"].strip()
-                    mjd = int(sfile.split("-")[4])
-                    plate = sfile.split("-")[3]
-
-                    kwds = star_kwds.copy()
-                    kwds.update(
-                        mjd=mjd,
-                        fiber=int(metadata[f"FIBER{i}"]),
-                        plate=plate
+                    star_kwds = dict(
+                        source_pk=spectrum.source_pk,
+                        release=spectrum.release,
+                        filetype=spectrum.filetype,
+                        apred=spectrum.apred,
+                        apstar=spectrum.apstar,
+                        obj=spectrum.obj,
+                        telescope=spectrum.telescope,
+                        #field=spectrum.field,
+                        #prefix=spectrum.prefix,
+                        #reduction=spectrum.obj if spectrum.telescope == "apo1m" else None
                     )
-                    visit_spectrum_data.append(kwds)
+                    for i, sfile in enumerate(sfiles, start=1):
+                        #if spectrum.telescope != "apo1m":
+                        #    plate = sfile.split("-")[2]
+                        #else:
+                        #    # plate not known..
+                        #    plate = metadata["FIELD"].strip()
+                        mjd = int(sfile.split("-")[4])
+                        plate = sfile.split("-")[3]
 
-            collect_step.update(advance=1)
+                        kwds = star_kwds.copy()
+                        kwds.update(
+                            mjd=mjd,
+                            fiber=int(metadata[f"FIBER{i}"]),
+                            plate=plate
+                        )
+                        visit_spectrum_data.append(kwds)
+
+                collect_step.update(advance=1)
+    finally:
+        # Always tear down the worker pool; a leaked ProcessPoolExecutor can
+        # deadlock interpreter shutdown (especially under the 'fork' start
+        # method), which hangs the migration scheduler's process.join().
+        executor.shutdown(wait=True)
 
     with queue.subtask("Updating apStar metadata", total=total) as update_step:
         for chunk in chunked(apStar_spectra.values(), batch_size):
@@ -149,7 +235,7 @@ def migrate_apogee_visits_in_apStar_files(apred: str, max_workers=16, queue=None
                         ApogeeCoaddedSpectrumInApStar.e_v_rad,
                         ApogeeCoaddedSpectrumInApStar.std_v_rad,
                         ApogeeCoaddedSpectrumInApStar.median_e_v_rad,
-                        ApogeeCoaddedSpectrumInApStar.spectrum_flags,
+                        ApogeeCoaddedSpectrumInApStar.star_flags,
                         ApogeeCoaddedSpectrumInApStar.min_mjd,
                         ApogeeCoaddedSpectrumInApStar.max_mjd
                     ]
@@ -426,19 +512,30 @@ def migrate_dithered_metadata(
                 for batch in chunked(null_pks, batch_size):
                     n += ApogeeVisitSpectrum.update(
                         dithered=None,
-                        spectrum_flags=ApogeeVisitSpectrum.spectrum_flags.bin_or(missing_file_flag)
+                        visit_flags=ApogeeVisitSpectrum.visit_flags.bin_or(missing_file_flag)
                     ).where(ApogeeVisitSpectrum.pk.in_(batch)).execute()
 
     queue.put(Ellipsis)
     return n
 
 
-def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=None, incremental=True):
+def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=None, incremental=True, restrict_to_stars=None, max_mjd=None):
     """
     Migrate APOGEE coadd spectrum-level information from the SDSS-V APOGEE DRP database.
 
     This function only loads spectrum-level data. Source creation and spectrum-to-source
     linking should be handled separately (e.g., via create_sources_and_link_spectra).
+
+    :param restrict_to_stars: [optional]
+        A sub-query selecting the (obj, telescope) pairs to ingest, as built by
+        `_limited_star_selection`. Prefer this over `limit`: it lets the same star
+        selection be shared with `migrate_apogee_visits`.
+
+    :param max_mjd: [optional]
+        Only ingest stars that still have a matching visit at or before this MJD (see
+        `_star_has_ingestable_visit`). This has to match the cut `migrate_apogee_visits`
+        applies, otherwise we ingest coadds for stars whose visits were all excluded, and
+        those coadds have no Source to link to.
     """
 
     from astra.models.apogee import ApogeeVisitSpectrum, ApogeeCoaddedSpectrumInApStar
@@ -464,8 +561,33 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
             .scalar() or 0
         )
 
+    restrict_clause = (
+        Tuple(Star.obj, Star.telescope).in_(restrict_to_stars)
+        if restrict_to_stars is not None
+        else None
+    )
+
     # In continuous operations mode, the APOGEE DRP does not update the `star` table to have unique `star_pk`,
     # so we have to sub-query to get the most recent co-add.
+    sq_where = (
+        (Star.apred_vers == apred)
+    &   (Star.pk > max_star_pk)
+    )
+    if restrict_clause is not None:
+        # Safe to narrow here as well as in the outer query: restricting which
+        # (obj, telescope) groups are considered does not change MAX(starver) within
+        # any surviving group, and it keeps this from scanning the whole `star` table.
+        sq_where &= restrict_clause
+
+    # Deliberately NOT pushed into `sq`: catalogid can vary between starver rows of the same
+    # star, so filtering there could make a superseded starver win the MAX and be ingested
+    # in place of the current one. Applied only to the outer query, where it just drops
+    # the star.
+    outer_clause = restrict_clause
+    if max_mjd is not None:
+        mjd_clause = _star_has_ingestable_visit(apred, max_mjd)
+        outer_clause = mjd_clause if outer_clause is None else (outer_clause & mjd_clause)
+
     sq = (
         Star
         .select(
@@ -473,10 +595,7 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
             Star.telescope,
             fn.MAX(Star.starver).alias("max")
         )
-        .where(
-            (Star.apred_vers == apred)
-        &   (Star.pk > max_star_pk)
-        )
+        .where(sq_where)
         .group_by(Star.apogee_id, Star.telescope)
     )
 
@@ -502,7 +621,7 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
             Star.ngoodvisits.alias("n_good_visits"),
             Star.ngoodrvs.alias("n_good_rvs"),
             Star.snr,
-            Star.starflag.alias("spectrum_flags"),
+            Star.starflag.alias("star_flags"),
             Star.meanfib.alias("mean_fiber"),
             Star.sigfib.alias("std_fiber"),
             Star.vrad.alias("v_rad"),
@@ -554,8 +673,9 @@ def migrate_apogee_coadds(apred: str, queue=None, batch_size: int = 1000, limit=
             (Star.apred_vers == apred)
         &   (Star.pk > max_star_pk)
         &   (SDSS_ID_Flat.rank == 1)
+        &   (outer_clause if outer_clause is not None else SQL("TRUE"))
         )
-        .limit(limit)
+        .limit(None if restrict_to_stars is not None else limit)
     )
     # Count before converting to dicts (peewee .count() doesn't work well with .dicts())
     q_total = q_base.count()
@@ -638,12 +758,19 @@ def migrate_apogee_visits(
     limit=None,
     incremental=True,
     where_modified=None,
+    restrict_to_stars=None,
 ):
     """
     Migrate APOGEE visit spectrum-level information from the SDSS-V APOGEE DRP database.
 
     This function only loads spectrum-level data. Source creation and spectrum-to-source
     linking should be handled separately (e.g., via create_sources_and_link_spectra).
+
+    :param restrict_to_stars: [optional]
+        A sub-query selecting the (obj, telescope) pairs to ingest, as built by
+        `_limited_star_selection`. Prefer this over `limit`: limiting visits directly
+        gives an arbitrary set of visits that does not correspond to the stars whose
+        coadds are ingested.
 
     :param where_modified: [optional]
         A clause to specify when spectra should be considered as 'modified'. Spectra are already
@@ -686,7 +813,7 @@ def migrate_apogee_visits(
     max_rv_visit_pk, max_visit_pk = (0, 0)
     if incremental:
         max_rv_visit_pk += ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.rv_visit_pk)).scalar() or 0
-        max_visit_pk += ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.spectrum_pk)).scalar() or 0
+        max_visit_pk += ApogeeVisitSpectrum.select(fn.MAX(ApogeeVisitSpectrum.visit_pk)).scalar() or 0
 
     if max_mjd is None:
         max_mjd = 1_000_000
@@ -729,6 +856,7 @@ def migrate_apogee_visits(
             RvVisit.xcorr_vrelerr,
             RvVisit.xcorr_vrad,
             RvVisit.n_components,
+            RvVisit.visitflag,
         )
         .join(
             ssq,
@@ -758,7 +886,7 @@ def migrate_apogee_visits(
             Visit.on_target,
             Visit.valid,
             Visit.snr,
-            Visit.starflag.alias("spectrum_flags"),
+            fn.COALESCE(sq.c.visitflag, Visit.visitflag).alias("visit_flags"),  # if no RV calculated, include flag from the visit
             Visit.ra.alias("input_ra"),
             Visit.dec.alias("input_dec"),
 
@@ -813,8 +941,13 @@ def migrate_apogee_visits(
         &   (Visit.pk > max_visit_pk)
         &   (Visit.mjd <= max_mjd)
         &   (SDSS_ID_Flat.rank == 1)
+        &   (
+                Tuple(Visit.obj, Visit.telescope).in_(restrict_to_stars)
+                if restrict_to_stars is not None
+                else SQL("TRUE")
+            )
         )
-        .limit(limit)
+        .limit(None if restrict_to_stars is not None else limit)
     )
     # Count before converting to dicts (peewee .count() doesn't work well with .dicts())
     q_total = q_base.count()
@@ -940,8 +1073,8 @@ def parse_apogee_coadd_spectrum_data(q, source_keys, queue, description, k=1000,
         total = q.count()
     if total > 0:
         queue.put(dict(description=description, total=total, completed=0))
-        # Keys to remove (source-only, except catalogid/sdss_id/healpix which are kept)
-        keys_to_remove = set(source_keys) - {"catalogid", "sdss_id", "healpix"}
+        # Keys to remove (source-only, except catalogid/healpix which are kept)
+        keys_to_remove = set(source_keys) - {"catalogid", "healpix"}
         for i, r in enumerate(q.iterator()):
             # Remove source-only keys
             for key in keys_to_remove:
@@ -1019,7 +1152,7 @@ def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[
             Visit.fiberid.alias("fiber"),
             Visit.jd,
             Visit.dateobs.alias("date_obs"),
-            Visit.starflag.alias("spectrum_flags"),
+            Visit.starflag.alias("visit_flags"),
             Visit.ra.alias("input_ra"),
             Visit.dec.alias("input_dec"),
             Visit.snr,
@@ -1149,7 +1282,31 @@ def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[
         .where(ApogeeVisitSpectrum.spectrum_pk.is_null())
         .exists()
     )
+    queue.put(Ellipsis)
+    return None
 
+    
+def migrate_sdss4_dr17_apogee_coadded_spectra_from_visits(batch_size: Optional[int] = 10_000, queue=None):
+    """
+    Derive DR17 APOGEE coadded (apStar) spectra from already-ingested `ApogeeVisitSpectrum`
+    rows and `Source.sdss4_apogee_id`.
+ 
+    This MUST be run after both:
+      - `migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb` (populates ApogeeVisitSpectrum)
+      - `migrate_sdss4_apogee_id` (populates Source.sdss4_apogee_id)
+ 
+    since coadds are matched to sources via `Source.sdss4_apogee_id`. Calling this before
+    `Source.sdss4_apogee_id` is populated will silently produce zero coadded spectra --
+    the lookup dict will simply be empty and every row will fail to match.
+    """
+    from astra.models.apogee import ApogeeVisitSpectrum, ApogeeCoaddedSpectrumInApStar
+    from astra.models.base import database
+    from astra.models.source import Source
+    from astra.migrations.sdss5db.catalogdb import AllStar_DR17_synspec_rev1 as Star
+ 
+    if queue is None:
+        queue = ProgressContext()
+ 
     # Ingest ApogeeCoadded
     # Derive coadded spectra from already-ingested visit spectra (local DB) instead of
     # re-querying the remote catalogdb, which is much faster
@@ -1199,7 +1356,7 @@ def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[
             Star.rv_flag.alias("doppler_flags"),
             Star.rv_ccfwhm.alias("ccfwhm"),
             Star.rv_autofwhm.alias("autofwhm"),
-            Star.starflag.alias("spectrum_flags"),
+            Star.starflag.alias("star_flags"),
         )
         .dicts()
     )
@@ -1270,7 +1427,7 @@ def migrate_sdss4_dr17_apogee_spectra_from_sdss5_catalogdb(batch_size: Optional[
                     ApogeeCoaddedSpectrumInApStar.doppler_flags,
                     ApogeeCoaddedSpectrumInApStar.ccfwhm,
                     ApogeeCoaddedSpectrumInApStar.autofwhm,
-                    ApogeeCoaddedSpectrumInApStar.spectrum_flags,
+                    ApogeeCoaddedSpectrumInApStar.star_flags,
                 ),
                 update={
                     ApogeeCoaddedSpectrumInApStar.modified: datetime.now()
@@ -1329,7 +1486,7 @@ def update_apogee_combined_spectra_from_coadds(batch_size=500, queue=None):
         "snr",
         "mean_fiber",
         "std_fiber",
-        "spectrum_flags",
+        "star_flags",
         "v_rad",
         "e_v_rad",
         "std_v_rad",
@@ -1342,9 +1499,8 @@ def update_apogee_combined_spectra_from_coadds(batch_size=500, queue=None):
         "doppler_e_fe_h",
         "doppler_rchi2",
         "doppler_flags",
-        "xcorr_v_rad",
-        "xcorr_v_rel",
-        "xcorr_e_v_rel",
+        # No xcorr_* here: neither model carries them at the star level, because
+        # apogee_drp.star has no cross-correlation velocity columns.
         "ccfwhm",
         "autofwhm",
         "n_components",

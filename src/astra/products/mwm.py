@@ -38,10 +38,10 @@ from astra.products.boss import prepare_boss_resampled_visit_and_coadd_spectra
 @task
 def create_mwmVisit_and_mwmStar_products(
     sources: Iterable[Source],
-    apreds: Optional[Iterable[str]] = ("1.5", "dr17"),
+    apreds: Optional[Iterable[str]] = ("1.6", "dr17"),
     run2ds: Optional[Iterable[str]] = ("v6_2_1", ),
     max_processes: Optional[int] = 4,
-    overwrite: bool = True,
+    overwrite: bool = False,
     **kwargs
 ) -> Iterable[MWMSpectrumProductStatus]:
 
@@ -179,7 +179,7 @@ def _create_mwmVisit_and_mwmStar_products(
         exists = os.path.exists(mwmStar_path) or os.path.exists(mwmVisit_path)
         t_path_check += time()
         if not overwrite and exists:
-            return (source.pk, True, os.path.exists(mwmVisit_path), os.path.exists(mwmStar_path))
+            return (source.pk, False, os.path.exists(mwmVisit_path), os.path.exists(mwmStar_path))
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=VerifyWarning)

@@ -18,6 +18,28 @@ from astra.migrations.utils import ProgressContext
 from astra.utils import log
 
 
+def _drain_and_close(queue) -> None:
+    """Drain any remaining items from a multiprocessing queue and close it.
+
+    Migration tasks (and ``_task_wrapper``) can both emit a completion
+    sentinel, so a queue may still hold messages once the scheduler has seen
+    the first one. Draining and closing here prevents the queue's feeder
+    thread from lingering and blocking interpreter shutdown.
+    """
+    try:
+        while True:
+            queue.get(block=False)
+    except mp.queues.Empty:
+        pass
+    except Exception:
+        pass
+    try:
+        queue.close()
+        queue.cancel_join_thread()
+    except Exception:
+        pass
+
+
 def _task_wrapper(target, *args, **kwargs):
     """Wrapper to run a migration task in a subprocess and handle exceptions."""
     # Reconnect database in subprocess to avoid stale connections
@@ -173,7 +195,23 @@ class MigrationScheduler:
                 if msg is Ellipsis:
                     # Task completed successfully - mark complete but keep visible
                     self.progress.update(progress_task, description=f"[green]✓[/green] {task.description}")
-                    process.join()
+
+                    # Join with a timeout so a child that fails to shut down
+                    # cleanly (e.g. a leaked process pool deadlocking at exit)
+                    # can't hang the whole scheduler. Fall back to terminate.
+                    process.join(timeout=30)
+                    if process.is_alive():
+                        log.warning(
+                            f"Task {name!r} reported completion but did not exit "
+                            f"within 30s; terminating."
+                        )
+                        process.terminate()
+                        process.join(timeout=5)
+
+                    # Drain and close the queue so leftover messages (e.g. the
+                    # duplicate completion sentinel) don't leave an orphaned
+                    # feeder thread alive at interpreter exit.
+                    _drain_and_close(queue)
 
                     # Clean up any subtask state for this task
                     for subtask_id in list(self.subtasks.keys()):

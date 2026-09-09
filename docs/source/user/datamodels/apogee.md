@@ -44,7 +44,8 @@ An individual visit spectrum from the APOGEE data reduction pipeline, stored in 
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `spectrum_flags` | BitField | Bit field encoding quality warnings |
+| `visit_flags` | BitField | Bit field encoding quality warnings from apVisit product |
+| `star_flags` | BitField | Bit field encoding quality warnings from apStar product |
 | `flag_bad_pixels` | bit 0 | Spectrum has many bad pixels |
 | `flag_bright_neighbor` | bit 2 | Star has a neighbor more than 10x brighter |
 | `flag_very_bright_neighbor` | bit 3 | Star has a neighbor more than 100x brighter |

@@ -209,6 +209,16 @@ def pixel_weighted_spectrum(
             continuum[v, finite] = smooth_filter(flux[v, finite])
 
 
+    # A single non-finite (visit, pixel) entry must not poison the sum for every other
+    # visit at that pixel: flux * ivar is NaN wherever flux is NaN, *regardless of ivar*
+    # (even NaN * 0 = NaN), and np.sum propagates that NaN across the whole axis. Zero out
+    # non-finite entries first so a bad visit just drops out of the weighted average at
+    # that pixel instead of nan-ing out the coadd there even when other visits are fine.
+    bad = ~np.isfinite(flux) | ~np.isfinite(ivar)
+    if np.any(bad):
+        flux = np.where(bad, 0, flux)
+        ivar = np.where(bad, 0, ivar)
+
     #cont = np.median(continuum, axis=0)  # TODO: is this right?
     stacked_ivar = np.sum(ivar, axis=0)
     with np.errstate(divide="ignore", invalid="ignore"):

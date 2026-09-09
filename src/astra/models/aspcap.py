@@ -49,7 +49,14 @@ class ASPCAPPixelArrayAccessor(BasePixelArrayAccessor):
                     species = label[:-2] if label.endswith("_h") else label
                     try:
                         masked_model_flux = instance._get_output_pixel_array(f"abundances", f"{species.title()}/rectified_model_flux.output")
-                    except FileNotFoundError:
+                    except (FileNotFoundError, LookupError, ValueError):
+                        # FileNotFoundError: this species was never run for this grid.
+                        # LookupError: FERRE silently dropped this star's row for this
+                        #   species entirely (see `_find_pixel_array_row`).
+                        # ValueError: the row was found, but its data is corrupted on
+                        #   disk (e.g. a partial/garbled write) and can't be parsed.
+                        # All three mean "no usable data for this star+species" -- fall
+                        # back to NaN rather than let one bad star take down the batch.
                         instance.__pixel_data__.setdefault(self.name, np.nan * np.ones(8575))
                     else:
                         instance.__pixel_data__.setdefault(self.name, instance._unmask_pixel_array(masked_model_flux))
@@ -184,11 +191,6 @@ class ASPCAP(PipelineOutputMixin):
     e_c_h = FloatField(null=True, help_text=Glossary.e_c_h)
     c_h_flags = BitField(default=0, help_text=Glossary.c_h_flags)
     c_h_rchi2 = FloatField(null=True, help_text=Glossary.c_h_rchi2)
-    flag_c_h_upper_limit_t1 = c_h_flags.flag(2**0, "At least one line is an upper limit by the 1% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_c_h_upper_limit_t2 = c_h_flags.flag(2**1, "At least one line is an upper limit by the 2% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_c_h_upper_limit_t3 = c_h_flags.flag(2**2, "At least one line is an upper limit by the 3% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_c_h_upper_limit_t4 = c_h_flags.flag(2**3, "At least one line is an upper limit by the 4% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_c_h_upper_limit_t5 = c_h_flags.flag(2**4, "At least one line is an upper limit by the 5% threshold in Hayes et al. (2022, ApJ, 262, 34)")
     flag_c_h_censored_high_teff = c_h_flags.flag(2**5, "Censored value because abundances known to be wrong for this Teff")
     flag_c_h_censored_low_teff_vmicro = c_h_flags.flag(2**6, "Censored value because it has low Teff and v_micro")
     flag_c_h_censored_unphysical = c_h_flags.flag(2**7, "Censored value because FERRE returned unphysical value")
@@ -336,11 +338,6 @@ class ASPCAP(PipelineOutputMixin):
     e_n_h = FloatField(null=True, help_text=Glossary.e_n_h)
     n_h_flags = BitField(default=0, help_text=Glossary.n_h_flags)
     n_h_rchi2 = FloatField(null=True, help_text=Glossary.n_h_rchi2)
-    flag_n_h_upper_limit_t1 = n_h_flags.flag(2**0, "At least one line is an upper limit by the 1% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_n_h_upper_limit_t2 = n_h_flags.flag(2**1, "At least one line is an upper limit by the 2% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_n_h_upper_limit_t3 = n_h_flags.flag(2**2, "At least one line is an upper limit by the 3% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_n_h_upper_limit_t4 = n_h_flags.flag(2**3, "At least one line is an upper limit by the 4% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_n_h_upper_limit_t5 = n_h_flags.flag(2**4, "At least one line is an upper limit by the 5% threshold in Hayes et al. (2022, ApJ, 262, 34)")
     flag_n_h_censored_high_teff = n_h_flags.flag(2**5, "Censored value because abundances known to be wrong for this Teff")
     flag_n_h_censored_low_teff_vmicro = n_h_flags.flag(2**6, "Censored value because it has low Teff and v_micro")
     flag_n_h_censored_unphysical = n_h_flags.flag(2**7, "Censored value because FERRE returned unphysical value")
@@ -353,11 +350,6 @@ class ASPCAP(PipelineOutputMixin):
     e_o_h = FloatField(null=True, help_text=Glossary.e_o_h)
     o_h_flags = BitField(default=0, help_text=Glossary.o_h_flags)
     o_h_rchi2 = FloatField(null=True, help_text=Glossary.o_h_rchi2)
-    flag_o_h_upper_limit_t1 = o_h_flags.flag(2**0, "At least one line is an upper limit by the 1% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_o_h_upper_limit_t2 = o_h_flags.flag(2**1, "At least one line is an upper limit by the 2% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_o_h_upper_limit_t3 = o_h_flags.flag(2**2, "At least one line is an upper limit by the 3% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_o_h_upper_limit_t4 = o_h_flags.flag(2**3, "At least one line is an upper limit by the 4% threshold in Hayes et al. (2022, ApJ, 262, 34)")
-    flag_o_h_upper_limit_t5 = o_h_flags.flag(2**4, "At least one line is an upper limit by the 5% threshold in Hayes et al. (2022, ApJ, 262, 34)")
     flag_o_h_censored_high_teff = o_h_flags.flag(2**5, "Censored value because abundances known to be wrong for this Teff")
     flag_o_h_censored_low_teff_vmicro = o_h_flags.flag(2**6, "Censored value because it has low Teff and v_micro")
     flag_o_h_censored_unphysical = o_h_flags.flag(2**7, "Censored value because FERRE returned unphysical value")
@@ -489,7 +481,10 @@ class ASPCAP(PipelineOutputMixin):
     flag_high_rchi2 = result_flags.flag(2**25, help_text="Reduced chi-squared is greater than 1000")
     flag_low_snr = result_flags.flag(2**26, help_text="S/N is less than 20")
     flag_high_std_v_rad = result_flags.flag(2**27, help_text="Standard deviation of v_rad is greater than 1 km/s")
-    
+    flag_m_h_atm_fe_h_mismatch = result_flags.flag(2**28, help_text="[M/H]_atm - [Fe/H] is greater than 0.1")
+    flag_caused_timeout = result_flags.flag(2**29, help_text="Caused timeout in downstream tasks")
+    flag_affected_by_timeout = result_flags.flag(2**30, help_text="Affected by timeout")
+
     @hybrid_property
     def flag_warn(self):
         return (self.result_flags > 0)
@@ -515,6 +510,7 @@ class ASPCAP(PipelineOutputMixin):
         |   self.flag_potential_ferre_timeout
         |   self.flag_no_suitable_initial_guess
         |   self.flag_spectrum_io_error
+        |   self.flag_m_h_atm_fe_h_mismatch
     )
 
     @flag_bad.expression
@@ -534,6 +530,7 @@ class ASPCAP(PipelineOutputMixin):
         |   self.flag_potential_ferre_timeout
         |   self.flag_no_suitable_initial_guess
         |   self.flag_spectrum_io_error
+        |   self.flag_m_h_atm_fe_h_mismatch
     )
 
     #> Initial parameters
@@ -556,30 +553,39 @@ class ASPCAP(PipelineOutputMixin):
     coarse_c_m_atm = FloatField(null=True, help_text=Glossary.coarse_c_m_atm)
     coarse_n_m_atm = FloatField(null=True, help_text=Glossary.coarse_n_m_atm)
     coarse_ferre_flags = BitField(default=0, help_text="FERRE flags for coarse grid")
-    flag_ferre_fail = coarse_ferre_flags.flag(2**0, help_text="FERRE failed")
-    flag_missing_model_flux = coarse_ferre_flags.flag(2**1, help_text="Missing model fluxes from FERRE")
-    flag_potential_ferre_timeout = coarse_ferre_flags.flag(2**2, help_text="Potentially impacted by FERRE timeout")
-    flag_no_suitable_initial_guess = coarse_ferre_flags.flag(2**3, help_text="FERRE not executed because there's no suitable initial guess")
-    flag_spectrum_io_error = coarse_ferre_flags.flag(2**4, help_text="Error accessing spectrum pixel data")
-    flag_teff_grid_edge_warn = coarse_ferre_flags.flag(2**5)
-    flag_teff_grid_edge_bad = coarse_ferre_flags.flag(2**6)
-    flag_logg_grid_edge_warn = coarse_ferre_flags.flag(2**7)
-    flag_logg_grid_edge_bad = coarse_ferre_flags.flag(2**8)
-    flag_v_micro_grid_edge_warn = coarse_ferre_flags.flag(2**9)
-    flag_v_micro_grid_edge_bad = coarse_ferre_flags.flag(2**10)
-    flag_v_sini_grid_edge_warn = coarse_ferre_flags.flag(2**11)
-    flag_v_sini_grid_edge_bad = coarse_ferre_flags.flag(2**12)
-    flag_m_h_atm_grid_edge_warn = coarse_ferre_flags.flag(2**13)
-    flag_m_h_atm_grid_edge_bad = coarse_ferre_flags.flag(2**14)
-    flag_alpha_m_grid_edge_warn = coarse_ferre_flags.flag(2**15)
-    flag_alpha_m_grid_edge_bad = coarse_ferre_flags.flag(2**16)
-    flag_c_m_atm_grid_edge_warn = coarse_ferre_flags.flag(2**17)
-    flag_c_m_atm_grid_edge_bad = coarse_ferre_flags.flag(2**18)
-    flag_n_m_atm_grid_edge_warn = coarse_ferre_flags.flag(2**19)
-    flag_n_m_atm_grid_edge_bad = coarse_ferre_flags.flag(2**20)    
-    flag_caused_timeout = coarse_ferre_flags.flag(2**21, help_text="Caused timeout in downstream tasks")
-    flag_multiple_equally_good_coarse_results = coarse_ferre_flags.flag(2**22, help_text="Multiple equally good coarse results")
-    flag_no_good_coarse_result = coarse_ferre_flags.flag(2**23, "No good result from coarse grid")
+    # Every flag here is prefixed `flag_coarse_` so that no name collides with one on `result_flags`
+    # (or with a key in a params/abundance result dict). Without the prefix the later definition here
+    # shadowed the `result_flags` one of the same name, so `ASPCAP(**params_result_dict)` silently
+    # filed every params-stage flag into this coarse column and left `result_flags` at zero.
+    #
+    # Bit positions are deliberately identical to `FerreCoarse.ferre_flags`, because this column is
+    # written as a straight integer copy of it (see `coarse_ferre_flags=coarse.ferre_flags` in the
+    # ASPCAP pipeline). If you add a flag to one, add it at the same bit in the other.
+    flag_coarse_ferre_fail = coarse_ferre_flags.flag(2**0, help_text="FERRE failed on the coarse grid")
+    flag_coarse_missing_model_flux = coarse_ferre_flags.flag(2**1, help_text="Missing model fluxes from FERRE on the coarse grid")
+    flag_coarse_potential_ferre_timeout = coarse_ferre_flags.flag(2**2, help_text="Coarse grid potentially impacted by FERRE timeout")
+    flag_coarse_no_suitable_initial_guess = coarse_ferre_flags.flag(2**3, help_text="Coarse grid not executed because there's no suitable initial guess")
+    flag_coarse_spectrum_io_error = coarse_ferre_flags.flag(2**4, help_text="Error accessing spectrum pixel data on the coarse grid")
+    flag_coarse_teff_grid_edge_warn = coarse_ferre_flags.flag(2**5, help_text="Coarse Teff is within one step from the grid edge")
+    flag_coarse_teff_grid_edge_bad = coarse_ferre_flags.flag(2**6, help_text="Coarse Teff is within 1/8th of a step from the grid edge")
+    flag_coarse_logg_grid_edge_warn = coarse_ferre_flags.flag(2**7, help_text="Coarse logg is within one step from the grid edge")
+    flag_coarse_logg_grid_edge_bad = coarse_ferre_flags.flag(2**8, help_text="Coarse logg is within 1/8th of a step from the grid edge")
+    flag_coarse_v_micro_grid_edge_warn = coarse_ferre_flags.flag(2**9, help_text="Coarse v_micro is within one step from the grid edge")
+    flag_coarse_v_micro_grid_edge_bad = coarse_ferre_flags.flag(2**10, help_text="Coarse v_micro is within 1/8th of a step from the grid edge")
+    flag_coarse_v_sini_grid_edge_warn = coarse_ferre_flags.flag(2**11, help_text="Coarse v_sini is within one step from the highest grid edge")
+    flag_coarse_v_sini_grid_edge_bad = coarse_ferre_flags.flag(2**12, help_text="Coarse v_sini is within 1/8th of a step from the highest grid edge")
+    flag_coarse_m_h_atm_grid_edge_warn = coarse_ferre_flags.flag(2**13, help_text="Coarse [M/H] is within one step from the grid edge")
+    flag_coarse_m_h_atm_grid_edge_bad = coarse_ferre_flags.flag(2**14, help_text="Coarse [M/H] is within 1/8th of a step from the grid edge")
+    flag_coarse_alpha_m_grid_edge_warn = coarse_ferre_flags.flag(2**15, help_text="Coarse [alpha/M] is within one step from the grid edge")
+    flag_coarse_alpha_m_grid_edge_bad = coarse_ferre_flags.flag(2**16, help_text="Coarse [alpha/M] is within 1/8th of a step from the grid edge")
+    flag_coarse_c_m_atm_grid_edge_warn = coarse_ferre_flags.flag(2**17, help_text="Coarse [C/M] is within one step from the grid edge")
+    flag_coarse_c_m_atm_grid_edge_bad = coarse_ferre_flags.flag(2**18, help_text="Coarse [C/M] is within 1/8th of a step from the grid edge")
+    flag_coarse_n_m_atm_grid_edge_warn = coarse_ferre_flags.flag(2**19, help_text="Coarse [N/M] is within one step from the grid edge")
+    flag_coarse_n_m_atm_grid_edge_bad = coarse_ferre_flags.flag(2**20, help_text="Coarse [N/M] is within 1/8th of a step from the grid edge")
+    flag_coarse_caused_timeout = coarse_ferre_flags.flag(2**21, help_text="Caused timeout in the coarse stage")
+    flag_coarse_affected_by_timeout = coarse_ferre_flags.flag(2**22, help_text="Coarse result affected by a timeout")
+    flag_multiple_equally_good_coarse_results = coarse_ferre_flags.flag(2**23, help_text="Multiple equally good coarse results")
+    flag_no_good_coarse_result = coarse_ferre_flags.flag(2**24, help_text="No good result from coarse grid")
 
     coarse_rchi2 = FloatField(null=True, help_text=Glossary.coarse_rchi2)
     coarse_penalized_rchi2 = FloatField(null=True, help_text="Penalized reduced chi-squared for coarse grid")
@@ -677,14 +683,54 @@ class ASPCAP(PipelineOutputMixin):
     def _get_input_pixel_array(self, stage, name):
         return np.loadtxt(**self._get_pixel_array_kwds(stage, name))
 
+    def _find_pixel_array_row(self, stage, name):
+        """
+        Locate the row in a FERRE output file that corresponds to this instance by
+        matching the embedded (source_pk, spectrum_pk) identity, rather than assuming
+        the row's position matches `ferre_index`.
+
+        `ferre_index` records this spectrum's position in the FERRE *input* list. That
+        matches the *output* file's row position only if every row in the input made it
+        into the output -- if FERRE silently drops a different star's row somewhere
+        earlier in the same output file (e.g. a one-off numerical failure for one
+        abundance species), every subsequent row shifts by one and position-based
+        lookup silently returns the wrong star's data.
+        """
+        fname = f"{self.pwd}/{stage}/{self.short_grid_name}/{name}"
+        names = np.atleast_1d(np.loadtxt(fname, usecols=(0, ), dtype=str))
+        for row, row_name in enumerate(names):
+            try:
+                meta = parse_ferre_spectrum_name(row_name)
+            except Exception:
+                # A malformed/corrupted name in some other row shouldn't stop the search.
+                continue
+            if meta["source_pk"] == self.source_pk and meta["spectrum_pk"] == self.spectrum_pk:
+                return row
+        raise LookupError(f"no row in {fname} matches source_pk={self.source_pk}, spectrum_pk={self.spectrum_pk}")
+
     def _get_output_pixel_array(self, stage, name, P=7514):
         kwds = self._get_pixel_array_kwds(stage, name)
-        name, = np.atleast_1d(np.loadtxt(usecols=(0, ), dtype=str, **kwds))
-        array = np.loadtxt(usecols=range(1, 1+P), **kwds)
-        meta = parse_ferre_spectrum_name(name)
-        assert int(meta["source_pk"]) == self.source_pk
-        assert int(meta["spectrum_pk"]) == self.spectrum_pk
+        try:
+            row_name, = np.atleast_1d(np.loadtxt(usecols=(0, ), dtype=str, **kwds))
+            meta = parse_ferre_spectrum_name(row_name)
+            matched = (meta["source_pk"] == self.source_pk and meta["spectrum_pk"] == self.spectrum_pk)
+        except (ValueError, IndexError):
+            # skiprows landed past the end of the file, or the row there didn't parse
+            # as a valid FERRE spectrum name at all.
+            matched = False
+
+        if not matched:
+            # Position-based lookup landed on the wrong row, or off the end of the file
+            # entirely (see `_find_pixel_array_row`). Fall back to finding this spectrum
+            # by its embedded identity.
+            kwds["skiprows"] = self._find_pixel_array_row(stage, name)
+            row_name, = np.atleast_1d(np.loadtxt(usecols=(0, ), dtype=str, **kwds))
+            meta = parse_ferre_spectrum_name(row_name)
+
+        assert meta["source_pk"] == self.source_pk
+        assert meta["spectrum_pk"] == self.spectrum_pk
         assert int(meta["index"]) == self.ferre_index
+        array = np.loadtxt(usecols=range(1, 1+P), **kwds)
         return array
 
 

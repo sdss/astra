@@ -42,3 +42,31 @@ class PipelineOutputMixin(BaseModel):
 
         kwds.update(spectrum_pk=spectrum.spectrum_pk, source_pk=spectrum.source_pk)
         return cls(**kwds)
+
+
+class AstraSpectrumProductStatus(BaseModel):
+
+    source_pk = ForeignKeyField(Source, null=False, index=True, lazy_load=False, column_name="source_pk")
+    pipeline = TextField(index=True)
+
+    #> Astra Metadata
+    task_pk = AutoField()
+    v_astra = IntegerField(default=version_string_to_integer(__version__))
+    created = DateTimeField(default=datetime.datetime.now)
+    modified = DateTimeField(default=datetime.datetime.now)
+    t_elapsed = FloatField(null=True)
+    t_overhead = FloatField(null=True)
+    tag = TextField(default="", index=True)
+    # The /1000 here is set in `astra.utils.version_string_to_integer` and `astra.utils.version_integer_to_string`.
+    v_astra_major_minor = IntegerField(constraints=[SQL("GENERATED ALWAYS AS (v_astra / 1000) STORED")], _hidden=True)
+
+    flags = BitField(default=0, help_text="Flags for the status of the astraStar/astraVisit products")
+    flag_created_astra_star = flags.flag(2**0, "astraStar product was created")
+    flag_created_astra_visit = flags.flag(2**1, "astraVisit product was created")
+    flag_skipped_because_no_pipeline_result = flags.flag(2**2, "Source was skipped because it has no result from this pipeline")
+    flag_attempted_but_exception = flags.flag(2**3, "An exception was raised during processing")
+
+    class Meta:
+        constraints = [
+            SQL("UNIQUE (source_pk, pipeline, v_astra_major_minor)")
+        ]

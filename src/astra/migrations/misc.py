@@ -452,13 +452,13 @@ def update_galactic_coordinates(queue=None, **kwargs):
     sql = f"""
         UPDATE {table}
         SET
-            l = DEGREES(
+            l = 122.93192 - DEGREES(
                 ATAN2(
                     SIN(RADIANS(ra - 192.85948)),
-                    COS(RADIANS(dec)) * TAN(RADIANS(27.12825))
-                    - SIN(RADIANS(dec)) * COS(RADIANS(ra - 192.85948))
+                    TAN(RADIANS(dec)) * COS(RADIANS(27.12825))
+                    - SIN(RADIANS(27.12825)) * COS(RADIANS(ra - 192.85948))
                 )
-            ) + 122.93192,
+            ),
             b = DEGREES(
                 ASIN(
                     SIN(RADIANS(dec)) * SIN(RADIANS(27.12825))

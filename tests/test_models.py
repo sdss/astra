@@ -83,3 +83,44 @@ def test_pipeline_replace_on_conflict():
     assert r3["spectrum_pk"] == r1["spectrum_pk"]
     assert r3["task_pk"] == r1["task_pk"]
 
+
+def test_pipeline_replace_on_conflict_scoped_by_pipeline():
+    """
+    Status models that add a `pipeline` column (e.g. `AstraSpectrumProductStatus`) must
+    include it in the ON CONFLICT target, since one source can have a row per pipeline.
+    Without this, upserting a second pipeline's row for the same source either crashes
+    (the ON CONFLICT target doesn't match the table's actual unique constraint) or wrongly
+    collides with a different pipeline's row.
+    """
+    from typing import Iterable
+    from astra import task
+    from astra.models.source import Source
+    from astra.models.pipeline import AstraSpectrumProductStatus
+
+    @task
+    def dummy_status_task(sources, pipeline="A") -> Iterable[AstraSpectrumProductStatus]:
+        for source in sources:
+            yield AstraSpectrumProductStatus(source_pk=source.pk, pipeline=pipeline)
+
+    for model in (Source, AstraSpectrumProductStatus):
+        model.create_table()
+
+    source = Source.create()
+
+    # Two different pipelines for the same source must not collide with each other.
+    r_a = list(dummy_status_task([source], pipeline="A"))[0].__data__
+    r_b = list(dummy_status_task([source], pipeline="B"))[0].__data__
+    assert r_a["task_pk"] != r_b["task_pk"]
+    assert AstraSpectrumProductStatus.select().where(
+        (AstraSpectrumProductStatus.source_pk == source.pk)
+    &   (AstraSpectrumProductStatus.pipeline.in_(["A", "B"]))
+    ).count() == 2
+
+    # Re-running the same pipeline for the same source must upsert (replace), not duplicate.
+    r_a2 = list(dummy_status_task([source], pipeline="A"))[0].__data__
+    assert r_a2["task_pk"] == r_a["task_pk"]
+    assert AstraSpectrumProductStatus.select().where(
+        (AstraSpectrumProductStatus.source_pk == source.pk)
+    &   (AstraSpectrumProductStatus.pipeline.in_(["A", "B"]))
+    ).count() == 2
+

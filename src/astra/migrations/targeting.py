@@ -1,4 +1,6 @@
 import datetime
+import re
+from importlib import resources
 from peewee import fn, chunked
 from tqdm import tqdm
 from astra.models.base import database
@@ -9,7 +11,16 @@ from astropy.table import join
 from astra.migrations.utils import NoQueue
 
 def get_carton_to_bit_mapping():
-    return Table.read(expand_path("$MWM_ASTRA/aux/targeting-bits/sdss5_target_3_with_groups.csv"))
+    """Read the carton-to-bit mapping from the highest-versioned file shipped with sdss-semaphore."""
+    etc_dir = resources.files("sdss_semaphore").joinpath("etc")
+    pattern = re.compile(r"sdss5_target_(\d+)_with_groups\.csv$")
+    candidates = [
+        (int(match.group(1)), entry)
+        for entry in etc_dir.iterdir()
+        if (match := pattern.match(entry.name))
+    ]
+    _, path = max(candidates, key=lambda x: x[0])
+    return Table.read(path)
 
 def migrate_targeting_cartons(where=(Source.sdss5_target_flags == b""), batch_size=500, queue=None):
 

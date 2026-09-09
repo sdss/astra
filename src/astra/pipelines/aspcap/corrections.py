@@ -367,7 +367,7 @@ def flag_upper_limits_by_hayes_2022():
 
     elements = set(coeff["Element"])
     N_elements = len(elements)
-    elements = ("P", "C", "Ce", "Cu", "N", "Na", "Nd", "O", "S", "V")
+    elements = ("P", "Ce", "Cu", "Na", "Nd", "S", "V")
     T = 5
     with tqdm(total=T * N_elements) as pb:
         for element in elements:
@@ -480,6 +480,19 @@ def apply_flags():
         )
         .execute()
     )
+    (
+        ASPCAP
+        .update(
+            result_flags=ASPCAP.flag_m_h_atm_fe_h_mismatch.set()
+        )
+        .where(
+            (ASPCAP.m_h_atm.is_null(False))
+        &   (ASPCAP.fe_h.is_null(False))
+        &   ((ASPCAP.m_h_atm - ASPCAP.fe_h) > 0.1)
+        &   (ASPCAP.v_astra_major_minor >= 7)
+        )
+        .execute()
+    )
     q = (
         ASPCAP
         .select(
@@ -551,6 +564,7 @@ def apply_flags():
             |   ASPCAP.flag_potential_ferre_timeout
             |   ASPCAP.flag_no_suitable_initial_guess
             |   ASPCAP.flag_spectrum_io_error
+            |   ASPCAP.flag_m_h_atm_fe_h_mismatch
         )
         )
     )

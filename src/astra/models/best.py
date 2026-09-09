@@ -38,6 +38,7 @@ class MWMBest(PipelineOutputMixin):
     gri_gaia_transform_flags = BitField(default=0, help_text="Flags for provenance of ugriz photometry")
     zwarning_flags = BitField(default=0, help_text="BOSS DRP warning flags") 
     spectrum_flags = BitField(default=0, help_text=Glossary.spectrum_flags)
+    star_flags = BitField(default=0, help_text=Glossary.star_flags)
 
     #> Observing Span
     min_mjd = IntegerField(null=True, help_text="Minimum MJD of visits")
@@ -72,9 +73,8 @@ class MWMBest(PipelineOutputMixin):
     doppler_flags = BitField(default=0, help_text="DOPPLER flags") # TODO: is this actually STARFLAG from the DRP?
 
     #> Radial Velocity (X-Correlation)
-    xcorr_v_rad = FloatField(null=True, help_text=Glossary.v_rad)
-    xcorr_v_rel = FloatField(null=True, help_text=Glossary.v_rel)
-    xcorr_e_v_rel = FloatField(null=True, help_text=Glossary.e_v_rel)
+    # No xcorr_* fields: this is sourced from ApogeeCoaddedSpectrumInApStar, and
+    # apogee_drp.star has no cross-correlation velocity columns to migrate.
     ccfwhm = FloatField(null=True, help_text=Glossary.ccfwhm)
     autofwhm = FloatField(null=True, help_text=Glossary.autofwhm)
     n_components = IntegerField(null=True, help_text=Glossary.n_components)    

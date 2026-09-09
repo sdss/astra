@@ -12,8 +12,16 @@ from astra.models.arjl import (
     ARJLDDRestFrameVisitSpectrum,
     ARJLTHVisitSpectrum,
     ARJLDDVisitSpectrum,
+    ARJLTHStarLinesVisitSpectrum,
+    ARJLDDStarLinesVisitSpectrum,
+    ARJLTHStarLinesRestFrameVisitSpectrum,
+    ARJLDDStarLinesRestFrameVisitSpectrum,
+    ARJLTHCoaddedSpectrum,
+    ARJLDDCoaddedSpectrum,
+    ARJLTHStarLinesCoaddedSpectrum,
+    ARJLDDStarLinesCoaddedSpectrum,
 )
-
+#from astra.models.aspcap import ASPCAP
 """
 from astra.models.apogeenet import ApogeeNet
 from astra.models.apogeenet_v2 import ApogeeNetV2

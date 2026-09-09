@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astra"
-version = "0.8.0" 
+version = "1.0.0" 
 readme = "README.md"
 license = "GPL-3.0-or-later"
 description = "Analysis framework for SDSS-V / MWM." 
@@ -16,7 +16,7 @@ maintainers = [
   {name = "Andy Casey", email = "andrew.casey@monash.edu"},
 ]
 dependencies = [
-  "numpy",
+  "numpy<2.3", # required by scipy<1.15.0
   "scipy<1.15.0", # https://github.com/scipy/scipy/issues/22325#issuecomment-2676345163
   "astropy",
   "tqdm",
@@ -36,7 +36,10 @@ dependencies = [
   "thread",
   "typer",
   "dustmaps",
-  "fitsio"
+  "fitsio",
+  "torch",
+  "astronn",
+  "sdss-semaphore",
 ]
 #requires-python = ">= 3.9"
 

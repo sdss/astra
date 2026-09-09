@@ -204,6 +204,8 @@ class Glossary(BaseGlossary):
 
 
     spectrum_flags = "Data reduction pipeline flags for this spectrum"
+    visit_flags = "spectrum_flags at the apVisit product level"
+    star_flags = "spectrum_flags at the apStar product level"
     result_flags = "Flags describing the results"
     
     plug_ra = "Right ascension of plug position [deg]"

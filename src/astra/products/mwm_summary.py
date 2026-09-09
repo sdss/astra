@@ -248,6 +248,7 @@ def create_mwm_targets_product(
         q = q.where(where)
     q = (
         q
+        .order_by(Source.sdss_id.asc())
         .limit(limit)
         .dicts()
     )
@@ -530,7 +531,7 @@ def _create_summary_product(
         if where: # Need to check, otherwise it requires AND with previous where.
             q = q.where(where)
 
-        q = q.limit(limit).dicts()
+        q = q.order_by(Source.sdss_id.asc()).limit(limit).dicts()
 
         hdu = get_binary_table_hdu(
             q,

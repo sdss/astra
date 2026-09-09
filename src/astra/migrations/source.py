@@ -45,6 +45,9 @@ def merge_sources(keep_pk: int, remove_pk: int, database=None) -> None:
     :param remove_pk: The source pk to remove (will be deleted after migration)
     :param database: Optional database connection (defaults to astra database)
     """
+    if keep_pk == remove_pk:
+        return
+
     if database is None:
         from astra.models.base import database
 
@@ -519,7 +522,7 @@ def link_apogee_spectra_to_sources(batch_size: int = 1000, queue=None):
     3. catalogid fields (fallback)
     """
     from astra.models.base import database
-    from astra.models.apogee import ApogeeVisitSpectrum, ApogeeCoaddedSpectrumInApStar
+    from astra.models.apogee import ApogeeVisitSpectrum, ApogeeVisitSpectrumInApStar, ApogeeCoaddedSpectrumInApStar
     from astra.models.source import Source
 
     queue = queue or ProgressContext()
@@ -570,6 +573,36 @@ def link_apogee_spectra_to_sources(batch_size: int = 1000, queue=None):
                 n_linked += updated
                 link_step.update(advance=updated)
 
+    # Now link ApogeeVisitSpectrumInApStar records. These don't carry their own catalogid,
+    # but each one points back to the ApogeeVisitSpectrum it was derived from via
+    # drp_spectrum_pk, so once that's linked we can just copy source_pk across. This has
+    # to be a real linking step (not just relying on migrate_apogee_visits_in_apStar_files
+    # to copy source_pk at insert time) because that function runs concurrently with this
+    # one and reads the coadd's source_pk before it has necessarily been set.
+    unlinked_in_apstar_count = (
+        ApogeeVisitSpectrumInApStar
+        .select()
+        .where(ApogeeVisitSpectrumInApStar.source.is_null())
+        .count()
+    )
+
+    if unlinked_in_apstar_count > 0:
+        with queue.subtask("Linking APOGEE visit-in-apStar spectra to sources", total=unlinked_in_apstar_count) as in_apstar_step:
+            with database.atomic():
+                updated = (
+                    ApogeeVisitSpectrumInApStar
+                    .update(source_pk=ApogeeVisitSpectrum.source_pk)
+                    .from_(ApogeeVisitSpectrum)
+                    .where(
+                        ApogeeVisitSpectrumInApStar.source.is_null()
+                        & (ApogeeVisitSpectrumInApStar.drp_spectrum_pk == ApogeeVisitSpectrum.spectrum_pk)
+                        & ApogeeVisitSpectrum.source.is_null(False)
+                    )
+                    .execute()
+                )
+            n_linked += updated
+            in_apstar_step.update(advance=updated)
+
     # Now link coadded spectra
     unlinked_coadd_count = (
         ApogeeCoaddedSpectrumInApStar
@@ -578,8 +611,6 @@ def link_apogee_spectra_to_sources(batch_size: int = 1000, queue=None):
         .count()
     )
 
-    # TODO: not even clear how to link these here... need to
-    """
     if unlinked_coadd_count > 0:
         with queue.subtask("Linking APOGEE coadded spectra to sources", total=unlinked_coadd_count) as coadd_step:
             # Link by catalogid
@@ -598,7 +629,7 @@ def link_apogee_spectra_to_sources(batch_size: int = 1000, queue=None):
                     )
                 n_linked += updated
                 coadd_step.update(advance=updated)
-    """
+
     return n_linked
 
 

@@ -170,34 +170,34 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
 
     #> Statistics and Spectrum Quality
     snr = FloatField(null=True)
-    spectrum_flags = BitField(default=0)
-
+    visit_flags = BitField(default=0)
+    
     # From https://github.com/sdss/apogee_drp/blob/630d3d45ecff840d49cf75ac2e8a31e22b543838/python/apogee_drp/utils/bitmask.py#L110
     # and https://github.com/sdss/apogee/blob/e134409dc14b20f69e68a0d4d34b2c1b5056a901/python/apogee/utils/bitmask.py#L9
-    flag_bad_pixels = spectrum_flags.flag(2**0)
-    flag_commissioning = spectrum_flags.flag(2**1)
-    flag_bright_neighbor = spectrum_flags.flag(2**2)
-    flag_very_bright_neighbor = spectrum_flags.flag(2**3)
-    flag_low_snr = spectrum_flags.flag(2**4)
+    flag_bad_pixels = visit_flags.flag(2**0)
+    flag_commissioning = visit_flags.flag(2**1)
+    flag_bright_neighbor = visit_flags.flag(2**2)
+    flag_very_bright_neighbor = visit_flags.flag(2**3)
+    flag_low_snr = visit_flags.flag(2**4)
     # 4-8 inclusive are not defined
-    flag_persist_high = spectrum_flags.flag(2**9)
-    flag_persist_med = spectrum_flags.flag(2**10)
-    flag_persist_low = spectrum_flags.flag(2**11)
-    flag_persist_jump_pos = spectrum_flags.flag(2**12)
-    flag_persist_jump_neg = spectrum_flags.flag(2**13)
+    flag_persist_high = visit_flags.flag(2**9)
+    flag_persist_med = visit_flags.flag(2**10)
+    flag_persist_low = visit_flags.flag(2**11)
+    flag_persist_jump_pos = visit_flags.flag(2**12)
+    flag_persist_jump_neg = visit_flags.flag(2**13)
     # 14-15 inclusive are not defined
-    flag_suspect_rv_combination = spectrum_flags.flag(2**16)
-    flag_suspect_broad_lines = spectrum_flags.flag(2**17)
-    flag_bad_rv_combination = spectrum_flags.flag(2**18)
-    flag_rv_reject = spectrum_flags.flag(2**19)
-    flag_rv_suspect = spectrum_flags.flag(2**20)
-    flag_multiple_suspect = spectrum_flags.flag(2**21)
-    flag_rv_failure = spectrum_flags.flag(2**22)
-    flag_suspect_rotation = spectrum_flags.flag(2**23)
-    flag_mtpflux_lt_75 = spectrum_flags.flag(2**24)
-    flag_mtpflux_lt_50 = spectrum_flags.flag(2**25)
-
-    flag_missing_or_corrupted_file = spectrum_flags.flag(2**26)
+    flag_suspect_rv_combination = visit_flags.flag(2**16)
+    flag_suspect_broad_lines = visit_flags.flag(2**17)
+    flag_bad_rv_combination = visit_flags.flag(2**18)
+    flag_rv_reject = visit_flags.flag(2**19)
+    flag_rv_suspect = visit_flags.flag(2**20)
+    flag_multiple_suspect = visit_flags.flag(2**21)
+    flag_rv_failure = visit_flags.flag(2**22)
+    flag_suspect_rotation = visit_flags.flag(2**23)
+    flag_mtpflux_lt_75 = visit_flags.flag(2**24)
+    flag_mtpflux_lt_50 = visit_flags.flag(2**25)
+    
+    flag_missing_or_corrupted_file = visit_flags.flag(2**26)
 
     #> Radial Velocity (Doppler)
     v_rad = FloatField(null=True)
@@ -233,7 +233,7 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
 
     @hybrid_property
     def flag_warn(self):
-        return (self.spectrum_flags > 0)
+        return (self.visit_flags > 0)
 
     @classmethod
     def get_path_template(cls, release, telescope):
@@ -242,8 +242,8 @@ class ApogeeVisitSpectrum(BaseModel, SpectrumMixin):
             #    # I fucking hate this project.
             #    template = "$SAS_BASE_DIR/../sdss51/sdsswork/mwm/apogee/spectro/redux/ipl-3-{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits"
             #else:
-            #return "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/apVisit-{apred}-{telescope}-{plate}-{mjd}-{fiber:0>3}.fits"
-            return "$SAS_BASE_DIR/ipl-4/spectro/apogee/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/apVisit-{apred}-{telescope}-{plate}-{mjd}-{fiber:0>3}.fits"
+            # return "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/apVisit-{apred}-{telescope}-{plate}-{mjd}-{fiber:0>3}.fits"
+            return "$SAS_BASE_DIR/ipl-5/spectro/apogee/redux/{apred}/visit/{telescope}/{field}/{plate}/{mjd}/apVisit-{apred}-{telescope}-{plate}-{mjd}-{fiber:0>3}.fits"
         else:
             if telescope == "apo1m":
                 return "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/visit/{telescope}/{field}/{mjd}/apVisit-{apred}-{mjd}-{reduction}.fits"
@@ -361,8 +361,8 @@ class ApogeeVisitSpectrumInApStar(BaseModel, SpectrumMixin):
         #    template = "$SAS_BASE_DIR/../sdss51/sdsswork/mwm/apogee/spectro/redux/ipl-3-{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits"
         #else:
         template = {
-            #"sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
-            "sdss5": "$SAS_BASE_DIR/ipl-4/spectro/apogee/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
+            # "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
+            "sdss5": "$SAS_BASE_DIR/ipl-5/spectro/apogee/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
             "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits"
         }[self.release]
 
@@ -470,7 +470,7 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     snr = FloatField(null=True)
     mean_fiber = FloatField(null=True)
     std_fiber = FloatField(null=True)
-    spectrum_flags = BitField(default=0)
+    star_flags = BitField(default=0)
 
     #> Radial Velocity (Doppler)
     v_rad = FloatField(null=True)
@@ -488,9 +488,10 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     doppler_flags = BitField(default=0)
 
     #> Radial Velocity (X-Correlation)
-    xcorr_v_rad = FloatField(null=True)
-    xcorr_v_rel = FloatField(null=True)
-    xcorr_e_v_rel = FloatField(null=True)
+    # No xcorr_* fields at the star level: apogee_drp.star has no cross-correlation
+    # velocity columns, so there is nothing upstream to migrate. They remain on
+    # ApogeeVisitSpectrum, where apogee_drp.rv_visit does provide
+    # xcorr_vrel/xcorr_vrelerr/xcorr_vrad.
     ccfwhm = FloatField(null=True)
     autofwhm = FloatField(null=True)
     n_components = IntegerField(null=True)
@@ -511,8 +512,8 @@ class ApogeeCoaddedSpectrumInApStar(BaseModel, SpectrumMixin):
     @property
     def path(self):
         template = {
-            #"sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
-            "sdss5": "$SAS_BASE_DIR/ipl-4/spectro/apogee/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
+            # "sdss5": "$SAS_BASE_DIR/sdsswork/mwm/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
+            "sdss5": "$SAS_BASE_DIR/ipl-5/spectro/apogee/redux/{apred}/{apstar}/{telescope}/{healpix_group}/{healpix}/apStar-{apred}-{telescope}-{obj}.fits",
             "dr17": "$SAS_BASE_DIR/dr17/apogee/spectro/redux/{apred}/{apstar}/{telescope}/{field}/{prefix}Star-{apred}-{obj}.fits"
         }[self.release]
 
