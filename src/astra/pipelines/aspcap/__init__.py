@@ -1003,6 +1003,7 @@ def ferre(
                 remaining_relative_paths = paths[current_index + 1:]
 
                 resumed_relative_path = None
+                new_element_nml_path = None
                 if current_relative_path is not None:
                     try:
                         element_dir = os.path.dirname(current_relative_path)
@@ -1071,6 +1072,26 @@ def ferre(
                     for k, v in this_t_elapsed.items():
                         t_elapsed.setdefault(k, [])
                         t_elapsed[k].extend(v)
+
+                    # Fold the rebuilt element's results back into the output files named by its
+                    # ORIGINAL namelist, which is what post-processing reads (post_process_ferre
+                    # walks the original input_list.nml, so it opens C/parameter.output, never
+                    # C/parameter.output.1). Without this the resumed rows are stranded in the
+                    # `.N` files and then overwritten with NaN, because `vaffoff` pads every name
+                    # that is missing from the output with a NaN row.
+                    #
+                    # This must run AFTER the recursive call returns: if the same element hangs
+                    # again inside it, that level merges its `.2` into `.1` before returning, so
+                    # merging `.1` into the original here folds in both.
+                    if new_element_nml_path is not None:
+                        try:
+                            merge_partial_ferre_outputs(
+                                os.path.join(cwd, current_relative_path),
+                                new_element_nml_path,
+                                cwd,
+                            )
+                        except Exception as e:
+                            debugger(f"exception merging resumed list element {current_relative_path}: {e}")
                 else:
                     # Every element is accounted for -- truly done, release the process slot.
                     pipe.send(dict(input_nml_path=input_nml_path, n_processes=-1))
