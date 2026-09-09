@@ -69,7 +69,18 @@ ERROR_SUFFIXES = ("_err", "_error", "_unc", "_uncertainty", "_sigma", "_scatter"
 ERROR_TOKEN_PREFIXES = ("e_", "err_", "sigma_", "std_", "stddev_")
 
 # Columns that are constant by construction, so zero variance is expected, not a defect.
-CONSTANT_OK_COLUMNS = {"v_astra", "release", "created", "tag", "reduction", "healpix_nside"}
+#
+# The FERRE entries are pipeline *inputs*, not measurements: "initial_*" are the starting
+# guesses handed to FERRE (e.g. initial_v_sini is always 10 km/s) and "continuum_*" are
+# fit configuration (continuum_reject is always 0.3). coarse_c_m_atm and coarse_n_m_atm
+# are named like outputs but are pinned at 0 because [C/M] and [N/M] are not free
+# dimensions of the coarse grid. A constant here says nothing about data quality; the
+# corresponding free outputs (c_m_atm, n_m_atm) are still checked normally.
+CONSTANT_OK_COLUMNS = {
+    "v_astra", "release", "created", "tag", "reduction", "healpix_nside",
+    "coarse_c_m_atm", "coarse_n_m_atm",
+}
+CONSTANT_OK_PREFIXES = ("initial_", "continuum_")
 
 # HDU 1 is the BOSS table in your files, HDU 2 is the APOGEE-style combined table.
 BOSS_APOGEE_MISSING_OK = {"n_apogee_visits", "apogee_min_mjd", "apogee_max_mjd"}
@@ -427,7 +438,7 @@ def analyze_column(data, colname, expected_max_mjd=None, *, hdu_index=None, tota
                 issues.append(issue(hdu_index, "", colname, f"{above} values ({pct:.1f}%) above expected max MJD {expected_max_mjd} (max={format_number(stats['max'])})", sev, release_label=release_label, category="above_expected_max_mjd", pct=pct, extra=expected_max_mjd))
 
     all_zero = stats.get("min", 1) == 0 and stats.get("max", 1) == 0 and len(finite) > 0
-    constant_ok = is_flag or cl in CONSTANT_OK_COLUMNS
+    constant_ok = is_flag or cl in CONSTANT_OK_COLUMNS or cl.startswith(CONSTANT_OK_PREFIXES)
 
     # "All values are zero" and "Zero variance" describe the same fact for an all-zero
     # column, so report the more specific one only.
