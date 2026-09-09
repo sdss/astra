@@ -235,7 +235,7 @@ def create_astraStar_and_astraVisit_products(
     sources: Iterable[Source],
     pipeline: str = "ASPCAP",
     max_processes: Optional[int] = 4,
-    overwrite: bool = True,
+    overwrite: bool = False,
     **kwargs,
 ) -> Iterable[AstraSpectrumProductStatus]:
     """
