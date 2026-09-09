@@ -28,10 +28,22 @@ def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_pa
     debugger(f"plan_stellar_parameters_stage: entry n_coarse_results={len(coarse_results)} n_spectra={len(spectra)} pre_continuum={pre_continuum}")
 
     best_coarse_results = {}
+    # Total FERRE time across every coarse grid tried for a spectrum, accumulated
+    # separately from the best-result selection. Doing it inline only credited the two
+    # most recent grids, and only for spectra that had more than one coarse result at
+    # all -- a spectrum fit in a single grid never got a time.
+    total_t_elapsed_coarse = {}
     for kwds in coarse_results:
         this = FerreCoarse(**kwds)
         # TODO: Make the penalized rchi2 a property of the FerreCoarse class.
         this.penalized_rchi2 = penalize_coarse_stellar_parameter_result(this)
+
+        # `t_elapsed` is None when no timing was recovered for this execution. Test for
+        # None explicitly: a truthiness test reads a legitimate 0.0 as missing.
+        t_elapsed = np.nan if this.t_elapsed is None else this.t_elapsed
+        total_t_elapsed_coarse[this.spectrum_pk] = (
+            total_t_elapsed_coarse.get(this.spectrum_pk, 0.0) + t_elapsed
+        )
 
         best = None
         try:
@@ -49,8 +61,6 @@ def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_pa
 
             if best is None:
                 log.error(f"Error for {kwds} - best is None. {existing} {existing.penalized_rchi2} {this} {this.penalized_rchi2}")
-            else:
-                best.ferre_time_coarse = (this.t_elapsed or np.nan) + (existing.t_elapsed or np.nan)
 
             if not np.isfinite(this.penalized_rchi2):
                 best.flag_affected_by_timeout = True
@@ -58,6 +68,10 @@ def plan_stellar_parameters_stage(spectra, parent_dir, coarse_results, weight_pa
         finally:
             best_coarse_results[this.spectrum_pk] = best
 
+    # Credit the whole coarse-stage cost to whichever result was chosen.
+    for spectrum_pk, best in best_coarse_results.items():
+        if best is not None:
+            best.ferre_time_coarse = total_t_elapsed_coarse[spectrum_pk]
 
     debugger(f"plan_stellar_parameters_stage: built best_coarse_results n={len(best_coarse_results)}")
 

@@ -398,12 +398,32 @@ def _aspcap_stage(
         stage_task_id = progress.add_task(f"[bold blue]{stage_name}[/bold blue]")
 
     def get_task_name(path):
+        # Display label for the progress bar. Callers must pass the full input_nml_path:
+        # the positional unpacking below counts back from the file name, so handing it a
+        # directory shifts every component by one.
         if stage == "abundances" and not use_ferre_list_mode:
             *__, stage_name, grid_name, species, base_name = path.split("/")
             return f"{grid_name}/{species}"
         else:
             *__, stage_name, task_name, base_name = path.split("/")
             return task_name
+
+    def get_timing_key(pwd):
+        # Key for the `timings` dict, which is per-stage and holds one entry per FERRE
+        # execution. This deliberately does NOT reuse get_task_name: that function is fed
+        # a directory here, and its off-by-one then collapsed every grid in a stage onto
+        # the same key (e.g. "params"), so each execution silently overwrote the previous
+        # one's per-spectrum timings and only the last execution's spectra kept a time.
+        # For coarse and params the working directory is unique per execution, so it is
+        # a sound key on its own.
+        if stage == "abundances" and not use_ferre_list_mode:
+            # Not so here: pre_process_ferre hands back the grid directory, which every
+            # species under that grid shares, so it cannot tell two executions apart.
+            # Return None so nothing is recorded and the time stays null, rather than
+            # crediting one species with another's runtime. Fixing this needs a key that
+            # carries the species (see ferre_time_abundances, which is never assigned).
+            return None
+        return os.path.normpath(pwd)
 
     # FERRE can be limited by at least three mechanisms:
     # 1. Too many threads requested (CPU limited).
@@ -515,9 +535,12 @@ def _aspcap_stage(
                 raise
             """
 
-            # TODO: Should `timings` and `post_process_ferre` take directories or input_nml_paths?
-            task_name = get_task_name(os.path.dirname(input_nml_path))
-            timings[task_name] = (t_overhead, t_elapsed)
+            # Keyed by the execution's working directory so that concurrent grids within
+            # a stage do not overwrite each other. `pwd` is what post-processing reports
+            # back on each result, so store under the same value it will look up with.
+            timing_key = get_timing_key(pwd)
+            if timing_key is not None:
+                timings[timing_key] = (t_overhead, t_elapsed)
             post_processed_futures.append(executor.submit(_safe_post_process_ferre, input_nml_path, pwd))
             ferre_futures.remove(ferre_future)
             debugger("removed ferre futures")
@@ -587,12 +610,18 @@ def _aspcap_stage(
         for result in future.result():
             debugger(f"result -> {result}")
             # Assign timings to the results.
+            result_pwd = result.get("pwd")
+            key = get_timing_key(result_pwd) if result_pwd else None
             try:
-                key = get_task_name(result["pwd"])
                 t_overhead, t_elapsed_all = timings[key]
                 t_elapsed = t_elapsed_all[result["ferre_name"]]
             except:
-                debugger("failure")
+                # Timings are best-effort, but losing them silently is how they went
+                # unnoticed before: say which spectrum and key missed.
+                debugger(
+                    f"no timing for {result.get('ferre_name')!r} under key {key!r} "
+                    f"(have {sorted(timings)})"
+                )
                 t_elapsed = t_overhead = np.nan
             finally:
                 debugger("ok")
