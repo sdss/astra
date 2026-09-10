@@ -857,6 +857,8 @@ def migrate_apogee_visits(
             RvVisit.xcorr_vrad,
             RvVisit.n_components,
             RvVisit.visitflag,
+            RvVisit.rv_ccpfwhm,
+            RvVisit.rv_autofwhm,
         )
         .join(
             ssq,
@@ -905,6 +907,8 @@ def migrate_apogee_visits(
             sq.c.xcorr_vrel.alias("xcorr_v_rel"),
             sq.c.xcorr_vrelerr.alias("xcorr_e_v_rel"),
             sq.c.xcorr_vrad.alias("xcorr_v_rad"),
+            sq.c.rv_ccpfwhm.alias("ccfwhm"),
+            sq.c.rv_autofwhm.alias("autofwhm"),
             sq.c.n_components,
             sq.c.pk.alias("rv_visit_pk"),
             sq.c.star_pk.alias("star_pk"),
